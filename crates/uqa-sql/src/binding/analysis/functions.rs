@@ -168,7 +168,10 @@ pub(super) fn validate_scalar_function(
         return Ok(());
     }
     crate::scalar_call_arguments(args)?;
-    if routines.has_registered_scalar_function(&identity) {
+    if routines.has_registered_scalar_function(&identity)
+        || (binding.is_none_or(|binding| binding.builtin)
+            && routines.has_registered_table_function(&identity))
+    {
         return Ok(());
     }
     if validate_fixed_builtin(name, binding, args, schema, params, resolver)? {

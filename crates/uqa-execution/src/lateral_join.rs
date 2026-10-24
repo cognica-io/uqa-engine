@@ -17,7 +17,7 @@ use crate::{
 /// Execution source for a correlated right-hand relation.
 ///
 /// The physical operator owns join iteration, `ON` filtering, and outer-row preservation. The source only evaluates the right relation, the predicates placed on that relation, and the scalar join predicate in the current correlated scope.
-pub type LateralRows<'a> = Box<dyn Iterator<Item = ExecResult<OwnedPhysicalRow>> + Send + 'a>;
+pub type LateralRows<'a> = crate::SQLRowStream<'a, OwnedPhysicalRow>;
 
 pub trait LateralSource<'a>: Send {
     fn rows_for(&mut self, left: &OwnedPhysicalRow) -> ExecResult<LateralRows<'a>>;
@@ -129,6 +129,12 @@ impl<'a> LateralJoin<'a> {
 }
 
 impl LateralJoin<'_> {
+    fn close_right(&mut self) -> ExecResult<()> {
+        self.right_rows
+            .take()
+            .map_or(Ok(()), |mut rows| rows.close().map_err(Into::into))
+    }
+
     fn pull(&mut self, batch_size: usize) -> ExecResult<Option<Batch>> {
         if self.exhausted && self.current_left.is_none() {
             return Ok(None);
@@ -179,7 +185,7 @@ impl LateralJoin<'_> {
                 continue;
             }
 
-            self.right_rows = None;
+            self.close_right()?;
             if !self.matched_left && matches!(self.kind, JoinKind::Left | JoinKind::Full) {
                 let left = self.current_left.take().ok_or_else(|| {
                     ExecError::Other(
@@ -210,7 +216,7 @@ impl PhysicalOperator for LateralJoin<'_> {
     fn open(&mut self) -> ExecResult<()> {
         self.left_rows = Vec::new().into_iter();
         self.current_left = None;
-        self.right_rows = None;
+        self.close_right()?;
         self.matched_left = false;
         self.exhausted = false;
         self.left.open()
@@ -227,10 +233,10 @@ impl PhysicalOperator for LateralJoin<'_> {
     fn close(&mut self) -> ExecResult<()> {
         self.left_rows = Vec::new().into_iter();
         self.current_left = None;
-        self.right_rows = None;
+        let right = self.close_right();
         self.matched_left = false;
         self.exhausted = true;
-        self.left.close()
+        crate::physical::with_cleanup(right, self.left.close(), "close lateral left input")
     }
 }
 
@@ -259,9 +265,11 @@ mod tests {
     impl<'a> LateralSource<'a> for RangeSource {
         fn rows_for(&mut self, left: &OwnedPhysicalRow) -> ExecResult<LateralRows<'a>> {
             let Value::Int(end) = left.get("l.n").cloned().unwrap_or(Value::Null) else {
-                return Ok(Box::new(std::iter::empty()));
+                return Ok(crate::SQLRowStream::new(std::iter::empty()));
             };
-            Ok(Box::new((1..=end).map(|value| Ok(right_row(value)))))
+            Ok(crate::SQLRowStream::new(
+                (1..=end).map(|value| Ok(right_row(value))),
+            ))
         }
 
         fn admits(&mut self, _right: &OwnedPhysicalRow) -> ExecResult<bool> {
@@ -353,7 +361,9 @@ mod tests {
 
     impl<'a> LateralSource<'a> for LargeRangeSource {
         fn rows_for(&mut self, _left: &OwnedPhysicalRow) -> ExecResult<LateralRows<'a>> {
-            Ok(Box::new((0..10_000).map(|value| Ok(right_row(value)))))
+            Ok(crate::SQLRowStream::new(
+                (0..10_000).map(|value| Ok(right_row(value))),
+            ))
         }
 
         fn admits(&mut self, _right: &OwnedPhysicalRow) -> ExecResult<bool> {
@@ -385,10 +395,12 @@ mod tests {
 
     impl<'a> LateralSource<'a> for FailingSource {
         fn rows_for(&mut self, _left: &OwnedPhysicalRow) -> ExecResult<LateralRows<'a>> {
-            Ok(Box::new(
+            Ok(crate::SQLRowStream::new(
                 vec![
                     Ok(right_row(1)),
-                    Err(crate::ExecError::Other("injected lateral failure".into())),
+                    Err(uqa_sql::SQLError::Internal(
+                        "injected lateral failure".into(),
+                    )),
                 ]
                 .into_iter(),
             ))

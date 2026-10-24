@@ -116,7 +116,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
         left_row: &crate::OwnedPhysicalRow,
     ) -> crate::ExecResult<crate::LateralRows<'a>> {
         if let Some(row) = self.pinned_right.as_ref() {
-            return Ok(Box::new(std::iter::once(Ok(row.clone()))));
+            return Ok(crate::SQLRowStream::new(std::iter::once(Ok(row.clone()))));
         }
         let combined;
         let left_row = if let Some(outer) = self.ctes.row_lock_outer_row() {
@@ -190,17 +190,9 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
             };
             let output = hook.table_function_rows(call, self.params, Some(left_row))?;
             let schema = self.right_schema.clone();
-            if output.columns.len() != schema.len() {
-                return Err(SQLError::Internal(format!(
-                    "lateral table function produced {} columns for a {}-column source",
-                    output.columns.len(),
-                    schema.len()
-                ))
-                .into());
-            }
-            return Ok(Box::new(output.rows.map(move |row| {
-                row.map(|row| crate::OwnedPhysicalRow::new(schema.clone(), row))
-            })));
+            return Ok(output
+                .into_rows(schema.len(), "lateral table function")?
+                .map_rows(move |row| Ok(crate::OwnedPhysicalRow::new(schema.clone(), row))));
         }
         let mut scoped_ctes = self.ctes.clone();
         scoped_ctes.set_row_lock_outer_row(left_row.clone());
@@ -214,7 +206,10 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
         )?;
         let schema = self.right_schema.clone();
         let rows = crate::physical::demand::OperatorRows::open(operator)?;
-        Ok(Box::new(rows.map(move |row| row?.relabel(schema.clone()))))
+        Ok(crate::SQLRowStream::from_source(rows).map_rows(move |row| {
+            row.relabel(schema.clone())
+                .map_err(crate::physical::physical_exec_error)
+        }))
     }
 
     fn matches(&mut self, joined: &crate::OwnedPhysicalRow) -> crate::ExecResult<bool> {

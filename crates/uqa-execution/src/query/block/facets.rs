@@ -132,7 +132,7 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
                         Some(Ok(projected))
                     },
                 );
-                Ok(Box::new(rows) as crate::PhysicalProjectRows)
+                Ok(crate::SQLRowStream::new(rows))
             }),
         ));
 

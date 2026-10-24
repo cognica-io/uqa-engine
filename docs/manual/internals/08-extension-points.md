@@ -10,6 +10,7 @@ The engine registries accept scalar, table, and aggregate implementations:
 | --- | --- |
 | `SQLScalarFunction` | Receives `&[Value]` and returns one `Value` or `SQLError` |
 | `SQLTableFunction` | Returns a table result or pull-based `SQLTableFunctionStream` |
+| `SQLRowSource<T>` | Produces rows and explicitly closes a scan with a fallible result |
 | `SQLAggregateFunction` | Existing infallible Rust aggregate factory, adapted to `SQLAggregateFactory` |
 | `SQLAggregateFactory` | Creates an independent `SQLAggregateState` or returns `SQLError` |
 | `SQLAggregateState` | Observes argument rows and returns a final value |
@@ -45,7 +46,11 @@ Node.js owns a strong function reference for same-thread execution and a weak th
 
 Browser WASM assigns numeric callback and aggregate-state identifiers in JavaScript. Emscripten imports perform synchronous reverse dispatch across a JSON value bridge, and aggregate state is released after finish, query failure, or engine-group teardown. Derived sessions retain the shared callback group until its last engine closes, and the wrapper rejects `Engine` method re-entry during reverse dispatch.
 
-Streaming table functions can yield a late error after rows. The physical pipeline propagates that error and does not convert it into an apparently complete truncated relation.
+Streaming table functions can yield a late error after rows. `SQLTableFunctionStream::new` adapts an ordinary iterator whose release is infallible. A scan with fallible cleanup implements `SQLRowSource<Vec<Value>>` and passes it to `SQLTableFunctionStream::from_source(columns, source)`. Its `next_row` returns a row, EOF or the original SQL error; `close` releases the source even when release reports an error. The owned `SQLRowStream` calls close once at EOF, a production error or explicit early termination. It consumes the source before invoking close, so a failing close is never retried. A cleanup error is an error item, never EOF, and subsequent pulls remain exhausted.
+
+Physical table scans, set projections and lateral inputs retain this stream owner through cancellation, row-width checks and ordinality. Use `map_rows` for row conversion; erasing the stream into an ordinary iterator discards its explicit cleanup interface. Custom physical adapters use `PhysicalRowIteratorScan::from_stream`, and the `PhysicalProjectRows` and `LateralRows` aliases carry `SQLRowStream` rather than boxed iterators. Explicitly close an unfinished stream while its consumer can report failure. Dropping an abandoned Rust stream provides best-effort release but cannot report its cleanup error.
+
+When execution and cleanup both fail, the primary SQLSTATE, message, hint, position and typed cause remain authoritative. `SQLError::with_cleanup` retains the secondary typed diagnostic, makes it available through `cleanup()`, and includes its fields after the original DETAIL. A cleanup failure alone retains its own diagnostic. The statement's ordinary failure and rollback boundary receives that result before reporting successful completion.
 
 ## SQL and PL/pgSQL routines
 

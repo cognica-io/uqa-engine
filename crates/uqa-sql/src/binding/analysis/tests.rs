@@ -23,7 +23,57 @@ impl FunctionTypeResolver for Routines {
     }
 }
 
-impl RoutineResolution for Routines {}
+impl RoutineResolution for Routines {
+    fn has_registered_table_function(&self, name: &str) -> bool {
+        name == "host_rows"
+    }
+}
+
+#[test]
+fn registered_table_calls_are_validated_before_set_placement() {
+    for (name, expected) in [("host_rows", true), ("missing_host_rows", false)] {
+        let block = block(&format!("SELECT {name}(3)"));
+        let expression = &block.projections[0].expr;
+        let ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            order_by,
+            ..
+        } = expression
+        else {
+            panic!("function expression");
+        };
+        let schema = RowSchema::default();
+        let result = functions::validate_scalar_function(
+            &Routines,
+            functions::ScalarFunctionValidation {
+                name,
+                binding: binding.as_ref(),
+                args,
+                order_by,
+                expression,
+                schema: &schema,
+                params: &[],
+                resolver: &Routines,
+            },
+        );
+        assert_eq!(result.is_ok(), expected, "{result:?}");
+        assert_eq!(
+            crate::semantics::sets::validation::function_may_return_set(
+                &Routines,
+                &Routines,
+                name,
+                binding.as_ref(),
+                args,
+                &schema,
+                &[],
+            )
+            .unwrap(),
+            expected
+        );
+    }
+}
 
 #[test]
 fn expression_analysis_resolves_parameters_in_its_supplied_scope() {

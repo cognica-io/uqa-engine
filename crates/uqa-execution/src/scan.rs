@@ -117,7 +117,7 @@ pub struct RowIteratorScan<'a> {
 /// columns and therefore cannot be represented by [`ResultRow`].
 pub struct PhysicalRowIteratorScan<'a> {
     schema: RowSchema,
-    rows: Box<dyn Iterator<Item = ExecResult<PhysicalRow>> + Send + 'a>,
+    rows: crate::SQLRowStream<'a, PhysicalRow>,
     batch_size: std::num::NonZeroUsize,
     exhausted: bool,
 }
@@ -211,6 +211,15 @@ impl<'a> PhysicalRowIteratorScan<'a> {
         schema: RowSchema,
         rows: Box<dyn Iterator<Item = ExecResult<PhysicalRow>> + Send + 'a>,
     ) -> Self {
+        Self::from_stream(
+            schema,
+            crate::SQLRowStream::new(
+                rows.map(|row| row.map_err(crate::physical::physical_exec_error)),
+            ),
+        )
+    }
+
+    pub fn from_stream(schema: RowSchema, rows: crate::SQLRowStream<'a, PhysicalRow>) -> Self {
         Self {
             schema,
             rows,
@@ -259,7 +268,7 @@ impl PhysicalOperator for PhysicalRowIteratorScan<'_> {
         while batch.len() < self.batch_size.get().min(demand.get()) {
             match self.rows.next() {
                 Some(Ok(row)) => batch.push(row),
-                Some(Err(error)) => return Err(error),
+                Some(Err(error)) => return Err(error.into()),
                 None => {
                     self.exhausted = true;
                     break;
@@ -275,7 +284,7 @@ impl PhysicalOperator for PhysicalRowIteratorScan<'_> {
 
     fn close(&mut self) -> ExecResult<()> {
         self.exhausted = true;
-        Ok(())
+        self.rows.close().map_err(Into::into)
     }
 }
 

@@ -71,7 +71,7 @@ impl ValueCursor for RegexSplit {
 fn one_column_rows(mut cursor: Option<impl ValueCursor>, column: String) -> TableFunctionRows {
     TableFunctionRows::new(
         vec![column],
-        Box::new(std::iter::from_fn(move || {
+        crate::SQLRowStream::new(std::iter::from_fn(move || {
             let current = cursor.as_mut()?;
             match current.next_value(&ProductionControl::uncontrolled()) {
                 Ok(Some(value)) => Some(Ok(crate::PhysicalRow::from_values(vec![
@@ -83,7 +83,7 @@ fn one_column_rows(mut cursor: Option<impl ValueCursor>, column: String) -> Tabl
                 }
                 Err(error) => {
                     cursor = None;
-                    Some(Err(error.into()))
+                    Some(Err(error))
                 }
             }
         })),

@@ -6,6 +6,7 @@
 
 //! Runtime contracts for scalar, table, and aggregate extensions.
 
+pub use crate::row_stream::{SQLRowSource, SQLRowStream};
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
@@ -92,7 +93,7 @@ impl SQLTableFunctionResult {
 /// or truncated result.
 pub struct SQLTableFunctionStream {
     pub columns: Vec<String>,
-    pub rows: Box<dyn Iterator<Item = Result<Vec<Value>, SQLError>> + Send>,
+    pub rows: SQLRowStream<'static, Vec<Value>>,
 }
 
 impl SQLTableFunctionStream {
@@ -102,7 +103,18 @@ impl SQLTableFunctionStream {
     {
         Self {
             columns: columns.into_iter().map(Into::into).collect(),
-            rows: Box::new(rows),
+            rows: SQLRowStream::new(rows),
+        }
+    }
+
+    /// Transfer a scan with fallible cleanup to the execution pipeline.
+    pub fn from_source(
+        columns: impl IntoIterator<Item = impl Into<String>>,
+        rows: impl SQLRowSource<Vec<Value>> + 'static,
+    ) -> Self {
+        Self {
+            columns: columns.into_iter().map(Into::into).collect(),
+            rows: SQLRowStream::from_source(rows),
         }
     }
 }
@@ -111,7 +123,7 @@ impl From<SQLTableFunctionResult> for SQLTableFunctionStream {
     fn from(result: SQLTableFunctionResult) -> Self {
         Self {
             columns: result.columns,
-            rows: Box::new(result.rows.into_iter().map(Ok)),
+            rows: SQLRowStream::new(result.rows.into_iter().map(Ok)),
         }
     }
 }

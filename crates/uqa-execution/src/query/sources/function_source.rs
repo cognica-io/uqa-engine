@@ -108,18 +108,32 @@ pub(super) fn build_function_group_source_operator<'a, S: Clone + Send + Sync + 
     let first = functions
         .first()
         .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
-    let mut members = Vec::with_capacity(functions.len());
+    let mut members: Vec<Box<dyn PhysicalOperator + 'a>> = Vec::with_capacity(functions.len());
     for function in functions {
-        members.push(build_table_function_operator(
+        let member = build_table_function_operator(
             context,
             FunctionSource::group_member(function),
             params,
             ctes,
             None,
             None,
-        )?);
+        );
+        match member {
+            Ok(member) => members.push(member),
+            Err(mut error) => {
+                for member in &mut members {
+                    if let Err(cleanup) = member.close() {
+                        error = error.with_cleanup(
+                            crate::physical::physical_exec_error(cleanup),
+                            "close earlier ROWS FROM member after initialization failure",
+                        );
+                    }
+                }
+                return Err(error);
+            }
+        }
     }
-    let operator: Box<dyn PhysicalOperator + 'a> =
+    let mut operator: Box<dyn PhysicalOperator + 'a> =
         Box::new(RowsFromOperator::new(members, *ordinality));
     let source_columns = operator
         .row_schema()
@@ -134,7 +148,17 @@ pub(super) fn build_function_group_source_operator<'a, S: Clone + Send + Sync + 
         })
         .collect::<Vec<_>>();
     let qualifier = alias.as_deref().unwrap_or(&first.output_name);
-    validate_table_function_alias_count(qualifier, source_columns.len(), column_aliases.len())?;
+    if let Err(error) =
+        validate_table_function_alias_count(qualifier, source_columns.len(), column_aliases.len())
+    {
+        return Err(match operator.close() {
+            Ok(()) => error,
+            Err(cleanup) => error.with_cleanup(
+                crate::physical::physical_exec_error(cleanup),
+                "close ROWS FROM after alias validation failure",
+            ),
+        });
+    }
     let operator = qualify_source_operator_with_columns(
         operator,
         &source_columns,
@@ -202,7 +226,7 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         ordinality: source.ordinality,
         column_types: source.column_types,
     };
-    let (columns, rows) = function_rows(
+    let (columns, mut rows) = function_rows(
         context,
         &source,
         call,
@@ -211,11 +235,13 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         params,
         outer_row,
     )?;
-    validate_table_function_alias_count(
+    if let Err(error) = validate_table_function_alias_count(
         source.alias.unwrap_or(source.output_name),
         columns.len(),
         source.column_aliases.len(),
-    )?;
+    ) {
+        return Err(rows.fail(error));
+    }
     let types = table_function_column_types(
         context.relational.catalog,
         TableFunctionTypeRequest {
@@ -236,7 +262,7 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
     );
     let schema = crate::RowSchema::with_types(columns.clone(), types);
     let operator: Box<dyn PhysicalOperator + 'a> =
-        Box::new(crate::PhysicalRowIteratorScan::new(schema, rows));
+        Box::new(crate::PhysicalRowIteratorScan::from_stream(schema, rows));
     let source_columns = columns;
     let qualifier = source.alias.unwrap_or(source.output_name);
     let operator = qualify_source_operator_with_columns(
@@ -252,7 +278,7 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
     ))
 }
 
-type FunctionRows<'a> = Box<dyn Iterator<Item = crate::ExecResult<crate::PhysicalRow>> + Send + 'a>;
+type FunctionRows<'a> = crate::SQLRowStream<'a, crate::PhysicalRow>;
 
 /// The output columns and rows of a function in FROM. `PostgreSQL` checks EXECUTE when it initializes a function scan and calls the function only when the scan's first row is requested; a call whose columns only its result reveals runs at once.
 fn function_rows<'a, S: Clone + Send + Sync + 'static>(
@@ -379,7 +405,7 @@ fn deferred_function_rows<'a>(
     let column_aliases = call.column_aliases.to_vec();
     let column_types = call.column_types.to_vec();
     let ordinality = call.ordinality;
-    Box::new(
+    crate::SQLRowStream::from_source(
         crate::query::table_functions::DeferredTableFunctionRows::new(move || {
             let call = TableFunctionCall {
                 name: &name,
@@ -393,14 +419,9 @@ fn deferred_function_rows<'a>(
                 ordinality,
                 column_types: &column_types,
             };
-            let output = runtime.table_function_rows(call, params, outer_row.as_ref())?;
-            if output.columns.len() != width {
-                return Err(SQLError::Internal(format!(
-                    "table function `{name}` produced {} columns for a {width}-column source",
-                    output.columns.len()
-                )));
-            }
-            Ok(output.rows)
+            runtime
+                .table_function_rows(call, params, outer_row.as_ref())?
+                .into_rows(width, &format!("table function `{name}`"))
         }),
     )
 }

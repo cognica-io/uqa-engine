@@ -172,8 +172,8 @@ pub use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions, SQLit
 use functions::RegisteredSQLFunction;
 pub use functions::{
     SQLAggregateFactory, SQLAggregateFunction, SQLAggregateState, SQLFunctionOptions,
-    SQLFunctionVolatility, SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult,
-    SQLTableFunctionStream,
+    SQLFunctionVolatility, SQLRowSource, SQLRowStream, SQLScalarFunction, SQLTableFunction,
+    SQLTableFunctionResult, SQLTableFunctionStream,
 };
 use notifications::{
     NotificationHubOwner as NotificationHub, PendingListenAction, PendingNotification,

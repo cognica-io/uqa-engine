@@ -72,6 +72,8 @@ pub mod operator_tree;
 pub mod parallel;
 pub mod physical;
 pub mod project_set;
+pub mod row_stream;
+pub use row_stream::{SQLRowSource, SQLRowStream};
 pub mod projected_predicate;
 pub mod projected_row;
 pub mod relational;

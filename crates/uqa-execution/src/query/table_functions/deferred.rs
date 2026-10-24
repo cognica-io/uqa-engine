@@ -6,7 +6,7 @@
 
 //! Table-function rows whose call starts at the first row request, as `PostgreSQL`'s function scan evaluates its call only when it is first asked for a row.
 
-use crate::{ExecResult, PhysicalProjectRows, PhysicalRow};
+use crate::{PhysicalProjectRows, PhysicalRow};
 use uqa_sql::SQLError;
 
 type StartCall<'a> = Box<dyn FnOnce() -> Result<PhysicalProjectRows, SQLError> + Send + 'a>;
@@ -26,17 +26,22 @@ impl<'a> DeferredTableFunctionRows<'a> {
     }
 }
 
-impl Iterator for DeferredTableFunctionRows<'_> {
-    type Item = ExecResult<PhysicalRow>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl crate::SQLRowSource<PhysicalRow> for DeferredTableFunctionRows<'_> {
+    fn next_row(&mut self) -> Result<Option<PhysicalRow>, SQLError> {
         if let Some(start) = self.start.take() {
             match start() {
                 Ok(rows) => self.rows = Some(rows),
-                Err(error) => return Some(Err(error.into())),
+                Err(error) => return Err(error),
             }
         }
-        self.rows.as_mut()?.next()
+        self.rows
+            .as_mut()
+            .map_or(Ok(None), |rows| rows.next().transpose())
+    }
+
+    fn close(&mut self) -> Result<(), SQLError> {
+        self.start = None;
+        self.rows.take().map_or(Ok(()), |mut rows| rows.close())
     }
 }
 

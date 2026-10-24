@@ -34,18 +34,10 @@ pub fn build_table_function_row_stream_with_row(
     let ordinality = call.ordinality;
     let mut output = build_table_function_value_row_stream_with_row(context, call, row)?;
     let cancellation = context.runtime.cancellation_token();
-    let mut rows = output.rows;
-    let mut cancelled = false;
-    output.rows = Box::new(std::iter::from_fn(move || {
-        if cancelled {
-            return None;
-        }
-        if let Err(error) = cancellation.check() {
-            cancelled = true;
-            return Some(Err(SQLError::from(error).into()));
-        }
-        rows.next()
-    }));
+    output.rows = crate::SQLRowStream::from_source(CancellableRows {
+        rows: output.rows,
+        cancellation,
+    });
     if !ordinality {
         return Ok(output);
     }
@@ -53,18 +45,31 @@ pub fn build_table_function_row_stream_with_row(
         .columns
         .push(ordinality_column(&call, output.columns.len()));
     let mut next = Some(1_i64);
-    output.rows = Box::new(output.rows.map(move |row| {
-        let row = row?;
-        let ordinal = next.ok_or_else(|| {
-            crate::ExecError::SQL(SQLError::Routine {
-                sqlstate: "22003".into(),
-                message: "WITH ORDINALITY counter exceeds bigint".into(),
-            })
+    output.rows = output.rows.map_rows(move |row| {
+        let ordinal = next.ok_or_else(|| SQLError::Routine {
+            sqlstate: "22003".into(),
+            message: "WITH ORDINALITY counter exceeds bigint".into(),
         })?;
         next = ordinal.checked_add(1);
         Ok(row.append_values(vec![Value::Int(ordinal)]))
-    }));
+    });
     Ok(output)
+}
+
+struct CancellableRows {
+    rows: crate::PhysicalProjectRows,
+    cancellation: uqa_core::CancellationToken,
+}
+
+impl crate::SQLRowSource<crate::PhysicalRow> for CancellableRows {
+    fn next_row(&mut self) -> Result<Option<crate::PhysicalRow>, SQLError> {
+        self.cancellation.check()?;
+        self.rows.next().transpose()
+    }
+
+    fn close(&mut self) -> Result<(), SQLError> {
+        self.rows.close()
+    }
 }
 
 /// The output columns of a built-in set-returning call, including its ordinality column. They follow from the call's name, aliases and argument count, never from argument values, so a FROM item can describe its rows before it evaluates the call, as `PostgreSQL` does until the first row is requested. `None` for a function whose columns only its result reveals.
@@ -330,7 +335,7 @@ fn builtin_value_rows(
             )));
         }
     };
-    Ok(Box::new(values.map(|value| {
+    Ok(crate::SQLRowStream::new(values.map(|value| {
         Ok(crate::PhysicalRow::from_values(vec![value]))
     })))
 }

@@ -28,7 +28,7 @@ pub struct RowsFromOperator<'a> {
     schema: RowSchema,
     ordinality: bool,
     next_ordinality: i64,
-    opened: bool,
+    closed: bool,
     exhausted: bool,
 }
 
@@ -61,7 +61,7 @@ impl<'a> RowsFromOperator<'a> {
             schema,
             ordinality,
             next_ordinality: 1,
-            opened: false,
+            closed: false,
             exhausted: false,
         }
     }
@@ -90,24 +90,18 @@ impl<'a> RowsFromOperator<'a> {
         }
     }
 
-    fn close_opened_children(&mut self) -> ExecResult<()> {
-        let mut errors = Vec::new();
+    fn close_children(&mut self) -> ExecResult<()> {
+        let mut result = Ok(());
         for child in &mut self.children {
             child.pending.clear();
             child.exhausted = true;
-            if let Err(error) = child.operator.close() {
-                errors.push(error.to_string());
-            }
+            result = crate::physical::with_cleanup(
+                result,
+                child.operator.close(),
+                "close ROWS FROM member",
+            );
         }
-        self.opened = false;
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(ExecError::Other(format!(
-                "failed to close ROWS FROM members: {}",
-                errors.join("; ")
-            )))
-        }
+        result
     }
 }
 
@@ -130,28 +124,18 @@ impl PhysicalOperator for RowsFromOperator<'_> {
     fn open(&mut self) -> ExecResult<()> {
         self.next_ordinality = 1;
         self.exhausted = false;
+        self.closed = false;
         for position in 0..self.children.len() {
             self.children[position].pending.clear();
             self.children[position].exhausted = false;
             if let Err(open_error) = self.children[position].operator.open() {
-                let mut close_errors = Vec::new();
-                for child in self.children.iter_mut().take(position + 1) {
-                    if let Err(close_error) = child.operator.close() {
-                        close_errors.push(close_error.to_string());
-                    }
-                }
-                self.opened = false;
-                return if close_errors.is_empty() {
-                    Err(open_error)
-                } else {
-                    Err(ExecError::Other(format!(
-                        "{open_error}; failed to close ROWS FROM members after open failure: {}",
-                        close_errors.join("; ")
-                    )))
-                };
+                return crate::physical::with_cleanup(
+                    Err(open_error),
+                    self.close(),
+                    "close ROWS FROM after open failure",
+                );
             }
         }
-        self.opened = true;
         Ok(())
     }
 
@@ -164,10 +148,10 @@ impl PhysicalOperator for RowsFromOperator<'_> {
 
     fn close(&mut self) -> ExecResult<()> {
         self.exhausted = true;
-        if self.opened {
-            self.close_opened_children()
-        } else {
+        if std::mem::replace(&mut self.closed, true) {
             Ok(())
+        } else {
+            self.close_children()
         }
     }
 }

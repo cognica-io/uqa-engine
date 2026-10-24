@@ -52,6 +52,10 @@ struct SetExpansion {
 }
 
 impl SetExpansion {
+    fn close(&mut self) -> ExecResult<()> {
+        close_calls(&mut self.calls)
+    }
+
     fn next_values(&mut self) -> ExecResult<Option<Vec<Value>>> {
         if !self.has_set {
             if self.scalar_emitted {
@@ -95,6 +99,24 @@ impl SetExpansion {
         }
         Ok(produced.then_some(values))
     }
+}
+
+fn close_calls(calls: &mut [SetFunctionState]) -> ExecResult<()> {
+    let mut result = Ok(());
+    for call in calls {
+        if let SetFunctionState::Set {
+            rows, exhausted, ..
+        } = call
+        {
+            *exhausted = true;
+            result = crate::physical::with_cleanup(
+                result,
+                rows.close().map_err(Into::into),
+                "close set-returning call",
+            );
+        }
+    }
+    result
 }
 
 fn set_row_value(row: PhysicalRow, columns: &[String]) -> Value {

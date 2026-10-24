@@ -27,7 +27,7 @@ self_cell::self_cell!(
 pub struct RetainedQueryOperator {
     query: QueryCell,
     schema: RowSchema,
-    opened: bool,
+    closed: bool,
     ordering: Vec<crate::PhysicalOrder>,
 }
 
@@ -44,7 +44,7 @@ impl RetainedQueryOperator {
         Ok(schema.map(|schema| Self {
             query,
             schema,
-            opened: false,
+            closed: false,
             ordering,
         }))
     }
@@ -99,7 +99,7 @@ impl PhysicalOperator for RetainedQueryOperator {
             .with_dependent_mut(|_, input| input.as_mut().expect("retained query present").rewind())
     }
     fn open(&mut self) -> ExecResult<()> {
-        self.opened = true;
+        self.closed = false;
         self.query
             .with_dependent_mut(|_, input| input.as_mut().expect("retained query present").open())
     }
@@ -116,7 +116,7 @@ impl PhysicalOperator for RetainedQueryOperator {
         })
     }
     fn close(&mut self) -> ExecResult<()> {
-        if !std::mem::take(&mut self.opened) {
+        if std::mem::replace(&mut self.closed, true) {
             return Ok(());
         }
         self.query
@@ -126,5 +126,57 @@ impl PhysicalOperator for RetainedQueryOperator {
 impl Drop for RetainedQueryOperator {
     fn drop(&mut self) {
         let _ = self.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct Input(Arc<AtomicUsize>);
+    struct Source(Arc<AtomicUsize>);
+
+    impl crate::SQLRowSource<crate::PhysicalRow> for Source {
+        fn next_row(&mut self) -> Result<Option<crate::PhysicalRow>, SQLError> {
+            panic!("closing must not fetch a row")
+        }
+        fn close(&mut self) -> Result<(), SQLError> {
+            assert_eq!(self.0.fetch_add(1, Ordering::SeqCst), 0);
+            Err(SQLError::Routine {
+                sqlstate: "58030".into(),
+                message: "retained scan close failed".into(),
+            })
+        }
+    }
+
+    impl RetainedQueryInput for Input {
+        fn build(&self) -> Result<Option<Box<dyn PhysicalOperator + '_>>, SQLError> {
+            Ok(Some(Box::new(crate::PhysicalRowIteratorScan::from_stream(
+                RowSchema::new(vec!["n".into()]),
+                crate::SQLRowStream::from_source(Source(self.0.clone())),
+            ))))
+        }
+    }
+
+    #[test]
+    fn retained_pipeline_close_reports_resources_created_before_open() {
+        for open in [false, true] {
+            let closed = Arc::new(AtomicUsize::new(0));
+            let mut pipeline = RetainedQueryOperator::try_new(Box::new(Input(closed.clone())))
+                .unwrap()
+                .unwrap();
+            if open {
+                pipeline.open().unwrap();
+            }
+            let error = crate::physical::physical_exec_error(pipeline.close().unwrap_err());
+            assert_eq!(error.sqlstate(), Some("58030"));
+            pipeline.close().unwrap();
+            drop(pipeline);
+            assert_eq!(closed.load(Ordering::SeqCst), 1);
+        }
     }
 }

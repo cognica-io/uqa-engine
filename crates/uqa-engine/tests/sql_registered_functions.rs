@@ -19,6 +19,9 @@ use uqa_sql::{ast::ColumnType, SQLError};
 #[path = "sql_registered_functions/fallible.rs"]
 mod fallible;
 
+#[path = "sql_registered_functions/stream_cleanup.rs"]
+mod stream_cleanup;
+
 struct Prefixer {
     prefix: String,
 }
