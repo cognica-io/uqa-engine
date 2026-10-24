@@ -23,6 +23,8 @@ mod records;
 
 /// Whether catalog-free constant evaluation could reach an admitted physical value.
 pub fn contains_datum(value: &Value) -> bool {
+    #[cfg(test)]
+    super::observations::record_visit();
     match value {
         Value::Datum(_) => true,
         Value::Array(array) => array.elements().iter().any(contains_datum),

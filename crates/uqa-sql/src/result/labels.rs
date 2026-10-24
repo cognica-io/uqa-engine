@@ -12,6 +12,9 @@ use crate::expr::enums::{contains_enum_carrier, render_enum_labels, EnumLabelCat
 use crate::SQLError;
 use uqa_core::Value;
 
+#[cfg(test)]
+mod tests;
+
 /// Read deferred datums and replace enum carriers in named and positional results by their current labels. This output boundary preserves declared column types and recursive carrier metadata.
 pub fn render_result_enum_labels(
     catalog: Option<&dyn EnumLabelCatalog>,

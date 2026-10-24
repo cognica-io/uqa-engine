@@ -28,6 +28,7 @@ mod in_range;
 pub(crate) mod integer_input;
 mod json;
 mod json_strip;
+pub(crate) mod observations;
 mod random;
 mod range;
 pub(crate) use range::datum as range_datum;

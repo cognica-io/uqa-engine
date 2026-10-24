@@ -397,6 +397,8 @@ pub(crate) fn has_missing_enum_oid(value: &Value) -> bool {
 }
 
 fn enum_carrier_matches(value: &Value, predicate: &dyn Fn(&EnumValue) -> bool) -> bool {
+    #[cfg(test)]
+    super::observations::record_visit();
     match value {
         Value::Enum(label) => predicate(label),
         Value::Array(array) => array
