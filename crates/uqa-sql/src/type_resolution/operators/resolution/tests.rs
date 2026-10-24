@@ -283,6 +283,7 @@ fn containment_operator_identities_and_bounded_types_match_postgresql() {
 
 #[test]
 fn retained_builtin_selections_equal_fresh_selections() {
+    let cache = BuiltinSelections::default();
     let numeric = ColumnType::Numeric {
         precision: Some(15),
         scale: Some(2),
@@ -308,18 +309,13 @@ fn retained_builtin_selections_equal_fresh_selections() {
         let fresh =
             select_binary_operator_types(name, left.as_ref(), right.as_ref(), &control).unwrap();
         for _ in 0..3 {
-            let selected = named_binary_operator_types_with_control(
-                name,
-                left.as_ref(),
-                right.as_ref(),
-                &control,
-            )
-            .unwrap();
+            let selected =
+                select_with_cache(name, left.as_ref(), right.as_ref(), &control, &cache).unwrap();
             assert_eq!(*selected, *fresh, "{left:?} {name} {right:?}");
         }
         let key = selection_key(name, left.as_ref(), right.as_ref()).unwrap();
         assert_eq!(
-            BUILTIN_SELECTIONS.read().unwrap().get(&key),
+            cache.read().unwrap().get(&key),
             Some(&*fresh),
             "{left:?} {name} {right:?}"
         );
@@ -386,22 +382,31 @@ fn fresh_builtin_selections_stay_below_the_retained_selection_allowance() {
 
 #[test]
 fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounded() {
-    // Other tests retain selections concurrently, so the assertions read keys, never counts.
+    let cache = BuiltinSelections::default();
+    let select = |name: &str, left: Option<&ColumnType>, right: Option<&ColumnType>| {
+        select_with_cache(
+            name,
+            left,
+            right,
+            &ProductionControl::uncontrolled(),
+            &cache,
+        )
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap()
+    };
     let contains = |name: &str, left: Option<ColumnType>, right: Option<ColumnType>| {
-        BUILTIN_SELECTIONS.read().unwrap().contains_key(&(
-            name.into(),
-            OperandType(left),
-            OperandType(right),
-        ))
+        cache
+            .read()
+            .unwrap()
+            .contains_key(&(name.into(), OperandType(left), OperandType(right)))
     };
     let numeric = |precision, scale| ColumnType::Numeric {
         precision: Some(precision),
         scale: Some(scale),
     };
-    let first = named_binary_operator_types("*", Some(&numeric(15, 2)), Some(&ColumnType::Integer))
-        .unwrap();
-    let second =
-        named_binary_operator_types("*", Some(&numeric(7, 3)), Some(&ColumnType::Integer)).unwrap();
+    let first = select("*", Some(&numeric(15, 2)), Some(&ColumnType::Integer));
+    let second = select("*", Some(&numeric(7, 3)), Some(&ColumnType::Integer));
     assert_eq!(first, second);
     assert!(contains(
         "*",
@@ -421,18 +426,16 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
         Some(numeric(7, 3)),
         Some(ColumnType::Integer)
     ));
-    let text = named_binary_operator_types(
+    let text = select(
         "||",
         Some(&ColumnType::Varchar(Some(12))),
         Some(&ColumnType::Varchar(Some(3))),
-    )
-    .unwrap();
-    let plain_text = named_binary_operator_types(
+    );
+    let plain_text = select(
         "||",
         Some(&ColumnType::Varchar(None)),
         Some(&ColumnType::Varchar(None)),
-    )
-    .unwrap();
+    );
     assert_eq!(text, plain_text);
     assert!(contains(
         "||",
@@ -444,14 +447,17 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
         Some(ColumnType::Varchar(Some(12))),
         Some(ColumnType::Varchar(Some(3))),
     ));
-    // Inserting as many distinct keys as the bound holds discards the retained selections at least once instead of growing past the bound; the first key of the sequence is gone afterwards.
+    // The capacity fixture owns its map so its synthetic keys cannot evict
+    // selections another test is inspecting in the process-wide cache.
+    let mut selections = HashMap::new();
     let types = [
         ColumnType::Integer,
         ColumnType::Integer,
         ColumnType::Integer,
     ];
     for index in 0..RETAINED_SELECTIONS {
-        retain_selection(
+        insert_selection(
+            &mut selections,
             (
                 format!("bounded_operator_{index}").into(),
                 OperandType(None),
@@ -459,7 +465,20 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
             ),
             &types,
         );
-        assert!(BUILTIN_SELECTIONS.read().unwrap().len() <= RETAINED_SELECTIONS);
+        assert_eq!(selections.len(), index + 1);
     }
-    assert!(!contains("bounded_operator_0", None, None));
+    assert_eq!(selections.len(), RETAINED_SELECTIONS);
+    let last = (
+        "after_capacity".into(),
+        OperandType(None),
+        OperandType(None),
+    );
+    insert_selection(&mut selections, last.clone(), &types);
+    assert_eq!(selections.len(), 1);
+    assert_eq!(selections.get(&last), Some(&types));
+    assert!(!selections.contains_key(&(
+        "bounded_operator_0".into(),
+        OperandType(None),
+        OperandType(None),
+    )));
 }

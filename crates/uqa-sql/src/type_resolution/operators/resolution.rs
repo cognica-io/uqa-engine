@@ -30,9 +30,10 @@ impl Hash for OperandType {
 }
 
 type SelectionKey = (Box<str>, OperandType, OperandType);
+type BuiltinSelections = RwLock<HashMap<SelectionKey, [ColumnType; 3]>>;
 
 /// Operator selection is a function of the operator name and its operand types without modifiers. Selections whose operands are builtin scalars or unknown, a bounded set, are made once per process; other operands are selected at every request.
-static BUILTIN_SELECTIONS: LazyLock<RwLock<HashMap<SelectionKey, [ColumnType; 3]>>> =
+static BUILTIN_SELECTIONS: LazyLock<BuiltinSelections> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// The catalog's operator names and the builtin scalar types bound the retained selections far below this; reaching it discards the retained selections instead of growing.
@@ -102,6 +103,16 @@ pub(crate) fn named_binary_operator_types_with_control(
     right: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<[ColumnType; 3]>, SQLError> {
+    select_with_cache(name, left, right, control, &BUILTIN_SELECTIONS)
+}
+
+fn select_with_cache(
+    name: &str,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+    control: &ProductionControl<'_>,
+    cache: &BuiltinSelections,
+) -> Result<Produced<[ColumnType; 3]>, SQLError> {
     control.check()?;
     let key = control
         .budget()
@@ -109,7 +120,7 @@ pub(crate) fn named_binary_operator_types_with_control(
         .then(|| selection_key(name, left, right))
         .flatten();
     let retained = key.as_ref().and_then(|key| {
-        BUILTIN_SELECTIONS
+        cache
             .read()
             .ok()
             .and_then(|selections| selections.get(key).cloned())
@@ -119,19 +130,27 @@ pub(crate) fn named_binary_operator_types_with_control(
     }
     let selected = select_binary_operator_types(name, left, right, control)?;
     if let Some(key) = key {
-        retain_selection(key, &selected);
+        retain_selection(cache, key, &selected);
     }
     Ok(selected)
 }
 
 /// Retain one selection, discarding every retained selection first when the bound is reached.
-fn retain_selection(key: SelectionKey, selected: &[ColumnType; 3]) {
-    if let Ok(mut selections) = BUILTIN_SELECTIONS.write() {
-        if selections.len() >= RETAINED_SELECTIONS {
-            selections.clear();
-        }
-        selections.entry(key).or_insert_with(|| selected.clone());
+fn retain_selection(cache: &BuiltinSelections, key: SelectionKey, selected: &[ColumnType; 3]) {
+    if let Ok(mut selections) = cache.write() {
+        insert_selection(&mut selections, key, selected);
     }
+}
+
+fn insert_selection(
+    selections: &mut HashMap<SelectionKey, [ColumnType; 3]>,
+    key: SelectionKey,
+    selected: &[ColumnType; 3],
+) {
+    if selections.len() >= RETAINED_SELECTIONS {
+        selections.clear();
+    }
+    selections.entry(key).or_insert_with(|| selected.clone());
 }
 
 fn select_binary_operator_types(
