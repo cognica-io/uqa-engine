@@ -6,6 +6,10 @@
 
 use crate::Engine;
 
+mod admission;
+mod calls;
+mod explain_inputs;
+
 #[test]
 fn prepared_temporal_constants_keep_the_preparation_clock() {
     use std::sync::atomic::Ordering;
@@ -201,4 +205,8 @@ fn prepared_costs_distinguish_rare_and_unknown_index_keys() {
     );
 }
 
+mod empty;
+mod handles;
 mod ownership;
+mod reference;
+mod utility;

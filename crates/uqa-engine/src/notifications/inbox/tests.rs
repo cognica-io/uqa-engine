@@ -355,3 +355,83 @@ fn exact_u64_sequence_never_wraps_or_loses_integer_precision() {
     );
     assert_eq!(inbox.memory.used(), 0);
 }
+
+#[test]
+fn receiver_admission_failure_and_unwind_preserve_payload_and_sequence() {
+    let inbox = inbox(options());
+    inbox.state.lock().next_sequence = Some(u64::MAX);
+    inbox.deliver(7, "events", "original allocation");
+    let original = inbox.state.lock().queue[0].value.payload.as_ptr();
+    let retained = inbox.memory.used();
+    let rejected = inbox
+        .poll_with::<(), _>(|value| {
+            assert_eq!(value.payload.as_ptr(), original);
+            Err(NotificationSubscriptionError::new(
+                NotificationFailureKind::Capacity,
+            ))
+        })
+        .unwrap_err();
+    assert_eq!(rejected.kind(), NotificationFailureKind::Capacity);
+    assert!(!inbox.is_closed());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _: Result<NotificationReceive<()>, NotificationSubscriptionError> =
+            inbox.poll_with(|_| panic!("admission unwind"));
+    }))
+    .is_err());
+    assert_eq!(inbox.memory.used(), retained);
+    let NotificationReceive::Event { event, admitted } = inbox
+        .wait_with(Duration::ZERO, |value| {
+            Ok::<_, NotificationSubscriptionError>(value.payload.as_ptr())
+        })
+        .unwrap()
+    else {
+        panic!("retained event")
+    };
+    let NotificationEvent::Notification {
+        sequence,
+        notification,
+        ..
+    } = event
+    else {
+        panic!("embedded event")
+    };
+    assert_eq!(sequence, u64::MAX);
+    assert_eq!(admitted, original);
+    assert_eq!(notification.payload.as_ptr(), original);
+    assert_eq!(
+        inbox.poll().unwrap_err().kind(),
+        NotificationFailureKind::SequenceExhausted
+    );
+    inbox.close();
+    assert_eq!(
+        inbox
+            .poll_with::<(), NotificationSubscriptionError>(|_| panic!(
+                "terminal error precedes admission"
+            ))
+            .unwrap_err()
+            .kind(),
+        NotificationFailureKind::SequenceExhausted
+    );
+}
+
+#[test]
+fn receiver_admission_is_not_called_for_timeout_or_close() {
+    let inbox = inbox(options());
+    assert!(matches!(
+        inbox.wait_with::<(), NotificationSubscriptionError>(Duration::ZERO, |_| panic!(
+            "empty queue"
+        )),
+        Ok(NotificationReceive::TimedOut)
+    ));
+    let waiting = inbox.clone();
+    let task = std::thread::spawn(move || {
+        waiting.wait_with::<(), NotificationSubscriptionError>(Duration::MAX, |_| {
+            panic!("closed queue")
+        })
+    });
+    inbox.close();
+    assert!(matches!(
+        task.join().unwrap(),
+        Ok(NotificationReceive::Closed)
+    ));
+}

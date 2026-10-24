@@ -25,7 +25,8 @@ pub struct SQLNotificationOptions {
 impl Engine {
     /// Configure bounded LISTEN delivery once, before opening a transaction or listening.
     /// This does not create another session, change channels or execute SQL. The adapter
-    /// must use `try_take_sql_notifications` and close this session on a terminal error.
+    /// must use `try_take_sql_notifications` or `try_take_sql_notification_with` and close
+    /// this session on a terminal error.
     pub fn configure_sql_notifications(
         &self,
         options: SQLNotificationOptions,
@@ -90,6 +91,43 @@ impl Engine {
             return inbox.take_sql().map_err(|error| sql_failure(&error));
         }
         Ok(self.runtime.notifications.lock().drain(..).collect())
+    }
+
+    /// Receive one event from a configured bounded SQL LISTEN inbox, admitting its destination
+    /// before dequeue. The ordinary SQL transaction deferral and cross-process synchronization
+    /// remain native. `prepare` follows `NotificationSubscription::poll_with`'s no-reentry contract.
+    /// A source failure remains terminal in this inbox; admission failures do not consume it.
+    pub fn try_take_sql_notification_with<T, E>(
+        &self,
+        prepare: impl FnOnce(&SQLNotification) -> Result<T, E>,
+    ) -> Result<super::NotificationReceive<T>, E>
+    where
+        E: From<NotificationSubscriptionError>,
+    {
+        let inbox = self
+            .runtime
+            .bounded_sql_notifications
+            .lock()
+            .clone()
+            .ok_or_else(|| {
+                NotificationSubscriptionError::new(NotificationFailureKind::InvalidRequest)
+            })?;
+        if self.transaction_depth() != 0 {
+            return Ok(super::NotificationReceive::TimedOut);
+        }
+        // Preserve a previously retained source/overflow failure before performing more I/O.
+        inbox.pending_count()?;
+        if let Err(error) = self.poll_sql_notifications() {
+            // Synchronization may already have installed the original structured failure.
+            inbox.pending_count()?;
+            let failure = NotificationSubscriptionError::with_source(
+                NotificationFailureKind::SourceUnavailable,
+                error,
+            );
+            inbox.fail(failure.clone());
+            return Err(failure.into());
+        }
+        inbox.poll_with(prepare)
     }
 
     pub(super) fn validate_sql_notification_channels(
@@ -172,6 +210,84 @@ impl SubscriptionInbox {
 mod tests {
     use super::*;
     use std::{sync::Arc, time::Duration};
+
+    #[test]
+    fn admitted_sql_receive_keeps_deferred_delivery_and_failed_destination() {
+        use super::super::NotificationReceive;
+        use uqa_core::notifications::NotificationEvent;
+        let engine = Engine::new();
+        engine
+            .configure_sql_notifications(SQLNotificationOptions {
+                max_channels: 1,
+                max_queued_notifications: 2,
+                max_queued_bytes: 4096,
+                max_registry_entries_per_poll: 2,
+            })
+            .unwrap();
+        engine
+            .sql("LISTEN events; BEGIN; NOTIFY events, 'committed'", &[])
+            .unwrap();
+        assert!(matches!(
+            engine.try_take_sql_notification_with::<(), NotificationSubscriptionError>(|_| panic!(
+                "transaction defers delivery"
+            )),
+            Ok(NotificationReceive::TimedOut)
+        ));
+        engine.sql("COMMIT", &[]).unwrap();
+        assert_eq!(
+            engine
+                .try_take_sql_notification_with::<(), _>(|_| {
+                    Err(NotificationSubscriptionError::new(
+                        NotificationFailureKind::Capacity,
+                    ))
+                })
+                .unwrap_err()
+                .kind(),
+            NotificationFailureKind::Capacity
+        );
+        let NotificationReceive::Event {
+            event:
+                NotificationEvent::Notification {
+                    sequence,
+                    notification,
+                    ..
+                },
+            ..
+        } = engine
+            .try_take_sql_notification_with(|_| Ok::<_, NotificationSubscriptionError>(()))
+            .unwrap()
+        else {
+            panic!("original notification")
+        };
+        assert_eq!(sequence, 1);
+        assert_eq!(notification.payload, "committed");
+        engine
+            .sql("BEGIN; NOTIFY events, 'abandoned'; ROLLBACK", &[])
+            .unwrap();
+        assert!(matches!(
+            engine.try_take_sql_notification_with::<(), NotificationSubscriptionError>(|_| panic!(
+                "rollback removes delivery"
+            )),
+            Ok(NotificationReceive::TimedOut)
+        ));
+        engine
+            .sql(
+                "NOTIFY events, 'one'; NOTIFY events, 'two'; NOTIFY events, 'overflow'",
+                &[],
+            )
+            .unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                engine
+                    .try_take_sql_notification_with::<(), NotificationSubscriptionError>(
+                        |_| panic!("terminal error precedes admission")
+                    )
+                    .unwrap_err()
+                    .kind(),
+                NotificationFailureKind::Backpressure
+            );
+        }
+    }
 
     #[test]
     fn sql_wait_releases_configuration_ownership_before_parking_the_inbox() {

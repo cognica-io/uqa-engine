@@ -18,6 +18,17 @@ impl crate::FunctionTypeResolver for NoRoutines {
     }
 }
 impl crate::routines::RoutineResolution for NoRoutines {}
+impl crate::prepared::utility::PreparedSessionMetadata for NoRoutines {
+    fn show_result_schema(&self, _: &str) -> Result<crate::RowSchema, crate::SQLError> {
+        panic!("query fixture does not read session utility descriptors");
+    }
+    fn portal_result_schema(&self, _: &str) -> Option<crate::RowSchema> {
+        panic!("query fixture does not read portal descriptors");
+    }
+    fn prepared_result_schema(&self, _: &str) -> Option<crate::RowSchema> {
+        panic!("query fixture does not read prepared utility descriptors");
+    }
+}
 impl crate::catalog::analysis::AnalysisCatalog for NoRoutines {
     fn effective_search_path(
         &self,
@@ -108,5 +119,59 @@ impl crate::schema::dependencies::oid_alias::OidAliasInput for NoRoutines {
         _: &str,
     ) -> Result<Option<i64>, crate::SQLError> {
         Ok(None)
+    }
+}
+
+impl crate::routines::declaration::RoutineTypeCatalog for NoRoutines {
+    fn try_describe_table(&self, _: &str) -> Result<Option<Vec<crate::ast::ColumnDef>>, String> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_column_type(&self, _: &str) -> Option<crate::ColumnType> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_column_type_name(
+        &self,
+        _: &str,
+    ) -> Result<crate::ColumnType, crate::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<crate::ColumnType> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn require_type_usage(&self, _: &crate::ColumnType) -> Result<(), crate::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn format_type(&self, _: &crate::ColumnType) -> Result<String, crate::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+}
+impl crate::routines::resolution::RoutineOverloadCatalog for NoRoutines {
+    fn routine_type_snapshot(&self) -> crate::routines::resolution::RoutineTypeSnapshot {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn routine_search_path(&self) -> Vec<String> {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn has_registered_scalar_function(&self, _: &str) -> bool {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn lookup_sql_routine_candidates(
+        &self,
+        _: &str,
+    ) -> Result<Option<Vec<std::sync::Arc<crate::routines::SQLUserFunction>>>, crate::SQLError>
+    {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn lookup_bound_sql_routine_candidates_by_binding(
+        &self,
+        _: &crate::ast::FunctionBinding,
+    ) -> Option<Vec<std::sync::Arc<crate::routines::SQLUserFunction>>> {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn lookup_bound_sql_functions_by_binding(
+        &self,
+        _: &crate::ast::FunctionBinding,
+    ) -> Option<Vec<std::sync::Arc<crate::routines::SQLUserFunction>>> {
+        panic!("query fixture does not resolve procedures");
     }
 }

@@ -8,6 +8,85 @@ use super::*;
 use crate::{query::output::QueryOutput, Batch, PhysicalRow, RowSchema, SpillBuffer};
 use sha2::{Digest, Sha256};
 
+#[test]
+fn copy_input_checks_cancellation_before_read_and_after_data_or_eof() {
+    struct Source {
+        token: CancellationToken,
+        reads: usize,
+        count: usize,
+    }
+    impl Read for Source {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.reads += 1;
+            buffer[0] = b'1';
+            self.token.cancel();
+            Ok(self.count)
+        }
+    }
+    for count in [0, 1] {
+        let token = CancellationToken::new();
+        let mut input = Source {
+            token: token.clone(),
+            reads: 0,
+            count,
+        };
+        assert_eq!(
+            read_copy_input(&mut input, &token).unwrap_err().sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(input.reads, 1);
+        assert_eq!(
+            read_copy_input(&mut input, &token).unwrap_err().sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(input.reads, 1);
+    }
+}
+
+#[test]
+fn copy_input_preserves_partial_reads_interruption_and_source_errors() {
+    struct Source {
+        reads: usize,
+        fail: bool,
+    }
+    impl Read for Source {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.reads += 1;
+            match self.reads {
+                1 => Err(std::io::ErrorKind::Interrupted.into()),
+                2 => {
+                    buffer[..2].copy_from_slice(b"1\n");
+                    Ok(2)
+                }
+                _ if self.fail => Err(std::io::Error::other("original source failure")),
+                _ => Ok(0),
+            }
+        }
+    }
+    let token = CancellationToken::new();
+    assert_eq!(
+        read_copy_input(
+            &mut Source {
+                reads: 0,
+                fail: false
+            },
+            &token
+        )
+        .unwrap(),
+        b"1\n"
+    );
+    let error = read_copy_input(
+        &mut Source {
+            reads: 0,
+            fail: true,
+        },
+        &token,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("58030"));
+    assert!(error.to_string().contains("original source failure"));
+}
+
 struct Sink {
     digest: Sha256,
     bytes: usize,

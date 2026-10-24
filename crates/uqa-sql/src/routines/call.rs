@@ -120,11 +120,20 @@ impl<'a> ProcedureCallAnalysis<'a> {
         infer: &mut dyn FnMut(&ExpressionPlan) -> Result<Option<ColumnType>, SQLError>,
     ) -> Result<super::StaticFunctionMatch, SQLError> {
         let argument_types = infer_call_argument_types(self.arguments, &self.decoded, infer)?;
+        self.resolve_types(name, overloads, &argument_types)
+    }
+
+    pub(crate) fn resolve_types(
+        &self,
+        name: &str,
+        overloads: &RoutineOverloadContext<'_>,
+        argument_types: &[Option<ColumnType>],
+    ) -> Result<super::StaticFunctionMatch, SQLError> {
         let Some(resolved) = overloads.resolve_static_sql_routine_match(
             name,
             None,
             &self.names,
-            &argument_types,
+            argument_types,
             self.explicit_variadic,
             RoutineCallKind::Procedure,
         )?

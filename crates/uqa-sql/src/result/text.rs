@@ -22,18 +22,31 @@ pub fn format_postgres_text(
     ty: &ColumnType,
     engine: Option<&dyn EngineHook>,
 ) -> Result<String, SQLError> {
+    format_postgres_text_with_control(value, ty, engine, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary typed output owner".into()))
+}
+
+/// Format through the live session while charging output and temporary payloads to the caller.
+pub fn format_postgres_text_with_control(
+    value: &Value,
+    ty: &ColumnType,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
     let _interval_style = if crate::expr::interval_style::output_can_contain_interval(value) {
-        crate::expr::interval_style::live_scope(engine, &ProductionControl::uncontrolled())?
+        crate::expr::interval_style::live_scope(engine, control)?
     } else {
         None
     };
     let catalog = engine.map(EngineValueCatalog);
-    format_postgres_text_with_catalog(
+    format_postgres_text_with_catalog_and_control(
         value,
         ty,
         catalog
             .as_ref()
             .map(|catalog| catalog as &dyn SQLValueCatalog),
+        control,
     )
 }
 
@@ -81,6 +94,9 @@ pub fn format_postgres_text_with_catalog_and_control(
     }
     if let ColumnType::Domain { base, .. } = ty {
         return format_postgres_text_with_catalog_and_control(value, base, catalog, control);
+    }
+    if let (ColumnType::Xml, Value::Str(text)) = (ty, value) {
+        return crate::xml::output_with_control(text, control);
     }
     if matches!(ty, ColumnType::InternalChar) {
         let byte = crate::expr::internal_char::value_byte(value)
@@ -315,6 +331,49 @@ mod tests {
             self.lookups.set(self.lookups.get() + 1);
             Ok((oid == 16_500).then(domain))
         }
+
+        fn temporal_interval_style(
+            &self,
+        ) -> Result<Option<uqa_core::TemporalIntervalStyle>, SQLError> {
+            Ok(Some(uqa_core::TemporalIntervalStyle::Iso8601))
+        }
+    }
+
+    #[test]
+    fn controlled_session_output_keeps_live_style_and_releases_its_allowance() {
+        use uqa_core::{memory::MemoryBudget, CancellationToken, TemporalValue};
+        let catalog = Catalog {
+            lookups: Cell::new(0),
+        };
+        let memory = MemoryBudget::new(4096);
+        let cancellation = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &cancellation, &cancellation);
+        let value = Value::Temporal(TemporalValue::Interval {
+            months: 0,
+            days: 1,
+            micros: 0,
+        });
+        let text = format_postgres_text_with_control(
+            &value,
+            &ColumnType::Interval,
+            Some(&catalog),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(&**text, "P1D");
+        assert!(memory.used() > 0);
+        drop(text);
+        assert_eq!(memory.used(), 0);
+        cancellation.cancel();
+        let error = format_postgres_text_with_control(
+            &value,
+            &ColumnType::Interval,
+            Some(&catalog),
+            &control,
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+        assert_eq!(memory.used(), 0);
     }
 
     #[test]

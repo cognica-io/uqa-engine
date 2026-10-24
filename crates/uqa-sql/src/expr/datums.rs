@@ -285,7 +285,7 @@ fn read_payload(
             let (bytes, memory) = output.finish()?.into_parts();
             Ok(control.finish(Value::Bytes(bytes), memory)?)
         }
-        25 | 114 | 194 | 1042 | 1043 | 1790 => {
+        25 | 114 | 142 | 194 | 1042 | 1043 | 1790 => {
             let text = std::str::from_utf8(bytes).map_err(|error| SQLError::Routine {
                 sqlstate: "22021".into(),
                 message: format!(

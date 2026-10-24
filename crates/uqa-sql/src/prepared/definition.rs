@@ -19,7 +19,9 @@ use crate::{
 pub struct PreparedDefinitionContext<'a> {
     pub types: &'a dyn FunctionTypeResolver,
     pub routines: &'a dyn RoutineResolution,
+    pub procedures: &'a dyn crate::routines::resolution::RoutineOverloadCatalog,
     pub scopes: &'a dyn StatementAnalysisScopes,
+    pub session: &'a dyn super::utility::PreparedSessionMetadata,
     /// The catalog the `reg*` input functions read object names from when the statement is analyzed.
     pub aliases: &'a dyn crate::schema::dependencies::oid_alias::OidAliasInput,
 }
@@ -41,16 +43,54 @@ pub fn analyze_definition(
 ) -> Result<PreparedDefinition, SQLError> {
     let parameter_types =
         super::declared_parameter_types(context.types, &mut logical_plan, declared)?;
-    let (input, effective_search_path, dependency_snapshot) =
-        with_scope_result(context.scopes, |scope| {
+    if !super::utility::requires_analysis(&logical_plan) {
+        let result_schema = super::utility::result_schema(context.session, &logical_plan)?;
+        return Ok(PreparedDefinition {
+            composite_inputs: super::composites::CompositeInputs::default(),
+            logical_plan,
+            parameter_types,
+            result_schema,
+            effective_search_path: None,
+            dependencies: PreparedAnalysisDependencies::default(),
+            dependency_snapshot: None,
+        });
+    }
+    let (input, effective_search_path, dependency_snapshot) = with_scope_result(
+        context.scopes,
+        |scope| {
             let binding = scope.binding_context()?;
-            let mut input = crate::binding::read_prepared_inputs(
-                context.routines,
-                &mut logical_plan,
-                &parameter_types,
-                &binding,
-                Some(context.aliases),
-            )?;
+            let mut input = if matches!(&logical_plan, UnifiedPlan::Command(command) if matches!(command.as_ref(), crate::plan::CommandPlan::Call { .. }))
+            {
+                let (_, input) = crate::binding::read_procedure_inputs(
+                    &crate::binding::statements::StatementAnalysisContext {
+                        routines: context.routines,
+                        scopes: context.scopes,
+                        aliases: context.aliases,
+                    },
+                    &crate::routines::resolution::RoutineOverloadContext {
+                        catalog: context.procedures,
+                    },
+                    context.procedures,
+                    &mut logical_plan,
+                    &parameter_types,
+                    &binding,
+                )?;
+                crate::binding::retain_prepared_input_metadata(
+                    context.routines,
+                    &mut logical_plan,
+                    &input.parameter_types,
+                    &binding,
+                )?;
+                input
+            } else {
+                crate::binding::read_prepared_inputs(
+                    context.routines,
+                    &mut logical_plan,
+                    &parameter_types,
+                    &binding,
+                    Some(context.aliases),
+                )?
+            };
             crate::schema::dependencies::oid_alias::read_prepared_oid_alias_constants(
                 context.aliases,
                 &mut logical_plan,
@@ -64,7 +104,8 @@ pub fn analyze_definition(
                 .catalog
                 .prepared_dependency_snapshot(&input.dependencies)?;
             Ok((input, effective_search_path, dependency_snapshot))
-        })?;
+        },
+    )?;
     let result_schema = analyze_result_schema(context, &logical_plan, &input.parameter_types)?;
     Ok(PreparedDefinition {
         composite_inputs: super::composites::CompositeInputs::capture(
@@ -128,13 +169,32 @@ pub fn analyze_result_schema(
     logical_plan: &UnifiedPlan,
     parameter_types: &[Option<ColumnType>],
 ) -> Result<Option<RowSchema>, SQLError> {
+    if !super::utility::requires_analysis(logical_plan) {
+        return super::utility::result_schema(context.session, logical_plan);
+    }
     with_scope_result(context.scopes, |scope| {
-        super::analyze_prepared_plan(
-            context.routines,
-            logical_plan,
-            parameter_types,
-            &scope.binding_context()?,
-        )
+        let binding = scope.binding_context()?;
+        if let UnifiedPlan::Command(command) = logical_plan {
+            if let crate::plan::CommandPlan::Call { name, args } = command.as_ref() {
+                let params = super::analysis_parameters(parameter_types);
+                return crate::routines::call::ProcedureCallAnalysis::new(args)?.result_schema(
+                    name,
+                    &crate::routines::resolution::RoutineOverloadContext {
+                        catalog: context.procedures,
+                    },
+                    context.procedures,
+                    &mut |argument| {
+                        crate::binding::analyze_expression_plan_type(
+                            context.routines,
+                            argument,
+                            &params,
+                            &binding,
+                        )
+                    },
+                );
+            }
+        }
+        super::analyze_prepared_plan(context.routines, logical_plan, parameter_types, &binding)
     })
 }
 

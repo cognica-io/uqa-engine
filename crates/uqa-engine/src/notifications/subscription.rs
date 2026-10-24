@@ -149,6 +149,18 @@ pub enum NotificationWait {
     Closed,
 }
 
+/// One receive with adapter-owned storage admitted before dequeue. Rejected admission leaves both
+/// the queued notification and its delivery sequence unchanged.
+#[derive(Debug)]
+pub enum NotificationReceive<T> {
+    Event {
+        event: NotificationEvent,
+        admitted: T,
+    },
+    TimedOut,
+    Closed,
+}
+
 pub(super) struct ListenerResources {
     pub(super) hub: Arc<NotificationHubOwner>,
     pub(super) session_id: u64,
@@ -186,6 +198,24 @@ impl NotificationSubscription {
         timeout: Duration,
     ) -> Result<NotificationWait, NotificationSubscriptionError> {
         self.inbox.wait(timeout)
+    }
+    /// Poll with fallible destination admission under the inbox lock. `prepare` runs at most once,
+    /// only for a present event, and must not reenter this inbox or Engine. It may reserve storage;
+    /// it must not invoke host callbacks. Failure or unwinding preserves the event and sequence.
+    pub fn poll_with<T, E: From<NotificationSubscriptionError>>(
+        &self,
+        prepare: impl FnOnce(&uqa_core::notifications::SQLNotification) -> Result<T, E>,
+    ) -> Result<NotificationReceive<T>, E> {
+        self.inbox.poll_with(prepare)
+    }
+    /// Wait with the same admission contract as [`Self::poll_with`]. Timeout and closure do not
+    /// invoke `prepare`; all ordinary native receive and retained-failure semantics remain intact.
+    pub fn wait_with<T, E: From<NotificationSubscriptionError>>(
+        &self,
+        timeout: Duration,
+        prepare: impl FnOnce(&uqa_core::notifications::SQLNotification) -> Result<T, E>,
+    ) -> Result<NotificationReceive<T>, E> {
+        self.inbox.wait_with(timeout, prepare)
     }
     /// Receive without blocking a thread or requiring a particular async runtime. At most one asynchronous receive may be pending; another returns `InvalidRequest`. Dropping a pending receive releases its wake slot without consuming an event or closing the listener.
     pub async fn next_event(

@@ -106,6 +106,38 @@ assert_eq!(tags, [Some("SELECT 1".into()), Some("SELECT 1".into())]);
 # Ok::<(), uqa_engine::SQLError>(())
 ```
 
+## Prepared statement handles
+
+`Engine::prepare_statement(sql, declared_types)` prepares one native SQL statement or an empty input and returns a `PreparedStatement` identity for that session. Multiple commands are rejected with SQLSTATE `42601`. `declared_types` is a slice of SQL `ColumnType` declarations; an empty slice uses native inference. `describe_prepared_statement(&statement)` returns the inferred parameter types and optional positional result schema, preserving duplicate labels and empty query descriptors.
+
+CALL preparation resolves procedure overloads, named/default arguments and parameter types, including parameters written in OUT positions. OUT and INOUT columns form the positional result descriptor. Describing a row-producing statement rechecks invalidated analysis and its fixed result shape without building an execution plan or increasing plan-use counters. Reanalysis uses the current session settings; a removed procedure or changed result shape reports its native error. A definition without row columns remains describable without catalog reanalysis.
+
+`execute_prepared_statement(&statement, params)` requires the complete parameter list and returns an ordinary owned `SQLResult`. It uses native argument coercion, custom/generic plan selection, dependency invalidation and fixed result schemas for statements that undergo analysis. Preparation and execution enter the existing session statement boundary; prepared transaction commands retain their transaction-control behavior. Source text is available in `pg_prepared_statements`, with `from_sql = false` for these host-created entries.
+
+The transaction owner covers syntax parsing, retained-identity lookup, parameter-count validation, analysis, binding and execution failures. A wrong host parameter count reports `08P01` and aborts the active transaction or savepoint, including for unused utility declarations. In an aborted transaction, empty input and transaction exits can be prepared, and definitions without a row descriptor can be described. Binding a transaction exit is allowed only with zero parameters; other execution and descriptions with row columns report `25P02`. A prepared COMMIT in a failed block completes as ROLLBACK. Recovery and parameter-count diagnostics preserve their native ordering.
+
+Empty and comment-only inputs retain a native definition with no result descriptor. Execution returns no rows or command tag and does not establish a transaction snapshot. Explicit parameter declarations remain visible and must still receive values; an empty definition uses a generic plan even under `force_custom_plan`. Empty preparation and description are allowed in an aborted transaction, while execution reports `25P02` until rollback or savepoint recovery. Ordinary empty Simple Query messages retain their own no-command behavior.
+
+Preparation of `SHOW`, `FETCH`, `MOVE` and SQL `EXECUTE` reads existing session metadata without executing the utility or selecting a query snapshot. `SHOW` describes its canonical text columns and rejects an unknown setting during preparation. `FETCH` copies the named portal's current descriptor; `MOVE` has none. SQL `EXECUTE` copies the referenced prepared definition's descriptor. A missing portal or referenced definition leaves the utility without a descriptor at preparation; execution resolves the named resource and reports a missing resource then.
+
+These session utilities always use generic plans, including with unused declared parameters under `force_custom_plan`. Their original descriptions survive `DISCARD PLANS` and replacement of the referenced cursor or prepared definition. Execution uses that resource's current result shape, which can differ from the utility's retained description. Read the returned `SQLResult` metadata to interpret its rows.
+
+SQL `EXECUTE saved($1)` does not bind `$1` from the host prepared handle's arguments; it reports `42P02` during execution even when the outer handle declares a parameter. Literal SQL `EXECUTE` arguments remain ordinary SQL expressions. Direct execution of the prepared handle binds its supplied values through the native host parameter interface.
+
+`finalize_prepared_statement(&statement)` removes that definition. Prepared definitions survive transaction rollback; explicit finalization, SQL `DEALLOCATE` and `DISCARD ALL` invalidate the handle. A different session or a removed/replaced definition reports SQLSTATE `26000`; finalizing such a handle is harmless and never removes its replacement. Retained results and descriptors keep their native ownership after finalization. Dropping the identity alone does not finalize its session definition.
+
+```rust
+use uqa_engine::{Engine, SQLParam};
+use uqa_core::Value;
+
+let engine = Engine::new();
+let statement = engine.prepare_statement("SELECT $1::integer AS answer", &[])?;
+let result = engine.execute_prepared_statement(&statement, &[SQLParam::scalar(Value::Int(42))])?;
+engine.finalize_prepared_statement(&statement);
+assert_eq!(result.value_at(0, 0), Some(&Value::Int(42)));
+# Ok::<(), uqa_engine::SQLError>(())
+```
+
 ## Stream results
 
 `Engine::sql_cursor` accepts one read query and returns a row cursor. The engine uses bounded spill when needed, and the read snapshot is committed before the cursor is returned. This makes the cursor suitable for large results without holding an open storage transaction for the consumer lifetime.
@@ -144,6 +176,8 @@ assert_eq!(output, b"1\tpending\n2\tpending\n");
 ```
 
 `COPY FROM` uses the ordinary INSERT path as one statement: declarative partition parents route each row after defaults, identity allocation, and stored generation; a direct partition validates every ancestor bound; ordinary inheritance writes only the named relation; and any format, conversion, or constraint error publishes no rows. Direct `COPY relation TO` reads only the named physical relation and omits generated columns, so a partitioned parent raises `42809`; use `COPY (SELECT ... FROM parent) TO STDOUT` to include descendants or put `ONLY` inside that query to exclude them. A generated column named in a direct COPY column list is `42P10`, duplicate and missing names are `42701` and `42703`, malformed row widths are `22P04`, invalid text conversion uses the target type's PostgreSQL SQLSTATE, and a COPY failure aborts the current explicit transaction.
+
+COPY FROM checks cancellation before each source read and after each successful read, including EOF. It stops requesting input when cancellation is observed and retains the native cancellation SQLSTATE; a source failure remains `58030`. These checks cannot interrupt a blocked application reader. The complete input still precedes insertion, so a cancelled or failed source publishes no rows.
 
 COPY TO writes text/CSV incrementally without retaining a second, encoded copy of the result. Formatting scratch for the current field is admitted under `work_mem`; ordinary text fields are borrowed. Writes and escape scans check cancellation in bounded chunks, partial writes are completed, and sink errors report `58030`. COPY flushes the supplied writer before its implicit transaction commits; write, flush and cancellation errors roll back that statement or abort an existing explicit transaction. Already emitted bytes cannot be retracted. The caller retains ownership of the writer and closes it. SELECT output uses the existing bounded query spool, spilling under the query allowance and delivering one decoded batch at a time. Query evaluation completes before sink delivery, so concurrent source changes do not alter the exported rows. Command RETURNING and data-modifying CTE output use retained, byte-bounded row captures at their existing completion boundaries. A single indivisible value, the query plan, provider caches and algorithm-specific retrieval state remain outside the encoded-output bound; this API does not impose a process-wide RSS ceiling.
 
@@ -268,13 +302,15 @@ session.sql("NOTIFY jobs, 'ready'", &[])?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-### Independent owned listeners
-
 ### Bounded notifications on one SQL session
 
 `Engine::configure_sql_notifications(SQLNotificationOptions)` opts the current session into bounded `LISTEN` delivery before any transaction, channel registration or queued message exists. All four options are positive: `max_channels`, `max_queued_notifications`, `max_queued_bytes` and `max_registry_entries_per_poll`. Configuration is immutable and does not register an independent listener or change the session's backend process ID. Bytes include queue capacity, string capacity and native prepared-delivery overlap.
 
 Use `Engine::try_take_sql_notifications() -> Result<Vec<SQLNotification>, SQLError>` for this adapter. It synchronizes the original provider, atomically drains committed messages and preserves a terminal queue or source failure on every subsequent read. A count or byte overflow closes delivery explicitly; the adapter must close the SQL session rather than silently reconnect, replay a transaction or call an empty result success. `LISTEN`, `UNLISTEN`, publisher deduplication, transaction deferral and savepoint rollback retain their existing semantics. The channel ceiling is checked before commit and rejects the attempted channel change with SQLSTATE `54000`. The historical unchecked `take_sql_notifications` cannot express terminal failures and is intended for the default unbounded adapter. See the [preservation proof](../../design/bounded-sql-session-notifications.md).
+
+`Engine::try_take_sql_notification_with(prepare)` receives one event from a configured bounded session inbox as `NotificationReceive<T>`. It preserves transaction deferral and synchronizes the original provider before reception. The callback admits adapter-owned storage before dequeue under the same constraints as the independent listener's `poll_with` below; rejection leaves the message and sequence intact. Each inbox has an opaque epoch and exact `u64` sequence beginning at one. An unconfigured inbox returns `NotificationFailureKind::InvalidRequest`; retained source/overflow errors keep their original native category and optional private cause. Choose either the single-event receiver or whole-queue drain for an adapter; the whole-queue drain does not expose or advance delivery sequences.
+
+### Independent owned listeners
 
 UQA Engine 0.6.1 provides `Engine::subscribe_notifications(&[&str], NotificationSubscriptionOptions) -> Result<NotificationSubscription, NotificationSubscriptionError>`. The returned handle is ready for all requested channels and remains independent of the caller's transaction and low-level SQL listener. It uses the original memory database or retained persistent provider, including encryption, and retains the effective role incarnation selected at registration. It neither creates a new SQL session nor reconnects through HTTP. Channels must be unique, nonempty, NUL-free exact UTF-8 strings of at most 63 bytes; invalid input fails before registering any channel.
 
@@ -285,6 +321,8 @@ Every option is required and positive: `max_active_subscriptions`, `max_channels
 Runtime adapters reserve admission before submitting work with `reserve_notification_subscription(options, &CancellationToken) -> Result<NotificationSubscriptionPermit, NotificationSubscriptionError>`. This operation uses the original shared allowance without waiting on Engine or provider gates. The opaque permit fixes all five options and is consumed once by `subscribe_notifications_with_permit(channels, permit, &CancellationToken)`, which performs the same native registration without acquiring another slot. A different hub rejects the permit with `InvalidRequest`; the permit is not an authorization grant. Retain the original Engine separately while work is pending. Dropping an unused permit releases only capacity metadata and performs no provider I/O; successful registration transfers the same permit through the listener's completed cleanup. An adapter must reserve this capacity before placing registration in its runtime queue; this Rust interface does not establish a particular language adapter.
 
 `poll()` returns `Poll::Pending`, `Poll::Ready(Some(NotificationEvent))` or `Poll::Ready(None)` after closure without a retained failure. `wait(Duration)` returns `NotificationWait::Event`, `TimedOut` or `Closed`; a receive timeout does not unsubscribe. `next_event().await` returns `Some(NotificationEvent)` or `None` on closure without blocking a thread or requiring a particular async runtime. All three preserve a retained terminal error, including after cleanup. Serialize consumption of a handle; a second pending asynchronous receive returns `InvalidRequest`. Dropping a pending receive releases its single wake slot without consuming an event or unsubscribing. Embedded events use a fresh `NotificationIdentity.epoch`, no HTTP request ID and contiguous exact `u64` sequences beginning at one. The original notification retains its channel, payload and sender process ID.
+
+`poll_with(prepare)` and `wait_with(timeout, prepare)` return `NotificationReceive<T>::Event { event, admitted }`, `TimedOut` or `Closed`. Their `FnOnce(&SQLNotification) -> Result<T, E>` callback runs at most once, while the inbox lock protects the next event; `E` must convert `NotificationSubscriptionError`. Use it only to reserve the receiving adapter's storage. It must not reenter Engine or the subscription, block on unrelated work, or invoke host callbacks. A rejected or unwound admission leaves the original payload, queue order and next sequence untouched. The callback is not called for an empty, closed or terminally failed inbox. Successful admission transfers the original notification with its exact sequence alongside `T`; ordinary poll, blocking wait and async receive retain their existing behavior.
 
 `close()` is idempotent and wakes blocked receivers; concurrent close calls wait for the same retained-resource cleanup, and dropping the handle closes it. `is_closed()` reports delivery closure, which can precede completed provider cleanup. `stop_delivery()` supplies only the non-I/O wake/closure signal for runtime adapters; registration and admission remain retained until the adapter calls and joins `close()` outside its event-loop worker. The last external owner cancels and joins shared recovery before releasing its provider; other Engine or subscription owners keep recovery alive. Close all retained handles before replacing a database file. Registration and close can perform native I/O; asynchronous runtime adapters must schedule that work outside their event-loop worker. The [cleanup argument](../../design/owned-notification-listeners.md#cleanup-completion-and-recovery-shutdown) states the completion boundary and remaining native-I/O limits.
 

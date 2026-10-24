@@ -3930,6 +3930,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-ffi"
+version = "0.6.1"
+dependencies = [
+ "parking_lot",
+ "tempfile",
+ "uqa-api",
+ "uqa-core",
+ "uqa-engine",
+ "uqa-sql",
+ "uqa-storage-sqlite",
+ "zeroize",
+]
+
+[[package]]
 name = "uqa-fusion"
 version = "0.6.1"
 dependencies = [
@@ -4178,7 +4192,9 @@ version = "0.6.1"
 dependencies = [
  "ahash",
  "allocation-counter",
+ "cc",
  "chrono",
+ "cmake",
  "crc32fast",
  "errno",
  "getrandom 0.3.4",

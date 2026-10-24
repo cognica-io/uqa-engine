@@ -14,6 +14,7 @@ use uqa_sql::{
     ColumnType, RowSchema, ScalarExpr,
 };
 mod fixtures;
+mod utility;
 use fixtures::NoRoutines;
 
 struct Inputs {
@@ -69,7 +70,9 @@ impl Inputs {
             analysis: PreparedDefinitionContext {
                 types: &NoRoutines,
                 routines: &NoRoutines,
+                procedures: &NoRoutines,
                 scopes: self,
+                session: &NoRoutines,
                 aliases: &NoRoutines,
             },
             optimization: self,
@@ -607,4 +610,75 @@ fn namespace_read_failure_does_not_reuse_or_publish_the_cached_plan() {
     assert_eq!(entry.generic_plans, original.generic_plans);
     assert_eq!(entry.custom_plans, original.custom_plans);
     assert_eq!(entry.total_custom_cost, original.total_custom_cost);
+}
+
+#[test]
+fn description_reanalysis_preserves_usage_without_building_a_plan() {
+    let inputs = Inputs::default();
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    entry.invalidate();
+    let source = entry.source_plan.clone();
+    let counts = (
+        entry.generic_plans,
+        entry.custom_plans,
+        entry.total_custom_cost,
+    );
+    let analysis = describe_entry(&inputs.context().analysis, &entry)
+        .unwrap()
+        .unwrap();
+    entry.record_analysis(analysis);
+    assert!(Arc::ptr_eq(&source, &entry.source_plan));
+    assert!(!entry.needs_analysis);
+    assert!(entry.plan.is_none());
+    assert!(entry.generic_cost.is_none());
+    assert_eq!(
+        (
+            entry.generic_plans,
+            entry.custom_plans,
+            entry.total_custom_cost
+        ),
+        counts
+    );
+    assert!(!inputs
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event.starts_with("optimize") || *event == "publish"));
+}
+
+#[test]
+fn description_rejects_changed_shape_before_publication() {
+    let inputs = Inputs::default();
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    entry.invalidate();
+    entry.result_schema = Some(RowSchema::with_types(
+        vec!["changed".into()],
+        vec![Some(ColumnType::Text)],
+    ));
+    let original = entry.logical_plan.clone();
+    let error = describe_entry(&inputs.context().analysis, &entry)
+        .err()
+        .unwrap();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert!(Arc::ptr_eq(&original, &entry.logical_plan));
+    assert!(entry.needs_analysis);
+    assert!(!inputs
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event.starts_with("optimize") || *event == "publish"));
+}
+
+#[test]
+fn no_data_description_never_reanalyzes() {
+    let inputs = Inputs::default();
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    entry.invalidate();
+    entry.result_schema = None;
+    inputs.fail_binding.set(true);
+    assert!(describe_entry(&inputs.context().analysis, &entry)
+        .unwrap()
+        .is_none());
+    assert!(inputs.events.borrow().is_empty());
+    assert!(entry.needs_analysis);
 }

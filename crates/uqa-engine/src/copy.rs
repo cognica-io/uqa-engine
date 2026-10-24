@@ -14,6 +14,7 @@ impl Engine {
     /// The complete input is decoded before the single underlying multi-row insert starts. Row routing, defaults, identity allocation, generated columns, checks, foreign keys, and statement rollback consequently use exactly the same implementation as `INSERT`.
     pub fn copy_from(&self, statement: &str, mut input: impl Read) -> Result<u64, SQLError> {
         let _statement = self.lock_statement_gate();
+        let _thread = self.statement_thread_context().enter();
         let result = self.synchronize_for_copy().and_then(|()| {
             uqa_execution::copy::copy_from(&self.copy_execution_context(), statement, &mut input)
         });

@@ -89,6 +89,7 @@ pub(crate) fn encode<'a>(
             | ColumnType::Character(_)
             | ColumnType::Bpchar
             | ColumnType::RefCursor
+            | ColumnType::Xml
             | ColumnType::PgNodeTree,
         )
         | (Value::Json(text), ColumnType::Json) => Ok(EncodedDatum::Borrowed(text.as_bytes())),

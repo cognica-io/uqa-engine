@@ -16,7 +16,30 @@ use uqa_sql::{plan::ExpressionPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
 mod context;
 pub use context::{ArgumentBindingContext, PreparedArgumentScopes, ScopedArgumentOperation};
 
+/// SQL EXECUTE analyzes its written arguments in an independent parameter namespace.
 pub fn bind_execute_parameters(
+    scopes: &dyn PreparedArgumentScopes,
+    name: &str,
+    types: Option<Vec<Option<ColumnType>>>,
+    arguments: &[ExpressionPlan],
+) -> Result<Vec<SQLParam>, SQLError> {
+    bind_parameter_expressions(scopes, name, types, arguments, &[])
+}
+
+/// Coerce supplied host values against the retained definition's parameter types.
+pub(crate) fn bind_host_parameters(
+    scopes: &dyn PreparedArgumentScopes,
+    name: &str,
+    types: Option<Vec<Option<ColumnType>>>,
+    parameters: &[SQLParam],
+) -> Result<Vec<SQLParam>, SQLError> {
+    let arguments = (1..=parameters.len())
+        .map(|index| ExpressionPlan::lower(uqa_sql::ast::Expr::Param(index)))
+        .collect::<Vec<_>>();
+    bind_parameter_expressions(scopes, name, types, &arguments, parameters)
+}
+
+fn bind_parameter_expressions(
     scopes: &dyn PreparedArgumentScopes,
     name: &str,
     types: Option<Vec<Option<ColumnType>>>,

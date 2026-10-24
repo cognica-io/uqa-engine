@@ -226,6 +226,12 @@ impl Engine {
         self.new_sibling_session(false, None)
     }
 
+    /// Whether these sessions use the same database identity. This reuses the provider-identified coordinator shared by independent opens and sibling sessions; memory engines have independent identities. Providers without stable storage identity can share only through their retained provider or backend owner.
+    #[must_use]
+    pub fn shares_database_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.row_locks, &other.row_locks)
+    }
+
     /// Restore an independent internal read view without entering the source statement or acquiring another automatic-maintenance client lease.
     pub(crate) fn new_internal_read_session(&self) -> StorageBackendResult<Self> {
         let mut session = self.new_sibling_session(true, None)?;

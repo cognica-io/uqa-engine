@@ -157,7 +157,8 @@ fn datum(value: &Value, ty: &ColumnType, descriptors: &Descriptors) -> Result<Fi
             | ColumnType::Varchar(_)
             | ColumnType::Bpchar
             | ColumnType::Character(_)
-            | ColumnType::RefCursor,
+            | ColumnType::RefCursor
+            | ColumnType::Xml,
         ) => varlena(value.as_bytes())?,
         (Value::Bytes(value), ColumnType::Bytea) => varlena(value)?,
         (Value::Str(text), ColumnType::Range(_) | ColumnType::Multirange(_)) => {

@@ -89,6 +89,13 @@
     "uqa-fdw": [
       "uqa-core"
     ],
+    "uqa-ffi": [
+      "uqa-api",
+      "uqa-core",
+      "uqa-engine",
+      "uqa-sql",
+      "uqa-storage-sqlite"
+    ],
     "uqa-fusion": [
       "uqa-core",
       "uqa-scoring"

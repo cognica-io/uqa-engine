@@ -8,6 +8,28 @@
 
 use super::*;
 
+#[test]
+fn database_identity_preserves_siblings_and_independent_native_opens() {
+    let memory = Engine::new();
+    assert!(memory.shares_database_with(&memory));
+    assert!(!memory.shares_database_with(&Engine::new()));
+    let directory = tempfile::tempdir().unwrap();
+    for provider in 0..4 {
+        let path = directory.path().join(format!("identity-{provider}.db"));
+        let source = persistent(provider, &path);
+        let sibling = source.new_session().unwrap();
+        assert!(source.shares_database_with(&sibling));
+        assert!(sibling.shares_database_with(&source));
+        assert!(!source.shares_database_with(&memory));
+        if provider == 0 {
+            let reopened = Engine::open(&path).unwrap();
+            assert!(source.shares_database_with(&reopened));
+            let unrelated = Engine::open(&directory.path().join("unrelated.db")).unwrap();
+            assert!(!source.shares_database_with(&unrelated));
+        }
+    }
+}
+
 fn persistent(provider: usize, path: &std::path::Path) -> Engine {
     match provider {
         0 => Engine::open(path).unwrap(),

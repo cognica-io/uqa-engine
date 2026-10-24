@@ -23,6 +23,7 @@ mod datestyle;
 mod intervalstyle;
 mod ranges;
 mod timezone;
+mod xml;
 
 /// Catalog input needed after analysis selects a type for an unknown literal. Domain array input includes each element's constraints, so the caller must retain this value rather than read the text again at execution.
 pub trait CatalogInputFunctions {
@@ -33,11 +34,12 @@ pub(crate) fn requires_domain_array_input(target: &ColumnType) -> bool {
     matches!(target, ColumnType::Array(element) if matches!(array_leaf_type(element), ColumnType::Domain { .. }))
 }
 
-/// Input constants containing declared composites/ranges or domain array elements must be read while the definition's catalog descriptor is available.
+/// Input constants containing declared composites/ranges, domain arrays or XML need the definition's catalog or session input context.
 pub(crate) fn requires_catalog_constant_input(target: &ColumnType) -> bool {
     requires_domain_array_input(target)
         || match target {
-            ColumnType::Composite(_)
+            ColumnType::Xml
+            | ColumnType::Composite(_)
             | ColumnType::DeclaredRange(_)
             | ColumnType::DeclaredMultirange(_) => true,
             ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
@@ -58,7 +60,7 @@ pub fn read_catalog_input(
     }
     if !requires_catalog_constant_input(target) {
         return Err(SQLError::Internal(
-            "catalog input requires a declared type or domain array".into(),
+            "constant input requires a catalog or session context".into(),
         ));
     }
     super::cast_value_with_type_resolution(
@@ -234,39 +236,32 @@ fn output_for_cast<'a>(
     Ok(None)
 }
 
-/// Array output borrows the input and retains both intermediate labels and final text under the caller's production budget.
+/// Array-to-string coercion invokes array output, which observes each element through its SQL output function. Element casts are different operations (for example, XML-to-text is binary coercion).
 fn catalog_array_output(
     value: &Value,
-    source_ty: Option<&str>,
+    source: Option<&ColumnType>,
     target_ty: &str,
     target: &ColumnType,
     engine: &dyn EngineHook,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>> {
-    if !matches!(value, Value::Array(_))
-        || !is_string_type(target)
-        || !(super::super::enums::contains_enum_carrier(value)
-            || super::super::datums::contains_datum(value))
-    {
+    if !matches!(value, Value::Array(_)) || !is_string_type(target) {
         return Ok(None);
     }
-    let actual_source;
-    let source_ty = if let Value::Array(array) = value {
-        actual_source = array
-            .element_type_oid()
-            .map(|oid| engine.resolve_type_oid(oid))
-            .transpose()
-            .map_err(SQLError::Internal)?
-            .flatten()
-            .map(|element| control.copy_text(&ColumnType::Array(Box::new(element)).catalog_name()))
-            .transpose()?;
-        actual_source.as_deref().map(String::as_str).or(source_ty)
-    } else {
-        source_ty
-    };
-    let text_array = ColumnType::Array(Box::new(ColumnType::Text));
-    let labels = cast_catalog_array(value, source_ty, &text_array, engine, control)?;
-    cast_value_from_with_control(&labels, target_ty, Some("text[]"), control).map(Some)
+    // Legacy untyped arrays still expose their retained element OID or enum carrier to the shared formatter.
+    let unspecified = ColumnType::Array(Box::new(ColumnType::Text));
+    let text = crate::result::format_postgres_text_with_control(
+        value,
+        source.unwrap_or(&unspecified),
+        Some(engine),
+        control,
+    )?;
+    let (text, memory) = text.into_parts();
+    let text = control.finish(Value::Str(text), memory)?;
+    if matches!(target, ColumnType::Text) {
+        return Ok(Some(text));
+    }
+    cast_value_from_with_control(&text, target_ty, Some("text"), control).map(Some)
 }
 
 fn physical_output_cast(
@@ -347,6 +342,7 @@ fn cast_with_resolution(
         .map(|source| resolve_catalog_type_with_control(source, engine, control))
         .transpose()?
         .flatten();
+    let source_type = resolved_source_type.as_deref();
     let parsed_target = if resolved_target.is_some() {
         None
     } else {
@@ -356,13 +352,7 @@ fn cast_with_resolution(
     let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
     let _interval_style = intervalstyle::cast_scope(value, target_column_type, engine, control)?;
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
-        if let Some(value) = record_identity_cast(
-            value,
-            resolved_source_type.as_deref(),
-            target,
-            engine,
-            control,
-        )? {
+        if let Some(value) = record_identity_cast(value, source_type, target, engine, control)? {
             return Ok(value);
         }
         if let Some(output) =
@@ -370,28 +360,19 @@ fn cast_with_resolution(
         {
             return Ok(output);
         }
-        if let Some(value) = cast_defined_type(
-            engine,
-            value,
-            source_ty,
-            resolved_source_type.as_deref(),
-            target,
-            control,
-        )? {
+        if let Some(value) =
+            cast_defined_type(engine, value, source_ty, source_type, target, control)?
+        {
             return Ok(value);
         }
         if let Some(output) =
-            catalog_array_output(value, source_ty, target_ty, target, engine, control)?
+            catalog_array_output(value, source_type, target_ty, target, engine, control)?
         {
             return Ok(output);
         }
-        if let Some((output, output_source)) = output_for_cast(
-            engine,
-            value,
-            source_ty,
-            resolved_source_type.as_deref(),
-            target,
-        )? {
+        if let Some((output, output_source)) =
+            output_for_cast(engine, value, source_ty, source_type, target)?
+        {
             return cast_value_with_type_resolution_with_control(
                 &output,
                 output_source,
@@ -403,7 +384,7 @@ fn cast_with_resolution(
         control.check()?;
         if matches!(target, ColumnType::Array(_))
             && (requires_catalog_array_cast(target)
-                || resolved_source_type.as_deref().is_some_and(|source| {
+                || source_type.is_some_and(|source| {
                     crate::type_resolution::cast_volatility(source, target)
                         != crate::ast::FunctionVolatility::Immutable
                 })
@@ -415,7 +396,7 @@ fn cast_with_resolution(
             return cast_catalog_array(value, source_ty, target, engine, control);
         }
     }
-    if let (Some(source), Some(target)) = (resolved_source_type.as_deref(), target_column_type) {
+    if let (Some(source), Some(target)) = (source_type, target_column_type) {
         if let Some(cast) = ResolvedCast::select(source, target).filter(|cast| cast.accepts(value))
         {
             let output = evaluate_selected_value(&cast, value, source_ty, engine, control)?;
@@ -491,6 +472,9 @@ fn cast_defined_type(
 ) -> Result<Option<Produced<Value>>> {
     if let Some(value) = engine.cast_domain(value, source_name, target)? {
         return Ok(Some(control.retain_external_value(value)?));
+    }
+    if matches!(target, ColumnType::Xml) {
+        return xml::cast(value, source_name, source, engine, control).map(Some);
     }
     if let Some(value) = ranges::cast(engine, value, source, target, control)? {
         return Ok(Some(value));
@@ -726,6 +710,7 @@ fn resolve_regobject_input(
 fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Domain { .. }
+        | ColumnType::Xml
         | ColumnType::Regtype
         | ColumnType::Regclass
         | ColumnType::Regproc
@@ -815,7 +800,7 @@ fn cast_array(
             other => {
                 return Err(SQLError::TypeMismatch(format!(
                     "CAST AS {target_name}: expected array, got {other:?}"
-                )))
+                )));
             }
         };
         let elements = cast_array_elements(

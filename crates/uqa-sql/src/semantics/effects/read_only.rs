@@ -76,7 +76,8 @@ pub fn forbidden_command(
             ..
         } => forbidden_command(context, body),
         // VACUUM's transaction-block prohibition has precedence over read-only validation and is enforced by its executor.
-        CommandPlan::Analyze { .. }
+        CommandPlan::Empty
+        | CommandPlan::Analyze { .. }
         | CommandPlan::LockTable(_)
         | CommandPlan::Vacuum(_)
         | CommandPlan::SetVariable { .. }
@@ -156,7 +157,8 @@ pub fn plan_sets_transaction_snapshot(plan: &UnifiedPlan) -> bool {
         UnifiedPlan::Command(command)
             if matches!(
                 command.as_ref(),
-                CommandPlan::SetVariable { .. }
+                CommandPlan::Empty
+                    | CommandPlan::SetVariable { .. }
                     | CommandPlan::Notify { .. }
                     | CommandPlan::Listen { .. }
                     | CommandPlan::Unlisten { .. }

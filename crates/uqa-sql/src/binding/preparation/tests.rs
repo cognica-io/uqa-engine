@@ -18,6 +18,7 @@ mod comparison_capabilities;
 mod defaults;
 mod dependencies;
 mod domain_collations;
+mod explain_inputs;
 mod field_collations;
 mod function_star;
 mod input_collations;

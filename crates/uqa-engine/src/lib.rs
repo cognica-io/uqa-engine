@@ -97,6 +97,7 @@ mod models;
 mod notifications;
 mod open;
 mod prepared;
+pub use prepared::{PreparedStatement, PreparedStatementDescription};
 mod relations;
 mod roles;
 mod schema_security;
@@ -155,8 +156,9 @@ use uqa_storage_sqlite::{
 };
 
 pub use notifications::{
-    NotificationSubscription, NotificationSubscriptionError, NotificationSubscriptionOptions,
-    NotificationSubscriptionPermit, NotificationWait, SQLNotification, SQLNotificationOptions,
+    NotificationReceive, NotificationSubscription, NotificationSubscriptionError,
+    NotificationSubscriptionOptions, NotificationSubscriptionPermit, NotificationWait,
+    SQLNotification, SQLNotificationOptions,
 };
 pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};

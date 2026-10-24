@@ -693,6 +693,8 @@ pub enum Statement {
         name: String,
         args: Vec<Expr>,
     },
+    /// Empty input retained by host preparation. Ordinary batch parsing returns no statements for this input.
+    Empty,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

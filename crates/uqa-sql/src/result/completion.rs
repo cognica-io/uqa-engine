@@ -26,7 +26,8 @@ pub fn set_command_completion(
     };
     if matches!(
         command,
-        CommandPlan::Execute { .. }
+        CommandPlan::Empty
+            | CommandPlan::Execute { .. }
             | CommandPlan::CreateTableAs { .. }
             | CommandPlan::CreateMaterializedView { .. }
     ) {
@@ -67,6 +68,7 @@ fn command_completion(
 #[expect(clippy::too_many_lines, reason = "exhaustive SQL command tag mapping")]
 pub fn command_tag_name(command: &CommandPlan) -> &'static str {
     match command {
+        CommandPlan::Empty => "",
         CommandPlan::Insert(_) => "INSERT",
         CommandPlan::Update(_) => "UPDATE",
         CommandPlan::Delete(_) => "DELETE",

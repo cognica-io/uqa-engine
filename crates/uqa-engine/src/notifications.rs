@@ -24,8 +24,8 @@ pub(crate) use owner::NotificationHubOwner;
 pub(crate) use registration::gate_waited;
 
 pub use subscription::{
-    NotificationSubscription, NotificationSubscriptionError, NotificationSubscriptionOptions,
-    NotificationSubscriptionPermit, NotificationWait,
+    NotificationReceive, NotificationSubscription, NotificationSubscriptionError,
+    NotificationSubscriptionOptions, NotificationSubscriptionPermit, NotificationWait,
 };
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]

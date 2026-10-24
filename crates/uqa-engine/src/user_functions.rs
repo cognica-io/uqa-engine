@@ -35,4 +35,14 @@ impl Engine {
     pub fn take_sql_notices(&self) -> Vec<uqa_sql::SQLNotice> {
         self.runtime.notices.take()
     }
+
+    /// Prepare a destination for the oldest notice before removing it. The callback runs only
+    /// when a notice exists; rejection or unwinding preserves the queue. It must not reenter
+    /// this Engine or its notice queue. Success moves the original notice and prepared owner.
+    pub fn try_take_sql_notice_with<T, E>(
+        &self,
+        prepare: impl FnOnce(&uqa_sql::SQLNotice) -> Result<T, E>,
+    ) -> Result<Option<(uqa_sql::SQLNotice, T)>, E> {
+        self.runtime.notices.try_take_with(prepare)
+    }
 }

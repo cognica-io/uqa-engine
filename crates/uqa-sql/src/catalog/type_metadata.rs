@@ -28,6 +28,7 @@ pub fn catalog_type_name(oid: i64) -> &'static str {
         25 => "text",
         28 => "xid",
         114 => "json",
+        142 => "xml",
         701 => "double precision",
         705 => "unknown",
         1184 => "timestamp with time zone",
@@ -88,6 +89,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::DoublePrecision => 701,
         ColumnType::Numeric { .. } => 1700,
         ColumnType::Json => 114,
+        ColumnType::Xml => 142,
         ColumnType::JsonB => 3802,
         ColumnType::Bytea => 17,
         ColumnType::Bit(_) => 1560,
@@ -379,6 +381,7 @@ pub fn pg_type_storage(ty: &ColumnType) -> &'static str {
         | ColumnType::Bpchar
         | ColumnType::Character(_)
         | ColumnType::Json
+        | ColumnType::Xml
         | ColumnType::JsonB
         | ColumnType::Bytea
         | ColumnType::Bit(_)
@@ -421,6 +424,7 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
         ColumnType::DoublePrecision => 1022,
         ColumnType::Numeric { .. } => 1231,
         ColumnType::Json => 199,
+        ColumnType::Xml => 143,
         ColumnType::JsonB => 3807,
         ColumnType::Bytea => 1001,
         ColumnType::Bit(_) => 1561,
@@ -636,6 +640,7 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Xid => PgTypeRoutineOids::new(50, 51, 2440, 2441),
         ColumnType::OidVector => PgTypeRoutineOids::new(54, 55, 2420, 2421),
         ColumnType::Json => PgTypeRoutineOids::new(321, 322, 323, 324),
+        ColumnType::Xml => PgTypeRoutineOids::new(2893, 2894, 2898, 2899),
         ColumnType::PgNodeTree => PgTypeRoutineOids::new(195, 196, 197, 198),
         ColumnType::Real => PgTypeRoutineOids::new(200, 201, 2424, 2425),
         ColumnType::DoublePrecision => PgTypeRoutineOids::new(214, 215, 2426, 2427),
@@ -713,6 +718,7 @@ pub fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::DoublePrecision => "double precision",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
+        ColumnType::Xml => "xml",
         ColumnType::JsonB => "jsonb",
         ColumnType::Bytea => "bytea",
         ColumnType::Bit(_) => "bit",

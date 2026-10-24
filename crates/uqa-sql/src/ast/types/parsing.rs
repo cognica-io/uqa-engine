@@ -158,6 +158,7 @@ impl ColumnType {
                 Ok(Self::Numeric { precision, scale })
             }
             "json" => Ok(Self::Json),
+            "xml" => Ok(Self::Xml),
             "jsonb" => Ok(Self::JsonB),
             "bytea" => Ok(Self::Bytea),
             "bit" | "bit varying" | "varbit" => {
