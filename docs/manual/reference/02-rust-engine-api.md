@@ -108,9 +108,11 @@ assert_eq!(tags, [Some("SELECT 1".into()), Some("SELECT 1".into())]);
 
 ## Prepared statement handles
 
-`Engine::prepare_statement(sql, declared_types)` prepares one native SQL statement and returns a `PreparedStatement` identity for that session. `declared_types` is a slice of SQL `ColumnType` declarations; an empty slice uses native inference. `describe_prepared_statement(&statement)` returns the inferred parameter types and optional positional result schema, preserving duplicate labels and empty query descriptors.
+`Engine::prepare_statement(sql, declared_types)` prepares one native SQL statement or an empty input and returns a `PreparedStatement` identity for that session. Multiple commands are rejected with SQLSTATE `42601`. `declared_types` is a slice of SQL `ColumnType` declarations; an empty slice uses native inference. `describe_prepared_statement(&statement)` returns the inferred parameter types and optional positional result schema, preserving duplicate labels and empty query descriptors.
 
 `execute_prepared_statement(&statement, params)` requires the complete parameter list and returns an ordinary owned `SQLResult`. It uses native argument coercion, custom/generic plan selection, dependency invalidation and fixed result schemas. Preparation and execution enter the existing session statement boundary; prepared transaction commands retain their transaction-control behavior. Source text is available in `pg_prepared_statements`, with `from_sql = false` for these host-created entries.
+
+Empty and comment-only inputs retain a native definition with no result descriptor. Execution returns no rows or command tag and does not establish a transaction snapshot. Explicit parameter declarations remain visible and must still receive values; an empty definition uses a generic plan even under `force_custom_plan`. Empty preparation and description are allowed in an aborted transaction, while execution reports `25P02` until rollback or savepoint recovery. Ordinary empty Simple Query messages retain their own no-command behavior.
 
 `finalize_prepared_statement(&statement)` removes that definition. Prepared definitions survive transaction rollback; explicit finalization, SQL `DEALLOCATE` and `DISCARD ALL` invalidate the handle. A different session or a removed/replaced definition reports SQLSTATE `26000`; finalizing such a handle is harmless and never removes its replacement. Retained results and descriptors keep their native ownership after finalization. Dropping the identity alone does not finalize its session definition.
 

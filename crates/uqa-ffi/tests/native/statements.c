@@ -44,6 +44,17 @@ static void sqlstate(const char *expected) {
     assert(equal(state, expected));
 }
 
+static void empty_result(uqa_result result) {
+    uint64_t rows = 99;
+    uint32_t columns = 99;
+    uqa_string_view tag = {NULL, 0};
+    CHECK(uqa_result_get_row_count(result, &rows));
+    CHECK(uqa_result_get_column_count(result, &columns));
+    assert(rows == 0 && columns == 0);
+    assert(uqa_result_get_command_tag(result, &tag) == UQA_DONE);
+    assert(tag.data == NULL && tag.size == 0);
+}
+
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -188,6 +199,47 @@ int main(void) {
     CHECK(uqa_statement_finalize(&statement));
     assert(uqa_statement_prepare(engine, "SELECT 1; SELECT 2", &statement) == UQA_ERROR_SQL);
     assert(statement == NULL);
+
+    CHECK(uqa_engine_execute(engine, "BEGIN", result));
+    CHECK(uqa_statement_prepare(engine, " ; -- empty\n; ", &statement));
+    CHECK(uqa_statement_get_parameter_count(statement, &count));
+    assert(count == 0);
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 0);
+    CHECK(uqa_statement_execute(statement, result));
+    empty_result(result);
+    CHECK(uqa_engine_execute(engine, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", result));
+    CHECK(uqa_engine_execute(engine, "SAVEPOINT keep", result));
+    assert(uqa_engine_execute(engine, "SELECT 1/0", result) == UQA_ERROR_SQL);
+    sqlstate("22012");
+    assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+    sqlstate("25P02");
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_prepare_n(engine, "ignored", 0, &statement));
+    CHECK(uqa_statement_get_column_count(statement, &count));
+    assert(count == 0);
+    assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+    sqlstate("25P02");
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO keep", result));
+    CHECK(uqa_statement_execute(statement, result));
+    empty_result(result);
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "COMMIT", result));
+
+    {
+        const char *types[] = {"integer"};
+        CHECK(uqa_statement_prepare_typed(engine, "", types, 1, &statement));
+        CHECK(uqa_statement_get_parameter_type(statement, 1, &type));
+        CHECK(uqa_type_get_kind(type, &kind));
+        assert(kind == UQA_TYPE_INT32);
+        assert(uqa_statement_execute(statement, result) == UQA_ERROR_STATE);
+        CHECK(uqa_value_create_int64(4, &value));
+        CHECK(uqa_statement_bind(statement, 1, value));
+        CHECK(uqa_value_destroy(&value));
+        CHECK(uqa_statement_execute(statement, result));
+        empty_result(result);
+        CHECK(uqa_statement_finalize(&statement));
+    }
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     return 0;

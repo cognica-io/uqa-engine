@@ -41,6 +41,18 @@ pub fn analyze_definition(
 ) -> Result<PreparedDefinition, SQLError> {
     let parameter_types =
         super::declared_parameter_types(context.types, &mut logical_plan, declared)?;
+    if matches!(&logical_plan, UnifiedPlan::Command(command) if matches!(command.as_ref(), crate::plan::CommandPlan::Empty))
+    {
+        return Ok(PreparedDefinition {
+            composite_inputs: super::composites::CompositeInputs::default(),
+            logical_plan,
+            parameter_types,
+            result_schema: None,
+            effective_search_path: None,
+            dependencies: PreparedAnalysisDependencies::default(),
+            dependency_snapshot: None,
+        });
+    }
     let (input, effective_search_path, dependency_snapshot) =
         with_scope_result(context.scopes, |scope| {
             let binding = scope.binding_context()?;

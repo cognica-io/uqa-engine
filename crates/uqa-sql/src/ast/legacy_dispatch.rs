@@ -340,7 +340,8 @@ impl Statement {
             | Self::DropRole(_)
             | Self::DropTrigger(_)
             | Self::DropRule(_)
-            | Self::DoBlock { .. } => false,
+            | Self::DoBlock { .. }
+            | Self::Empty => false,
         }
     }
 }

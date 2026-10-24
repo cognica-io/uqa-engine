@@ -36,6 +36,7 @@ struct Inputs {
     cached: Option<(Arc<Statement>, Arc<UnifiedPlan>)>,
     cancel_after_cache_lookup: bool,
     reject_snapshot: bool,
+    transaction_error: Option<SQLError>,
     requires_subscriptions: bool,
     transaction_clock: Cell<Option<i64>>,
     date_order: Cell<Option<uqa_core::TemporalDateOrder>>,
@@ -234,9 +235,15 @@ impl BatchTransactions for Inputs {
     fn run_transaction_statement(&self, _: TransactionStmt) -> Result<(), SQLError> {
         panic!("a rejected statement cannot commit")
     }
-    fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
-        self.record("usable");
-        Ok(())
+    fn with_active_transaction(
+        &self,
+        operation: &mut dyn FnMut() -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.record("transaction.enter");
+        if let Some(error) = &self.transaction_error {
+            return Err(error.clone());
+        }
+        operation().map_err(|error| self.abort_after_error(error))
     }
     fn prepare_explicit_statement_snapshot(&self, sets_snapshot: bool) -> Result<(), SQLError> {
         self.record(format!("snapshot.{sets_snapshot}"));
@@ -328,6 +335,39 @@ fn prepared_cancellation_aborts_before_snapshot_or_cache_access() {
     .unwrap_err();
     assert!(error.to_string().contains("canceling statement"));
     inputs.assert_events(&["abort.false"]);
+}
+
+#[test]
+fn rejected_transaction_never_starts_prepared_snapshot_or_execution() {
+    for statement in [
+        uqa_sql::Statement::Empty,
+        uqa_sql::compile("DELETE FROM items").unwrap().remove(0),
+    ] {
+        let empty = matches!(statement, uqa_sql::Statement::Empty);
+        let inputs = Inputs {
+            transaction_error: Some(SQLError::Routine {
+                sqlstate: "25P02".into(),
+                message: "current transaction is aborted".into(),
+            }),
+            ..Inputs::default()
+        };
+        inputs.depth.set(1);
+        let error = execute_prepared_statement(
+            &inputs.context(),
+            Arc::new(statement),
+            "saved",
+            None,
+            &[],
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("25P02"));
+        inputs.assert_events(if empty {
+            &["transaction.enter"]
+        } else {
+            &["guard.enter", "transaction.enter", "guard.drop"]
+        });
+    }
 }
 
 #[test]
@@ -563,7 +603,7 @@ fn cached_statement_relowers_under_the_snapshot_and_retains_guard_through_abort(
     inputs.assert_events(&[
         "cache.lookup",
         "guard.enter",
-        "usable",
+        "transaction.enter",
         "snapshot.true",
         "cache.write.true",
         "optimize.true",
@@ -629,7 +669,7 @@ fn implicit_batch_failure_aborts_then_releases_guard_before_segment_rollback() {
         "cache.lookup",
         "begin.segment",
         "guard.enter",
-        "usable",
+        "transaction.enter",
         "snapshot.true",
         "optimize.true",
         "abort.true",

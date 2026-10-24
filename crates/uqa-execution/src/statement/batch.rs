@@ -511,58 +511,34 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 }
                 continue;
             }
+            let empty_statement = matches!(
+                initial_plan.as_ref(),
+                UnifiedPlan::Command(command) if matches!(command.as_ref(), uqa_sql::plan::CommandPlan::Empty)
+            );
             let (has_row_locks, needs_row_lock_statement) = match initial_plan.as_ref() {
                 uqa_sql::plan::UnifiedPlan::Query(query) => {
                     let has_row_locks = query_has_row_locks(query);
                     (has_row_locks, has_row_locks)
                 }
-                uqa_sql::plan::UnifiedPlan::Command(_) => (false, true),
+                uqa_sql::plan::UnifiedPlan::Command(_) => (false, !empty_statement),
             };
             let _row_lock_statement =
                 needs_row_lock_statement.then(|| context.row_locks.begin_row_lock_statement());
 
             if context.transactions.transaction_depth() != 0 {
-                context.transactions.ensure_transaction_usable()?;
-                if has_row_locks {
-                    context
-                        .row_locks
-                        .statement_row_lock_cache()
-                        .map_err(|error| context.transactions.abort_after_error(error))?;
-                }
-                context
-                    .transactions
-                    .prepare_explicit_statement_snapshot(
-                        uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
-                            initial_plan.as_ref(),
-                        ),
-                    )
-                    .map_err(|error| context.transactions.abort_after_error(error))?;
-                // The statement was lowered immediately above, after any earlier
-                // BEGIN or catalog-changing statement in this batch completed.
-                let mut plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-                if cache_single_statement {
-                    context.cache.cache_sql_statement(
-                        sql.to_string(),
-                        shared_statement(),
-                        Arc::new(plan.clone()),
-                        parser.clone(),
-                    );
-                }
-                let mutating_query = match &plan {
-                    uqa_sql::plan::UnifiedPlan::Query(query) => {
-                        query_may_mutate_engine(&context.effects.query_effect_context(), query)
+                last = context::with_active_transaction(context.transactions, || {
+                    if has_row_locks {
+                        context.row_locks.statement_row_lock_cache()?;
                     }
-                    uqa_sql::plan::UnifiedPlan::Command(_) => Ok(false),
-                }
-                .map_err(|error| context.transactions.abort_after_error(error))?;
-                if mutating_query
-                    && !has_row_locks
-                    && context
-                        .transactions
-                        .prepare_explicit_transaction_writer()
-                        .map_err(|error| context.transactions.abort_after_error(error))?
-                {
-                    plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+                    if !empty_statement {
+                        context.transactions.prepare_explicit_statement_snapshot(
+                            uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
+                                initial_plan.as_ref(),
+                            ),
+                        )?;
+                    }
+                    // Earlier BEGIN or catalog changes precede this statement's admitted snapshot.
+                    let mut plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
                     if cache_single_statement {
                         context.cache.cache_sql_statement(
                             sql.to_string(),
@@ -571,30 +547,42 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                             parser.clone(),
                         );
                     }
-                }
-                let optimized = match analysis::plan(
-                    context,
-                    sql,
-                    plan,
-                    params,
-                    cache_single_statement && !nested_statement,
-                    source.prepared.is_some(),
-                ) {
-                    Ok(plan) => plan,
-                    Err(error) => {
-                        return Err(context.transactions.abort_after_error(error));
+                    let mutating_query = match &plan {
+                        uqa_sql::plan::UnifiedPlan::Query(query) => {
+                            query_may_mutate_engine(&context.effects.query_effect_context(), query)
+                        }
+                        uqa_sql::plan::UnifiedPlan::Command(_) => Ok(false),
+                    }?;
+                    if mutating_query
+                        && !has_row_locks
+                        && context.transactions.prepare_explicit_transaction_writer()?
+                    {
+                        plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+                        if cache_single_statement {
+                            context.cache.cache_sql_statement(
+                                sql.to_string(),
+                                shared_statement(),
+                                Arc::new(plan.clone()),
+                                parser.clone(),
+                            );
+                        }
                     }
-                };
-                let mut executor = UnifiedPlanExecutor::with_nested_statement(
-                    context.statements.statement_execution_context(),
-                    params,
-                    nested_statement || simple_query_batch,
-                )
-                .with_optional_source_sql(source_sql);
-                match execute_plan(&mut executor, &optimized, consumer, source.prepared) {
-                    Ok(result) => last = result,
-                    Err(error) => return Err(context.transactions.abort_after_error(error)),
-                }
+                    let optimized = analysis::plan(
+                        context,
+                        sql,
+                        plan,
+                        params,
+                        cache_single_statement && !nested_statement,
+                        source.prepared.is_some(),
+                    )?;
+                    let mut executor = UnifiedPlanExecutor::with_nested_statement(
+                        context.statements.statement_execution_context(),
+                        params,
+                        nested_statement || simple_query_batch,
+                    )
+                    .with_optional_source_sql(source_sql);
+                    execute_plan(&mut executor, &optimized, consumer, source.prepared)
+                })?;
                 if statement_index != final_statement_index {
                     consume_result(context, &last, consumer)?;
                 }
@@ -628,7 +616,8 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 uqa_sql::plan::UnifiedPlan::Command(command)
                     if matches!(
                         command.as_ref(),
-                        uqa_sql::plan::CommandPlan::Discard { .. }
+                        uqa_sql::plan::CommandPlan::Empty
+                            | uqa_sql::plan::CommandPlan::Discard { .. }
                             | uqa_sql::plan::CommandPlan::Vacuum(_)
                     )
             );

@@ -381,7 +381,8 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::DropTrigger(_)
         | CommandPlan::CreateRule(_)
         | CommandPlan::DropRule(_)
-        | CommandPlan::DoBlock { .. } => {}
+        | CommandPlan::DoBlock { .. }
+        | CommandPlan::Empty => {}
     }
 }
 

@@ -107,11 +107,27 @@ impl Engine {
         }
     }
 
-    pub(super) fn run_existing_transaction_operation<R, E: std::fmt::Display>(
+    /// Own admission and completion of an operation in the current transaction. No callback runs in a failed or unresolved frame, and admitted failures restore the original transaction or savepoint before returning.
+    pub(crate) fn run_existing_transaction_operation<R, E: std::fmt::Display>(
         &self,
         operation: impl FnOnce() -> Result<R, E>,
         map_cleanup_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
+        let _statement = self.lock_statement_gate();
+        let status = self
+            .session
+            .transactions
+            .lock()
+            .last()
+            .map(|frame| frame.status)
+            .ok_or_else(|| {
+                map_cleanup_error(SQLError::Internal(
+                    "transaction operation has no active frame".into(),
+                ))
+            })?;
+        if let Some(error) = Self::transaction_status_error(status) {
+            return Err(map_cleanup_error(error));
+        }
         self.finish_existing_transaction_operation(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)),
             map_cleanup_error,

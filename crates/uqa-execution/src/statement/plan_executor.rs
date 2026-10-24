@@ -494,6 +494,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
         self.validate_command_target(command)?;
         match command {
+            CommandPlan::Empty => Ok(SQLResult::empty()),
             CommandPlan::CreateTable(statement) => {
                 crate::schema::table_creation::entry::run_create_table(
                     self.context.schemas.creation,

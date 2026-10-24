@@ -143,7 +143,8 @@ fn select(
         generic_cost = None;
     }
     let usage = super::PreparedPlanUsage {
-        has_parameters: !entry.parameter_types.is_empty(),
+        has_parameters: !entry.parameter_types.is_empty()
+            && !matches!(logical_plan, UnifiedPlan::Command(command) if matches!(command.as_ref(), uqa_sql::plan::CommandPlan::Empty)),
         custom_plans: entry.custom_plans,
         total_custom_cost: entry.total_custom_cost,
     };

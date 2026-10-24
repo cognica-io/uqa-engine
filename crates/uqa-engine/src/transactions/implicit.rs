@@ -86,8 +86,6 @@ impl Engine {
             return query(self);
         }
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(&map_transaction_error)?;
             return self.run_existing_transaction_operation(
                 || {
                     self.runtime
@@ -153,7 +151,6 @@ impl Engine {
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()?;
             return self.run_existing_transaction_operation(
                 || {
                     self.prepare_explicit_transaction_writer()?;
@@ -184,7 +181,6 @@ impl Engine {
             });
         }
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()?;
             self.run_existing_transaction_operation(
                 || {
                     self.prepare_serializable_transaction_snapshot()?;
@@ -224,8 +220,6 @@ impl Engine {
             }));
         }
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(&map_transaction_error)?;
             return self.run_existing_transaction_operation(
                 || {
                     self.prepare_explicit_transaction_writer()
@@ -368,8 +362,6 @@ impl Engine {
     ) -> StorageBackendResult<R> {
         let _statement = self.lock_statement_gate();
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(|error| StorageBackendError::backend("storage transaction", error))?;
             return self.run_existing_transaction_operation(
                 || {
                     self.prepare_serializable_transaction_snapshot()
@@ -443,8 +435,6 @@ impl Engine {
     ) -> Result<R, String> {
         let _statement = self.lock_statement_gate();
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(|error| error.to_string())?;
             return self.run_existing_transaction_operation(
                 || {
                     self.prepare_explicit_transaction_writer()

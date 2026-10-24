@@ -72,10 +72,32 @@ pub trait BatchTransactions: StatementTransactions {
     fn begin_simple_query_transaction(&self) -> Result<(), SQLError>;
     fn promote_simple_query_transaction(&self) -> Result<(), SQLError>;
     fn run_transaction_statement(&self, statement: TransactionStmt) -> Result<(), SQLError>;
-    fn ensure_transaction_usable(&self) -> Result<(), SQLError>;
+    /// Admit and run one operation in the existing transaction. The owner rejects failed or unresolved frames before invoking the callback, invokes it exactly once on admission, and owns error and unwind cleanup.
+    fn with_active_transaction(
+        &self,
+        operation: &mut dyn FnMut() -> Result<(), SQLError>,
+    ) -> Result<(), SQLError>;
     fn prepare_explicit_statement_snapshot(&self, sets_snapshot: bool) -> Result<(), SQLError>;
     fn prepare_explicit_transaction_writer(&self) -> Result<bool, SQLError>;
     fn begin_implicit_statement_transaction(&self, read_only: bool) -> Result<(), SQLError>;
+}
+
+pub(in crate::statement) fn with_active_transaction<T>(
+    transactions: &dyn BatchTransactions,
+    operation: impl FnOnce() -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
+    let mut operation = Some(operation);
+    let mut result = None;
+    transactions.with_active_transaction(&mut || {
+        let operation = operation.take().ok_or_else(|| {
+            SQLError::Internal("transaction owner invoked its operation more than once".into())
+        })?;
+        result = Some(operation()?);
+        Ok(())
+    })?;
+    result.ok_or_else(|| {
+        SQLError::Internal("transaction owner did not invoke its admitted operation".into())
+    })
 }
 
 /// Retain the session's row-lock frame until the current loop iteration exits.

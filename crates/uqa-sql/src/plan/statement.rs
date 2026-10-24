@@ -31,6 +31,7 @@ impl UnifiedPlan {
     )]
     pub fn lower_with(statement: Statement, aggregates: &dyn AggregateClassifier) -> Self {
         match statement {
+            Statement::Empty => Self::Command(Box::new(CommandPlan::Empty)),
             Statement::Select(query) => {
                 Self::Query(Box::new(QueryPlan::lower_with(*query, aggregates)))
             }
@@ -635,6 +636,7 @@ impl CommandPlan {
             Self::DropRule(_) => "DropRule",
             Self::DoBlock { .. } => "DoBlock",
             Self::Call { .. } => "Call",
+            Self::Empty => "Empty",
         }
     }
 }

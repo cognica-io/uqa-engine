@@ -63,32 +63,44 @@ pub fn register_plan(
     )
 }
 
-/// Parse and analyze a host's single prepared definition under the session's parser settings. Source text is retained for catalog inspection, without marking the definition as SQL PREPARE.
-pub fn register_host_sql(
-    context: &PreparedRegistrationContext<'_>,
-    name: String,
+/// Parse a prepared message before selecting its analysis snapshot. Empty input remains an explicit native definition.
+pub fn parse_host_sql(
     sql: &str,
-    declared: &[ColumnType],
     settings: uqa_sql::parser::ParserSettings,
     notices: &crate::query::NoticeQueue,
+    cancellation: &uqa_core::CancellationToken,
 ) -> Result<Arc<Statement>, SQLError> {
-    context.cancellation.check()?;
+    cancellation.check()?;
     let (statements, parser) =
         uqa_sql::parser::with_settings(settings, || uqa_sql::parse_statements(sql));
     for notice in parser.notices.iter() {
         notices.push(notice.clone());
     }
     let mut statements = statements?;
-    if statements.len() != 1 {
+    if statements.len() > 1 {
         return Err(SQLError::Routine {
             sqlstate: "42601".into(),
-            message: "a prepared definition must contain one statement".into(),
+            message: "cannot insert multiple commands into a prepared statement".into(),
         });
     }
-    let statement = statements.pop().expect("one statement").compile()?;
-    let plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-    register_definition(context, name, plan, declared, Some(sql), false)?;
+    let statement = statements
+        .pop()
+        .map(|statement| statement.compile())
+        .transpose()?
+        .unwrap_or(Statement::Empty);
     Ok(Arc::new(statement))
+}
+
+/// Analyze the parsed host definition in its admitted session boundary. Retain source text without marking it as SQL PREPARE.
+pub fn register_host_statement(
+    context: &PreparedRegistrationContext<'_>,
+    name: String,
+    statement: &Statement,
+    sql: &str,
+    declared: &[ColumnType],
+) -> Result<(), SQLError> {
+    let plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+    register_definition(context, name, plan, declared, Some(sql), false)
 }
 
 fn register_definition(

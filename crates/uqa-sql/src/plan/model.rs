@@ -752,6 +752,8 @@ pub enum CommandPlan {
         name: String,
         args: Vec<ExpressionPlan>,
     },
+    /// An empty prepared input, with neither rows nor a command completion tag.
+    Empty,
 }
 
 /// Classification hook for engine-registered aggregate functions. Built-in

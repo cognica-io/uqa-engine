@@ -40,7 +40,7 @@ impl Engine {
         sql: &str,
         declared: &[ColumnType],
     ) -> Result<PreparedStatement, SQLError> {
-        self.with_direct_read_snapshot(|engine| {
+        self.with_prepared_registration(sql, |engine, source| {
             let name = loop {
                 let identity = engine
                     .session
@@ -59,13 +59,12 @@ impl Engine {
                     break name;
                 }
             };
-            let source = uqa_execution::statement::prepared::register_host_sql(
+            uqa_execution::statement::prepared::register_host_statement(
                 &engine.prepared_registration_context(),
                 name.clone(),
+                &source,
                 sql,
                 declared,
-                engine.parser_settings(),
-                &engine.runtime.notices,
             )?;
             let registry = engine.session.prepared.read();
             let entry = registry.get(&name).expect("published prepared definition");
