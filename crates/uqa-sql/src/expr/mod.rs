@@ -58,7 +58,7 @@ use time::{
 };
 pub(crate) use uuid::format_uuid;
 use uuid::generate_random_uuid;
-pub use uuid::parse_uuid_bytes;
+pub use uuid::{format_uuid_with_control, parse_uuid_bytes, parse_uuid_bytes_with_control};
 mod binary;
 mod casting;
 pub use casting::numeric::NumericCast;

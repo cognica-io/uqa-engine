@@ -17,6 +17,7 @@ use crate::ast::ColumnType;
 mod input;
 pub use input::create_typed_parameter_with_control;
 mod binding;
+mod packed;
 pub use binding::{
     bind_declared_parameter_types, bind_parameter_type_with_control, bind_parameter_types,
 };

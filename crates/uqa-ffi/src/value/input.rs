@@ -6,7 +6,7 @@
 
 //! Catalog-aware value creation reserves its public owner before SQL input can execute.
 
-use super::{boundary, UQAValue, ValueSource};
+use super::{boundary, UQAError, UQAValue, ValueSource};
 use crate::{abi::UQA_OK, session::UQAEngine};
 use std::{ffi::c_char, sync::Arc};
 use uqa_core::Value;
@@ -40,6 +40,7 @@ ffi_fn!(uqa_value_create_typed_null(engine: *mut UQAEngine, type_name: *const c_
 });
 ffi_fn!(uqa_value_create_typed_null_n(engine: *mut UQAEngine, type_name: *const c_char, type_name_size: usize, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
+    if type_name.is_null() { return Err(UQAError::invalid("type name must not be NULL")); }
     create(engine, boundary::text_n(type_name, type_name_size)?, None, out)
 });
 ffi_fn!(uqa_value_create_from_text(engine: *mut UQAEngine, type_name: *const c_char, text: *const c_char, out: *mut *mut UQAValue) {
@@ -48,5 +49,6 @@ ffi_fn!(uqa_value_create_from_text(engine: *mut UQAEngine, type_name: *const c_c
 });
 ffi_fn!(uqa_value_create_from_text_n(engine: *mut UQAEngine, type_name: *const c_char, type_name_size: usize, text: *const c_char, text_size: usize, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
+    if type_name.is_null() || text.is_null() { return Err(UQAError::invalid("type name and input text must not be NULL")); }
     create(engine, boundary::text_n(type_name, type_name_size)?, Some(boundary::text_n(text, text_size)?), out)
 });

@@ -152,7 +152,11 @@ pub fn parse_uuid_bytes(text: &str) -> Result<[u8; 16]> {
     parse_uuid_bytes_with_control(text, &ProductionControl::uncontrolled())
 }
 
-fn parse_uuid_bytes_with_control(text: &str, control: &ProductionControl<'_>) -> Result<[u8; 16]> {
+/// Parse `PostgreSQL` UUID input under the invoking cancellation scope without allocating a payload.
+pub fn parse_uuid_bytes_with_control(
+    text: &str,
+    control: &ProductionControl<'_>,
+) -> Result<[u8; 16]> {
     control.check()?;
     let digits = text
         .strip_prefix('{')
@@ -278,7 +282,8 @@ pub(crate) fn format_uuid(bytes: [u8; 16]) -> String {
         .expect("ordinary UUID text")
 }
 
-pub(super) fn format_uuid_with_control(
+/// Format network-order UUID octets as canonical text under the original production allowance.
+pub fn format_uuid_with_control(
     bytes: [u8; 16],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {

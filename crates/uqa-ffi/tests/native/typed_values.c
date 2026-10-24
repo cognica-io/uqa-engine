@@ -65,6 +65,22 @@ static void builtins(uqa_engine engine, uqa_result result, uqa_buffer buffer) {
     uqa_type_kind kind = UQA_TYPE_UNKNOWN;
     uint8_t is_null = 0;
     int16_t number = 1;
+    {
+        uint32_t state = UQA_TRANSACTION_IDLE;
+        CHECK(uqa_transaction_begin(engine));
+        assert(uqa_value_create_typed_null_n(engine, NULL, 0, &value) == UQA_ERROR_INVALID_ARGUMENT && value == NULL);
+        assert(uqa_value_create_from_text_n(engine, NULL, 0, "", 0, &value) == UQA_ERROR_INVALID_ARGUMENT && value == NULL);
+        assert(uqa_value_create_from_text_n(engine, "text", 4, NULL, 0, &value) == UQA_ERROR_INVALID_ARGUMENT && value == NULL);
+        assert(uqa_value_create_from_text(engine, "text", NULL, &value) == UQA_ERROR_INVALID_ARGUMENT && value == NULL);
+        CHECK(uqa_transaction_get_state(engine, &state));
+        assert(state == UQA_TRANSACTION_ACTIVE);
+        CHECK(uqa_value_create_from_text_n(engine, "text", 4, "", 0, &value));
+        CHECK(uqa_value_get_is_null(value, &is_null));
+        assert(is_null == 0);
+        formatted(value, buffer, "");
+        CHECK(uqa_value_destroy(&value));
+        CHECK(uqa_transaction_rollback(engine));
+    }
     CHECK(uqa_value_create_typed_null(engine, "smallint", &value));
     CHECK(uqa_value_get_is_null(value, &is_null));
     assert(is_null == 1);

@@ -1,0 +1,526 @@
+{
+  "provenance": {
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "protocol": "libpq PQexecParams, explicit UUID/BIT/VARBIT OIDs, network-order binary parameters and selected UUID text inputs; text results",
+    "consumer": "SQL parameter owner tests and the C/C++ packed_values.c fixture"
+  },
+  "cases": [
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "00000000000000000000000000000000",
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "00000000-0000-0000-0000-000000000000",
+          "uuid"
+        ]
+      ]
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "ffffffffffffffffffffffffffffffff",
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "ffffffff-ffff-ffff-ffff-ffffffffffff",
+          "uuid"
+        ]
+      ]
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "000102030405060708090a0b0c0d0e0f",
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "00010203-0405-0607-0809-0a0b0c0d0e0f",
+          "uuid"
+        ]
+      ]
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "550e8400e29b41d4a716446655440000",
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "550e8400-e29b-41d4-a716-446655440000",
+          "uuid"
+        ]
+      ]
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "text": "{550E8400-E29B-41D4-A716-446655440000}",
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "550e8400-e29b-41d4-a716-446655440000",
+          "uuid"
+        ]
+      ]
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "text": "550e8400e29b41d4a716446655440000",
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "550e8400-e29b-41d4-a716-446655440000",
+          "uuid"
+        ]
+      ]
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "text": "550e-8400-e29b-41d4-a716-4466-5544-0000",
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "550e8400-e29b-41d4-a716-446655440000",
+          "uuid"
+        ]
+      ]
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "text": " 550e8400-e29b-41d4-a716-446655440000",
+      "sqlstate": "22P02",
+      "message": "invalid input syntax for type uuid: \" 550e8400-e29b-41d4-a716-446655440000\"",
+      "column_oids": [],
+      "rows": []
+    },
+    {
+      "kind": "uuid",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "text": "not-a-uuid",
+      "sqlstate": "22P02",
+      "message": "invalid input syntax for type uuid: \"not-a-uuid\"",
+      "column_oids": [],
+      "rows": []
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "",
+      "bit_length": 0,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "ff",
+      "bit_length": 1,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "1",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "a7",
+      "bit_length": 3,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "101",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "81",
+      "bit_length": 7,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "1000000",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "81",
+      "bit_length": 8,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "10000001",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "00ff",
+      "bit_length": 9,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "000000001",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "1235",
+      "bit_length": 15,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "000100100011010",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "1235",
+      "bit_length": 16,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "0001001000110101",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "1234ff",
+      "bit_length": 17,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "00010010001101001",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "000180ff",
+      "bit_length": 32,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "00000000000000011000000011111111",
+          "bit"
+        ]
+      ]
+    },
+    {
+      "kind": "bit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "",
+      "bit_length": 4294967295,
+      "sqlstate": "22P03",
+      "message": "invalid length in external bit string",
+      "column_oids": [],
+      "rows": []
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "",
+      "bit_length": 0,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "ff",
+      "bit_length": 1,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "1",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "a7",
+      "bit_length": 3,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "101",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "81",
+      "bit_length": 7,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "1000000",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "81",
+      "bit_length": 8,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "10000001",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "00ff",
+      "bit_length": 9,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "000000001",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "1235",
+      "bit_length": 15,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "000100100011010",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "1235",
+      "bit_length": 16,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "0001001000110101",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "1234ff",
+      "bit_length": 17,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "00010010001101001",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "000180ff",
+      "bit_length": 32,
+      "sqlstate": "",
+      "message": "",
+      "column_oids": [
+        25,
+        25
+      ],
+      "rows": [
+        [
+          "00000000000000011000000011111111",
+          "bit varying"
+        ]
+      ]
+    },
+    {
+      "kind": "varbit",
+      "sql": "SELECT $1::text, pg_typeof($1)::text",
+      "input_hex": "",
+      "bit_length": 4294967295,
+      "sqlstate": "22P03",
+      "message": "invalid length in external bit string",
+      "column_oids": [],
+      "rows": []
+    }
+  ]
+}

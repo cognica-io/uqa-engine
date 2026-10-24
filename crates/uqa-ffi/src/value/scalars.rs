@@ -57,6 +57,11 @@ text_constructor!(
     uqa_value_create_jsonb_n,
     ColumnType::JsonB
 );
+text_constructor!(
+    uqa_value_create_uuid,
+    uqa_value_create_uuid_n,
+    ColumnType::Uuid
+);
 
 macro_rules! integer_getter {
     ($name:ident, $ty:ty, $access:ident) => {
@@ -112,7 +117,7 @@ ffi_fn!(uqa_value_get_numeric(value: *const UQAValue, out: *mut UQAStringView) {
     let Value::Decimal(number) = observed else { return Err(wrong_type(observed)); };
     if value.numeric_text.get().is_none() {
         let text = number.to_sql_string_with_control(&value.control())?;
-        value.numeric_text.set(text).map_err(|_| UQAError::state("numeric value was already formatted"))?;
+        let _ = value.numeric_text.set(text);
     }
     *out = value.numeric_text.get().ok_or_else(|| UQAError::state("numeric formatter returned no text"))?.as_str().into();
     Ok(UQA_OK)

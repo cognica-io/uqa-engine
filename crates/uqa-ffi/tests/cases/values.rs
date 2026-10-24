@@ -18,6 +18,76 @@ use uqa_ffi::{
 };
 
 #[test]
+fn concurrent_owned_observers_publish_one_immutable_numeric_and_uuid_view() {
+    use std::sync::{Arc, Barrier};
+    use uqa_ffi::{
+        uqa_value_create_numeric, uqa_value_create_uuid, uqa_value_get_uuid_bytes, UQABytesView,
+    };
+    let mut numeric = ptr::null_mut();
+    let mut uuid = ptr::null_mut();
+    let input = std::ffi::CString::new(format!("1{}", "0".repeat(4096))).unwrap();
+    unsafe {
+        assert_eq!(
+            uqa_value_create_numeric(input.as_ptr(), &raw mut numeric),
+            UQA_OK
+        );
+        assert_eq!(
+            uqa_value_create_uuid(
+                c"00010203-0405-0607-0809-0a0b0c0d0e0f".as_ptr(),
+                &raw mut uuid
+            ),
+            UQA_OK
+        );
+    }
+    let addresses = (numeric as usize, uuid as usize);
+    let barrier = Arc::new(Barrier::new(4));
+    let workers: Vec<_> = (0..4)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                let mut first = None;
+                for _ in 0..32 {
+                    let mut text = UQAStringView::default();
+                    let mut bytes = UQABytesView::default();
+                    unsafe {
+                        assert_eq!(
+                            uqa_value_get_numeric(addresses.0 as *const _, &raw mut text),
+                            UQA_OK
+                        );
+                        assert_eq!(
+                            uqa_value_get_uuid_bytes(addresses.1 as *const _, &raw mut bytes),
+                            UQA_OK
+                        );
+                        assert_eq!(text.size, 4097);
+                        let digits = std::slice::from_raw_parts(text.data.cast::<u8>(), text.size);
+                        assert_eq!(digits[0], b'1');
+                        assert!(digits[1..].iter().all(|digit| *digit == b'0'));
+                        assert_eq!(bytes.size, 16);
+                        assert_eq!(
+                            std::slice::from_raw_parts(bytes.data, bytes.size),
+                            &(0_u8..16).collect::<Vec<_>>()
+                        );
+                    }
+                    let views = (text.data as usize, bytes.data as usize);
+                    assert_eq!(*first.get_or_insert(views), views);
+                }
+                first.unwrap()
+            })
+        })
+        .collect();
+    let views: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert!(views.windows(2).all(|pair| pair[0] == pair[1]));
+    unsafe {
+        assert_eq!(uqa_value_destroy(&raw mut numeric), UQA_OK);
+        assert_eq!(uqa_value_destroy(&raw mut uuid), UQA_OK);
+    }
+}
+
+#[test]
 fn contextual_handle_allocation_precedes_domain_input_and_transaction_effects() {
     use uqa_ffi::{
         uqa_transaction_begin, uqa_transaction_get_state, uqa_transaction_rollback,

@@ -6,9 +6,8 @@
 
 //! Immutable C values borrow native carriers or own admitted parameter copies.
 
-use std::cell::OnceCell;
 use std::ffi::c_char;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use uqa_core::{
     memory::{MemoryReservation, Produced, ProductionControl, ProductionVec},
     Value,
@@ -30,6 +29,8 @@ mod scalars;
 pub use scalars::*;
 mod input;
 pub use input::*;
+mod packed;
+pub use packed::*;
 
 enum ValueSource {
     Owned(Produced<SQLParam>),
@@ -42,8 +43,9 @@ enum ValueSource {
 
 pub struct UQAValue {
     source: ValueSource,
-    decoded: OnceCell<Produced<Value>>,
-    numeric_text: OnceCell<Produced<String>>,
+    decoded: OnceLock<Produced<Value>>,
+    numeric_text: OnceLock<Produced<String>>,
+    uuid_bytes: OnceLock<[u8; 16]>,
     parameter_type: Option<ColumnType>,
     pub(crate) session: Option<Arc<Session>>,
     _memory: Option<MemoryReservation>,
@@ -61,8 +63,9 @@ impl UQAValue {
                 value,
                 ty: ty.map(std::ptr::from_ref),
             },
-            decoded: OnceCell::new(),
-            numeric_text: OnceCell::new(),
+            decoded: OnceLock::new(),
+            numeric_text: OnceLock::new(),
+            uuid_bytes: OnceLock::new(),
             parameter_type: None,
             session: Some(Arc::clone(session)),
             _memory: Some(memory),
@@ -87,8 +90,9 @@ impl UQAValue {
             .transpose()?;
         boundary::boxed(Self {
             source: ValueSource::Owned(value),
-            decoded: OnceCell::new(),
-            numeric_text: OnceCell::new(),
+            decoded: OnceLock::new(),
+            numeric_text: OnceLock::new(),
+            uuid_bytes: OnceLock::new(),
             parameter_type,
             session,
             _memory: memory,
@@ -149,10 +153,8 @@ impl UQAValue {
                 .map(|session| &session.native as &dyn uqa_sql::expr::EngineHook),
             &self.control(),
         )?;
-        // Calls observing one value are serialized by the C lifetime contract and session admission.
-        self.decoded
-            .set(decoded)
-            .map_err(|_| UQAError::state("value was already decoded"))?;
+        // A concurrent immutable reader may publish first; the losing candidate releases its reservation.
+        let _ = self.decoded.set(decoded);
         self.decoded
             .get()
             .map(|value| &**value)
@@ -204,6 +206,9 @@ impl UQAValue {
                     | ColumnType::Xml
             ),
             ScalarAccess::Bytes => matches!(ty, ColumnType::Bytea),
+            ScalarAccess::Uuid => matches!(ty, ColumnType::Uuid),
+            ScalarAccess::Bit => matches!(ty, ColumnType::Bit(_)),
+            ScalarAccess::VarBit => matches!(ty, ColumnType::VarBit(_)),
         };
         if accepted {
             Ok(())
@@ -386,6 +391,9 @@ enum ScalarAccess {
     JsonB,
     Text,
     Bytes,
+    Uuid,
+    Bit,
+    VarBit,
 }
 
 macro_rules! scalar_getter {

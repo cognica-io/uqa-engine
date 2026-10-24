@@ -49,6 +49,12 @@ typedef struct uqa_bytes_view {
     size_t size;
 } uqa_bytes_view;
 
+typedef struct uqa_bits_view {
+    const uint8_t *data;
+    size_t size;
+    uint32_t bit_length;
+} uqa_bits_view;
+
 #define UQA_OK                       INT32_C(0)
 #define UQA_DONE                     INT32_C(1)
 #define UQA_TIMEOUT                  INT32_C(2)
@@ -322,7 +328,9 @@ UQA_API uqa_status UQA_CALL uqa_type_get_element_type(uqa_type type, uqa_type *o
 UQA_API uqa_status UQA_CALL uqa_value_create_null(uqa_value *out);
 /* Catalog-aware constructors execute native type input in the Engine's
  * statement/transaction scope and retain the session until value destruction.
- * Type names include native SQL modifiers; NULL input still checks domains. */
+ * Type names include native SQL modifiers; NULL input still checks domains.
+ * Required string pointers remain non-NULL in the _n forms, including an
+ * empty text input. Use create_typed_null for SQL NULL. */
 UQA_API uqa_status UQA_CALL uqa_value_create_typed_null(
     uqa_engine engine, const char *type_name, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_typed_null_n(
@@ -356,6 +364,21 @@ UQA_API uqa_status UQA_CALL uqa_value_create_jsonb(
     const char *value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_jsonb_n(
     const char *value, size_t size, uqa_value *out);
+/* UUID text uses native input rules; byte input contains exactly sixteen
+ * network-order octets, with no UUID version or variant restriction. */
+UQA_API uqa_status UQA_CALL uqa_value_create_uuid(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_uuid_n(
+    const char *value, size_t size, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_uuid_bytes(
+    const uint8_t *data, size_t size, uqa_value *out);
+/* Packed bytes are MSB-first; size must equal ceil(bit_length / 8).
+ * Unused low bits are discarded. Empty input permits NULL with size zero.
+ * The type has no length modifier; logical length belongs to the value. */
+UQA_API uqa_status UQA_CALL uqa_value_create_bit(
+    const uint8_t *data, size_t size, uint32_t bit_length, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_varbit(
+    const uint8_t *data, size_t size, uint32_t bit_length, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_vector_f32(
     const float *data, size_t dimensions,
     uqa_value *out);
@@ -383,6 +406,15 @@ UQA_API uqa_status UQA_CALL uqa_value_get_numeric(uqa_value_view value, uqa_stri
 UQA_API uqa_status UQA_CALL uqa_value_get_numeric_scale(uqa_value_view value, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_json(uqa_value_view value, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_jsonb(uqa_value_view value, uqa_string_view *out);
+/* Independently constructed immutable values permit concurrent readers;
+ * synchronize destruction against every use. Session-backed values retain
+ * session admission and can return UQA_ERROR_BUSY during another operation.
+ * These views borrow the value's lifetime. UUID octets are in
+ * network order; UUID text is canonical. BIT and VARBIT accessors are distinct. */
+UQA_API uqa_status UQA_CALL uqa_value_get_uuid_bytes(uqa_value_view value, uqa_bytes_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_uuid(uqa_value_view value, uqa_string_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_bit(uqa_value_view value, uqa_bits_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_varbit(uqa_value_view value, uqa_bits_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_bytes(uqa_value_view value, uqa_bytes_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_text(
     uqa_value_view value, uqa_string_view *out);

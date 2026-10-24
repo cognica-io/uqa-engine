@@ -176,3 +176,21 @@ impl Default for UQABytesView {
         }
     }
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct UQABitsView {
+    pub data: *const u8,
+    pub size: usize,
+    pub bit_length: u32,
+}
+
+impl Default for UQABitsView {
+    fn default() -> Self {
+        Self {
+            data: std::ptr::null(),
+            size: 0,
+            bit_length: 0,
+        }
+    }
+}
