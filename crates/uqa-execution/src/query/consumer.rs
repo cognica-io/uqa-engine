@@ -24,6 +24,11 @@ pub trait QueryRowConsumer {
         Ok(QueryConsumerControl::Continue)
     }
 
+    /// Requested output rows before this consumer receives control. The default retains row-level demand for stop and error boundaries. A consumer that accepts complete input may return `None` to retain the producer's ordinary bounded batches.
+    fn input_demand(&self) -> Option<std::num::NonZeroUsize> {
+        Some(crate::physical::demand::ONE)
+    }
+
     /// Whether UNION ALL may deliver directly from each child instead of its ordinary set operator.
     fn streams_set_inputs(&self) -> bool {
         true

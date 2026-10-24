@@ -18901,8 +18901,21 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
       "capability": "Incremental public SQL materialization",
-      "workload": "16,384 shared physical rows arrive in 128-row batches at the public SQL result boundary.",
-      "invariant": "Each completed batch releases all physical input references before the next pull; every Unicode value and row remains in the public result.",
+      "workload": "16,384 shared physical rows arrive through a demand-aware producer with native 128-row batches at the public SQL result boundary.",
+      "invariant": "Complete collection uses exactly 129 producer calls, including exhaustion, and releases each physical batch before the next pull; every Unicode value and row remains in the public result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "row_sensitive_consumers_keep_singleton_production_and_first_error",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
+      "capability": "Query consumer evaluation demand",
+      "workload": "A demand-aware 128-row producer feeds consumers that stop or raise 57014 after three rows, before an unreached 22012 source failure.",
+      "invariant": "Only three rows are produced in three pulls; the first consumer result is preserved, the source closes once and all physical owners are released.",
       "case_names": [
         ""
       ]

@@ -124,6 +124,13 @@ fn public_result_collection_releases_physical_batches_before_reading_the_next() 
 }
 
 fn collect_source(source: Source) -> Result<uqa_sql::SQLResult, uqa_sql::SQLError> {
+    super::collect::<()>(|mode| collect_input(source, bind_output_mode(None, mode, None)?))
+}
+
+fn collect_input(
+    source: Source,
+    mode: crate::query::consumer::QueryOutputMode<'_>,
+) -> Result<crate::query::output::QueryOutput, uqa_sql::SQLError> {
     let runtime = QueryRuntimeView {
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         cancellation: &uqa_core::CancellationToken::new(),
@@ -133,14 +140,65 @@ fn collect_source(source: Source) -> Result<uqa_sql::SQLResult, uqa_sql::SQLErro
         aggregate_functions: &RwLock::default(),
         notices: &crate::query::NoticeQueue::default(),
     };
-    super::collect::<()>(|mode| {
-        collect_query_operator(
-            runtime,
-            vec!["value".into()],
-            Box::new(source),
-            bind_output_mode(None, mode, None)?,
-        )
-    })
+    collect_query_operator(runtime, vec!["value".into()], Box::new(source), mode)
+}
+
+#[test]
+fn row_sensitive_consumers_keep_singleton_production_and_first_error() {
+    use crate::query::consumer::{QueryConsumerControl, QueryOutputMode, QueryRowConsumer};
+    use crate::OwnedPhysicalRow;
+    use std::{cell::Cell, rc::Rc};
+    use uqa_sql::SQLError;
+
+    struct Consumer {
+        remaining: Cell<usize>,
+        fail: bool,
+    }
+    impl QueryRowConsumer for Consumer {
+        fn begin(&self, _: &[String], _: &RowSchema) -> Result<(), SQLError> {
+            Ok(())
+        }
+
+        fn consume(&self, row: OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {
+            assert_eq!(row.get("value"), Some(&Value::Str("日本λ".into())));
+            let remaining = self.remaining.get() - 1;
+            self.remaining.set(remaining);
+            if remaining != 0 {
+                return Ok(QueryConsumerControl::Continue);
+            }
+            if self.fail {
+                return Err(SQLError::Routine {
+                    sqlstate: "57014".into(),
+                    message: "cancelled by consumer".into(),
+                });
+            }
+            Ok(QueryConsumerControl::Stop)
+        }
+    }
+
+    for fail in [false, true] {
+        let mut source = Source::new(128);
+        source.fail_after = Some(3);
+        let produced = Arc::clone(&source.emitted);
+        let pulls = Arc::clone(&source.pulls);
+        let closes = Arc::clone(&source.closes);
+        let values = Arc::downgrade(&source.values);
+        let consumer = Rc::new(Consumer {
+            remaining: Cell::new(3),
+            fail,
+        });
+        match collect_input(source, QueryOutputMode::RowConsumer(consumer)) {
+            Ok(_) => assert!(!fail),
+            Err(error) => {
+                assert!(fail);
+                assert_eq!(error.sqlstate(), Some("57014"));
+            }
+        }
+        assert_eq!(produced.load(Ordering::Relaxed), 3);
+        assert_eq!(pulls.load(Ordering::Relaxed), 3);
+        assert_eq!(closes.load(Ordering::Relaxed), 1);
+        assert!(values.upgrade().is_none());
+    }
 }
 
 #[test]
