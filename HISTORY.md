@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Move only selected physical values into named SQL results. Avoid copying discarded fragmented payloads, release row-local aliases before donation, and copy repeated selected values only when their public output requires it.
+
 - Preserve native producer batches for complete SQL results when both the consumer and producer preserve evaluation order, avoiding one pipeline pull and batch allocation per row on eligible paths. Computed projections, early-stop, cardinality and directional consumers retain their original evaluation, side-effect and error boundaries.
 
 - Update ctutils to restore constant-time cryptographic operations, Tokio to fix AsyncFd I/O safety, and clipboard-win to the maintained non-yanked patch release. Existing dependency audit and licensing policies remain enforced.
