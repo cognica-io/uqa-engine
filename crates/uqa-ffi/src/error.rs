@@ -20,7 +20,7 @@ use crate::abi::{
     UQA_ERROR_SQL, UQA_ERROR_STATE, UQA_OK,
 };
 use crate::boundary::{self, Result};
-use uqa_core::memory::{Budgeted, MemoryBudget};
+use uqa_core::memory::{Budgeted, MemoryBudget, MemoryReservation};
 use uqa_sql::SQLError;
 
 #[derive(Debug)]
@@ -33,6 +33,8 @@ pub struct UQAError {
     position: Option<u64>,
     pub(crate) completion: u32,
     pub(crate) statement_index: Option<u64>,
+    cause: Option<RetainedError>,
+    memory: Option<MemoryReservation>,
 }
 
 impl UQAError {
@@ -46,6 +48,8 @@ impl UQAError {
             position: None,
             completion: UQA_COMPLETION_NONE,
             statement_index: None,
+            cause: None,
+            memory: None,
         }
     }
 
@@ -55,6 +59,28 @@ impl UQAError {
 
     pub(crate) fn state(message: &'static str) -> Self {
         Self::new(UQA_ERROR_STATE, message)
+    }
+
+    pub(crate) fn callback(status: UQAStatus, message: &str, memory: &MemoryBudget) -> Self {
+        let mut error = Self::new(status, "callback failed; diagnostic allocation failed");
+        if let Ok(reservation) = memory.reserve(message.len()) {
+            if let Ok(message) = boundary::copy_text(message) {
+                error.message = Cow::Owned(message);
+                error.memory = Some(reservation);
+            }
+        }
+        error
+    }
+
+    pub(crate) fn with_cause(mut self, cause: &RetainedError) -> Self {
+        if cause.get().is_some() {
+            self.cause = Some(Arc::clone(cause));
+        }
+        self
+    }
+
+    pub(crate) fn message(&self) -> &str {
+        &self.message
     }
 
     pub(crate) fn display(status: UQAStatus, source: &impl std::fmt::Display) -> Self {
@@ -192,12 +218,14 @@ fn inspect(
             let Ok(slot) = slot.try_borrow() else {
                 return UQA_ERROR_BUSY;
             };
-            match slot.as_ref().and_then(CurrentError::get) {
-                Some(error) if std::ptr::eq(error, pointer) => {
-                    read(error).unwrap_or_else(|error| error.status)
+            let mut current = slot.as_ref().and_then(CurrentError::get);
+            while let Some(error) = current {
+                if std::ptr::eq(error, pointer) {
+                    return read(error).unwrap_or_else(|error| error.status);
                 }
-                _ => UQA_ERROR_INVALID_ARGUMENT,
+                current = error.cause.as_ref().and_then(|cause| cause.get());
             }
+            UQA_ERROR_INVALID_ARGUMENT
         })
         .unwrap_or(UQA_ERROR_STATE)
 }
@@ -248,6 +276,11 @@ macro_rules! diagnostic_getter {
 diagnostic_getter!(uqa_error_get_status, UQAStatus, |e: &UQAError| Some(
     e.status
 ));
+diagnostic_getter!(uqa_error_get_cause, *const UQAError, |e: &UQAError| e
+    .cause
+    .as_ref()
+    .and_then(|cause| cause.get())
+    .map(std::ptr::from_ref));
 diagnostic_getter!(uqa_error_get_message, UQAStringView, |e: &UQAError| Some(
     e.message.as_ref().into()
 ));

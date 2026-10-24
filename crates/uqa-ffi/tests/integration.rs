@@ -9,6 +9,9 @@
 #[path = "cases/config.rs"]
 mod config;
 
+#[path = "cases/copy.rs"]
+mod copy;
+
 #[path = "cases/cursors.rs"]
 mod cursors;
 

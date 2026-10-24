@@ -161,6 +161,7 @@ UQA_API uqa_status UQA_CALL uqa_engine_close(uqa_engine *engine);
 
 UQA_API uqa_status UQA_CALL uqa_error_get_last(uqa_error *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_status(uqa_error error, uqa_status *out);
+UQA_API uqa_status UQA_CALL uqa_error_get_cause(uqa_error error, uqa_error *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_sqlstate(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_message(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_detail(uqa_error error, uqa_string_view *out);
@@ -392,6 +393,14 @@ UQA_API uqa_status UQA_CALL uqa_engine_copy_from(
     uint64_t *rows);
 UQA_API uqa_status UQA_CALL uqa_engine_copy_to(
     uqa_engine engine, const char *statement,
+    uqa_copy_write_fn write, uqa_copy_flush_fn flush, void *user_data,
+    uint64_t *rows);
+UQA_API uqa_status UQA_CALL uqa_engine_copy_from_n(
+    uqa_engine engine, const char *statement, size_t statement_size,
+    uqa_copy_read_fn read, void *user_data,
+    uint64_t *rows);
+UQA_API uqa_status UQA_CALL uqa_engine_copy_to_n(
+    uqa_engine engine, const char *statement, size_t statement_size,
     uqa_copy_write_fn write, uqa_copy_flush_fn flush, void *user_data,
     uint64_t *rows);
 

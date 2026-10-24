@@ -287,6 +287,7 @@ Do not duplicate entire results merely to stabilize string addresses. Borrow nat
 ```c
 UQA_API uqa_status UQA_CALL uqa_error_get_last(uqa_error *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_status(uqa_error error, uqa_status *out);
+UQA_API uqa_status UQA_CALL uqa_error_get_cause(uqa_error error, uqa_error *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_sqlstate(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_message(uqa_error error, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_error_get_detail(uqa_error error, uqa_string_view *out);
@@ -308,6 +309,8 @@ Each non-diagnostic UQA call replaces the thread's diagnostic state. Successful 
 Native SQL failures return `UQA_ERROR_SQL` with the original SQLSTATE, detail, hint, position, and routine context. Classify through `SQLError::primary()`; preserve the separate context chain. Do not manufacture SQLSTATEs for C pointer, type-accessor, or handle-state mistakes. Missing optional string fields return `UQA_DONE` with an empty view; missing index/position likewise returns `UQA_DONE`. A present empty string returns `UQA_OK`. Statement indices are zero-based and SQL positions are one-based character positions. Do not infer locations from display messages.
 
 The final diagnostic is published after the operation's cleanup completes. Internally retain its primary cause and any cleanup context; nested callback helpers must not overwrite that pending failure. Callback failure records are scoped to the invocation and captured by the trampoline before cleanup. Worker-thread failures travel with native results and are published on the calling thread when the synchronous operation returns; never inspect another thread's diagnostic slot.
+
+`uqa_error_get_cause` borrows an optional retained cause, or returns `UQA_DONE` with NULL output. The same diagnostic getters inspect that cause, with the same lifetime as its enclosing diagnostic and no release operation. COPY stream failures retain the native `58030` diagnostic and expose the callback's original status and copied message through this cause; native cancellation remains `57014` without a manufactured callback failure.
 
 Distinguish SQL resource failures such as `53200` from FFI allocation failure. The latter returns `UQA_ERROR_OUT_OF_MEMORY`. A fixed fallback diagnostic retains status, available SQLSTATE/completion information, and a static message if richer diagnostic allocation fails. Preserve the original operation's status when only diagnostic formatting fails. Not every process allocator failure is recoverable.
 
@@ -625,6 +628,8 @@ Cancellation is cooperative and is not automatically reset at query start. Reset
 
 A thread-local callback guard rejects reentry into Engine/session operations while executing a C UDF, COPY, or logging callback on that thread. Permit value construction, observation and release, the callback's documented argument/result and diagnostic helpers, and cancellation signaling. Check this before acquiring native locks. Helpers operate inside the invoking native scope rather than reacquiring its session gate. Callback declarations about mutation do not authorize recursive Engine calls.
 
+Session-backed value helpers can use the invoking session's values while its callback is active. Values from a different session return `UQA_ERROR_BUSY` before acquiring that session's gate. Independent calls on another thread retain ordinary session admission; the callback guard does not serialize unrelated Engines across threads.
+
 No background async runtime is created by ordinary C SQL calls. Applications can execute synchronous operations on their own workers; future async APIs require explicit scheduling and completion contracts.
 
 ## 14. COPY and bulk data transfer
@@ -651,6 +656,14 @@ UQA_API uqa_status UQA_CALL uqa_engine_copy_to(
     uqa_engine engine, const char *statement,
     uqa_copy_write_fn write, uqa_copy_flush_fn flush, void *user_data,
     uint64_t *rows);
+UQA_API uqa_status UQA_CALL uqa_engine_copy_from_n(
+    uqa_engine engine, const char *statement, size_t statement_size,
+    uqa_copy_read_fn read, void *user_data,
+    uint64_t *rows);
+UQA_API uqa_status UQA_CALL uqa_engine_copy_to_n(
+    uqa_engine engine, const char *statement, size_t statement_size,
+    uqa_copy_write_fn write, uqa_copy_flush_fn flush, void *user_data,
+    uint64_t *rows);
 ```
 
 Adapt callbacks to `Read`/`Write` and use [native COPY](../../crates/uqa-engine/src/copy.rs). COPY supports the text/CSV formats and options in the [manual](../manual/reference/02-rust-engine-api.md#copy-streams); a C function name does not add PostgreSQL binary COPY support.
@@ -658,6 +671,8 @@ Adapt callbacks to `Read`/`Write` and use [native COPY](../../crates/uqa-engine/
 A successful read with zero bytes means EOF. Partial reads and writes are valid; a writer reporting zero progress for nonempty input is an error. Counts must not exceed supplied capacity/length. Buffers are borrowed only during the callback. A supplied flush callback runs through the native flush boundary before an implicit commit; NULL means the sink has no additional flush operation. The caller owns and closes the source/sink.
 
 Callbacks report details with `uqa_callback_fail(status, message)` or its explicit-length `_n` form, then return the resulting negative status. This helper copies text into the current callback's library-owned failure record; it does not create an object for the host to destroy. It rejects nonnegative failure codes and use outside a supported callback scope. The trampoline captures that record before cleanup and maps COPY failures to native I/O diagnostics while preserving the private cause. A failing callback status without a message still produces a diagnostic. Do not convert callback failure to EOF.
+
+The first recorded callback failure wins, even if the callback later returns `UQA_OK`, invokes another failure helper, or calls an ordinary API that clears its thread's current diagnostic. Diagnostic text counts toward the invoking session's FFI allowance; failed diagnostic admission retains the original status with a static fallback message. A COPY callback must return `UQA_OK` or a negative status; `UQA_DONE` and `UQA_TIMEOUT` are invalid callback statuses. On a failed COPY call the row-count output is zero, even when an external sink has already received bytes.
 
 COPY FROM shares ordinary insertion, constraints, defaults, triggers, partition routing, and rollback. COPY TO uses incremental encoding and the existing spool. Already emitted bytes cannot be retracted on write, flush, cancellation, or transaction failure. The C API does not retry an external sink or replay a mutating input stream.
 

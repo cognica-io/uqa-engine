@@ -35,14 +35,21 @@ macro_rules! ffi_fn {
 pub(crate) fn run(operation: impl FnOnce() -> Result<UQAStatus>) -> UQAStatus {
     match catch_unwind(AssertUnwindSafe(|| {
         error::clear();
-        operation()
+        let result = operation();
+        if matches!(result, Ok(status) if status >= 0) {
+            error::clear();
+        }
+        result
     })) {
         Ok(Ok(status)) => status,
         Ok(Err(error)) => error::publish(error),
-        Err(_) => error::publish(UQAError::new(
-            UQA_ERROR_PANIC,
-            "panic at the C ABI boundary",
-        )),
+        Err(_) => {
+            crate::callback::record_panic();
+            error::publish(UQAError::new(
+                UQA_ERROR_PANIC,
+                "panic at the C ABI boundary",
+            ))
+        }
     }
 }
 

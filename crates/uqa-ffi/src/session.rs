@@ -25,7 +25,7 @@ use crate::{
         UQA_ERROR_UNSUPPORTED, UQA_OK, UQA_TRANSACTION_ACTIVE, UQA_TRANSACTION_COMPLETION_PENDING,
         UQA_TRANSACTION_FAILED, UQA_TRANSACTION_IDLE,
     },
-    boundary,
+    boundary, callback,
     config::UQAConfig,
     error::UQAError,
     library,
@@ -65,6 +65,18 @@ impl Session {
         self.enter_inner(true)
     }
 
+    pub(crate) fn enter_value(&self) -> boundary::Result<SessionCall<'_>> {
+        if callback::uses_value_scope(self)? {
+            self.check_poison()?;
+            Ok(SessionCall {
+                session: self,
+                release: false,
+            })
+        } else {
+            self.enter()
+        }
+    }
+
     pub(crate) fn check_poison(&self) -> boundary::Result<()> {
         if self.poisoned.load(Ordering::Acquire) {
             return Err(UQAError::state("session is poisoned after a panic"));
@@ -77,6 +89,7 @@ impl Session {
     }
 
     fn enter_inner(&self, cleanup: bool) -> boundary::Result<SessionCall<'_>> {
+        callback::reject_reentry()?;
         if self
             .busy
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -87,7 +100,10 @@ impl Session {
                 "session already has an active call",
             ));
         }
-        let call = SessionCall(self);
+        let call = SessionCall {
+            session: self,
+            release: true,
+        };
         if !cleanup {
             self.check_poison()?;
         }
@@ -122,14 +138,19 @@ impl Session {
     }
 }
 
-pub(crate) struct SessionCall<'a>(&'a Session);
+pub(crate) struct SessionCall<'a> {
+    session: &'a Session,
+    release: bool,
+}
 
 impl Drop for SessionCall<'_> {
     fn drop(&mut self) {
         if std::thread::panicking() {
-            self.0.poisoned.store(true, Ordering::Release);
+            self.session.poison();
         }
-        self.0.busy.store(false, Ordering::Release);
+        if self.release {
+            self.session.busy.store(false, Ordering::Release);
+        }
     }
 }
 
@@ -157,6 +178,7 @@ fn publish_engine(
 
 ffi_fn!(uqa_engine_open_memory(config: *mut UQAConfig, out: *mut *mut UQAEngine) {
     let out = boundary::new_handle(out)?;
+    callback::reject_reentry()?;
     let defaults = UQAConfig::default();
     let config = if config.is_null() { &defaults } else { boundary::input(config)? };
     if config.key.is_some() || config.compression.is_some() {
@@ -167,6 +189,7 @@ ffi_fn!(uqa_engine_open_memory(config: *mut UQAConfig, out: *mut *mut UQAEngine)
 });
 
 fn open(path: &str, config: Option<&UQAConfig>, auto: bool) -> boundary::Result<*mut UQAEngine> {
+    callback::reject_reentry()?;
     if path.is_empty() {
         return Err(UQAError::invalid("database path must not be empty"));
     }

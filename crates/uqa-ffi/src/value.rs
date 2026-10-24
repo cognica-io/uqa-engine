@@ -291,14 +291,16 @@ ffi_fn!(uqa_value_create_vector_f32(data: *const f32, dimensions: usize, out: *m
 ffi_fn!(uqa_value_create_copy(value: *const UQAValue, out: *mut *mut UQAValue) {
     let out = boundary::new_handle(out)?;
     let value = boundary::input(value)?;
-    let _call = value.session.as_ref().map(|session| session.enter()).transpose()?;
+    let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
     *out = Box::into_raw(UQAValue::owned(value.copy_parameter(&value.control())?, value.session.clone())?);
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_value_destroy(value: *mut *mut UQAValue) { boundary::release(value) });
 ffi_fn!(uqa_value_get_is_null(value: *const UQAValue, out: *mut u8) {
     let out = boundary::output(out)?;
-    *out = u8::from(matches!(boundary::input(value)?.raw(), Some(Value::Null)));
+    let value = boundary::input(value)?;
+    let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
+    *out = u8::from(matches!(value.raw(), Some(Value::Null)));
     Ok(UQA_OK)
 });
 
@@ -327,7 +329,7 @@ macro_rules! scalar_getter {
         ffi_fn!($name(value: *const UQAValue, out: *mut $output) {
             let out = boundary::output(out)?;
             let value = boundary::input(value)?;
-            let _call = value.session.as_ref().map(|session| session.enter()).transpose()?;
+            let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
             value.check_access(ScalarAccess::$access)?;
             match value.observed()? {
                 $pattern => { *out = $value; Ok(UQA_OK) },
@@ -362,7 +364,7 @@ ffi_fn!(uqa_buffer_get_bytes(buffer: *mut UQABuffer, out: *mut UQABytesView) {
 ffi_fn!(uqa_value_format_sql(value: *const UQAValue, buffer: *mut UQABuffer) {
     let value = boundary::input(value)?;
     boundary::input(buffer)?;
-    let _call = value.session.as_ref().map(|session| session.enter()).transpose()?;
+    let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
     let control = value.control();
     let materialized;
     let native = if let Some(native) = value.raw() { native } else {
