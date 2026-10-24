@@ -17,6 +17,21 @@ pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
 ];
 
 pub(super) const SIGNATURES: &[(&str, &str, &str, &str, i64, i64)] = &[
+    ("#", "int8", "int8", "int8", 1888, 1906),
+    ("#", "int2", "int2", "int2", 1876, 1894),
+    ("#", "int4", "int4", "int4", 1882, 1900),
+    ("&", "int8", "int8", "int8", 1886, 1904),
+    ("&", "int2", "int2", "int2", 1874, 1892),
+    ("&", "int4", "int4", "int4", 1880, 1898),
+    ("<<", "int8", "int4", "int8", 1890, 1908),
+    ("<<", "int2", "int4", "int2", 1878, 1896),
+    ("<<", "int4", "int4", "int4", 1884, 1902),
+    (">>", "int8", "int4", "int8", 1891, 1909),
+    (">>", "int2", "int4", "int2", 1879, 1897),
+    (">>", "int4", "int4", "int4", 1885, 1903),
+    ("|", "int8", "int8", "int8", 1887, 1905),
+    ("|", "int2", "int2", "int2", 1875, 1893),
+    ("|", "int4", "int4", "int4", 1881, 1899),
     ("&&", "anyarray", "anyarray", "bool", 2750, 2747),
     ("@>", "anyarray", "anyarray", "bool", 2751, 2748),
     ("<@", "anyarray", "anyarray", "bool", 2752, 2749),
