@@ -293,6 +293,14 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// Retain a scalar evaluation boundary without splitting batches for a slot-only projection.
+    pub(crate) fn with_row_at_a_time_input(mut self) -> Self {
+        if !self.computed.is_empty() {
+            self.child = Box::new(crate::query::row_at_a_time::RowAtATime::new(self.child));
+        }
+        self
+    }
+
     /// Bound evaluated output while retaining the original input-batch evaluation boundary.
     pub fn with_memory_budget(mut self, bytes: usize) -> Self {
         self.work_mem = Some(bytes);

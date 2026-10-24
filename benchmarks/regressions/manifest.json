@@ -18901,8 +18901,21 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
       "capability": "Incremental public SQL materialization",
-      "workload": "16,384 shared physical rows pass through a demand-aware 128-row producer, slot-only projection and column selection at the public SQL result boundary.",
+      "workload": "16,384 shared physical rows pass through a demand-aware 128-row producer, the actual post-sort projection helper and column selection at the public SQL result boundary.",
       "invariant": "Complete collection uses exactly 129 producer calls, including exhaustion, and releases each physical batch before the next pull; every Unicode value and row remains in the public result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "complete_result_collection_preserves_stored_scan_and_sort_batches",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/execution/materialized/tests.rs",
+      "capability": "Query consumer evaluation demand",
+      "workload": "A real stored-document scan filters 8,192 rows to 4,096 Unicode outputs, directly or through descending ExternalSort with a 4MiB allowance, then the post-sort slot projection and complete public materialization.",
+      "invariant": "Every exact output value and ascending/descending position survives; each path takes at most 34 pulls including exhaustion instead of one pull per returned row.",
       "case_names": [
         ""
       ]

@@ -275,8 +275,7 @@ impl PhysicalOperator for Sort<'_> {
     }
 
     fn supports_batched_consumption(&self) -> bool {
-        // Both pull methods read the same already-sorted output after the blocking input boundary.
-        true
+        self.inner.supports_batched_consumption()
     }
 
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {

@@ -110,15 +110,16 @@ fn public_result_collection_releases_physical_batches_before_reading_the_next() 
     let observed_owners = Arc::clone(&source.observed_owners);
     let closes = Arc::clone(&source.closes);
     let pulls = Arc::clone(&source.pulls);
-    let projection = crate::Project::new(
+    let projection = crate::query::ordering::append_row_at_time_projection(
         Box::new(source),
-        vec![("selected".into(), crate::ScalarExpr::Column("value".into()))],
-        Vec::new(),
+        vec![(
+            crate::ProjectionTarget::Column("selected".into()),
+            crate::ScalarExpr::Column("value".into()),
+        )],
+        crate::relational::DefaultExpressionEvaluator::shared(Vec::new()),
     );
-    let selection = crate::ColumnSelection::with_mapping(
-        Box::new(projection),
-        vec![("value".into(), "selected".into())],
-    );
+    let selection =
+        crate::ColumnSelection::with_mapping(projection, vec![("value".into(), "selected".into())]);
     let result = super::collect::<()>(|mode| {
         collect_input(Box::new(selection), bind_output_mode(None, mode, None)?)
     })
@@ -146,6 +147,147 @@ fn collect_source(source: Source) -> Result<uqa_sql::SQLResult, uqa_sql::SQLErro
     super::collect::<()>(|mode| {
         collect_input(Box::new(source), bind_output_mode(None, mode, None)?)
     })
+}
+
+struct Counted {
+    input: Box<dyn PhysicalOperator>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl PhysicalOperator for Counted {
+    fn row_schema(&self) -> &RowSchema {
+        self.input.row_schema()
+    }
+    fn supports_batched_consumption(&self) -> bool {
+        self.input.supports_batched_consumption()
+    }
+    fn open(&mut self) -> ExecResult<()> {
+        self.input.open()
+    }
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.input.next()
+    }
+    fn next_with_demand(&mut self, rows: std::num::NonZeroUsize) -> ExecResult<Option<Batch>> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.input.next_with_demand(rows)
+    }
+    fn close(&mut self) -> ExecResult<()> {
+        self.input.close()
+    }
+}
+
+fn stored_scan(count: usize) -> crate::TableScan {
+    use crate::query::{
+        scored_input::{ScoredDocumentSource, ScoredInput},
+        table_read::TableRead,
+    };
+    use uqa_storage::{DocumentStore, MemoryDocumentStore};
+
+    struct Table(RwLock<Box<dyn DocumentStore>>);
+    impl TableRead for Table {
+        fn column_definitions(&self) -> Vec<uqa_sql::ast::ColumnDef> {
+            Vec::new()
+        }
+        fn read_documents(&self) -> parking_lot::RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+            self.0.read()
+        }
+        fn maps_integer_keys(&self) -> bool {
+            true
+        }
+    }
+    let mut documents = MemoryDocumentStore::new();
+    for id in 1..=count {
+        documents
+            .put(
+                id as u64,
+                [
+                    ("id".into(), Value::Int(id as i64)),
+                    ("value".into(), Value::Str(format!("日本λ-{id}"))),
+                ]
+                .into(),
+            )
+            .unwrap();
+    }
+    let columns = vec!["id".into(), "value".into()];
+    let predicate = crate::ProjectedPredicate::compile(
+        &crate::ScalarExpr::Binary {
+            op: uqa_sql::ast::BinaryOp::Greater,
+            lhs: Box::new(crate::ScalarExpr::Column("id".into())),
+            rhs: Box::new(crate::ScalarExpr::Literal(Value::Int((count / 2) as i64))),
+        },
+        &columns,
+        &[],
+    )
+    .unwrap()
+    .unwrap();
+    let source = ScoredDocumentSource::new(
+        "t",
+        Arc::new(Table(RwLock::new(Box::new(documents)))),
+        ScoredInput::All,
+        columns,
+        Some("id".into()),
+        Some(predicate),
+    );
+    crate::TableScan::new(Box::new(source))
+}
+
+#[test]
+fn complete_result_collection_preserves_stored_scan_and_sort_batches() {
+    const COUNT: usize = 4096;
+    for sorted in [false, true] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let scan: Box<dyn PhysicalOperator> = Box::new(stored_scan(COUNT * 2));
+        let input: Box<dyn PhysicalOperator> = if sorted {
+            Box::new(crate::ExternalSort::new(
+                scan,
+                vec![crate::SortKey {
+                    expr: crate::ScalarExpr::Column("id".into()),
+                    descending: true,
+                    nulls_first: None,
+                }],
+                crate::relational::DefaultExpressionEvaluator::shared(Vec::new()),
+                None,
+                4 * 1024 * 1024,
+            ))
+        } else {
+            scan
+        };
+        let projection = crate::query::ordering::append_row_at_time_projection(
+            input,
+            vec![(
+                crate::ProjectionTarget::Column("selected".into()),
+                crate::ScalarExpr::Column("value".into()),
+            )],
+            crate::relational::DefaultExpressionEvaluator::shared(Vec::new()),
+        );
+        let selection = crate::ColumnSelection::with_mapping(
+            projection,
+            vec![("value".into(), "selected".into())],
+        );
+        let counted = Counted {
+            input: Box::new(selection),
+            calls: Arc::clone(&calls),
+        };
+        let result = super::collect::<()>(|mode| {
+            collect_input(Box::new(counted), bind_output_mode(None, mode, None)?)
+        })
+        .unwrap();
+        assert_eq!(result.rows.len(), COUNT);
+        for (index, row) in result.rows.iter().enumerate() {
+            let id = if sorted {
+                COUNT * 2 - index
+            } else {
+                COUNT + index + 1
+            };
+            assert_eq!(row["value"], Value::Str(format!("日本λ-{id}")));
+        }
+        assert!(
+            calls.load(Ordering::Relaxed) <= COUNT.div_ceil(128) + 2,
+            "sorted={sorted}: stored scan or projection split batches into {} pulls",
+            calls.load(Ordering::Relaxed)
+        );
+    }
 }
 
 fn collect_input(
