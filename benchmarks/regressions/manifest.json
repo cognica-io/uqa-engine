@@ -2,6 +2,71 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_integer_aggregate_metadata_keeps_positional_updates",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/projected_input/tests/retained.rs",
+      "capability": "Retained aggregate input metadata",
+      "workload": "Bound and nested integer products in SUM with positive, negative and NULL rows.",
+      "invariant": "Retained value-identity metadata preserves direct positional aggregation without any named scalar reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_integer_aggregate_metadata_preserves_operand_width_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/projected_input/tests/retained.rs",
+      "capability": "Retained aggregate input metadata",
+      "workload": "Nested SMALLINT, INTEGER and BIGINT products that overflow their original operation width.",
+      "invariant": "Metadata does not widen inner operations or publish an aggregate contribution after error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_integer_aggregate_metadata_preserves_scalar_fallback_and_casts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/projected_input/tests/retained.rs",
+      "capability": "Retained aggregate input metadata",
+      "workload": "A non-integer runtime product and a narrowing SMALLINT cast under retained result metadata.",
+      "invariant": "Keep canonical non-integer fallback and never erase an actual cast.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_integer_aggregate_metadata_preserves_division_and_nulls",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/projected_input/tests/retained.rs",
+      "capability": "Retained aggregate input metadata",
+      "workload": "NULL and non-NULL dividends with a zero divisor under retained result metadata.",
+      "invariant": "NULL contributes no aggregate value and a non-NULL zero division keeps PostgreSQL 22012 without publishing partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_integer_aggregate_metadata_keeps_selected_operand_types",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/projected_input/tests/retained.rs",
+      "capability": "Retained aggregate input metadata",
+      "workload": "A metadata-wrapped integer column and a typed BIGINT literal widen addition beyond the INTEGER maximum.",
+      "invariant": "Resolve positional columns through metadata while retaining the original selected operand types for width inference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-planner",
       "kind": "lib",
       "test": "strict_arithmetic_does_not_guess_a_result_for_an_unanalyzed_row",

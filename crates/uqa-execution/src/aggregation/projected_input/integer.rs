@@ -52,6 +52,7 @@ pub(super) struct ProjectedIntegerExpression {
 
 impl ProjectedIntegerExpression {
     pub(super) fn compile(expression: &ScalarExpr, input_schema: &RowSchema) -> Option<Self> {
+        let expression = value_expression(expression);
         if let ScalarExpr::Binary { op, lhs, rhs } = expression {
             if matches!(
                 op,
@@ -143,10 +144,19 @@ impl ProjectedIntegerExpression {
     }
 }
 
+fn value_expression(mut expression: &ScalarExpr) -> &ScalarExpr {
+    // Retained result metadata is an identity on values. Borrow through it without changing the original operands used for SQL width selection or scalar fallback.
+    while let ScalarExpr::Collated { expr, .. } = expression {
+        expression = expr;
+    }
+    expression
+}
+
 fn compile_integer_operand(
     expression: &ScalarExpr,
     input_schema: &RowSchema,
 ) -> Option<ProjectedIntegerOperand> {
+    let expression = value_expression(expression);
     match expression {
         ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => Some(
             ProjectedIntegerOperand::Slot(column_slot(expression, input_schema)?),
@@ -185,6 +195,7 @@ fn emit_integer_expression(
     stack_depth: &mut usize,
     max_stack_depth: &mut usize,
 ) -> Option<()> {
+    let expression = value_expression(expression);
     match expression {
         ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => {
             instructions.push(ProjectedIntegerInstruction::Slot(column_slot(
