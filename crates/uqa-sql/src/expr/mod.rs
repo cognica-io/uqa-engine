@@ -131,8 +131,8 @@ pub use conversion::{
     value_to_string_with_control, vector_value_to_string,
 };
 pub(crate) use conversion::{
-    bytea_to_string_with_control, tensor_items, vector_element, vector_items,
-    vector_value_to_string_with_control,
+    bytea_to_string_with_control, tensor_items, vector_element, vector_element_with_control,
+    vector_items, vector_value_to_string_with_control,
 };
 pub use conversion::{
     value_to_tensor, value_to_tensor_with_control, value_to_vector, value_to_vector_with_control,

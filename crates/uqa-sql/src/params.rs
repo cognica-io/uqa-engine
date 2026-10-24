@@ -94,6 +94,26 @@ impl SQLParam {
         Self::Vector(v)
     }
 
+    /// Copy a host vector after validating its SQL dimension and finite float32 elements. The completed parameter retains the caller's original allowance.
+    pub fn vector_with_control(
+        values: &[f32],
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        control.check()?;
+        if values.is_empty() || u32::try_from(values.len()).is_err() {
+            return Err(SQLError::TypeMismatch(
+                "vector dimension must be a positive 32-bit integer".into(),
+            ));
+        }
+        for value in values {
+            crate::expr::vector_element_with_control(&Value::Float(f64::from(*value)), control)?;
+        }
+        let mut output = ProductionVec::new(*control);
+        output.extend_from_slice(values)?;
+        let (values, memory) = output.finish()?.into_parts();
+        Ok(control.finish(Self::Vector(values), memory)?)
+    }
+
     pub fn tensor(v: Vec<Vec<f32>>) -> Self {
         Self::Tensor(v)
     }
@@ -131,6 +151,59 @@ mod tests {
         let scalar = SQLParam::scalar(value.clone());
         assert_eq!(scalar.scalar_value(), Some(&value));
         assert_eq!(scalar.declared_scalar_type(), None);
+    }
+
+    #[test]
+    fn host_vector_input_checks_shape_and_finiteness_before_retaining_bytes() {
+        use uqa_core::{memory::MemoryBudget, CancellationToken};
+        let budget = MemoryBudget::new(64);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let held = control.copy_text("held").unwrap();
+        for values in [
+            vec![],
+            vec![f32::NAN],
+            vec![f32::INFINITY],
+            vec![f32::NEG_INFINITY],
+        ] {
+            assert!(SQLParam::vector_with_control(&values, &control).is_err());
+            assert_eq!(budget.used(), held.reserved_bytes());
+        }
+        assert_eq!(
+            SQLParam::vector_with_control(&[1.0; 64], &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("53200")
+        );
+        assert_eq!(budget.used(), held.reserved_bytes());
+        for token in [&original, &invoking] {
+            token.cancel();
+            assert_eq!(
+                SQLParam::vector_with_control(&[1.0], &control)
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("57014")
+            );
+            assert_eq!(budget.used(), held.reserved_bytes());
+            token.reset();
+        }
+        let mut input = [-0.0, f32::MIN_POSITIVE, f32::MAX];
+        let vector = SQLParam::vector_with_control(&input, &control).unwrap();
+        input[1] = 1.0;
+        assert_eq!(input[1], 1.0);
+        let SQLParam::Vector(values) = &*vector else {
+            panic!("expected dedicated vector");
+        };
+        assert_eq!(values[0].to_bits(), (-0.0_f32).to_bits());
+        assert_eq!(values[1], f32::MIN_POSITIVE);
+        assert_eq!(values[2], f32::MAX);
+        assert_eq!(
+            budget.used(),
+            held.reserved_bytes() + vector.reserved_bytes()
+        );
+        drop(vector);
+        assert_eq!(budget.used(), held.reserved_bytes());
     }
 
     #[test]
