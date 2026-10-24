@@ -262,6 +262,148 @@ static void restored_input(void) {
     CHECK(uqa_engine_close(&engine));
 }
 
+/* The independent declaration/transaction oracle is parameters/live.pg18.json in the Engine owner's tests. These clients exercise the actual ABI paths. */
+static void live_types(uqa_engine source) {
+    const char *types[] = {
+        "c_live_host.mood", "c_live_host.mood[]",
+        "c_live_host.amount", "c_live_host.amount[]",
+        "c_live_host.pair", "c_live_host.pair[]",
+        "c_live_host.row_value", "c_live_host.row_value[]"
+    };
+    const char *queries[] = {"SELECT $1 IS NULL", "SELECT 1 AS cached", "", "COMMIT", "ROLLBACK", "BEGIN"};
+    uqa_value values[8] = {NULL};
+    uqa_value untyped_null = NULL;
+    uqa_statement declared[8][2] = {{NULL}};
+    uqa_result result = NULL;
+    uqa_engine sibling = NULL;
+    uqa_engine engine = source;
+    uqa_statement statement = NULL;
+    uint32_t state = UQA_TRANSACTION_IDLE;
+    CHECK(uqa_result_create(&result));
+    if (test_database_flags() != UQA_OPEN_MEMORY) {
+        CHECK(uqa_engine_open_session(source, &sibling));
+        engine = sibling;
+    }
+    CHECK(uqa_engine_execute(source,
+        "CREATE SCHEMA c_live_host; "
+        "CREATE TYPE c_live_host.mood AS ENUM ('calm'); "
+        "CREATE DOMAIN c_live_host.amount AS integer; "
+        "CREATE TYPE c_live_host.pair AS (n integer); "
+        "CREATE TABLE c_live_host.row_value(n integer)", result));
+    CHECK(uqa_statement_prepare(engine, "SELECT $1::text", &statement));
+    CHECK(uqa_value_create_null(&untyped_null));
+    for (size_t index = 0; index < 8; ++index) {
+        const char *target[] = {types[index]};
+        CHECK(uqa_value_create_typed_null(source, types[index], &values[index]));
+        CHECK(uqa_statement_prepare_typed(engine, "SELECT $1 IS NULL", target, 1, &declared[index][0]));
+        CHECK(uqa_statement_prepare_typed(engine, "SELECT 1 AS value", target, 1, &declared[index][1]));
+    }
+    CHECK(uqa_engine_execute(source,
+        "DROP TYPE c_live_host.mood; DROP DOMAIN c_live_host.amount; "
+        "DROP TYPE c_live_host.pair; DROP TABLE c_live_host.row_value; "
+        "CREATE TYPE c_live_host.mood AS ENUM ('replacement')", result));
+    CHECK(uqa_engine_execute(engine, "SELECT 1 AS cached", result));
+    for (size_t index = 0; index < 8; ++index) {
+        uqa_value copy = NULL;
+        uqa_value_view params[] = {values[index]};
+        uqa_type type = NULL;
+        uint32_t oid = 0;
+        char expected[80];
+        CHECK(uqa_value_get_type(values[index], &type));
+        CHECK(uqa_type_get_oid(type, &oid));
+        (void)snprintf(expected, sizeof(expected), "cache lookup failed for type %u", (unsigned)oid);
+        /* Copy and metadata access do not bind or observe a retained payload. */
+        CHECK(uqa_value_create_copy(values[index], &copy));
+        CHECK(uqa_value_destroy(&copy));
+        for (size_t query = 0; query < sizeof(queries) / sizeof(queries[0]); ++query) {
+            uqa_error error = NULL;
+            uqa_string_view message = {NULL, 0};
+            uint64_t rows = 99;
+            sql_error(uqa_engine_execute_params(engine, queries[query], params, 1, result), "XX000");
+            CHECK(uqa_error_get_last(&error));
+            CHECK(uqa_error_get_message(error, &message));
+            assert(equal(message, expected));
+            CHECK(uqa_result_get_row_count(result, &rows));
+            assert(rows == 1);
+            {
+                uqa_value_view retained = NULL;
+                int32_t number = 0;
+                CHECK(uqa_result_get_value(result, 0, 0, &retained));
+                CHECK(uqa_value_get_int32(retained, &number));
+                assert(number == 1);
+            }
+            CHECK(uqa_transaction_get_state(engine, &state));
+            assert(state == UQA_TRANSACTION_IDLE);
+        }
+        {
+            uqa_cursor cursor = NULL;
+            sql_error(uqa_cursor_open_params(engine, "SELECT 1 AS cached", params, 1, &cursor), "XX000");
+            assert(cursor == NULL);
+        }
+        CHECK(uqa_statement_bind(statement, 1, values[index]));
+        sql_error(uqa_statement_execute(statement, result), "XX000");
+        for (size_t target = 0; target < 2; ++target) {
+            CHECK(uqa_statement_bind(declared[index][target], 1, untyped_null));
+            sql_error(uqa_statement_execute(declared[index][target], result), "XX000");
+            CHECK(uqa_statement_finalize(&declared[index][target]));
+        }
+        CHECK(uqa_value_destroy(&values[index]));
+    }
+    CHECK(uqa_value_destroy(&untyped_null));
+    CHECK(uqa_statement_finalize(&statement));
+    {
+        uqa_value value = NULL;
+        CHECK(uqa_engine_execute(engine, "CREATE TYPE c_live_host.restored AS ENUM ('calm')", result));
+        CHECK(uqa_value_create_typed_null(engine, "c_live_host.restored", &value));
+        {
+            uqa_value_view params[] = {value};
+            CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT type_keep; DROP TYPE c_live_host.restored", result));
+            sql_error(uqa_engine_execute_params(engine, "SELECT $1 IS NULL", params, 1, result), "XX000");
+            CHECK(uqa_transaction_get_state(engine, &state));
+            assert(state == UQA_TRANSACTION_FAILED);
+            sql_error(uqa_engine_execute_params(engine, "ROLLBACK TO type_keep", params, 1, result), "25P02");
+            CHECK(uqa_engine_execute(engine, "ROLLBACK TO type_keep", result));
+            CHECK(uqa_engine_execute_params(engine, "SELECT $1 IS NULL", params, 1, result));
+            CHECK(uqa_engine_execute_params(engine, "COMMIT", params, 1, result));
+        }
+        CHECK(uqa_value_destroy(&value));
+        CHECK(uqa_engine_execute(engine,
+            "BEGIN; CREATE TYPE c_live_host.private_type AS ENUM ('calm')", result));
+        CHECK(uqa_value_create_typed_null(engine, "c_live_host.private_type", &value));
+        CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+        {
+            uqa_value_view params[] = {value};
+            sql_error(uqa_engine_execute_params(engine, "SELECT 1 AS cached", params, 1, result), "XX000");
+        }
+        CHECK(uqa_value_destroy(&value));
+        CHECK(uqa_value_create_typed_null(engine, "integer", &value));
+        {
+            uqa_value_view params[] = {value};
+            CHECK(uqa_engine_execute_params(engine, "", params, 1, result));
+        }
+        CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT failed_keep", result));
+        sql_error(uqa_engine_execute(engine, "SELECT 1 / 0", result), "22012");
+        CHECK(uqa_engine_execute(engine, "", result));
+        CHECK(uqa_transaction_get_state(engine, &state));
+        assert(state == UQA_TRANSACTION_FAILED);
+        {
+            uqa_value_view params[] = {value};
+            const char *failed[] = {"", "SELECT 1 AS cached", "ROLLBACK", "COMMIT", "ROLLBACK TO failed_keep"};
+            for (size_t index = 0; index < sizeof(failed) / sizeof(failed[0]); ++index) {
+                sql_error(uqa_engine_execute_params(engine, failed[index], params, 1, result), "25P02");
+                CHECK(uqa_transaction_get_state(engine, &state));
+                assert(state == UQA_TRANSACTION_FAILED);
+            }
+            CHECK(uqa_engine_execute(engine, "ROLLBACK TO failed_keep", result));
+            CHECK(uqa_engine_execute_params(engine, "ROLLBACK", params, 1, result));
+        }
+        CHECK(uqa_value_destroy(&value));
+    }
+    CHECK(uqa_engine_execute(engine, "DROP SCHEMA c_live_host CASCADE", result));
+    CHECK(uqa_result_destroy(&result));
+    if (sibling != NULL) CHECK(uqa_engine_close(&sibling));
+}
+
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -273,6 +415,7 @@ int main(void) {
     builtins(engine, result, buffer);
     domains(engine, result);
     catalog_values(engine, result, buffer);
+    live_types(engine);
     CHECK(uqa_value_create_typed_null(engine, "integer", &lease));
     CHECK(uqa_buffer_destroy(&buffer));
     CHECK(uqa_result_destroy(&result));

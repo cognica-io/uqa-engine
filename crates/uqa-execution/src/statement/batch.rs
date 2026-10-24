@@ -203,8 +203,7 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some((plan, parser)) = cached.as_ref().and_then(|cached| {
             cached
-                .optimized_plan
-                .as_ref()
+                .optimized_plan_for(params)
                 .map(|plan| (plan, &cached.parser))
         }) {
             let _statement_deadline = (!nested_statement)
@@ -272,7 +271,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     // the parsed AST and logical plan; batches still lower each statement only
     // when its turn arrives so earlier DDL, SET, ANALYZE, and function commands
     // can affect the following statement's semantics.
-    let (statements, mut cached_entry, parser) = match cached_statement {
+    let (mut statements, mut cached_entry, parser) = match cached_statement {
         Some(cached) => {
             let parser = cached.parser.clone();
             for notice in parser.notices.iter() {
@@ -314,12 +313,17 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             }
         }
     }
-    if statements.is_empty() {
-        return Ok(SQLResult::empty());
+    let empty_request = statements.is_empty();
+    if empty_request {
+        if params.is_empty() {
+            return Ok(SQLResult::empty());
+        }
+        // An empty request still binds supplied inputs in the native operation scope.
+        statements.push(StatementInput::Cached(Arc::new(uqa_sql::Statement::Empty)));
     }
     let is_single_statement = statements.len() == 1;
     let cache_single_statement =
-        is_single_statement && source_sql.is_some() && source.prepared.is_none();
+        is_single_statement && !empty_request && source_sql.is_some() && source.prepared.is_none();
     let final_statement_index = statements.len() - 1;
     let simple_query_batch = !is_single_statement;
     let mut implicit_segment_open = false;
@@ -419,18 +423,21 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             }
             let (initial_plan, cached_optimized_plan) = if is_single_statement {
                 if let Some(cached) = cached_entry.take() {
-                    (cached.logical_plan, cached.optimized_plan)
+                    let optimized = cached.optimized_plan_for(params).cloned();
+                    (cached.logical_plan, optimized)
                 } else {
                     let plan = Arc::new(UnifiedPlan::lower_with(
                         statement.clone(),
                         context.aggregates,
                     ));
-                    context.cache.cache_sql_statement(
-                        sql.to_string(),
-                        shared_statement(),
-                        Arc::clone(&plan),
-                        parser.clone(),
-                    );
+                    if cache_single_statement {
+                        context.cache.cache_sql_statement(
+                            sql.to_string(),
+                            shared_statement(),
+                            Arc::clone(&plan),
+                            parser.clone(),
+                        );
+                    }
                     (plan, None)
                 }
             } else {
@@ -443,48 +450,63 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 )
             };
             if is_transaction_control(initial_plan.as_ref()) {
-                // Text commands have no retained inputs to bind. Prepared commands reach the same completion after their native argument conversion.
-                if source.prepared.is_none() {
-                    if let Some(completed) = transaction.as_ref().and_then(|statement| {
-                        super::transactions::complete_idle_transaction(
-                            context.transactions,
-                            context.runtime.notices,
-                            statement,
+                let mut execute = || {
+                    let analyzed = if source.prepared.is_none() && !params.is_empty() {
+                        Some(
+                            context
+                                .planning
+                                .plan_for_execution(initial_plan.as_ref().clone(), params)?,
                         )
-                    }) {
-                        last = completed;
-                        if statement_index != final_statement_index {
-                            consume_result(context, &last, consumer)?;
+                    } else {
+                        None
+                    };
+                    // Completion follows host input binding. Prepared commands bind through their retained definition's request owner.
+                    if source.prepared.is_none() {
+                        if let Some(completed) = transaction.as_ref().and_then(|statement| {
+                            super::transactions::complete_idle_transaction(
+                                context.transactions,
+                                context.runtime.notices,
+                                statement,
+                            )
+                        }) {
+                            return Ok(completed);
                         }
-                        continue;
                     }
-                }
-                if simple_query_batch
-                    && implicit_segment_open
-                    && transaction.as_ref().is_some_and(|transaction| {
-                        matches!(
-                            transaction,
-                            uqa_sql::ast::TransactionStmt::Commit
-                                | uqa_sql::ast::TransactionStmt::Rollback
-                        )
-                    })
+                    if simple_query_batch
+                        && implicit_segment_open
+                        && transaction.as_ref().is_some_and(|transaction| {
+                            matches!(
+                                transaction,
+                                uqa_sql::ast::TransactionStmt::Commit
+                                    | uqa_sql::ast::TransactionStmt::Rollback
+                            )
+                        })
+                    {
+                        context.runtime.notices.push(
+                            uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
+                        );
+                    }
+                    let mut executor = UnifiedPlanExecutor::with_nested_statement(
+                        context.statements.statement_execution_context(),
+                        params,
+                        nested_statement || simple_query_batch,
+                    )
+                    .with_optional_source_sql(source_sql);
+                    execute_plan(
+                        &mut executor,
+                        analyzed.as_ref().unwrap_or(initial_plan.as_ref()),
+                        consumer,
+                        source.prepared,
+                    )
+                };
+                last = if source.prepared.is_none()
+                    && !params.is_empty()
+                    && context.transactions.transaction_depth() != 0
                 {
-                    context.runtime.notices.push(
-                        uqa_sql::semantics::effects::transaction_blocks::no_transaction_in_progress_warning(),
-                    );
-                }
-                let mut executor = UnifiedPlanExecutor::with_nested_statement(
-                    context.statements.statement_execution_context(),
-                    params,
-                    nested_statement || simple_query_batch,
-                )
-                .with_optional_source_sql(source_sql);
-                last = execute_plan(
-                    &mut executor,
-                    initial_plan.as_ref(),
-                    consumer,
-                    source.prepared,
-                )?;
+                    context::with_active_transaction(context.transactions, execute)?
+                } else {
+                    execute()?
+                };
                 if simple_query_batch
                     && transaction.as_ref().is_some_and(|transaction| {
                         matches!(

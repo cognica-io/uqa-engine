@@ -12,6 +12,8 @@ use uqa_core::{
 };
 use uqa_sql::{SQLError, SQLResult};
 
+mod live;
+
 fn rows(engine: &crate::Engine, result: &SQLResult) -> Result<Json, SQLError> {
     result
         .rows

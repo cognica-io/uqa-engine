@@ -36,8 +36,7 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some((plan, parser)) = cached.as_ref().and_then(|cached| {
             cached
-                .optimized_plan
-                .as_ref()
+                .optimized_plan_for(params)
                 .map(|plan| (plan, &cached.parser))
         }) {
             if !context.statements.notification_subscriptions_required()
@@ -72,10 +71,11 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         for notice in cached.parser.notices.iter() {
             context.runtime.notices.push(notice.clone());
         }
+        let optimized = cached.optimized_plan_for(params).cloned();
         (
             cached.statement.as_ref().clone(),
             cached.logical_plan,
-            cached.optimized_plan,
+            optimized,
             cached.parser,
         )
     } else {

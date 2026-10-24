@@ -34,6 +34,8 @@ pub fn sql(
 
 `Engine::create_typed_parameter_with_control(type_name, text, control)` resolves a native SQL type declaration and returns a retained `Produced<SQLParam>`. `Some(text)` uses native explicit conversion from unknown text; `None` creates a typed NULL and still applies domain constraints. Type modifiers, catalog identities and session input settings are preserved. The operation shares the session's statement and transaction boundary, including routine effects during domain input, failure of an active frame and savepoint recovery. Reusing the admitted parameter does not rerun its input checks. The supplied `ProductionControl` retains output allocations and observes both cancellation tokens; dropping the produced parameter releases its reservations.
 
+Each host execution resolves declared catalog parameter types in its current scope, including NULL and unused inputs. Renames preserve identity; a dropped type reports `XX000` with its original OID, including the outer array OID. This applies to SQL, cursors and host prepared arguments, and to empty SQL or transaction commands with supplied parameters. Failed transactions reject such parameterized requests with `25P02`; parameterless transaction recovery keeps its existing behavior. Type binding does not decode retained Datum bytes or change the lazy semantics of already-admitted procedural variables.
+
 ```rust
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};

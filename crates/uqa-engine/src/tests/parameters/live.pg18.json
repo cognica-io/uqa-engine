@@ -1,0 +1,2136 @@
+{
+  "provenance": {
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "capture": "libpq PQexecParams with explicit retained parameter OIDs and NULL inputs; declared targets use PQprepare and PQexecPrepared; ordinary SQL uses PQexec.",
+    "normalization": "Only dynamic missing-type OIDs are replaced by {parameter_oid}.",
+    "entry_points": "Cursor cases compare the same typed query. method:prepared uses PQexecParams to compare source argument binding before assignment to text. prepare/execute_prepared cases use PQprepare/PQexecPrepared with retained target OIDs and NULL arguments; PQexecPrepared has no source type OID argument."
+  },
+  "cases": [
+    {
+      "sql": "CREATE SCHEMA c_live_bind",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE SCHEMA c_live_moved",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.enum_value AS ENUM ('calm')",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.enum_value AS value",
+      "retain": "enum",
+      "type": "c_live_bind.enum_value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.enum_value[] AS value",
+      "retain": "enum_array",
+      "type": "c_live_bind.enum_value[]",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_enum_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "enum",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_used",
+      "type_parameter": "enum",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_enum_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "enum",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_unused",
+      "type_parameter": "enum",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_enum(c_live_bind.enum_value) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_enum_array_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "enum_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_array_used",
+      "type_parameter": "enum_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_enum_array_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "enum_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_array_unused",
+      "type_parameter": "enum_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_enum_array(c_live_bind.enum_value[]) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ALTER TYPE c_live_bind.enum_value RENAME TO enum_renamed",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ALTER TYPE c_live_bind.enum_renamed SET SCHEMA c_live_moved",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty, pg_typeof($1)::text AS type_name",
+      "parameter": "enum",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t",
+          "c_live_moved.enum_renamed"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "enum",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty, pg_typeof($1)::text AS type_name",
+      "parameter": "enum_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t",
+          "c_live_moved.enum_renamed[]"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "enum_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "DROP TYPE c_live_moved.enum_renamed",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_used",
+      "type_parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_unused",
+      "type_parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_enum(NULL)",
+      "type_parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_array_used",
+      "type_parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_enum_array_unused",
+      "type_parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_enum_array(NULL)",
+      "type_parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE DOMAIN c_live_bind.domain_value AS integer",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.domain_value AS value",
+      "retain": "domain",
+      "type": "c_live_bind.domain_value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.domain_value[] AS value",
+      "retain": "domain_array",
+      "type": "c_live_bind.domain_value[]",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_domain_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "domain",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_used",
+      "type_parameter": "domain",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_domain_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "domain",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_unused",
+      "type_parameter": "domain",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_domain(c_live_bind.domain_value) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_domain_array_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "domain_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_array_used",
+      "type_parameter": "domain_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_domain_array_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "domain_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_array_unused",
+      "type_parameter": "domain_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_domain_array(c_live_bind.domain_value[]) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ALTER DOMAIN c_live_bind.domain_value RENAME TO domain_renamed",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ALTER DOMAIN c_live_bind.domain_renamed SET SCHEMA c_live_moved",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty, pg_typeof($1)::text AS type_name",
+      "parameter": "domain",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t",
+          "c_live_moved.domain_renamed"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "domain",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty, pg_typeof($1)::text AS type_name",
+      "parameter": "domain_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t",
+          "c_live_moved.domain_renamed[]"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "domain_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "DROP DOMAIN c_live_moved.domain_renamed",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_used",
+      "type_parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_unused",
+      "type_parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_domain(NULL)",
+      "type_parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_array_used",
+      "type_parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_domain_array_unused",
+      "type_parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_domain_array(NULL)",
+      "type_parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.composite_value AS (n integer)",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.composite_value AS value",
+      "retain": "composite",
+      "type": "c_live_bind.composite_value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.composite_value[] AS value",
+      "retain": "composite_array",
+      "type": "c_live_bind.composite_value[]",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_composite_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "composite",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_used",
+      "type_parameter": "composite",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_composite_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "composite",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_unused",
+      "type_parameter": "composite",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_composite(c_live_bind.composite_value) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_composite_array_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "composite_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_array_used",
+      "type_parameter": "composite_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_composite_array_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "composite_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_array_unused",
+      "type_parameter": "composite_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_composite_array(c_live_bind.composite_value[]) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ALTER TYPE c_live_bind.composite_value RENAME TO composite_renamed",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ALTER TYPE c_live_bind.composite_renamed SET SCHEMA c_live_moved",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty, pg_typeof($1)::text AS type_name",
+      "parameter": "composite",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t",
+          "c_live_moved.composite_renamed"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "composite",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty, pg_typeof($1)::text AS type_name",
+      "parameter": "composite_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t",
+          "c_live_moved.composite_renamed[]"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "composite_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "DROP TYPE c_live_moved.composite_renamed",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_used",
+      "type_parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_unused",
+      "type_parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_composite(NULL)",
+      "type_parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_array_used",
+      "type_parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_composite_array_unused",
+      "type_parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_composite_array(NULL)",
+      "type_parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE TABLE c_live_bind.row_value (n integer)",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.row_value AS value",
+      "retain": "row",
+      "type": "c_live_bind.row_value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.row_value[] AS value",
+      "retain": "row_array",
+      "type": "c_live_bind.row_value[]",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_row_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "row",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_used",
+      "type_parameter": "row",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_row_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "row",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_unused",
+      "type_parameter": "row",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_row(c_live_bind.row_value) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_row_array_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "row_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_array_used",
+      "type_parameter": "row_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_row_array_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "row_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_array_unused",
+      "type_parameter": "row_array",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_row_array(c_live_bind.row_value[]) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "DROP TABLE c_live_bind.row_value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_used",
+      "type_parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_unused",
+      "type_parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_row(NULL)",
+      "type_parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_array_used",
+      "type_parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_row_array_unused",
+      "type_parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "EXECUTE c_live_sql_row_array(NULL)",
+      "type_parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.enum_value AS ENUM ('replacement')",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "row",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT pg_typeof($1)::text AS type_name",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "cursor"
+    },
+    {
+      "sql": "SELECT $1::text AS value",
+      "parameter": "row_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0,
+      "method": "prepared"
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.restored AS ENUM ('calm')",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.restored AS value",
+      "retain": "restored",
+      "type": "c_live_bind.restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_restored_used",
+      "sql": "SELECT $1 IS NULL AS empty",
+      "type_parameter": "restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_restored_used",
+      "type_parameter": "restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "prepare": "c_live_target_restored_unused",
+      "sql": "SELECT 1 AS value",
+      "type_parameter": "restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "execute_prepared": "c_live_target_restored_unused",
+      "type_parameter": "restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "1"
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "PREPARE c_live_sql_restored(c_live_bind.restored) AS SELECT 1 AS value",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SAVEPOINT type_keep",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "DROP TYPE c_live_bind.restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "execute_prepared": "c_live_target_restored_used",
+      "type_parameter": "restored",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "restored",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "ROLLBACK TO type_keep",
+      "parameter": "restored",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "ROLLBACK TO type_keep",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "execute_prepared": "c_live_target_restored_used",
+      "type_parameter": "restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "restored",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.private_enum AS ENUM ('calm')",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.private_enum AS value",
+      "retain": "private_enum",
+      "type": "c_live_bind.private_enum",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.private_enum[] AS value",
+      "retain": "private_enum_array",
+      "type": "c_live_bind.private_enum[]",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "CREATE DOMAIN c_live_bind.private_domain AS integer",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.private_domain AS value",
+      "retain": "private_domain",
+      "type": "c_live_bind.private_domain",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.private_domain[] AS value",
+      "retain": "private_domain_array",
+      "type": "c_live_bind.private_domain[]",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.private_composite AS (n integer)",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.private_composite AS value",
+      "retain": "private_composite",
+      "type": "c_live_bind.private_composite",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT NULL::c_live_bind.private_composite[] AS value",
+      "retain": "private_composite_array",
+      "type": "c_live_bind.private_composite[]",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "ROLLBACK",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "private_enum",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "private_enum_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "private_domain",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "private_domain_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "private_composite",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "private_composite_array",
+      "sqlstate": "XX000",
+      "message": "cache lookup failed for type {parameter_oid}",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "SELECT NULL::integer AS value",
+      "retain": "builtin",
+      "type": "integer",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          null
+        ]
+      ],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SAVEPOINT failed_keep",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT 1 / 0",
+      "sqlstate": "22012",
+      "message": "division by zero",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "",
+      "parameter": "builtin",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "builtin",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "builtin",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "builtin",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "ROLLBACK TO failed_keep",
+      "parameter": "builtin",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "",
+      "parameter": "enum",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "SELECT 1 AS cached",
+      "parameter": "enum",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "enum",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "enum",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "ROLLBACK TO failed_keep",
+      "parameter": "enum",
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block",
+      "rows": [],
+      "transaction_status": 3
+    },
+    {
+      "sql": "ROLLBACK TO failed_keep",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SELECT $1 IS NULL AS empty",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [
+        [
+          "t"
+        ]
+      ],
+      "transaction_status": 2
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "BEGIN",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "SAVEPOINT valid_keep",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "ROLLBACK TO valid_keep",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 2
+    },
+    {
+      "sql": "COMMIT",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "ROLLBACK",
+      "parameter": "builtin",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.procedural AS ENUM ('ok')",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "DO $body$ DECLARE v c_live_bind.procedural; BEGIN DROP TYPE c_live_bind.procedural; PERFORM 1; END $body$",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "CREATE TYPE c_live_bind.procedural AS ENUM ('ok')",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "DO $body$ DECLARE v c_live_bind.procedural; BEGIN DROP TYPE c_live_bind.procedural; IF v IS NOT NULL THEN RAISE EXCEPTION 'expected NULL'; END IF; END $body$",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "DROP SCHEMA c_live_bind CASCADE",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    },
+    {
+      "sql": "DROP SCHEMA c_live_moved CASCADE",
+      "sqlstate": "",
+      "message": "",
+      "rows": [],
+      "transaction_status": 0
+    }
+  ]
+}

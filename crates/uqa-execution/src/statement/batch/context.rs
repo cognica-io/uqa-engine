@@ -17,7 +17,7 @@ use std::sync::Arc;
 use uqa_sql::{
     ast::TransactionStmt,
     plan::{AggregateClassifier, ExecutablePlanOptimizer, UnifiedPlan},
-    SQLError, Statement,
+    SQLError, SQLParam, Statement,
 };
 
 /// Cancel the statement that begins now once the session's `statement_timeout` passes, as `PostgreSQL`'s `start_xact_command` enables the timeout for each statement of a query and `finish_xact_command` disables it; the returned deadline disarms when the statement ends.
@@ -39,6 +39,17 @@ pub struct CachedStatement {
     pub logical_plan: Arc<UnifiedPlan>,
     pub optimized_plan: Option<Arc<UnifiedPlan>>,
     pub parser: uqa_sql::parser::ParserMetadata,
+}
+
+impl CachedStatement {
+    /// Optimized entries were analyzed without parameters; any supplied inputs require native binding, including inputs the query does not reference.
+    pub(crate) fn optimized_plan_for(&self, params: &[SQLParam]) -> Option<&Arc<UnifiedPlan>> {
+        if params.is_empty() {
+            self.optimized_plan.as_ref()
+        } else {
+            None
+        }
+    }
 }
 
 pub trait StatementCache {

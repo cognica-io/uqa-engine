@@ -119,7 +119,14 @@ pub(crate) fn read_executable_inputs(
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
-    read_executable_inputs_inner(routines, plan, params, binding, aliases, false)
+    read_executable_inputs_inner(
+        routines,
+        plan,
+        params,
+        binding,
+        aliases,
+        InputAnalysisKind::Host,
+    )
 }
 
 pub(crate) fn read_procedural_inputs(
@@ -129,7 +136,19 @@ pub(crate) fn read_procedural_inputs(
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
-    read_executable_inputs_inner(routines, plan, params, binding, aliases, true)
+    read_executable_inputs_inner(
+        routines,
+        plan,
+        params,
+        binding,
+        aliases,
+        InputAnalysisKind::Procedural,
+    )
+}
+
+enum InputAnalysisKind {
+    Host,
+    Procedural,
 }
 
 fn read_executable_inputs_inner(
@@ -138,11 +157,17 @@ fn read_executable_inputs_inner(
     params: &[crate::SQLParam],
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
-    track_dependencies: bool,
+    kind: InputAnalysisKind,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
     use super::statements::AnalyzedResult;
 
-    let declared = super::statements::parameter_input_types(params)?;
+    let (declared, track_dependencies) = match kind {
+        InputAnalysisKind::Host => (
+            crate::params::bind_parameter_types(params, routines)?,
+            false,
+        ),
+        InputAnalysisKind::Procedural => (super::statements::parameter_input_types(params)?, true),
+    };
     let mut scope = SchemaScope::for_analysis(binding)?;
     scope.prepared_dependencies = track_dependencies.then(Default::default);
     let mut analysis = Preparation {
