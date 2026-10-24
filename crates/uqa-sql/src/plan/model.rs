@@ -33,6 +33,9 @@ pub struct QueryPlan {
     /// Already-analyzed input layouts, consumed before any optimizer rewrite changes source topology. Stored syntax never retains them.
     #[serde(skip)]
     pub analyzed_source: Option<std::sync::Arc<AnalyzedSource>>,
+    /// Grouping-set equality established before scalar optimization. Stored SQL retains its original grouping syntax.
+    #[serde(skip)]
+    pub analyzed_grouping: Option<crate::semantics::grouping_sets::AnalyzedGroupingSets>,
     /// Whether relation references in this tree are stored catalog identities rather than names that must be resolved in the executing session.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub relations_bound: bool,

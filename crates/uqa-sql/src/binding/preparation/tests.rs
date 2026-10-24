@@ -8,6 +8,7 @@ use super::*;
 use crate::{ast::FunctionBinding, FunctionTypeResolver, RelationIdentity};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod arithmetic_results;
 mod array_bounds;
 mod array_transforms;
 mod body_inputs;
@@ -21,6 +22,7 @@ mod domain_collations;
 mod explain_inputs;
 mod field_collations;
 mod function_star;
+mod grouping_identity;
 mod input_collations;
 mod json_operators;
 mod lateral;
@@ -32,7 +34,7 @@ mod set_contexts;
 mod set_ordering;
 mod stored_inputs;
 
-struct NoRoutines;
+pub(super) struct NoRoutines;
 impl FunctionTypeResolver for NoRoutines {
     fn resolve_function_type(
         &self,
@@ -298,7 +300,10 @@ fn domain_input_constants_use_the_base_type_without_erasing_parameter_identity()
         });
         let mut parameter = parameters.reference(1).unwrap();
         parameters.coerce_unknown(&mut parameter, &domain).unwrap();
-        parameters.take_input_constants().apply(&mut plan).unwrap();
+        parameters
+            .take_input_constants()
+            .apply(&mut plan, &NoRoutines, &[])
+            .unwrap();
         assert_eq!(parameters.finish().unwrap(), [Some(domain)]);
         let mut constants = 0;
         plan.rewrite_scalar_expressions(&mut |expression| {

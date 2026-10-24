@@ -34,6 +34,32 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     source_schema: &crate::RowSchema,
     sources: Option<&SourceBindings<'_>>,
 ) -> Result<QueryOutput, SQLError> {
+    // Binding and validation finish before row evaluation can reenter a routine.
+    let (expression_schema, outer) =
+        validate_bound_query_block(context, stmt, params, ctes, source_schema)?;
+    if stmt.from.is_none() {
+        return run_select_without_from_output(context, block, stmt, params, ctes, output_mode);
+    }
+    run_from_query_block(
+        context,
+        block,
+        stmt,
+        params,
+        ctes,
+        output_mode,
+        &expression_schema,
+        outer.as_ref(),
+        sources,
+    )
+}
+
+fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    stmt: &QueryBlockPlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    source_schema: &crate::RowSchema,
+) -> Result<(crate::RowSchema, Option<crate::RowSchema>), SQLError> {
     let outer = ctes.row_lock_outer_row().map(|row| row.schema.clone());
     let source_schema = with_query_table_pseudo_columns(source_schema);
     let expression_schema = overlay_outer_schema(&source_schema, outer.as_ref());
@@ -73,7 +99,7 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
             ctes,
             outer.as_ref(),
         )?;
-        return run_select_without_from_output(context, block, stmt, params, ctes, output_mode);
+        return Ok((expression_schema, outer));
     };
     validate_source_set_contexts_before_build(
         context.relational.catalog,
@@ -84,17 +110,7 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
         outer.as_ref(),
     )?;
 
-    run_from_query_block(
-        context,
-        block,
-        stmt,
-        params,
-        ctes,
-        output_mode,
-        &expression_schema,
-        outer.as_ref(),
-        sources,
-    )
+    Ok((expression_schema, outer))
 }
 
 #[expect(

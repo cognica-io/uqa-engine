@@ -91,6 +91,7 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) expression_runtime: std::sync::OnceLock<
         std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
     >,
+    pub(super) function_group: super::function_source::PreparedFunctionGroup,
     pub(super) params: &'a [SQLParam],
     pub(super) ctes: CteScope<S>,
     /// Calling join row followed by any enclosing-query values. Only the join's own row changes between calls.
@@ -295,16 +296,30 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
         if let Some(rows) = self.function_rows(left_row)? {
             return Ok(rows);
         }
-        let mut scoped_ctes = self.ctes.clone();
-        scoped_ctes.set_row_lock_outer_row(left_row.clone());
-        let operator = build_join_operator_with_ctes(
-            &self.context,
-            &self.right,
-            self.params,
-            &mut scoped_ctes,
-            None,
-            None,
-        )?;
+        let group_runtime = matches!(self.right, SourcePlan::FunctionGroup { .. })
+            .then(|| self.expression_runtime())
+            .filter(|runtime| runtime.routine_description_scope().is_some());
+        let operator = if let Some(runtime) = group_runtime {
+            self.function_group.operator(
+                &self.context,
+                &self.right,
+                self.params,
+                &self.ctes,
+                &runtime,
+                left_row,
+            )?
+        } else {
+            let mut scoped_ctes = self.ctes.clone();
+            scoped_ctes.set_row_lock_outer_row(left_row.clone());
+            build_join_operator_with_ctes(
+                &self.context,
+                &self.right,
+                self.params,
+                &mut scoped_ctes,
+                None,
+                None,
+            )?
+        };
         let schema = self.right_schema.clone();
         let (operator, slots) =
             crate::physical::construction::OperatorBuild::run(operator, |input| {

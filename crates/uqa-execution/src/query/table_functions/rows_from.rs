@@ -49,6 +49,23 @@ impl<'a> RowsFromOperator<'a> {
             );
             schema = RowSchema::join(&schema, &ordinality_schema, std::iter::empty());
         }
+        Self::with_schema(operators, ordinality, schema)
+    }
+
+    /// Reopen the same prepared members with their previously assembled physical layout.
+    pub(crate) fn with_schema(
+        operators: Vec<Box<dyn PhysicalOperator + 'a>>,
+        ordinality: bool,
+        schema: RowSchema,
+    ) -> Self {
+        debug_assert_eq!(
+            operators
+                .iter()
+                .map(|operator| operator.row_schema().len())
+                .sum::<usize>()
+                + usize::from(ordinality),
+            schema.len()
+        );
         Self {
             children: operators
                 .into_iter()

@@ -202,6 +202,7 @@ fn group_output_closes_every_state_on_success_filter_or_expression_failure() {
             false,
             &crate::RowSchema::default(),
             &[],
+            None,
         )
         .unwrap();
         let (counts, template) = template("");

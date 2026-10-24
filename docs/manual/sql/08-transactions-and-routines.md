@@ -139,6 +139,8 @@ Preparation also reads unknown literals through their selected input functions. 
 
 `plan_cache_mode` controls planning at execution time. Its default `auto` uses custom plans for the first five parameterized executions, then compares the generic execution cost with the average custom cost, including planning work. Statistics and available index access influence this comparison: a selective parameter can keep using custom plans after the fifth execution. `force_generic_plan` reuses a parameter-independent plan; `force_custom_plan` plans for the current bound values. Statements with no parameters use generic plans in every mode. Parameter specialization preserves declared types, including typed NULLs and domain identities.
 
+A strict arithmetic operator with a constant NULL input simplifies to NULL of its selected result type, so a volatile sibling such as `nextval` is not executed. Child constant expressions are simplified first: `NULL::integer + (1 / 0)` still reports division by zero. This planning rule does not skip evaluation merely because a row value or generic-plan parameter is NULL at runtime. Non-strict operators, including array concatenation, retain their own NULL and effect behavior.
+
 `generic_plans` and `custom_plans` count plans selected for execution, including executions that later fail. Argument or planning failures do not increment them. Changing `plan_cache_mode` takes effect on the next EXECUTE without preparing the statement again.
 
 ```sql execute

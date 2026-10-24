@@ -16,7 +16,10 @@ use super::{
 use crate::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::expr::RowLookup;
 
+pub(super) mod outer;
+
 pub(super) struct AggregateOutputPlan {
+    outer: Option<std::sync::Arc<OwnedPhysicalRow>>,
     slot_relation: uqa_sql::ast::InternalRelationId,
     finalizers: Vec<AggregateFinalizer>,
     projections: Vec<AggregateProjectionPlan>,
@@ -52,6 +55,7 @@ impl AggregateOutputPlan {
         relaxed: bool,
         input_schema: &RowSchema,
         params: &[SQLParam],
+        outer: Option<&outer::AggregateOuterRow>,
     ) -> Result<Self, SQLError> {
         let finalizers = aggregate_targets
             .iter()
@@ -108,6 +112,7 @@ impl AggregateOutputPlan {
                 if aggregate_cursor != first_aggregate
                     || contained_aggregate
                     || !expr_references_columns(&projection.expr)
+                    || outer::uses_finalized_inputs(&expression, input_schema, outer, slot_relation)
                 {
                     let uses_group_row = references_external_row(&expression, slot_relation);
                     return Ok(AggregateProjectionPlan::Evaluate(AggregateExpressionPlan {
@@ -166,6 +171,7 @@ impl AggregateOutputPlan {
             .transpose()?;
 
         Ok(Self {
+            outer: outer.map(|outer| std::sync::Arc::clone(&outer.row)),
             slot_relation,
             finalizers,
             projections,
@@ -216,8 +222,13 @@ pub(super) fn finish_group(
                     let row = plan
                         .uses_group_row
                         .then(|| {
-                            group_row
-                                .get_or_insert_with(|| group_context_row(statement, group_values))
+                            group_row.get_or_insert_with(|| {
+                                outer::group_row(
+                                    statement,
+                                    group_values,
+                                    output_plan.outer.as_deref(),
+                                )
+                            })
                         })
                         .map(|row| &*row);
                     let lookup = AggregateOutputLookup {
@@ -252,9 +263,9 @@ pub(super) fn finish_group(
 
         if let Some(having) = output_plan.having.as_ref() {
             let having_row = having.uses_group_row.then(|| {
-                group_row
-                    .take()
-                    .unwrap_or_else(|| group_context_row(statement, group_values))
+                group_row.take().unwrap_or_else(|| {
+                    outer::group_row(statement, group_values, output_plan.outer.as_deref())
+                })
             });
             let lookup = AggregateOutputLookup {
                 aggregate_values: &aggregate_values,

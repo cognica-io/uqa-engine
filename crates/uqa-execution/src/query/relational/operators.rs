@@ -126,6 +126,18 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
             None
         };
         let statement = bound_group_statement.as_ref().unwrap_or(statement);
+        let aggregate_outer = if matches!(statement.compute, ComputePlan::Aggregate) {
+            ctes.row_lock_outer_row()
+                .map(|outer| {
+                    crate::aggregation::AggregateOuterRow::new(
+                        outer,
+                        operator.row_schema().physical_width(),
+                    )
+                })
+                .transpose()?
+        } else {
+            None
+        };
         let mut group_statement = None;
         if matches!(statement.compute, ComputePlan::Aggregate) {
             if let Some(plan) = prepare_group_set_projection(
@@ -479,13 +491,14 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                     .collect::<Vec<_>>();
                 let aggregate_row_schema =
                     crate::RowSchema::with_types(aggregate_schema.clone(), aggregate_types.clone());
-                let aggregate_executor = PhysicalAggregateExecutor::new(
+                let aggregate_executor = PhysicalAggregateExecutor::with_outer_scope(
                     context.expression_scope(ctes.clone()),
                     &output_plan.statement,
                     params,
                     input_schema,
                     aggregate_row_schema,
                     work_mem_bytes,
+                    aggregate_outer,
                 )?;
                 operator.wrap(|operator| {
                     Box::new(HashAggregate::with_typed_executor(

@@ -10,6 +10,7 @@ mod catalog_types;
 mod collations;
 mod retained;
 mod similar_substring;
+mod strict_arithmetic;
 
 #[test]
 fn constant_folding_retains_selected_collation_metadata() {

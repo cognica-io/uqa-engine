@@ -15,6 +15,17 @@ use super::{
 };
 use uqa_sql::{ast::FunctionBinding, plan::TableFunctionPlan};
 
+#[cfg(test)]
+#[path = "function_source/tests/runtime.rs"]
+mod test_support;
+#[cfg(test)]
+mod tests;
+
+mod prepared_call;
+mod prepared_group;
+use prepared_call::{deferred_function_rows, PreparedFunctionCall};
+pub(super) use prepared_group::PreparedFunctionGroup;
+
 struct FunctionSource<'a> {
     name: &'a str,
     binding: Option<&'a FunctionBinding>,
@@ -182,6 +193,54 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let outer_row = ctes.row_lock_outer_row().cloned();
     let hook = context.relational.expression_scope(ctes.clone());
+    let initialized = initialize_function_source(context, &source, params, &hook, outer_row)?;
+    let operator = initialized.operator(&source, prune, ctes.lock_identities.emit);
+    Ok(attach_closed_qualifier_filter(
+        operator,
+        source.alias.unwrap_or(source.output_name),
+        filters,
+        context,
+        params,
+        ctes,
+    ))
+}
+
+struct InitializedFunctionSource<'a> {
+    columns: Vec<String>,
+    schema: crate::RowSchema,
+    rows: FunctionRows<'a>,
+    prepared: Option<std::sync::Arc<PreparedFunctionCall>>,
+}
+
+impl<'a> InitializedFunctionSource<'a> {
+    fn operator(
+        self,
+        source: &FunctionSource<'_>,
+        prune: Option<&ColumnPrune>,
+        emit_lock_origins: bool,
+    ) -> Box<dyn PhysicalOperator + 'a> {
+        let operator = Box::new(crate::PhysicalRowIteratorScan::from_stream(
+            self.schema,
+            self.rows,
+        ));
+        qualify_source_operator_with_columns(
+            operator,
+            &self.columns,
+            source.alias.unwrap_or(source.output_name),
+            prune,
+            &[],
+            emit_lock_origins,
+        )
+    }
+}
+
+fn initialize_function_source<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    source: &FunctionSource<'_>,
+    params: &'a [SQLParam],
+    hook: &std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    outer_row: Option<crate::OwnedPhysicalRow>,
+) -> Result<InitializedFunctionSource<'a>, SQLError> {
     let input_schema = outer_row
         .as_ref()
         .map_or_else(crate::RowSchema::default, |row| row.schema.clone());
@@ -227,12 +286,12 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         ordinality: source.ordinality,
         column_types: source.column_types,
     };
-    let (columns, mut rows) = function_rows(
+    let (columns, mut rows, prepared) = function_rows(
         context,
-        &source,
+        source,
         call,
         resolved.as_ref(),
-        &hook,
+        hook,
         params,
         outer_row,
     )?;
@@ -262,22 +321,19 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
         hook.as_ref(),
     );
     let schema = crate::RowSchema::with_types(columns.clone(), types);
-    let operator: Box<dyn PhysicalOperator + 'a> =
-        Box::new(crate::PhysicalRowIteratorScan::from_stream(schema, rows));
-    let source_columns = columns;
-    let qualifier = source.alias.unwrap_or(source.output_name);
-    let operator = qualify_source_operator_with_columns(
-        operator,
-        &source_columns,
-        qualifier,
-        prune,
-        &[],
-        ctes.lock_identities.emit,
-    );
-    Ok(attach_closed_qualifier_filter(
-        operator, qualifier, filters, context, params, ctes,
-    ))
+    Ok(InitializedFunctionSource {
+        columns,
+        schema,
+        rows,
+        prepared,
+    })
 }
+
+type InitializedRows<'a> = (
+    Vec<String>,
+    FunctionRows<'a>,
+    Option<std::sync::Arc<PreparedFunctionCall>>,
+);
 
 type FunctionRows<'a> = crate::SQLRowStream<'a, crate::PhysicalRow>;
 
@@ -290,7 +346,7 @@ fn function_rows<'a, S: Clone + Send + Sync + 'static>(
     hook: &std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
     params: &'a [SQLParam],
     outer_row: Option<crate::OwnedPhysicalRow>,
-) -> Result<(Vec<String>, FunctionRows<'a>), SQLError> {
+) -> Result<InitializedRows<'a>, SQLError> {
     let deferred_columns = match resolved {
         Some(resolved) => {
             hook.require_user_function_execute(&resolved.function)?;
@@ -333,18 +389,32 @@ fn function_rows<'a, S: Clone + Send + Sync + 'static>(
         params,
     )?;
     if let Some(columns) = deferred_columns {
+        let bound = hook.routine_description_scope().is_some().then(|| {
+            call.args
+                .iter()
+                .map(|argument| {
+                    uqa_sql::bind_type_introspection_with_resolver(
+                        argument.clone(),
+                        &input_schema,
+                        params,
+                        hook.as_ref(),
+                    )
+                })
+                .collect()
+        });
+        let prepared = std::sync::Arc::new(PreparedFunctionCall::new(&call, bound));
         let rows = deferred_function_rows(
-            &call,
+            std::sync::Arc::clone(&prepared),
             std::sync::Arc::clone(hook),
             params,
             outer_row,
             columns.len(),
         );
-        return Ok((columns, rows));
+        return Ok((columns, rows, Some(prepared)));
     }
     let output = hook.table_function_rows(call, params, outer_row.as_ref())?;
     let rows: FunctionRows<'a> = output.rows;
-    Ok((output.columns, rows))
+    Ok((output.columns, rows, None))
 }
 
 /// Initialize argument calls without evaluating them. Their retained routine identities must pass EXECUTE even when the scan is never fetched.
@@ -398,43 +468,5 @@ fn user_function_columns(
         source.alias,
         source.column_aliases,
         source.ordinality,
-    )
-}
-
-/// The rows of a function call whose `width` columns are known before it runs. The call evaluates its arguments and starts at the first row request, so a consumer that requests none, such as `LIMIT 0`, never evaluates it.
-fn deferred_function_rows<'a>(
-    call: &TableFunctionCall<'_>,
-    runtime: std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
-    params: &'a [SQLParam],
-    outer_row: Option<crate::OwnedPhysicalRow>,
-    width: usize,
-) -> FunctionRows<'a> {
-    let name = call.name.to_string();
-    let binding = call.binding.cloned();
-    let output_name = call.output_name.to_string();
-    let args = call.args.to_vec();
-    let alias = call.alias.map(str::to_string);
-    let column_aliases = call.column_aliases.to_vec();
-    let column_types = call.column_types.to_vec();
-    let ordinality = call.ordinality;
-    crate::SQLRowStream::from_source(
-        crate::query::table_functions::DeferredTableFunctionRows::new(move || {
-            let call = TableFunctionCall {
-                name: &name,
-                binding: binding.as_ref(),
-                output_name: &output_name,
-                relations: None,
-                args: &args,
-                function_states: None,
-                routine_descriptions: None,
-                alias: alias.as_deref(),
-                column_aliases: &column_aliases,
-                ordinality,
-                column_types: &column_types,
-            };
-            runtime
-                .table_function_rows(call, params, outer_row.as_ref())?
-                .into_rows(width, &format!("table function `{name}`"))
-        }),
     )
 }
