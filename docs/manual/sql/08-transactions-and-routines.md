@@ -417,6 +417,8 @@ SELECT manual_foreach_sum(ARRAY[1, 2, 3]);
 
 Statements report their own notices with the SQLSTATE PostgreSQL gives each, such as `42P07` for `relation "t" already exists, skipping` and `25P01` for `there is no transaction in progress`. `Engine::take_sql_notices` drains a session's notices in the order they were reported, as `SQLNotice` values with `level`, `sqlstate`, `message`, `detail` and `hint`. The Python binding returns them as dictionaries with those keys, and the Node.js and WASM bindings as objects whose `detail` and `hint` are present when set. The PostgreSQL server sends each notice as a NoticeResponse with these fields, and `usql` prints it on standard error with its detail and hint on lines of their own.
 
+`Engine::try_take_sql_notice_with` admits a destination for one notice before removing it. Its preparation closure receives a borrowed view of the oldest notice and runs once under the queue lock; it must not reenter the Engine or the notice queue. Success returns the original notice and the prepared owner without copying notice fields. Rejection or unwinding preserves the queued notice. An empty queue returns `Ok(None)` without running the closure. Each admitted dequeue visits one notice, preserving the original emission order and emission-time filtering.
+
 ### Assertions
 
 The implemented syntax is `ASSERT condition [, message];`. The condition uses PL/pgSQL assignment-style Boolean coercion. A true condition is a no-op, while false or NULL raises `assert_failure` with SQLSTATE `P0004`. The optional message is evaluated only on failure and coerced to text; an omitted or NULL message becomes `assertion failed`.
