@@ -23,15 +23,7 @@ mod records;
 
 /// Whether catalog-free constant evaluation could reach an admitted physical value.
 pub fn contains_datum(value: &Value) -> bool {
-    match value {
-        Value::Datum(_) => true,
-        Value::Array(array) => array.elements().iter().any(contains_datum),
-        Value::List(values) => values.iter().any(contains_datum),
-        Value::Row(values) => values.iter().any(contains_datum),
-        Value::Record(fields) => fields.iter().any(|(_, value)| contains_datum(value)),
-        Value::Map(values) => values.values().any(contains_datum),
-        _ => false,
-    }
+    super::observations::any_nested_value(value, &mut |value| matches!(value, Value::Datum(_)))
 }
 
 /// Read only the actual tuple type of a value already selected as a composite by SQL analysis.

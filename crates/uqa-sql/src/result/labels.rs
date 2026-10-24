@@ -7,10 +7,13 @@
 //! Host-facing results observe deferred physical datums and carry enums as their current labels, through SQL's type-output owners.
 
 use super::SQLResult;
-use crate::expr::datums::contains_datum;
 use crate::expr::enums::{contains_enum_carrier, render_enum_labels, EnumLabelCatalog};
+use crate::expr::observations::output_carriers;
 use crate::SQLError;
 use uqa_core::Value;
+
+#[cfg(test)]
+mod tests;
 
 /// Read deferred datums and replace enum carriers in named and positional results by their current labels. This output boundary preserves declared column types and recursive carrier metadata.
 pub fn render_result_enum_labels(
@@ -19,23 +22,26 @@ pub fn render_result_enum_labels(
 ) -> Result<(), SQLError> {
     for row in &mut result.rows {
         for value in row.values_mut() {
-            if contains_datum(value) {
-                *value = read_datums(value, catalog)?;
-            }
-            if contains_enum_carrier(value) {
-                *value = render_enum_labels(catalog, value)?;
-            }
+            render_value(catalog, value)?;
         }
     }
     for row in result.positional_rows.iter_mut().flatten() {
         for value in row {
-            if contains_datum(value) {
-                *value = read_datums(value, catalog)?;
-            }
-            if contains_enum_carrier(value) {
-                *value = render_enum_labels(catalog, value)?;
-            }
+            render_value(catalog, value)?;
         }
+    }
+    Ok(())
+}
+
+fn render_value(catalog: Option<&dyn EnumLabelCatalog>, value: &mut Value) -> Result<(), SQLError> {
+    let carriers = output_carriers(value);
+    if carriers.datum {
+        *value = read_datums(value, catalog)?;
+    }
+    // Datum decoding can reveal an enum. Preserve the original complete datum
+    // phase before any enum-label lookup, including its first-error boundary.
+    if carriers.enumeration || (carriers.datum && contains_enum_carrier(value)) {
+        *value = render_enum_labels(catalog, value)?;
     }
     Ok(())
 }
