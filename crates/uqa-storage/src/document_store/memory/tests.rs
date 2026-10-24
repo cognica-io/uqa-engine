@@ -401,6 +401,83 @@ fn borrowed_cursor_honors_zero_limit_and_visitor_stop() {
 }
 
 #[test]
+fn stable_borrowed_shared_cursor_keeps_slots_and_never_acquires_row_ownership() {
+    let mut store = MemoryDocumentStore::new();
+    store
+        .put(1, doc([("alpha", Value::Int(1)), ("zulu", Value::Int(2))]))
+        .unwrap();
+    store
+        .put(
+            3,
+            doc([
+                ("alpha", Value::Int(3)),
+                ("zulu", Value::Str("日本λ".into())),
+            ]),
+        )
+        .unwrap();
+    store
+        .put(
+            7,
+            doc([("alpha", Value::Null), ("other", Value::Bool(true))]),
+        )
+        .unwrap();
+    assert_eq!(
+        store.for_each_next_shared_fields_borrowed(None, 0, &[], &mut |_, _| panic!(
+            "zero-limit callback"
+        )),
+        Some(0)
+    );
+    let fields = ["zulu", "missing", "alpha", "zulu"];
+    let mut actual = Vec::new();
+    assert_eq!(
+        store.for_each_next_shared_fields_borrowed(Some(1), 8, &fields, &mut |id, values| {
+            assert_eq!(Arc::strong_count(&store.state.documents[&id].values), 1);
+            actual.push((id, values.iter().copied().cloned().collect::<Vec<_>>()));
+            true
+        }),
+        Some(2)
+    );
+    assert_eq!(
+        actual,
+        vec![
+            (
+                3,
+                vec![
+                    Value::Str("日本λ".into()),
+                    Value::Null,
+                    Value::Int(3),
+                    Value::Str("日本λ".into())
+                ]
+            ),
+            (7, vec![Value::Null; 4]),
+        ]
+    );
+    let expected = store
+        .next_shared_fields(Some(1), 8, &fields)
+        .unwrap()
+        .unwrap()
+        .into_iter()
+        .map(|(id, row)| {
+            (
+                id,
+                row.with_projected(|values| values.iter().copied().cloned().collect::<Vec<_>>()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+    let mut seen = Vec::new();
+    assert_eq!(
+        store.for_each_next_shared_fields_borrowed(None, 8, &[], &mut |id, values| {
+            assert!(values.is_empty());
+            seen.push(id);
+            false
+        }),
+        Some(1)
+    );
+    assert_eq!(seen, [1]);
+}
+
+#[test]
 fn shared_snapshot_remains_isolated_after_a_write() {
     let mut s = MemoryDocumentStore::new();
     s.put(1, doc([("value", Value::Int(1))])).unwrap();

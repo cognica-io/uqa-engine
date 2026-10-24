@@ -87,6 +87,14 @@ pub trait RowSource: Send {
     ) -> ExecResult<bool> {
         Ok(false)
     }
+
+    /// Consume the complete source into the native public accumulator without transferring temporary row ownership. Unsupported sources decline before advancing their cursor.
+    fn collect_materialized(
+        &mut self,
+        _sink: &mut crate::query::output::MaterializedResultSink<'_>,
+    ) -> ExecResult<bool> {
+        Ok(false)
+    }
 }
 
 /// In-memory source from a precomputed `Vec<ResultRow>`. Useful for
@@ -452,6 +460,18 @@ impl PhysicalOperator for TableScan {
             return Ok(false);
         };
         source.consume_into_aggregate(executor)
+    }
+
+    fn collect_materialized(
+        &mut self,
+        sink: &mut crate::query::output::MaterializedResultSink<'_>,
+    ) -> ExecResult<bool> {
+        let Some(source) = self.source.as_mut() else {
+            return Ok(false);
+        };
+        let complete = source.collect_materialized(sink)?;
+        self.exhausted |= complete;
+        Ok(complete)
     }
 
     fn open(&mut self) -> ExecResult<()> {

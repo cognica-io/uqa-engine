@@ -14,6 +14,7 @@ pub use exists::collect_exists_key_operator;
 mod public_rows;
 pub(crate) use public_rows::PublicQueryRows;
 mod materialized;
+pub use materialized::MaterializedResultSink;
 pub(crate) use materialized::ResultRows;
 
 #[cfg(test)]
