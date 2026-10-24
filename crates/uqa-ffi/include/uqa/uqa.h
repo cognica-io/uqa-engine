@@ -35,6 +35,7 @@ typedef int32_t uqa_status;
 typedef uint32_t uqa_type_kind;
 typedef uint32_t uqa_notice_level;
 typedef uint32_t uqa_notification_failure_kind;
+typedef uint32_t uqa_open_flags;
 
 typedef uqa_status (UQA_CALL *uqa_user_data_destroy_fn)(void *user_data);
 
@@ -89,6 +90,12 @@ typedef struct uqa_bytes_view {
 #define UQA_COMPRESSION_NONE UINT32_C(0)
 #define UQA_COMPRESSION_ZSTD UINT32_C(1)
 #define UQA_COMPRESSION_LZ4 UINT32_C(2)
+
+#define UQA_OPEN_MEMORY        (UINT32_C(1) << 0)
+#define UQA_OPEN_SQLITE_NATIVE (UINT32_C(1) << 1)
+#define UQA_OPEN_SQLITE_KV     (UINT32_C(1) << 2)
+#define UQA_OPEN_REDB          (UINT32_C(1) << 3)
+#define UQA_OPEN_SQLITE_AUTO   (UINT32_C(1) << 4)
 
 #define UQA_TRANSACTION_IDLE UINT32_C(0)
 #define UQA_TRANSACTION_ACTIVE UINT32_C(1)
@@ -210,19 +217,8 @@ UQA_API uqa_status UQA_CALL uqa_config_get_ffi_memory_limit(
 UQA_API uqa_status UQA_CALL uqa_config_set_ffi_memory_limit(
     uqa_config config, uint64_t bytes);
 
-UQA_API uqa_status UQA_CALL uqa_engine_open_memory(
-    uqa_config config, uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open(
-    const char *path, uqa_config config,
-    uqa_engine *out);
-UQA_API uqa_status UQA_CALL uqa_engine_open_sqlite_kv(
-    const char *path, uqa_config config,
-    uqa_engine *out);
-UQA_API uqa_status UQA_CALL uqa_engine_open_redb(
-    const char *path, uqa_config config,
-    uqa_engine *out);
-UQA_API uqa_status UQA_CALL uqa_engine_open_auto(
-    const char *path, uqa_config config,
+    const char *path, uqa_open_flags flags, uqa_config config,
     uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_session(
     uqa_engine source, uqa_engine *out);

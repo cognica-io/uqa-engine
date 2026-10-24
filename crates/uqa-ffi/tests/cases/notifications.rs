@@ -9,13 +9,13 @@
 
 use std::{ptr, time::Duration};
 use uqa_ffi::{
-    uqa_engine_close, uqa_engine_execute, uqa_engine_open, uqa_engine_open_memory,
-    uqa_engine_open_session, uqa_notification_create, uqa_notification_destroy,
-    uqa_notification_get_payload, uqa_notification_get_sequence, uqa_result_create,
-    uqa_result_destroy, uqa_subscription_close, uqa_subscription_open, uqa_subscription_poll,
-    uqa_subscription_wait, UQANotification, UQAStringView, UQASubscription, UQASubscriptionOptions,
-    UQA_DONE, UQA_ERROR_BUSY, UQA_ERROR_STATE, UQA_OK, UQA_SUBSCRIPTION_OPTIONS_VERSION,
-    UQA_TIMEOUT,
+    uqa_engine_close, uqa_engine_execute, uqa_engine_open, uqa_engine_open_session,
+    uqa_notification_create, uqa_notification_destroy, uqa_notification_get_payload,
+    uqa_notification_get_sequence, uqa_result_create, uqa_result_destroy, uqa_subscription_close,
+    uqa_subscription_open, uqa_subscription_poll, uqa_subscription_wait, UQANotification,
+    UQAStringView, UQASubscription, UQASubscriptionOptions, UQA_DONE, UQA_ERROR_BUSY,
+    UQA_ERROR_STATE, UQA_OK, UQA_OPEN_MEMORY, UQA_OPEN_SQLITE_NATIVE,
+    UQA_SUBSCRIPTION_OPTIONS_VERSION, UQA_TIMEOUT,
 };
 
 fn options() -> UQASubscriptionOptions {
@@ -39,7 +39,12 @@ fn close_wakes_an_admitted_receiver_and_retires_its_owner() {
         let mut probe = ptr::null_mut();
         let options = options();
         assert_eq!(
-            uqa_engine_open_memory(ptr::null_mut(), &raw mut engine),
+            uqa_engine_open(
+                ptr::null(),
+                UQA_OPEN_MEMORY,
+                ptr::null_mut(),
+                &raw mut engine
+            ),
             UQA_OK
         );
         assert_eq!(uqa_notification_create(&raw mut waiting), UQA_OK);
@@ -113,7 +118,12 @@ fn retained_provider_delivers_after_the_creating_engine_closes() {
         let mut result = ptr::null_mut();
         let options = options();
         assert_eq!(
-            uqa_engine_open(path.as_ptr(), ptr::null_mut(), &raw mut engine),
+            uqa_engine_open(
+                path.as_ptr(),
+                UQA_OPEN_SQLITE_NATIVE,
+                ptr::null_mut(),
+                &raw mut engine
+            ),
             UQA_OK
         );
         assert_eq!(uqa_engine_open_session(engine, &raw mut publisher), UQA_OK);

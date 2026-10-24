@@ -343,20 +343,16 @@ UQA_API uqa_status UQA_CALL uqa_config_get_ffi_memory_limit(
 UQA_API uqa_status UQA_CALL uqa_config_set_ffi_memory_limit(
     uqa_config config, uint64_t bytes);
 
-UQA_API uqa_status UQA_CALL uqa_engine_open_memory(
-    uqa_config config, uqa_engine *out);
+typedef uint32_t uqa_open_flags;
+#define UQA_OPEN_MEMORY        (UINT32_C(1) << 0)
+#define UQA_OPEN_SQLITE_NATIVE (UINT32_C(1) << 1)
+#define UQA_OPEN_SQLITE_KV     (UINT32_C(1) << 2)
+#define UQA_OPEN_REDB          (UINT32_C(1) << 3)
+#define UQA_OPEN_SQLITE_AUTO   (UINT32_C(1) << 4)
+
 UQA_API uqa_status UQA_CALL uqa_engine_open(
-    const char *path, uqa_config config,
-    uqa_engine *out);
-UQA_API uqa_status UQA_CALL uqa_engine_open_sqlite_kv(
-    const char *path, uqa_config config,
-    uqa_engine *out);
-UQA_API uqa_status UQA_CALL uqa_engine_open_redb(
-    const char *path, uqa_config config,
-    uqa_engine *out);
-UQA_API uqa_status UQA_CALL uqa_engine_open_auto(
-    const char *path, uqa_config config,
-    uqa_engine *out);
+    const char *path, uqa_open_flags flags,
+    uqa_config config, uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_session(
     uqa_engine source, uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_session_for_user(
@@ -372,18 +368,20 @@ Configuration getters inspect the same stored settings changed by their matching
 
 Serialize config and UDF-option mutation with getters, borrowed-view use, and destruction of the same object. Setters copy borrowed inputs before replacing their storage; a key returned by `uqa_config_get_encryption_key` can be passed back through `uqa_config_set_encryption_key_n` without requiring a NUL terminator or invalidating its input before the copy completes.
 
-The constructor selects the storage provider explicitly. Every successful constructor returns an owned `uqa_engine` released by `uqa_engine_close`; the same SQL, result, callback, cancellation and retained-resource contracts apply to all four backends.
+`uqa_engine_open` selects storage and optional opening behavior through a fixed-width flag mask. Exactly one of `UQA_OPEN_MEMORY`, `UQA_OPEN_SQLITE_NATIVE`, `UQA_OPEN_SQLITE_KV` and `UQA_OPEN_REDB` is required. `UQA_OPEN_SQLITE_AUTO` is an optional modifier combined with either SQLite selector. Zero, unknown bits, multiple storage selectors and modifiers on another storage type return `UQA_ERROR_INVALID_ARGUMENT` before file I/O. The same `uqa_engine_close` releases every successful open.
 
-| Constructor | Backend | Encryption and compression |
+| Flags | Storage | Path |
 | --- | --- | --- |
-| `uqa_engine_open_memory` | Memory | Reject configured encryption or compression |
-| `uqa_engine_open` | Native SQLite | Existing native SQLite encryption/compression combinations |
-| `uqa_engine_open_sqlite_kv` | SQLite Key/Value | Existing SQLite connection encryption/compression combinations |
-| `uqa_engine_open_redb` | redb | Reject configured SQLite encryption or compression before opening a file |
+| `UQA_OPEN_MEMORY` | Memory | NULL required |
+| `UQA_OPEN_SQLITE_NATIVE` | Native SQLite | Nonempty UTF-8 file path |
+| `UQA_OPEN_SQLITE_KV` | SQLite Key/Value | Nonempty UTF-8 file path |
+| `UQA_OPEN_REDB` | redb | Nonempty UTF-8 file path |
 
-Native SQLite remains the default persistent backend. Its encryption and compression combinations map to the existing `Engine::open_*` methods. SQLite Key/Value uses `ManagedConnection` and `SQLiteKeyValueStorage`; redb uses `RedbStorage`. Both providers enter the existing `Engine::from_persistent_provider` boundary, which owns session restoration and independent sessions. Validate compression codec and level through the [SQLite provider](../../crates/uqa-storage-sqlite/src/lib.rs). `uqa_engine_open_auto` detects native SQLite file encryption/compression; it does not select between storage backends. Custom provider callbacks remain outside this interface.
+A non-NULL path with `UQA_OPEN_MEMORY` is rejected rather than ignored. Both SQLite layouts accept configured encryption and compression. Memory and redb reject configured encryption or compression before opening storage. SQLite validates codec and level through its existing owner. Native SQLite uses Engine's SQLite adapters; SQLite Key/Value and redb use their concrete provider constructors through `Engine::from_persistent_provider`. All four choices share SQL, result, callback, cancellation and retained-resource contracts.
 
-Trusted-anchor open and anchor extraction use separate explicit functions, with native SQLite owning anchor validation and representation. They are required wherever the C package advertises anchored compressed encryption. Encryption and compression alone do not establish rollback protection. Preserve existing wrong-key, format, and open diagnostics.
+`UQA_OPEN_SQLITE_AUTO` detects the selected SQLite file's encryption/compression without changing its native or Key/Value layout. Existing containers retain their stored codec; new files use plain SQLite or SQLCipher according to the configured key. AUTO rejects explicit compression settings because it reads them from the file. `ManagedConnection::open_auto` owns format-directed opening, and `Engine::open_auto` delegates to it. A key on an unencrypted file is rejected; encrypted or unrecognized files require a key. Open failures preserve native diagnostics. Storage types, encodings and their combinations do not add C open functions.
+
+An optional trusted anchor belongs in configuration and is consumed by the same open entry point; anchor extraction is a separate read-only operation. Native SQLite owns anchor validation and representation. This configuration is required wherever the C package advertises anchored compressed encryption. Encryption and compression alone do not establish rollback protection. Custom provider callbacks remain outside this interface.
 
 `uqa_engine_open_session` does not inherit private transaction state, prepared statements, cancellation, or mutable session variables. It shares database data and runtime registries. A memory source returns `UQA_ERROR_UNSUPPORTED` with NULL output; constructing another empty memory Engine would not create a session over the same database. Future memory multi-session support must begin in the Storage state and transaction-affine session contracts.
 
@@ -1035,7 +1033,7 @@ Implement in dependency order. Every row below is proposed work, not a completed
 | Optional Arrow | Shared conversion policy | Independent release order, moved structs, duplicate names, exact mapping or explicit rejection |
 | Packaging and parity | Completed implementation and focused checks | Actual target artifacts, five C scenarios, final-source CI results |
 
-Maintain one integration test target in `uqa-ffi` with `autotests = false`; register Rust test modules under `tests/integration.rs`. Keep C test translation units under `tests/native`; the single Rust harness compiles each as C11 and C++17 and executes both clients against the actual shared library. Run the same client fixtures separately against Memory, native SQLite, SQLite Key/Value and redb through their public C constructors, and verify durable session, failure recovery and close/reopen behavior on all three persistent providers. Header-only checks additionally verify inclusion, declarations and linkage modes. Examples remain the five public runnable scenarios.
+Maintain one integration test target in `uqa-ffi` with `autotests = false`; register Rust test modules under `tests/integration.rs`. Keep C test translation units under `tests/native`; the single Rust harness compiles each as C11 and C++17 and executes both clients against the actual shared library. Run the same client fixtures separately against Memory, native SQLite, SQLite Key/Value and redb through the public C open flags, and verify durable session, failure recovery and close/reopen behavior on all three persistent providers. Header-only checks additionally verify inclusion, declarations and linkage modes. Examples remain the five public runnable scenarios.
 
 Required verification includes:
 
@@ -1100,7 +1098,7 @@ int main(void)
     int64_t answer = 0;
     int exit_code = 1;
 
-    CALL(uqa_engine_open_memory(NULL, &engine));
+    CALL(uqa_engine_open(NULL, UQA_OPEN_MEMORY, NULL, &engine));
     CALL(uqa_result_create(&result));
     CALL(uqa_engine_execute(engine, "SELECT 42::bigint AS answer", result));
     CALL(uqa_result_get_value(result, 0, 0, &cell));

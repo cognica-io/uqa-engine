@@ -115,7 +115,7 @@ static void storage_options(void) {
             uqa_config config = NULL;
             uqa_engine engine = NULL;
             uqa_result result = NULL;
-            if (!encrypted && codec == 0) continue;
+            if (!sqlite && !encrypted && codec == 0) continue;
             (void)snprintf(name, sizeof(name), "options-%u-%u", encrypted, codec);
             database_path(path, sizeof(path), name);
             CHECK(uqa_config_create(&config));
@@ -126,7 +126,10 @@ static void storage_options(void) {
                 assert(engine == NULL);
                 assert(fopen(path, "rb") == NULL);
             } else {
-                CHECK(test_database_open_path(path, config, &engine));
+                if (codec == 0)
+                    CHECK(uqa_engine_open(path, test_database_flags() | UQA_OPEN_SQLITE_AUTO, config, &engine));
+                else
+                    CHECK(test_database_open_path(path, config, &engine));
                 CHECK(uqa_result_create(&result));
                 CHECK(uqa_engine_execute(engine,
                     "CREATE TABLE configured (n integer); INSERT INTO configured VALUES (17)", result));
@@ -138,9 +141,17 @@ static void storage_options(void) {
                 assert(number(result) == 17);
                 CHECK(uqa_result_destroy(&result));
                 CHECK(uqa_engine_close(&engine));
+                CHECK(uqa_config_set_compression(config, UQA_COMPRESSION_NONE, 0));
+                CHECK(uqa_engine_open(path, test_database_flags() | UQA_OPEN_SQLITE_AUTO, config, &engine));
+                CHECK(uqa_result_create(&result));
+                CHECK(uqa_engine_execute(engine, "SELECT n FROM configured", result));
+                assert(number(result) == 17);
+                CHECK(uqa_result_destroy(&result));
+                CHECK(uqa_engine_close(&engine));
                 if (encrypted && codec == 2) {
                     CHECK(uqa_config_set_encryption_key(config, "wrong-c-abi-test-key"));
-                    assert(test_database_open_path(path, config, &engine) == UQA_ERROR_IO);
+                    assert(uqa_engine_open(path, test_database_flags() | UQA_OPEN_SQLITE_AUTO,
+                        config, &engine) == UQA_ERROR_IO);
                     assert(engine == NULL);
                 }
             }
@@ -149,7 +160,36 @@ static void storage_options(void) {
     }
 }
 
+static void invalid_open_flags(void) {
+    char path[4096];
+    uqa_engine engine = NULL;
+    uqa_config config = NULL;
+    const uqa_open_flags persistent[] = {UQA_OPEN_SQLITE_NATIVE, UQA_OPEN_SQLITE_KV, UQA_OPEN_REDB};
+    database_path(path, sizeof(path), "invalid-flags");
+    for (uqa_open_flags flags = 0; flags < 32; flags++) {
+        if (flags == UQA_OPEN_MEMORY || flags == UQA_OPEN_SQLITE_NATIVE || flags == UQA_OPEN_REDB ||
+            flags == (UQA_OPEN_SQLITE_KV) || flags == (UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO) ||
+            flags == (UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO)) continue;
+        assert(uqa_engine_open(path, flags, NULL, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+        assert(engine == NULL);
+    }
+    assert(uqa_engine_open(path, UQA_OPEN_SQLITE_NATIVE | (UINT32_C(1) << 31), NULL, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+    assert(uqa_engine_open(path, UQA_OPEN_MEMORY, NULL, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+    for (size_t i = 0; i < sizeof(persistent) / sizeof(persistent[0]); i++) {
+        assert(uqa_engine_open(NULL, persistent[i], NULL, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+        assert(uqa_engine_open("", persistent[i], NULL, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+    }
+    CHECK(uqa_config_create(&config));
+    CHECK(uqa_config_set_compression(config, UQA_COMPRESSION_ZSTD, 3));
+    assert(uqa_engine_open(path, UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO, config, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+    assert(uqa_engine_open(path, UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO, config, &engine) == UQA_ERROR_INVALID_ARGUMENT);
+    CHECK(uqa_config_destroy(&config));
+    assert(engine == NULL);
+    assert(fopen(path, "rb") == NULL);
+}
+
 int main(void) {
+    invalid_open_flags();
     if (strcmp(test_database_backend(), "memory") == 0) {
         uqa_engine engine = NULL, sibling = NULL;
         uint64_t capabilities = 0;

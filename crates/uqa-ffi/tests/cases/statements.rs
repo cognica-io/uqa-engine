@@ -11,10 +11,10 @@
 use std::{ffi::CString, ptr};
 use uqa_ffi::{
     uqa_config_create, uqa_config_destroy, uqa_config_set_ffi_memory_limit, uqa_engine_close,
-    uqa_engine_execute, uqa_engine_open_memory, uqa_result_create, uqa_result_destroy,
+    uqa_engine_execute, uqa_engine_open, uqa_result_create, uqa_result_destroy,
     uqa_result_get_value, uqa_statement_bind, uqa_statement_execute, uqa_statement_finalize,
     uqa_statement_prepare, uqa_value_create_int64, uqa_value_create_text_n, uqa_value_destroy,
-    uqa_value_get_int64, UQA_ERROR_LIMIT, UQA_OK,
+    uqa_value_get_int64, UQA_ERROR_LIMIT, UQA_OK, UQA_OPEN_MEMORY,
 };
 
 #[test]
@@ -37,7 +37,10 @@ fn failed_prepared_admission_removes_native_definition_and_binding_failure_keeps
         let mut integer = 99;
         assert_eq!(uqa_config_create(&raw mut config), UQA_OK);
         assert_eq!(uqa_config_set_ffi_memory_limit(config, 4096), UQA_OK);
-        assert_eq!(uqa_engine_open_memory(config, &raw mut engine), UQA_OK);
+        assert_eq!(
+            uqa_engine_open(ptr::null(), UQA_OPEN_MEMORY, config, &raw mut engine),
+            UQA_OK
+        );
         assert_eq!(uqa_config_destroy(&raw mut config), UQA_OK);
         assert_eq!(
             uqa_statement_prepare(engine, wide.as_ptr(), &raw mut statement),

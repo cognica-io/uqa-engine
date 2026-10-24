@@ -9,9 +9,9 @@
 
 use std::{ffi::c_void, ptr};
 use uqa_ffi::{
-    uqa_engine_close, uqa_engine_copy_to, uqa_engine_execute, uqa_engine_open_memory,
-    uqa_error_get_last, uqa_error_get_status, uqa_result_create, uqa_result_destroy, UQAEngine,
-    UQAStatus, UQA_DONE, UQA_ERROR_BUSY, UQA_ERROR_STATE, UQA_OK,
+    uqa_engine_close, uqa_engine_copy_to, uqa_engine_execute, uqa_engine_open, uqa_error_get_last,
+    uqa_error_get_status, uqa_result_create, uqa_result_destroy, UQAEngine, UQAStatus, UQA_DONE,
+    UQA_ERROR_BUSY, UQA_ERROR_STATE, UQA_OK, UQA_OPEN_MEMORY,
 };
 
 struct Invocation {
@@ -79,11 +79,21 @@ fn callback_admission_and_diagnostics_are_local_to_the_invoking_thread() {
         let mut engine = ptr::null_mut();
         let mut other = ptr::null_mut();
         assert_eq!(
-            uqa_engine_open_memory(ptr::null_mut(), &raw mut engine),
+            uqa_engine_open(
+                ptr::null(),
+                UQA_OPEN_MEMORY,
+                ptr::null_mut(),
+                &raw mut engine
+            ),
             UQA_OK
         );
         assert_eq!(
-            uqa_engine_open_memory(ptr::null_mut(), &raw mut other),
+            uqa_engine_open(
+                ptr::null(),
+                UQA_OPEN_MEMORY,
+                ptr::null_mut(),
+                &raw mut other
+            ),
             UQA_OK
         );
         let mut invocation = Invocation {

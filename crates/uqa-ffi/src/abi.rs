@@ -54,6 +54,13 @@ pub const UQA_COMPRESSION_NONE: u32 = 0;
 pub const UQA_COMPRESSION_ZSTD: u32 = 1;
 pub const UQA_COMPRESSION_LZ4: u32 = 2;
 
+pub type UQAOpenFlags = u32;
+pub const UQA_OPEN_MEMORY: UQAOpenFlags = 1 << 0;
+pub const UQA_OPEN_SQLITE_NATIVE: UQAOpenFlags = 1 << 1;
+pub const UQA_OPEN_SQLITE_KV: UQAOpenFlags = 1 << 2;
+pub const UQA_OPEN_REDB: UQAOpenFlags = 1 << 3;
+pub const UQA_OPEN_SQLITE_AUTO: UQAOpenFlags = 1 << 4;
+
 pub const UQA_TRANSACTION_IDLE: u32 = 0;
 pub const UQA_TRANSACTION_ACTIVE: u32 = 1;
 pub const UQA_TRANSACTION_FAILED: u32 = 2;

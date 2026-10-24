@@ -12,12 +12,12 @@ use uqa_ffi::{
     uqa_config_create, uqa_config_destroy, uqa_config_set_compression,
     uqa_config_set_ffi_memory_limit, uqa_engine_close, uqa_engine_execute,
     uqa_engine_execute_params, uqa_engine_get_capabilities, uqa_engine_open,
-    uqa_engine_open_memory, uqa_engine_open_session, uqa_result_create, uqa_result_destroy,
-    uqa_result_get_value, uqa_transaction_begin, uqa_transaction_get_state,
-    uqa_transaction_rollback, uqa_value_create_copy, uqa_value_get_int64, uqa_value_get_text,
-    UQAStringView, UQA_CAP_INDEPENDENT_SESSIONS, UQA_CAP_PERSISTENCE, UQA_COMPRESSION_ZSTD,
-    UQA_ERROR_BUSY, UQA_ERROR_INVALID_ARGUMENT, UQA_ERROR_LIMIT, UQA_ERROR_TYPE,
-    UQA_ERROR_UNSUPPORTED, UQA_OK, UQA_TRANSACTION_IDLE,
+    uqa_engine_open_session, uqa_result_create, uqa_result_destroy, uqa_result_get_value,
+    uqa_transaction_begin, uqa_transaction_get_state, uqa_transaction_rollback,
+    uqa_value_create_copy, uqa_value_get_int64, uqa_value_get_text, UQAStringView,
+    UQA_CAP_INDEPENDENT_SESSIONS, UQA_CAP_PERSISTENCE, UQA_COMPRESSION_ZSTD, UQA_ERROR_BUSY,
+    UQA_ERROR_INVALID_ARGUMENT, UQA_ERROR_LIMIT, UQA_ERROR_TYPE, UQA_ERROR_UNSUPPORTED, UQA_OK,
+    UQA_OPEN_MEMORY, UQA_OPEN_SQLITE_NATIVE, UQA_TRANSACTION_IDLE,
 };
 
 #[test]
@@ -30,7 +30,12 @@ fn persistent_siblings_share_data_but_own_transactions_and_lifetimes() {
         let mut first_result = ptr::null_mut();
         let mut second_result = ptr::null_mut();
         assert_eq!(
-            uqa_engine_open(path.as_ptr(), ptr::null_mut(), &raw mut first),
+            uqa_engine_open(
+                path.as_ptr(),
+                UQA_OPEN_SQLITE_NATIVE,
+                ptr::null_mut(),
+                &raw mut first
+            ),
             UQA_OK
         );
         assert_eq!(uqa_result_create(&raw mut first_result), UQA_OK);
@@ -89,12 +94,17 @@ fn memory_sessions_and_inapplicable_storage_options_are_rejected() {
             UQA_OK
         );
         assert_eq!(
-            uqa_engine_open_memory(config, &raw mut engine),
+            uqa_engine_open(ptr::null(), UQA_OPEN_MEMORY, config, &raw mut engine),
             UQA_ERROR_INVALID_ARGUMENT
         );
         assert!(engine.is_null());
         assert_eq!(
-            uqa_engine_open_memory(ptr::null_mut(), &raw mut engine),
+            uqa_engine_open(
+                ptr::null(),
+                UQA_OPEN_MEMORY,
+                ptr::null_mut(),
+                &raw mut engine
+            ),
             UQA_OK
         );
         assert_eq!(
@@ -115,11 +125,21 @@ fn catalog_values_cannot_rebind_equal_oids_from_a_different_database() {
         let mut source = ptr::null_mut();
         let mut destination = ptr::null_mut();
         assert_eq!(
-            uqa_engine_open_memory(ptr::null_mut(), &raw mut first),
+            uqa_engine_open(
+                ptr::null(),
+                UQA_OPEN_MEMORY,
+                ptr::null_mut(),
+                &raw mut first
+            ),
             UQA_OK
         );
         assert_eq!(
-            uqa_engine_open_memory(ptr::null_mut(), &raw mut second),
+            uqa_engine_open(
+                ptr::null(),
+                UQA_OPEN_MEMORY,
+                ptr::null_mut(),
+                &raw mut second
+            ),
             UQA_OK
         );
         assert_eq!(uqa_result_create(&raw mut source), UQA_OK);
@@ -200,7 +220,12 @@ fn result_admission_precedes_sql_and_value_copies_hold_their_allowance() {
         assert_eq!(uqa_config_create(&raw mut config), UQA_OK);
         assert_eq!(uqa_config_set_ffi_memory_limit(config, 1), UQA_OK);
         assert_eq!(
-            uqa_engine_open(path.as_ptr(), config, &raw mut engine),
+            uqa_engine_open(
+                path.as_ptr(),
+                UQA_OPEN_SQLITE_NATIVE,
+                config,
+                &raw mut engine
+            ),
             UQA_OK
         );
         assert_eq!(uqa_result_create(&raw mut result), UQA_OK);
@@ -215,7 +240,10 @@ fn result_admission_precedes_sql_and_value_copies_hold_their_allowance() {
         native.close().unwrap();
         drop(native);
         assert_eq!(uqa_config_set_ffi_memory_limit(config, 4096), UQA_OK);
-        assert_eq!(uqa_engine_open_memory(config, &raw mut engine), UQA_OK);
+        assert_eq!(
+            uqa_engine_open(ptr::null(), UQA_OPEN_MEMORY, config, &raw mut engine),
+            UQA_OK
+        );
         assert_eq!(
             uqa_engine_execute(engine, c"SELECT repeat('x', 50000)".as_ptr(), result),
             UQA_OK

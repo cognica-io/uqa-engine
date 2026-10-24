@@ -20,10 +20,12 @@ use uqa_engine::Engine;
 
 use crate::{
     abi::{
-        UQA_CAP_INDEPENDENT_SESSIONS, UQA_CAP_PERSISTENCE, UQA_COMPLETION_IN_TRANSACTION,
-        UQA_COMPLETION_PENDING, UQA_COMPLETION_UNKNOWN, UQA_ERROR_BUSY, UQA_ERROR_IO,
-        UQA_ERROR_UNSUPPORTED, UQA_OK, UQA_TRANSACTION_ACTIVE, UQA_TRANSACTION_COMPLETION_PENDING,
-        UQA_TRANSACTION_FAILED, UQA_TRANSACTION_IDLE,
+        UQAOpenFlags, UQA_CAP_INDEPENDENT_SESSIONS, UQA_CAP_PERSISTENCE,
+        UQA_COMPLETION_IN_TRANSACTION, UQA_COMPLETION_PENDING, UQA_COMPLETION_UNKNOWN,
+        UQA_ERROR_BUSY, UQA_ERROR_IO, UQA_ERROR_UNSUPPORTED, UQA_OK, UQA_OPEN_MEMORY,
+        UQA_OPEN_REDB, UQA_OPEN_SQLITE_AUTO, UQA_OPEN_SQLITE_KV, UQA_OPEN_SQLITE_NATIVE,
+        UQA_TRANSACTION_ACTIVE, UQA_TRANSACTION_COMPLETION_PENDING, UQA_TRANSACTION_FAILED,
+        UQA_TRANSACTION_IDLE,
     },
     boundary, callback,
     config::UQAConfig,
@@ -178,22 +180,10 @@ fn publish_engine(
     }
 }
 
-ffi_fn!(uqa_engine_open_memory(config: *mut UQAConfig, out: *mut *mut UQAEngine) {
-    let out = boundary::new_handle(out)?;
-    callback::reject_reentry()?;
-    let defaults = UQAConfig::default();
-    let config = if config.is_null() { &defaults } else { boundary::input(config)? };
-    if config.key.is_some() || config.compression.is_some() {
-        return Err(UQAError::invalid("memory databases do not accept encryption or compression"));
-    }
-    *out = publish_engine(Engine::new(), false, config.memory_limit)?;
-    Ok(UQA_OK)
-});
-
 #[derive(Clone, Copy)]
 enum PersistentBackend {
     SQLiteNative { auto: bool },
-    SQLiteKeyValue,
+    SQLiteKeyValue { auto: bool },
     Redb,
 }
 
@@ -202,7 +192,6 @@ fn open(
     config: Option<&UQAConfig>,
     backend: PersistentBackend,
 ) -> boundary::Result<*mut UQAEngine> {
-    callback::reject_reentry()?;
     if path.is_empty() {
         return Err(UQAError::invalid("database path must not be empty"));
     }
@@ -210,14 +199,19 @@ fn open(
     let config = config.unwrap_or(&defaults);
     let key = config.key.as_ref().map(|key| key.as_str());
     let path = Path::new(path);
+    if matches!(
+        backend,
+        PersistentBackend::SQLiteNative { auto: true }
+            | PersistentBackend::SQLiteKeyValue { auto: true }
+    ) && config.compression.is_some()
+    {
+        return Err(UQAError::invalid(
+            "automatic open detects compression from the database file",
+        ));
+    }
     let native = match backend {
         PersistentBackend::SQLiteNative { auto } => {
             let native = if auto {
-                if config.compression.is_some() {
-                    return Err(UQAError::invalid(
-                        "automatic open detects compression from the database file",
-                    ));
-                }
                 Engine::open_auto(path, key)
             } else {
                 match (key, config.compression) {
@@ -231,14 +225,18 @@ fn open(
             };
             native.map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?
         }
-        PersistentBackend::SQLiteKeyValue => {
+        PersistentBackend::SQLiteKeyValue { auto } => {
             use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage};
-            let connection = match (key, config.compression) {
-                (None, None) => ManagedConnection::open(path),
-                (Some(key), None) => ManagedConnection::open_encrypted(path, key),
-                (None, Some(options)) => ManagedConnection::open_compressed(path, options),
-                (Some(key), Some(options)) => {
-                    ManagedConnection::open_compressed_encrypted(path, key, options)
+            let connection = if auto {
+                ManagedConnection::open_auto(path, key)
+            } else {
+                match (key, config.compression) {
+                    (None, None) => ManagedConnection::open(path),
+                    (Some(key), None) => ManagedConnection::open_encrypted(path, key),
+                    (None, Some(options)) => ManagedConnection::open_compressed(path, options),
+                    (Some(key), Some(options)) => {
+                        ManagedConnection::open_compressed_encrypted(path, key, options)
+                    }
                 }
             }
             .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
@@ -262,32 +260,32 @@ fn open(
     publish_engine(native, true, config.memory_limit)
 }
 
-ffi_fn!(uqa_engine_open(path: *const c_char, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
+ffi_fn!(uqa_engine_open(path: *const c_char, flags: UQAOpenFlags, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
     let out = boundary::new_handle(out)?;
-    let path = boundary::text(path)?;
+    callback::reject_reentry()?;
     let config = if config.is_null() { None } else { Some(boundary::input(config)?) };
-    *out = open(path, config, PersistentBackend::SQLiteNative { auto: false })?;
-    Ok(UQA_OK)
-});
-ffi_fn!(uqa_engine_open_sqlite_kv(path: *const c_char, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
-    let out = boundary::new_handle(out)?;
+    if flags == UQA_OPEN_MEMORY {
+        if !path.is_null() {
+            return Err(UQAError::invalid("memory open requires a NULL path"));
+        }
+        let defaults = UQAConfig::default();
+        let config = config.unwrap_or(&defaults);
+        if config.key.is_some() || config.compression.is_some() {
+            return Err(UQAError::invalid("memory databases do not accept encryption or compression"));
+        }
+        *out = publish_engine(Engine::new(), false, config.memory_limit)?;
+        return Ok(UQA_OK);
+    }
+    let backend = match flags {
+        UQA_OPEN_SQLITE_NATIVE => PersistentBackend::SQLiteNative { auto: false },
+        UQA_OPEN_REDB => PersistentBackend::Redb,
+        flags if flags == UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteNative { auto: true },
+        UQA_OPEN_SQLITE_KV => PersistentBackend::SQLiteKeyValue { auto: false },
+        flags if flags == UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteKeyValue { auto: true },
+        _ => return Err(UQAError::invalid("open requires exactly one storage flag; SQLITE_AUTO modifies SQLite only")),
+    };
     let path = boundary::text(path)?;
-    let config = if config.is_null() { None } else { Some(boundary::input(config)?) };
-    *out = open(path, config, PersistentBackend::SQLiteKeyValue)?;
-    Ok(UQA_OK)
-});
-ffi_fn!(uqa_engine_open_redb(path: *const c_char, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
-    let out = boundary::new_handle(out)?;
-    let path = boundary::text(path)?;
-    let config = if config.is_null() { None } else { Some(boundary::input(config)?) };
-    *out = open(path, config, PersistentBackend::Redb)?;
-    Ok(UQA_OK)
-});
-ffi_fn!(uqa_engine_open_auto(path: *const c_char, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
-    let out = boundary::new_handle(out)?;
-    let path = boundary::text(path)?;
-    let config = if config.is_null() { None } else { Some(boundary::input(config)?) };
-    *out = open(path, config, PersistentBackend::SQLiteNative { auto: true })?;
+    *out = open(path, config, backend)?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_engine_open_session(source: *mut UQAEngine, out: *mut *mut UQAEngine) {

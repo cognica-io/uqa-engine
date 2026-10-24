@@ -42,24 +42,28 @@ The repository provides the same five complete scenarios for every public bindin
 
 The binding workflows execute all five scenarios through their built artifacts. The vector example compares exact, HNSW, IVF and DiskANN access, binds vector/query parameters, and checks canonical scores, private rollback, committed changes and closed reopen. DiskANN configuration uses the same [SQL options](../sql/02-ddl.md#diskann-vector-indexes) in every binding and is independent of Nori/Kuromoji features. The Browser WASM directory also provides an HTML runner for interactive use. Its modules run against the generated Emscripten package under Node.js and in real Chrome; `scripts/verify-examples-browser.py` additionally verifies DiskANN after an IndexedDB checkpoint and a fresh page/module load.
 
-The binding transaction tests also exercise an independent session's commit while the first session retains private writes, then verify commit, rollback or savepoint undo and closed reopen. Python and Node.js cover ordinary, compressed, encrypted and compressed-encrypted native SQLite files; WASM covers ordinary and compressed files. Each target checks READ UNCOMMITTED/READ COMMITTED command refresh and REPEATABLE READ/SERIALIZABLE fixed visibility against the shared PostgreSQL reference fixture. `scripts/verify-concurrent-transactions-browser.py` additionally runs the browser cases in real Chrome and verifies committed state after an IndexedDB checkpoint and a fresh page/module load. These schedules exercise the providers exposed by their released bindings. The C source suite below also executes SQLite Key/Value and redb through their C constructors.
+The binding transaction tests also exercise an independent session's commit while the first session retains private writes, then verify commit, rollback or savepoint undo and closed reopen. Python and Node.js cover ordinary, compressed, encrypted and compressed-encrypted native SQLite files; WASM covers ordinary and compressed files. Each target checks READ UNCOMMITTED/READ COMMITTED command refresh and REPEATABLE READ/SERIALIZABLE fixed visibility against the shared PostgreSQL reference fixture. `scripts/verify-concurrent-transactions-browser.py` additionally runs the browser cases in real Chrome and verifies committed state after an IndexedDB checkpoint and a fresh page/module load. These schedules exercise the providers exposed by their released bindings. The C source suite below also executes SQLite Key/Value and redb through the C open flags.
 
 ## C source API
 
 The embedded C binding is under implementation and has no released package yet. Its [source headers](../../../crates/uqa-ffi/include/uqa/uqa.h) and [implementation ledger](../../plans/0028-c-bindings.md) distinguish the implemented source API from remaining design and qualification work.
 
-| Constructor | Storage |
-| --- | --- |
-| `uqa_engine_open_memory(config, &engine)` | Memory |
-| `uqa_engine_open(path, config, &engine)` | Native SQLite |
-| `uqa_engine_open_sqlite_kv(path, config, &engine)` | SQLite Key/Value |
-| `uqa_engine_open_redb(path, config, &engine)` | redb |
+Use `uqa_engine_open(path, flags, config, &engine)` for every backend. The fixed-width `uqa_open_flags` mask requires exactly one storage selector; `UQA_OPEN_SQLITE_AUTO` may be combined with either SQLite selector.
 
-All constructors return `uqa_status`. Supply an initially NULL output handle; success writes an owned opaque `uqa_engine`, and failure leaves that output NULL. Paths are UTF-8 C strings. NULL config selects defaults; a supplied config is copied and remains caller-owned. Release an Engine with `uqa_engine_close(&engine)`. Dependent result, statement and cursor handles must be released first; a busy close leaves the Engine usable. Successful close rolls back its uncommitted transaction before release. Each persistent backend supports independent sibling sessions through `uqa_engine_open_session`; memory reports `UQA_ERROR_UNSUPPORTED`.
+| Flags | Storage | Path |
+| --- | --- | --- |
+| `UQA_OPEN_MEMORY` | Memory | NULL |
+| `UQA_OPEN_SQLITE_NATIVE` | Native SQLite | Nonempty UTF-8 file path |
+| `UQA_OPEN_SQLITE_KV` | SQLite Key/Value | Nonempty UTF-8 file path |
+| `UQA_OPEN_REDB` | redb | Nonempty UTF-8 file path |
 
-Both SQLite constructors accept encryption and LZ4/Zstandard compression settings from `uqa_config`. Memory and redb reject configured encryption or compression with `UQA_ERROR_INVALID_ARGUMENT`; redb rejects those settings before opening a file. Native open failures report `UQA_ERROR_IO` with borrowed thread-local diagnostics. `uqa_engine_open_auto` detects native SQLite file encryption/compression and does not select a provider.
+Open returns `uqa_status`. Supply an initially NULL output handle; success writes an owned opaque `uqa_engine`, and failure leaves that output NULL. NULL config selects defaults; a supplied config is copied and remains caller-owned. Release an Engine with `uqa_engine_close(&engine)`. Dependent result, statement and cursor handles must be released first; a busy close leaves the Engine usable. Successful close rolls back its uncommitted transaction before release. Each persistent backend supports independent sibling sessions through `uqa_engine_open_session`; memory reports `UQA_ERROR_UNSUPPORTED`.
 
-For example, `uqa_engine engine = NULL;` followed by `uqa_engine_open_redb("database.redb", NULL, &engine)` opens or creates a redb database; check the returned status before issuing SQL or closing the handle. The same C11/C++17 source fixtures execute SQL, prepared statements, cursors, COPY, notices and notifications through all four constructors. Durable fixture cases also check sibling isolation, savepoint recovery, retained subscriptions, rollback on close and reopen on each persistent backend. The [C crate README](../../../crates/uqa-ffi/README.md) provides the source test command; this evidence does not qualify a release or additional platforms.
+Both SQLite layouts accept encryption and LZ4/Zstandard compression settings from `uqa_config`. Add `UQA_OPEN_SQLITE_AUTO` to either layout to detect an existing file's encryption/compression; clear explicit compression settings first. AUTO uses the file's stored codec and requires the appropriate key. For a new file it creates plain SQLite or SQLCipher according to the configured key. AUTO does not choose a storage type or layout. Native open failures report `UQA_ERROR_IO` with borrowed thread-local diagnostics.
+
+Zero flags, unknown bits, multiple storage selectors, the SQLite AUTO modifier on memory or redb, a non-NULL memory path, and missing/empty persistent paths return `UQA_ERROR_INVALID_ARGUMENT` before opening a file. Memory and redb also reject configured encryption or compression. AUTO with explicit compression settings is invalid.
+
+For example, `uqa_engine engine = NULL;` followed by `uqa_engine_open("database.db", UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO, NULL, &engine)` opens SQLite Key/Value using detected file encoding; check the status before issuing SQL or closing the handle. The same C11/C++17 fixtures execute SQL, prepared statements, cursors, COPY, notices and notifications through the four storage selections. Durable cases verify sibling isolation, savepoint recovery, retained subscriptions, rollback on close and reopen for every persistent backend. The [C crate README](../../../crates/uqa-ffi/README.md) provides the source test command; static runtime consumers, other platforms and release qualification remain in the ledger.
 
 ## Rust QueryBuilder
 

@@ -19,14 +19,19 @@ static const char *test_database_backend(void) {
     return backend;
 }
 
-static uqa_status test_database_open_path(const char *path, uqa_config config, uqa_engine *out) {
+static uqa_open_flags test_database_flags(void) {
     const char *backend = test_database_backend();
-    if (strcmp(backend, "memory") == 0) return uqa_engine_open_memory(config, out);
-    if (strcmp(backend, "sqlite_native") == 0) return uqa_engine_open(path, config, out);
-    if (strcmp(backend, "sqlite_kv") == 0) return uqa_engine_open_sqlite_kv(path, config, out);
-    if (strcmp(backend, "redb") == 0) return uqa_engine_open_redb(path, config, out);
+    if (strcmp(backend, "memory") == 0) return UQA_OPEN_MEMORY;
+    if (strcmp(backend, "sqlite_native") == 0) return UQA_OPEN_SQLITE_NATIVE;
+    if (strcmp(backend, "sqlite_kv") == 0) return UQA_OPEN_SQLITE_KV;
+    if (strcmp(backend, "redb") == 0) return UQA_OPEN_REDB;
     fprintf(stderr, "unknown test storage: %s\n", backend);
     abort();
+}
+
+static uqa_status test_database_open_path(const char *path, uqa_config config, uqa_engine *out) {
+    uqa_open_flags flags = test_database_flags();
+    return uqa_engine_open(flags == UQA_OPEN_MEMORY ? NULL : path, flags, config, out);
 }
 
 static uqa_status test_database_open(uqa_config config, uqa_engine *out) {

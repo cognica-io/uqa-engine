@@ -12,10 +12,10 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_ffi::{
     uqa_config_create, uqa_config_destroy, uqa_config_set_ffi_memory_limit, uqa_cursor_close,
-    uqa_cursor_fetch, uqa_cursor_open, uqa_engine_close, uqa_engine_open, uqa_engine_open_memory,
-    uqa_error_get_completion, uqa_error_get_last, uqa_result_create, uqa_result_destroy,
-    uqa_result_get_value, uqa_value_get_int64, UQACursor, UQAStatus, UQA_COMPLETION_COMMITTED,
-    UQA_COMPLETION_NONE, UQA_DONE, UQA_ERROR_BUSY, UQA_ERROR_LIMIT, UQA_OK,
+    uqa_cursor_fetch, uqa_cursor_open, uqa_engine_close, uqa_engine_open, uqa_error_get_completion,
+    uqa_error_get_last, uqa_result_create, uqa_result_destroy, uqa_result_get_value,
+    uqa_value_get_int64, UQACursor, UQAStatus, UQA_COMPLETION_COMMITTED, UQA_COMPLETION_NONE,
+    UQA_DONE, UQA_ERROR_BUSY, UQA_ERROR_LIMIT, UQA_OK, UQA_OPEN_MEMORY, UQA_OPEN_SQLITE_NATIVE,
 };
 
 #[test]
@@ -48,7 +48,12 @@ fn cursor_admission_precedes_evaluation_and_descriptor_failure_reports_completed
             assert_eq!(uqa_config_create(&raw mut config), UQA_OK);
             assert_eq!(uqa_config_set_ffi_memory_limit(config, limit), UQA_OK);
             assert_eq!(
-                uqa_engine_open(path.as_ptr(), config, &raw mut engine),
+                uqa_engine_open(
+                    path.as_ptr(),
+                    UQA_OPEN_SQLITE_NATIVE,
+                    config,
+                    &raw mut engine
+                ),
                 UQA_OK
             );
             assert_eq!(uqa_config_destroy(&raw mut config), UQA_OK);
@@ -92,7 +97,12 @@ fn concurrent_fetches_admit_one_caller_and_deliver_each_row_once() {
         let mut engine = ptr::null_mut();
         let mut cursor = ptr::null_mut();
         assert_eq!(
-            uqa_engine_open_memory(ptr::null_mut(), &raw mut engine),
+            uqa_engine_open(
+                ptr::null(),
+                UQA_OPEN_MEMORY,
+                ptr::null_mut(),
+                &raw mut engine
+            ),
             UQA_OK
         );
         assert_eq!(
