@@ -95,6 +95,28 @@ impl UQAError {
         &self.message
     }
 
+    pub(crate) fn take_native(&mut self) -> Option<SQLError> {
+        self.native.take().map(|error| *error)
+    }
+
+    pub(crate) fn native(&self) -> Option<&SQLError> {
+        self.native
+            .as_deref()
+            .or_else(|| self.cause.as_ref()?.get()?.native())
+    }
+
+    fn cause(&self) -> Option<&Self> {
+        self.cause
+            .as_ref()
+            .and_then(|cause| cause.get())
+            .or_else(|| match self.native.as_deref()?.primary() {
+                SQLError::Host(source) => {
+                    source.downcast_ref::<crate::udf::HostError>()?.diagnostic()
+                }
+                _ => None,
+            })
+    }
+
     pub(crate) fn is_notification_failure(&self) -> bool {
         self.notification.is_some()
     }
@@ -132,6 +154,14 @@ impl From<SQLError> for UQAError {
             error.sqlstate_present = true;
         }
         error.position = native.position().map(u64::from);
+        if let SQLError::Host(source) = native.primary() {
+            if let Some(failure) = source
+                .downcast_ref::<crate::udf::HostError>()
+                .and_then(crate::udf::HostError::retained)
+            {
+                error.cause = Some(Arc::clone(failure));
+            }
+        }
         let mut message = DiagnosticWriter(String::new());
         if write!(message, "{}", native.primary()).is_ok() {
             error.message = Cow::Owned(message.0);
@@ -223,16 +253,28 @@ pub(crate) fn retained_slot(memory: &MemoryBudget) -> Result<RetainedError> {
     Ok(Budgeted::new(OnceLock::new(), memory.empty_reservation()).into_shared()?)
 }
 
-enum CurrentError {
+pub(crate) enum CurrentError {
     Owned(UQAError),
     Retained(RetainedError),
 }
 
 impl CurrentError {
-    fn get(&self) -> Option<&UQAError> {
+    pub(crate) fn get(&self) -> Option<&UQAError> {
         match self {
             Self::Owned(error) => Some(error),
             Self::Retained(error) => error.get(),
+        }
+    }
+
+    pub(crate) fn into_owned(self, memory: &MemoryBudget) -> UQAError {
+        match self {
+            Self::Owned(error) => error,
+            Self::Retained(cause) => match cause.get() {
+                Some(error) => {
+                    UQAError::callback(error.status, error.message(), memory).with_cause(&cause)
+                }
+                None => UQAError::state("retained diagnostic has not been populated"),
+            },
         }
     }
 }
@@ -242,11 +284,13 @@ thread_local! {
 }
 
 pub(crate) fn clear() {
-    let _ = LAST_ERROR.try_with(|slot| {
-        if let Ok(mut slot) = slot.try_borrow_mut() {
-            *slot = None;
-        }
-    });
+    let previous = LAST_ERROR
+        .try_with(|slot| slot.try_borrow_mut().ok()?.take())
+        .ok()
+        .flatten();
+    if let Some(error) = previous {
+        crate::callback::retain_helper_error(error);
+    }
 }
 
 pub(crate) fn publish(error: UQAError) -> UQAStatus {
@@ -288,7 +332,7 @@ fn inspect(
                 if std::ptr::eq(error, pointer) {
                     return read(error).unwrap_or_else(|error| error.status);
                 }
-                current = error.cause.as_ref().and_then(|cause| cause.get());
+                current = error.cause();
             }
             UQA_ERROR_INVALID_ARGUMENT
         })
@@ -342,9 +386,7 @@ diagnostic_getter!(uqa_error_get_status, UQAStatus, |e: &UQAError| Some(
     e.status
 ));
 diagnostic_getter!(uqa_error_get_cause, *const UQAError, |e: &UQAError| e
-    .cause
-    .as_ref()
-    .and_then(|cause| cause.get())
+    .cause()
     .map(std::ptr::from_ref));
 diagnostic_getter!(uqa_error_get_message, UQAStringView, |e: &UQAError| Some(
     e.message.as_ref().into()

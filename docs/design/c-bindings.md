@@ -889,6 +889,9 @@ typedef struct uqa_udf_options_t *uqa_udf_options;
 #define UQA_VOLATILITY_STABLE    UINT32_C(1)
 #define UQA_VOLATILITY_VOLATILE  UINT32_C(2)
 
+/* Defaults: VOLATILE and may_mutate_engine = 1. Setters validate each
+ * property; registration validates the complete combination and copies it.
+ * Invalid setters preserve the previous value. */
 UQA_API uqa_status UQA_CALL uqa_udf_options_create(uqa_udf_options *out);
 UQA_API uqa_status UQA_CALL uqa_udf_options_get_volatility(
     uqa_udf_options options, uint32_t *out);
@@ -905,17 +908,78 @@ typedef uqa_status (UQA_CALL *uqa_udf_scalar_fn)(
     uqa_value_view const *arguments, uint32_t count,
     void *user_data);
 
+/* A successful create transfers scan ownership even when *out_scan is NULL.
+ * A failed create remains responsible for its own partial allocations. */
+typedef uqa_status (UQA_CALL *uqa_udf_create_scan_fn)(
+    uqa_value_view const *arguments, uint32_t count, void *user_data,
+    void **out_scan);
+typedef uqa_status (UQA_CALL *uqa_udf_next_fn)(
+    uqa_udf_row_sink sink, void *scan, void *user_data);
+typedef uqa_status (UQA_CALL *uqa_udf_destroy_scan_fn)(
+    void *scan, void *user_data);
+
+typedef uqa_status (UQA_CALL *uqa_udf_create_state_fn)(
+    void *user_data, void **out_state);
+typedef uqa_status (UQA_CALL *uqa_udf_observe_fn)(
+    void *state, uqa_value_view const *arguments, uint32_t count, void *user_data);
+typedef uqa_status (UQA_CALL *uqa_udf_finish_fn)(
+    uqa_udf_context context, void *state, void *user_data);
+typedef uqa_status (UQA_CALL *uqa_udf_destroy_state_fn)(
+    void *state, void *user_data);
+
 UQA_API uqa_status UQA_CALL uqa_udf_register_scalar(
     uqa_engine engine, const char *name,
     uqa_udf_options options, uqa_udf_scalar_fn function,
     void *user_data, uqa_user_data_destroy_fn destroy_user_data,
     uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_table(
+    uqa_engine engine, const char *name, uqa_udf_options options,
+    const char *const *columns, uint32_t column_count,
+    uqa_udf_create_scan_fn create_scan, uqa_udf_next_fn next,
+    uqa_udf_destroy_scan_fn destroy_scan,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_aggregate(
+    uqa_engine engine, const char *name, uqa_udf_options options,
+    uqa_udf_create_state_fn create_state, uqa_udf_observe_fn observe,
+    uqa_udf_finish_fn finish, uqa_udf_destroy_state_fn destroy_state,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
+
+/* These objects and argument views are borrowed for their active invocation.
+ * Argument types follow native runtime carriers/physical OIDs, not the lost
+ * expression declaration or modifiers; unknown NULL has no type descriptor.
+ * Exactly one successful result assignment is required; explicit SQL NULL is
+ * a value. Before assignment get_result returns UQA_DONE and a NULL view.
+ * Failed/duplicate assignments preserve the previous result. */
 UQA_API uqa_status UQA_CALL uqa_udf_context_get_result(
     uqa_udf_context context, uqa_value_view *out);
 UQA_API uqa_status UQA_CALL uqa_udf_context_set_result(
     uqa_udf_context context, uqa_value_view value);
 UQA_API uqa_status UQA_CALL uqa_udf_context_fail(
     uqa_udf_context context, const char *message);
+
+/* next returns UQA_OK after emitting one row, or UQA_DONE without a row.
+ * emit copies the values before returning; wrong width and a second row fail.
+ * All other callbacks return UQA_OK or a negative failure status.
+ * Every successful create has one destroy call, including on early stop or
+ * failure. finish reads aggregate state without consuming it. Destruction
+ * consumes ownership even when it fails; it is never retried. */
+UQA_API uqa_status UQA_CALL uqa_udf_row_sink_emit(
+    uqa_udf_row_sink sink, uqa_value_view const *values, uint32_t count);
+
+/* Register copies options and table column names (UTF-8 C strings, at least
+ * one column). Names and order are fixed for the registration, including
+ * empty and correlated sources. Failure leaves user_data with the caller. Shared
+ * user_data can be invoked concurrently by sibling sessions. Per-scan/group
+ * calls are serialized but may move between workers. Engine reentry is
+ * prohibited from every callback, including destruction; value/result and
+ * callback-diagnostic helpers are allowed. Returning the most recent helper
+ * failure status preserves its diagnostic through later successful helpers.
+ * Native SQL errors retain their SQLSTATE. No exception/longjmp may escape.
+ *
+ * A handle keeps the shared registry, not its creating session. Unregister
+ * returns UQA_ERROR_BUSY with the handle intact while execution retains it.
+ * Success retires only that registration, destroys user_data exactly once and
+ * clears the handle even when the destructor returns an error. */
 UQA_API uqa_status UQA_CALL uqa_udf_unregister(uqa_udf *function);
 ```
 
@@ -933,17 +997,19 @@ Engine provides identity-specific `SQLFunctionRegistration` handles and shared-s
 
 ### Streaming table functions
 
-Use `uqa_udf_register_table` with `create_scan`, `next`, and `destroy_scan` callbacks. Create supplies per-scan state and ordered column names; next writes at most one row to `uqa_udf_row_sink`; `UQA_DONE` ends the scan. The row sink rejects incorrect width and multiple rows per next call. Each successful scan creation has exactly one status-returning destroy call, including early stop, error, and cancellation. State allocated before a failed scan creation remains the callback's cleanup responsibility.
+Use `uqa_udf_register_table(engine, name, options, columns, column_count, create_scan, next, destroy_scan, user_data, destroy_user_data, out)`. Registration copies at least one ordered UTF-8 column name. Names and order remain fixed until retirement; SQL binds the descriptor before invoking a callback, including for empty input and LATERAL sources. Create supplies only per-scan state; next writes at most one row to `uqa_udf_row_sink`; `UQA_DONE` ends the scan. The row sink rejects incorrect width and multiple rows per next call. Each successful scan creation has exactly one status-returning destroy call, including early stop, error, and cancellation. State allocated before a failed scan creation remains the callback's cleanup responsibility.
 
-Implement the adapter through `SQLTableFunction::call_stream`, `SQLTableFunctionStream::from_source` and Execution's `SQLRowSource<Vec<Value>>`. Do not collect an unbounded table callback into `SQLTableFunctionResult`. Late errors after emitted rows remain errors. The owned `SQLRowStream` explicitly closes its source at EOF, production failure and early termination, before the enclosing statement reports success. The C adapter's `close` invokes `destroy_scan` and consumes the scan even when that callback fails. Do not erase this owner into an ordinary iterator or rely on `Drop` to report status. Native physical scans, set projections and lateral inputs retain the explicit close path through their adapters. When both execution and cleanup fail, retain the primary typed error and append the cleanup diagnostic with `SQLError::with_cleanup`. Typed output declarations beyond the current native column contract require an owner extension before publication.
+The adapter declares `SQLTableFunction::output_columns` and uses `SQLTableFunction::call_stream_with_context`, `SQLTableFunctionStream::from_source` and Execution's `SQLRowSource<Vec<Value>>`. Do not collect an unbounded table callback into `SQLTableFunctionResult`. Late errors after emitted rows remain errors. The owned `SQLRowStream` explicitly closes its source at EOF, production failure and early termination, before the enclosing statement reports success. The C adapter's `close` invokes `destroy_scan` and consumes the scan even when that callback fails. Do not erase this owner into an ordinary iterator or rely on `Drop` to report status. Native physical scans, set projections and lateral inputs retain the explicit close path through their adapters. When both execution and cleanup fail, retain the primary typed error and append the cleanup diagnostic with `SQLError::with_cleanup`. Typed output declarations beyond the current native column contract require an owner extension before publication.
 
 ### Aggregate functions
 
 Use `uqa_udf_register_aggregate` with `create_state`, `observe`, `finish`, and `destroy_state`. Each group has independent state. `finish` reports status and writes its result through the callback context while reading state without consuming it, matching `SQLAggregateState::finish(&self)`; destruction occurs exactly once even when no rows were observed or execution fails. The adapter implements `SQLAggregateState::close` to propagate `destroy_state` failures before statement completion. Execution consumes state ownership before invoking cleanup, including during partial construction, ordered or DISTINCT replay, window frame replacement, input failure and cancellation. A Rust `Drop` implementation supplies only best-effort fallback cleanup and cannot replace that error channel.
 
-C state creation can fail. The adapter implements Execution's `SQLAggregateFactory::try_create_state`, which returns a state or the original SQL error. Existing Rust `SQLAggregateFunction` implementations retain their infallible interface through its blanket adapter, and existing states retain the default successful `close`. Do not postpone initialization errors until the first row, which would lose them for empty groups. A window factory starts when its frame is evaluated, including an empty frame; a window input with no rows creates no state. C callback adapters and registration retirement remain required before this C API is complete. Merge/serialize/deserialize and incremental window callbacks are not advertised until their native execution contracts exist.
+C state creation can fail. The adapter implements Execution's `SQLAggregateFactory::try_create_state_with_context`, which returns a state or the original SQL error. Existing Rust `SQLAggregateFunction` implementations retain their infallible interface through its blanket adapter, and existing states retain the default successful `close`. Do not postpone initialization errors until the first row, which would lose them for empty groups. A window factory starts when its frame is evaluated, including an empty frame; a window input with no rows creates no state. Merge/serialize/deserialize and incremental window callbacks are not advertised until their native execution contracts exist.
 
-Native `SQLFunctionContext` supplies the invoking session to contextual scalar/table calls and aggregate creation. Internal readers and portal workers share that session's installation cell; public sibling sessions receive their own C session context. The C adapter stores a weak session reference in the context and upgrades it only during invocation. Registrations and retained scan/state adapters must not capture the creating C session strongly.
+Host callback failures carry an owned native `SQLError::Host` cause with SQLSTATE `38000`. The cause survives worker transfer, routine traceback and cleanup attachment; the C diagnostic exposes the original callback status through `uqa_error_get_cause`. Ordinary successful helpers may clear thread-local diagnostics without erasing an explicit callback failure. Each invocation also retains its most recent helper failure; returning that same negative status forwards its original diagnostic even after successful cleanup helpers. Returning success permits recovery from an ordinary helper failure. Forwarded native SQL errors retain their original type and SQLSTATE, including `57014` for cancellation. Scan/state and user-data destruction use separate diagnostic slots admitted before successful ownership transfer, so a prior callback error or an exhausted FFI allowance cannot suppress cleanup.
+
+Native `SQLFunctionContext` supplies the invoking session to contextual scalar/table calls and aggregate creation. Internal readers and portal workers share that session's installation cell; public sibling sessions receive their own C session context. The C adapter installs a weak session reference in the context and upgrades it only during invocation. Registrations and retained scan/state adapters must not capture the creating C session strongly.
 
 Shared `user_data` may be used concurrently across sessions. Per-scan and per-group states have serialized invocation but may move between workers. Document these requirements explicitly; do not infer single-threaded callbacks from a synchronous C query function.
 

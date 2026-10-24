@@ -7,17 +7,20 @@
 //! Invocation-scoped diagnostics and admission; no TLS borrow crosses a host callback.
 
 use std::{cell::RefCell, ffi::c_char, sync::Arc};
+use uqa_core::memory::MemoryBudget;
 
 use crate::{
     abi::{UQAStatus, UQA_ERROR_BUSY, UQA_ERROR_PANIC},
     boundary::{self, Result},
-    error::{self, RetainedError, UQAError},
+    error::{self, CurrentError, RetainedError, UQAError},
     session::Session,
 };
 
 struct Frame {
-    session: Arc<Session>,
+    session: Option<Arc<Session>>,
+    memory: MemoryBudget,
     failure: RetainedError,
+    helper_error: Option<CurrentError>,
 }
 
 thread_local! {
@@ -51,7 +54,14 @@ pub(crate) fn reject_reentry() -> Result<()> {
 pub(crate) fn uses_value_scope(session: &Session) -> Result<bool> {
     inspect(|frame| match frame {
         None => Ok(false),
-        Some(frame) if std::ptr::eq(frame.session.as_ref(), session) => Ok(true),
+        Some(frame)
+            if frame
+                .session
+                .as_ref()
+                .is_some_and(|active| std::ptr::eq(active.as_ref(), session)) =>
+        {
+            Ok(true)
+        }
         Some(_) => Err(UQAError::new(
             UQA_ERROR_BUSY,
             "value belongs to another callback session",
@@ -62,7 +72,9 @@ pub(crate) fn uses_value_scope(session: &Session) -> Result<bool> {
 pub(crate) fn record_panic() {
     let _ = inspect(|frame| {
         if let Some(frame) = frame {
-            frame.session.poison();
+            if let Some(session) = &frame.session {
+                session.poison();
+            }
             let _ = frame.failure.set(UQAError::new(
                 UQA_ERROR_PANIC,
                 "panic in a C callback helper",
@@ -72,23 +84,52 @@ pub(crate) fn record_panic() {
     });
 }
 
+/// Move a helper's diagnostic out of ordinary TLS before a later helper clears
+/// it. It becomes a callback failure only when the callback returns its status.
+pub(crate) fn retain_helper_error(error: CurrentError) {
+    let _ = FRAME.try_with(|slot| {
+        if let Ok(mut slot) = slot.try_borrow_mut() {
+            if let Some(frame) = slot.as_mut() {
+                frame.helper_error = Some(error);
+            }
+        }
+    });
+}
+
 struct Scope;
 
 impl Scope {
-    fn enter(session: &Arc<Session>, failure: &RetainedError) -> Result<Self> {
+    fn enter(
+        session: Option<&Arc<Session>>,
+        memory: &MemoryBudget,
+        failure: &RetainedError,
+    ) -> Result<Self> {
         reject_reentry()?;
+        error::clear();
         FRAME
             .try_with(|frame| {
                 let mut frame = frame
                     .try_borrow_mut()
                     .map_err(|_| UQAError::state("callback scope is borrowed"))?;
                 *frame = Some(Frame {
-                    session: Arc::clone(session),
+                    session: session.cloned(),
+                    memory: memory.clone(),
                     failure: Arc::clone(failure),
+                    helper_error: None,
                 });
                 Ok(Self)
             })
             .unwrap_or_else(|_| Err(UQAError::state("callback thread is exiting")))
+    }
+
+    fn finish(self) -> Option<CurrentError> {
+        error::clear();
+        let error = FRAME
+            .try_with(|slot| slot.try_borrow_mut().ok()?.take()?.helper_error)
+            .ok()
+            .flatten();
+        drop(self);
+        error
     }
 }
 
@@ -103,16 +144,32 @@ impl Drop for Scope {
 }
 
 pub(crate) struct Callbacks<'a> {
-    session: &'a Arc<Session>,
+    session: Option<&'a Arc<Session>>,
+    memory: &'a MemoryBudget,
     pub(crate) failure: RetainedError,
 }
 
 impl<'a> Callbacks<'a> {
     pub(crate) fn new(session: &'a Arc<Session>) -> Result<Self> {
         Ok(Self {
-            session,
+            session: Some(session),
+            memory: &session.memory,
             failure: error::retained_slot(&session.memory)?,
         })
+    }
+
+    /// Cleanup uses a slot admitted before the host resource was created. It
+    /// remains callable after the creating session closes or its allowance fills.
+    pub(crate) fn retained(
+        session: Option<&'a Arc<Session>>,
+        memory: &'a MemoryBudget,
+        failure: RetainedError,
+    ) -> Self {
+        Self {
+            session,
+            memory,
+            failure,
+        }
     }
 
     pub(crate) fn fail(&self, error: UQAError) -> UQAStatus {
@@ -125,26 +182,37 @@ impl<'a> Callbacks<'a> {
         if let Some(failure) = self.failure.get() {
             return failure.status;
         }
-        let scope = match Scope::enter(self.session, &self.failure) {
+        let scope = match Scope::enter(self.session, self.memory, &self.failure) {
             Ok(scope) => scope,
             Err(error) => return self.fail(error),
         };
         let status = invoke();
-        drop(scope);
+        let helper_error = scope.finish();
         if let Some(failure) = self.failure.get() {
             return failure.status;
         }
         if status < 0 {
-            return self.fail(UQAError::new(
-                status,
-                "C callback failed without a diagnostic",
-            ));
+            return self.fail(
+                helper_error
+                    .filter(|error| error.get().is_some_and(|error| error.status == status))
+                    .map_or_else(
+                        || UQAError::new(status, "C callback failed without a diagnostic"),
+                        |error| error.into_owned(self.memory),
+                    ),
+            );
         }
         status
     }
 }
 
-fn fail(status: UQAStatus, message: &str) -> Result<UQAStatus> {
+pub(crate) fn check_scope(failure: &RetainedError) -> Result<()> {
+    inspect(|frame| match frame {
+        Some(frame) if Arc::ptr_eq(&frame.failure, failure) => Ok(()),
+        _ => Err(UQAError::state("callback object is outside its invocation")),
+    })
+}
+
+pub(crate) fn fail(status: UQAStatus, message: &str) -> Result<UQAStatus> {
     if status >= 0 {
         return Err(UQAError::invalid(
             "callback failure status must be negative",
@@ -155,7 +223,7 @@ fn fail(status: UQAStatus, message: &str) -> Result<UQAStatus> {
         if frame.failure.get().is_none() {
             let _ = frame
                 .failure
-                .set(UQAError::callback(status, message, &frame.session.memory));
+                .set(UQAError::callback(status, message, &frame.memory));
         }
         Ok(Arc::clone(&frame.failure))
     })?;

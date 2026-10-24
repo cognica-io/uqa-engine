@@ -4,7 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Owned runtime function options using the native execution contract.
+//! C function adapters using the native registry, execution and value owners.
+
+mod aggregate;
+mod context;
+mod registration;
+mod resource;
+mod scalar;
+mod support;
+mod table;
+pub use aggregate::*;
+pub use context::*;
+pub use registration::*;
+pub use scalar::*;
+pub(crate) use support::HostError;
+pub use table::*;
 
 use crate::{
     abi::{UQA_OK, UQA_VOLATILITY_IMMUTABLE, UQA_VOLATILITY_STABLE, UQA_VOLATILITY_VOLATILE},

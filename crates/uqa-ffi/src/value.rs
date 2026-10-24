@@ -72,7 +72,7 @@ impl UQAValue {
         })
     }
 
-    fn owned(
+    pub(crate) fn owned(
         value: Produced<SQLParam>,
         session: Option<Arc<Session>>,
     ) -> boundary::Result<Box<Self>> {
@@ -266,6 +266,26 @@ impl UQAValue {
         } else {
             let (value, memory) = value.into_parts();
             Ok(control.finish(SQLParam::Scalar(value), memory)?)
+        }
+    }
+
+    /// Transfer an owned callback result into the native untyped value contract.
+    /// Scalar carriers move without a second copy; packed parameters use SQL's
+    /// existing conversion while both source and destination leases are live.
+    pub(crate) fn into_native(self) -> boundary::Result<Produced<Value>> {
+        let ValueSource::Owned(parameter) = self.source else {
+            return Err(UQAError::state("callback result must own its value"));
+        };
+        let control = self
+            .session
+            .as_ref()
+            .map_or_else(ProductionControl::uncontrolled, |session| session.control());
+        let (parameter, memory) = parameter.into_parts();
+        match parameter {
+            SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. } => {
+                Ok(control.finish(value, memory)?)
+            }
+            parameter => Ok(parameter.to_value_with_control(&control)?),
         }
     }
 }

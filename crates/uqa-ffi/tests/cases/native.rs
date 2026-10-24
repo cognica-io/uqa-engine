@@ -52,6 +52,12 @@ native_clients!(typed_values, "typed_values.c");
 native_clients!(packed_values, "packed_values.c");
 #[cfg(unix)]
 native_clients!(udf_options, "udf_options.c");
+#[cfg(unix)]
+native_clients!(udf, "udf.c");
+#[cfg(unix)]
+native_clients!(udf_table, "udf_table.c");
+#[cfg(unix)]
+native_clients!(udf_aggregate, "udf_aggregate.c");
 
 #[cfg(unix)]
 fn native_client(fixture: &str, backend: &str) {
@@ -85,6 +91,7 @@ fn native_client(fixture: &str, backend: &str) {
                 "-Wextra",
                 "-Werror",
                 "-DUQA_USE_SHARED",
+                "-pthread",
             ])
             .arg("-I")
             .arg(root.join("include"))

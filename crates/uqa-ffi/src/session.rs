@@ -164,6 +164,23 @@ fn publish_engine(
     limit: usize,
 ) -> boundary::Result<*mut UQAEngine> {
     let session = Arc::new(Session::new(native, persistent, limit));
+    if let Err(error) =
+        session
+            .native
+            .install_sql_function_context(uqa_engine::SQLFunctionContext::new(Arc::downgrade(
+                &session,
+            )))
+    {
+        let error = uqa_sql::SQLError::from(error);
+        return Err(match session.native.close() {
+            Ok(()) => error,
+            Err(cleanup) => error.with_cleanup(
+                cleanup,
+                "close session after callback context installation failed",
+            ),
+        }
+        .into());
+    }
     // On a recoverable handle-allocation failure, clean up the native session before returning.
     let handle = boundary::boxed(UQAEngine {
         session: Arc::clone(&session),
