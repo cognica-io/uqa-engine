@@ -523,6 +523,8 @@ Duplicate projected labels remain separate slots through execution and the colum
 
 Owned columnar transfer resolves output positions once per batch and moves exclusive selected values into their result columns. Fragment projections and repeated slots are resolved before donation; row-local aliases share one materialization owner, while independent retained readers keep their original values. Only shared or repeated selected values are copied, unselected payloads are not materialized, and zero-column batches retain their row count.
 
+Stored scored-document sources [prepare projection properties](../../../crates/uqa-execution/src/query/scored_input/projection.rs) once from their captured column definitions, selected fields and positional mapping. Shared rows reuse the identity decision; page and aggregate paths reuse the generated-column/tuple-xmin decision. Locking, pinned rechecks and the current candidate-input variant remain dynamic, and structural metadata still follows its original append and error boundaries.
+
 ## Pull execution and blocking operators
 
 Physical relational operators are pull-based and exchange batches of dynamic `Value` instances. Filters can compile projected predicates once and evaluate positions directly. Aggregates use streaming state and adaptive grouping where possible. Finalized expressions read their aggregate/group slots through a borrowed output lookup, including expressions simplified to constants before slot binding; an external group row is built only when the expression still needs one.

@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Prepare immutable stored-scan projection decisions once, avoiding repeated column checks per page and slot checks per row while preserving generated columns, tuple metadata, locking and rechecks.
+
 - Inspect ordinary public SQL result values once for deferred Datum and enum carriers, avoiding duplicate recursive walks while preserving payload ownership, nested metadata and output-error order.
 
 - Move only selected physical values into named SQL results. Avoid copying discarded fragmented payloads, release row-local aliases before donation, and copy repeated selected values only when their public output requires it.

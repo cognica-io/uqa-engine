@@ -98,21 +98,8 @@ fn ordinary_nested_output_retains_payloads_with_one_carrier_walk() {
     );
 }
 
-#[test]
-fn named_and_positional_output_preserve_nested_metadata_and_decoded_enums() {
-    let field_types = vec![
-        RecordFieldType {
-            oid: 23,
-            type_modifier: -1,
-            collation_oid: None,
-        },
-        RecordFieldType {
-            oid: 16_384,
-            type_modifier: -1,
-            collation_oid: None,
-        },
-    ];
-    let input = Value::Record(
+fn nested_carrier_input(field_types: &[RecordFieldType]) -> Value {
+    Value::Record(
         vec![
             (
                 "row".into(),
@@ -122,7 +109,7 @@ fn named_and_positional_output_preserve_nested_metadata_and_decoded_enums() {
                             Value::Datum(DatumValue::new(23, 0, 7_i32.to_le_bytes().to_vec())),
                             Value::Enum(label()),
                         ],
-                        field_types.clone(),
+                        field_types.to_vec(),
                     )
                     .unwrap(),
                 ),
@@ -147,7 +134,24 @@ fn named_and_positional_output_preserve_nested_metadata_and_decoded_enums() {
             ),
         ]
         .into(),
-    );
+    )
+}
+
+#[test]
+fn named_and_positional_output_preserve_nested_metadata_and_decoded_enums() {
+    let field_types = vec![
+        RecordFieldType {
+            oid: 23,
+            type_modifier: -1,
+            collation_oid: None,
+        },
+        RecordFieldType {
+            oid: 16_384,
+            type_modifier: -1,
+            collation_oid: None,
+        },
+    ];
+    let input = nested_carrier_input(&field_types);
     let encoded_enum = Value::Datum(DatumValue::new(
         16_384,
         0,

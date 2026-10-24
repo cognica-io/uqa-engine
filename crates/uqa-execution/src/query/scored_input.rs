@@ -12,6 +12,7 @@ mod deferred;
 mod hierarchy;
 mod indexed;
 mod materialize;
+mod projection;
 
 pub use capture::CapturedScoredEntries;
 pub(crate) use capture::ScoredEntryCapture;
@@ -250,6 +251,7 @@ pub struct ScoredDocumentSource {
     schema: crate::RowSchema,
     projected_fields: Vec<String>,
     projected_slots: Vec<crate::ProjectedValueSlot>,
+    projection_properties: projection::ProjectionProperties,
     predicate: Option<crate::ProjectedPredicate>,
     hidden_columns: HiddenColumns,
     metadata_doc_id_attribute: Option<uqa_sql::ast::InternalColumnRef>,
@@ -491,6 +493,11 @@ impl ScoredDocumentSource {
         let extra_columns = HiddenColumn::ALL.map(HiddenColumn::name);
         let projected_slots =
             crate::ProjectedValueSlot::compile(&schema, &projected_fields, &extra_columns);
+        let projection_properties = projection::ProjectionProperties::new(
+            &column_definitions,
+            &projected_fields,
+            &projected_slots,
+        );
         let wildcard_hidden = schema
             .iter()
             .enumerate()
@@ -580,6 +587,7 @@ impl ScoredDocumentSource {
             schema,
             projected_fields,
             projected_slots,
+            projection_properties,
             predicate,
             hidden_columns,
             metadata_doc_id_attribute,
@@ -850,14 +858,7 @@ impl crate::RowSource for ScoredDocumentSource {
         matches!(self.input, ScoredInputCursor::All { .. })
             && self.lock_origin.is_none()
             && !self.recheck_pinned
-            && !crate::query::generated::projection_contains_virtual_generated_column(
-                &self.column_definitions,
-                &self.projected_fields,
-            )
-            && !crate::query::document_projection::projections_use_tuple_xmin(
-                &self.projected_fields,
-                &self.column_definitions,
-            )
+            && !self.projection_properties.requires_materialization
     }
 
     fn physical_schema(&self) -> Option<&crate::RowSchema> {

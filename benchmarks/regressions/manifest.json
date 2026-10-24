@@ -2,6 +2,84 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_scan_reuses_immutable_projection_classification",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
+      "capability": "Prepared scan projection",
+      "workload": "512 rows with 64 ordinary projected values through ordered shared storage pages.",
+      "invariant": "Inspect immutable metadata once and 64 identity slots once; return all 32,768 exact values with exactly 512 document visits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_scan_reuses_immutable_projection_classification",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
+      "capability": "Prepared scan projection",
+      "workload": "512 rows with 64 ordinary projected values through ordered borrowed storage pages.",
+      "invariant": "Inspect immutable metadata once, independent of page count; preserve all 32,768 values, row order and exactly 512 document visits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_preserves_selected_generated_and_tuple_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "Stored, selected/unselected virtual generated, failing virtual and tuple-xmin projections.",
+      "invariant": "Retain selected generated values, lazy division-by-zero errors, tuple metadata and conservative producer batching.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_preserves_declared_metadata_and_repeated_slots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "Repeated stored slots, missing fields and both declared and structural xmin/document-ID values.",
+      "invariant": "Preserve every output position, NULL and declared-column shadow without mistaking nonidentity projections for shared identity rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_keeps_lock_and_recheck_decisions_dynamic",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "A prepared ordinary source receives a lock origin and a tuple-local recheck value.",
+      "invariant": "Reevaluate mutable locking/recheck eligibility after preparation; preserve lock identity and the pinned value rather than stored data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_projection_keeps_retrieval_input_decisions_dynamic",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/projection.rs",
+      "capability": "Prepared scan projection",
+      "workload": "A prepared All scan receives evaluated retrieval entries before its first read.",
+      "invariant": "Retain conservative candidate batching and exact selected output after the input variant changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "failed_datum_does_not_inspect_later_values",
