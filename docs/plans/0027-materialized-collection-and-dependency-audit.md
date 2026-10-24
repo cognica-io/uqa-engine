@@ -6,10 +6,10 @@ The maintainer requested resolution of the remaining performance and dependency 
 
 | Task | Owner and delivery | Current evidence and remaining work |
 | --- | --- | --- |
-| #1262: dependency audit | Existing Storage cryptography, CLI terminal and HTTP/binding runtime dependencies; PR #1263 | Official ctutils 0.4.5, Tokio 1.53.3 and clipboard-win 5.4.3 replace vulnerable/yanked versions. Full cargo-deny passes without new exceptions; 964 Storage, 100 CLI and 81 HTTP client tests pass locally. Only three versions/checksums change. Final automatic Linux/macOS regression and affected FDW qualification, merge and closure remain. |
-| #653: materialized SQL result throughput | Execution's query consumer/collection boundary; [PR #1264](https://github.com/cognica-io/uqa-engine/pull/1264), dependent on #1263 | Complete collection now retains ordinary producer batches; row-sensitive consumers retain singleton demand. The 16,384-row fixture improves from 16,385 producer calls to 129. All 1,741 non-ignored Execution tests, 81 public PostgreSQL fixture cases, strict Clippy and ownership checks pass locally. Final-source automatic checks and a controlled result under the original bounds remain required. |
+| #1262: dependency audit | Existing Storage cryptography, CLI terminal and HTTP/binding runtime dependencies; PR #1263 | Merged as `0755ae252` and #1262 closed. Official ctutils 0.4.5, Tokio 1.53.3 and clipboard-win 5.4.3 replace vulnerable/yanked versions. Full cargo-deny passes without new exceptions; 964 Storage, 100 CLI and 81 HTTP client tests pass locally. Only three versions/checksums change. Actual Linux/macOS regression and all six FDW configurations pass on the unchanged qualified tree. |
+| #653: materialized SQL result throughput | Execution's query consumer/collection boundary; [PR #1264](https://github.com/cognica-io/uqa-engine/pull/1264), based on main after #1263 | Complete collection now retains ordinary producer batches; row-sensitive consumers retain singleton demand. The 16,384-row fixture improves from 16,385 producer calls to 129. All 1,741 non-ignored Execution tests, 81 public PostgreSQL fixture cases, strict Clippy and ownership checks pass locally. Final-source automatic checks and a controlled result under the original bounds remain required. |
 
-- [ ] Deliver the complete dependency correction with actual final-source qualification and close #1262.
+- [x] Deliver the complete dependency correction with actual final-source qualification and close #1262.
 - [ ] Correct complete-result scheduling, preserve early-stop semantics and deliver the performance change with local and actual platform evidence.
 - [ ] Inspect the next automatic controlled result, retain original failed observations and reconcile #653's current regression and historical investigation before closure.
 
@@ -28,6 +28,12 @@ Let an input produce ordered rows R and a row-sensitive consumer stop or fail af
 ## Historical evidence
 
 #653 retains older inconclusive reference calibration, collected hardware/resource observations, source-provenance corrections and previous materialized-result investigations. A new accepted source-specific result must not erase those records, assert a retrospective hardware cause without evidence, widen a limit or turn an inconclusive interval into acceptance. The original records remain distinct from this live delivery state.
+
+## Platform and delivery evidence
+
+Dependency PR #1263 qualifies source `a593ffcf8` in regression run 40042414796: each Linux/macOS result passes 1,732 checks, all 2,434 exact required cases and eight independent-process histories; both archives match all 739 source hashes with zero JUnit failures, errors or skips. FDW run 40042414831 passes all six configurations and combined-handler Clippy with final fingerprint `ad64371bc47bd131b9e86b42b06a0b2532ff729d283790dd9b8319bb6e0d30f3`. Dependency policy, both regex WASM toolchains and native/JavaScript HTTP parity pass. Squash merge `0755ae252` preserves the qualified tree exactly and closes #1262. Windows clipboard runtime execution is not claimed.
+
+Performance PR #1264 is ready and based on main. History-only rebase `3ab648d1a` preserves the complete tree of qualified candidate `a569ef4db`; automatic regression run 40044127893 remains in progress. Its FDW selector reports no affected foreign-handler input, so that skipped matrix is not counted as passing runtime evidence. The dependency correction's full matrix remains attributed to its own source. Only verification records change after this rebase; product, fixtures and qualification inputs remain unchanged.
 
 ## Verification
 
