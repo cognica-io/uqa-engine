@@ -106,6 +106,30 @@ pub trait EngineHook {
         )))
     }
 
+    /// Construct an admitted declared range with its selected canonical support, without repeating endpoint conversion.
+    fn construct_range(
+        &self,
+        oid: u32,
+        _bounds: super::RangeBoundsInput,
+        _control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        Err(SQLError::Internal(format!(
+            "cache lookup failed for range type {oid}"
+        )))
+    }
+
+    /// Normalize admitted members with the selected declaration's comparison and canonical support.
+    fn construct_multirange(
+        &self,
+        oid: u32,
+        _members: &[Value],
+        _control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        Err(SQLError::Internal(format!(
+            "cache lookup failed for range type {oid}"
+        )))
+    }
+
     /// Certify stable descriptors for bound/schema-qualified type names. Live custom catalogs decline by default; conversion callbacks, settings and unqualified namespace resolution are never covered by this capability.
     fn catalog_cast_scope(&self) -> Option<&CatalogCastScope> {
         None

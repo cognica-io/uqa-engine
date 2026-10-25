@@ -40,6 +40,10 @@ mod array_input;
 mod arrays;
 pub use array_input::*;
 pub use arrays::*;
+mod range_input;
+mod ranges;
+pub use range_input::*;
+pub use ranges::*;
 
 enum ValueSource {
     Owned(Produced<SQLParam>),
@@ -59,6 +63,7 @@ pub struct UQAValue {
     tensor_data: OnceLock<Produced<uqa_sql::params::SQLTensor>>,
     array_shape: OnceLock<Produced<Vec<crate::abi::UQAArrayDimension>>>,
     array_children: Mutex<arrays::Children>,
+    ranges: OnceLock<Box<ranges::RangeViews>>,
     parameter_type: Option<ColumnType>,
     types: crate::types::TypeViews,
     pub(crate) session: Option<Arc<Session>>,
@@ -96,6 +101,7 @@ impl UQAValue {
             tensor_data: OnceLock::new(),
             array_shape: OnceLock::new(),
             array_children: Mutex::new(arrays::Children::new(&control)),
+            ranges: OnceLock::new(),
             types: crate::types::TypeViews::new(&control),
             parameter_type: None,
             session: session.cloned(),
@@ -138,6 +144,7 @@ impl UQAValue {
                     .as_ref()
                     .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
             ),
+            ranges: OnceLock::new(),
             parameter_type,
             session,
             _memory: memory,

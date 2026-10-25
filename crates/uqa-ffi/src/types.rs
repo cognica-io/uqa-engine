@@ -27,6 +27,8 @@ use crate::{
 use uqa_sql::{ast::ColumnType, catalog::type_metadata};
 
 mod fields;
+mod ranges;
+pub use ranges::*;
 mod views;
 use crate::session::Session;
 pub use fields::*;

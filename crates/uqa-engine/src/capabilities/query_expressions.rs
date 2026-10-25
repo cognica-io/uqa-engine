@@ -110,6 +110,38 @@ impl EngineExpressionEvaluator {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn construct_range(
+        &self,
+        oid: u32,
+        bounds: uqa_sql::expr::RangeBoundsInput,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        uqa_execution::catalog::range_type::input::construct_range(
+            &self
+                .engine
+                .range_input_context(&self.ctes.catalog_read_view()?, self),
+            oid,
+            bounds,
+            control,
+        )
+    }
+
+    fn construct_multirange(
+        &self,
+        oid: u32,
+        members: &[Value],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        uqa_execution::catalog::range_type::input::construct_multirange(
+            &self
+                .engine
+                .range_input_context(&self.ctes.catalog_read_view()?, self),
+            oid,
+            members,
+            control,
+        )
+    }
+
     fn sql_notice(&self, notice: uqa_sql::SQLNotice) {
         self.engine.push_sql_notice(notice);
     }

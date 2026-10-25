@@ -17,6 +17,23 @@ use uqa_core::{
 mod records;
 pub use records::SQLRecordFields;
 
+pub(in crate::expr) struct ValueCompositeCatalog<'a>(
+    pub(in crate::expr) Option<&'a dyn SQLValueCatalog>,
+);
+
+impl super::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
+    fn composite_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<Arc<super::composites::CompositeTypeDescriptor>>> {
+        self.0
+            .ok_or_else(|| {
+                crate::SQLError::Internal("composite operator lookup has no catalog".into())
+            })?
+            .value_composite_type(oid)
+    }
+}
+
 /// Type metadata and enum support used to observe already admitted SQL values. Implementations borrow one statement catalog generation and never invoke type input.
 pub trait SQLValueCatalog {
     /// The selected endpoint layout of a range or multirange in this statement generation. Observation does not execute input, domain checks or a canonical support function.

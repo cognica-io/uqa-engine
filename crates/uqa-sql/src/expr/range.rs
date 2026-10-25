@@ -18,18 +18,22 @@ mod construction;
 pub use construction::{
     multirange_from_ranges_with_operations, parse_multirange_with_operations,
     parse_range_with_operations, range_bound_flags, range_from_bounds_with_operations,
-    RangeConstruction,
+    RangeBoundsInput, RangeConstruction,
 };
 mod descriptor;
 pub use descriptor::RangeValueDescriptor;
 pub(crate) mod datum;
 pub use datum::{declared_multirange_datum_with_control, declared_range_datum_with_control};
+mod host;
 mod input;
 mod production;
+pub use host::{multirange_value_from_members_with_control, range_value_from_bounds_with_control};
+mod observation;
 mod relationships;
 mod semantics;
 pub(in crate::expr) mod subtype_distance;
 mod typed;
+pub use observation::RangeBoundValues;
 pub(super) use production::{
     canonical_multirange_text_with_control, canonical_range_as_multirange_text_with_control,
     canonical_range_text_with_control, multirange_from_produced_ranges,

@@ -16,6 +16,11 @@ use crate::ast::ColumnType;
 
 mod record;
 pub use record::create_record_parameter_with_control;
+mod range;
+pub use range::{
+    create_multirange_parameter_with_control, create_range_parameter_with_control,
+    RangeParameterBounds,
+};
 mod array;
 mod input;
 pub use array::create_array_parameter_with_control;

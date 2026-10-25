@@ -23,6 +23,9 @@ use uqa_sql::{
     SQLError,
 };
 
+mod construction;
+pub use construction::{construct_multirange, construct_range};
+
 /// Catalog support calls retain their selected routine identity and execute as callbacks, without another name lookup or EXECUTE privilege check.
 pub trait RangeCanonicalInvocation {
     fn invoke_canonical(
@@ -49,14 +52,7 @@ pub fn read_input(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
-    let definition = context
-        .catalog
-        .range_definition_by_oid(oid)?
-        .ok_or_else(|| SQLError::Internal(format!("cache lookup failed for range type {oid}")))?;
-    let descriptor = context
-        .catalog
-        .range_value_descriptor(oid)?
-        .ok_or_else(|| SQLError::Internal(format!("cache lookup failed for range type {oid}")))?;
+    let (definition, descriptor) = selected(context, oid)?;
     let operations = SelectedInput {
         context,
         definition,
@@ -79,6 +75,22 @@ pub fn read_input(
             control,
         )
     }
+}
+
+fn selected<'a>(
+    context: &'a RangeInputContext<'_>,
+    oid: u32,
+) -> Result<(&'a StoredRange, std::sync::Arc<RangeValueDescriptor>), SQLError> {
+    let missing = || SQLError::Internal(format!("cache lookup failed for range type {oid}"));
+    let definition = context
+        .catalog
+        .range_definition_by_oid(oid)?
+        .ok_or_else(missing)?;
+    let descriptor = context
+        .catalog
+        .range_value_descriptor(oid)?
+        .ok_or_else(missing)?;
+    Ok((definition, descriptor))
 }
 
 struct SelectedInput<'a> {

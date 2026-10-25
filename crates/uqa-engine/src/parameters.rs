@@ -11,6 +11,42 @@ use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::{SQLError, SQLParam};
 
 impl Engine {
+    /// Construct typed range bounds with the native statement scope; SQL owns endpoint conversion and Execution invokes selected catalog support.
+    pub fn create_range_parameter_with_control(
+        &self,
+        type_name: &str,
+        bounds: uqa_sql::params::RangeParameterBounds<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<SQLParam>, SQLError> {
+        self.with_direct_query_snapshot(
+            false,
+            |engine| {
+                uqa_sql::params::create_range_parameter_with_control(
+                    type_name, bounds, engine, engine, control,
+                )
+            },
+            std::convert::identity,
+        )
+    }
+
+    /// Normalize typed range members and validate an enclosing domain in the native statement scope.
+    pub fn create_multirange_parameter_with_control(
+        &self,
+        type_name: &str,
+        members: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<SQLParam>, SQLError> {
+        self.with_direct_query_snapshot(
+            false,
+            |engine| {
+                uqa_sql::params::create_multirange_parameter_with_control(
+                    type_name, members, engine, engine, control,
+                )
+            },
+            std::convert::identity,
+        )
+    }
+
     /// Construct a typed host record in the native statement scope. SQL owns attribute selection, source binding, scalar casts and domain checks.
     pub fn create_record_parameter_with_control(
         &self,

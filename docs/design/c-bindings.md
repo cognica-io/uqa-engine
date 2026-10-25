@@ -506,6 +506,8 @@ typedef struct uqa_field_descriptor {
     uint32_t collation_oid;
 } uqa_field_descriptor;
 
+UQA_API uqa_status UQA_CALL uqa_type_get_range_subtype(uqa_type type, uqa_type *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_range_type(uqa_type type, uqa_type *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_field_count(uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_field(
     uqa_type type, uint32_t index, uqa_field_descriptor *out);
@@ -518,6 +520,8 @@ Read cells through `SQLResult::value_at` or native positional column batches. Do
 A `uqa_type` describes SQL identity separately from physical value representation. Additional accessors expose available OID, schema/name, modifier, nested element/field descriptors, domain base type, and collation. An optional metadata accessor returns `UQA_DONE` when the native field is absent, rather than inferring it from a first row or column name. A separate PostgreSQL client descriptor accessor may expose `postgres_result_type`, whose scalar-domain representation can use the base type.
 
 `uqa_type_get_field_count` and `uqa_type_get_field` observe the current catalog attributes of a named composite. Positions are zero-based and exclude dropped slots; `number` retains the attribute's one-based physical catalog number, and `collation_oid` is its selected collation. Names and field types are borrowed from the parent type and remain valid for its lifetime, including after later catalog changes or failed observations. A new observation sees the current descriptor; a removed type reports its native SQL diagnostic. Domains expose fields through `uqa_type_get_base_type`. Types without a named composite descriptor, including the anonymous `record` pseudotype, return `UQA_DONE`; an index beyond an existing composite's field count returns `UQA_ERROR_RANGE`. Failure clears the output.
+
+`uqa_type_get_range_subtype` returns a range or multirange's endpoint descriptor. `uqa_type_get_range_type` returns a multirange's associated range descriptor. Domains expose these through their base type; unrelated types return `UQA_DONE`. Returned type handles borrow their parent and retain the original session and allowance. Catalog metadata lookup does not invoke input or canonical support.
 
 Type wrappers copy their native declaration and retain the original session and FFI allowance. Root, base, element and field wrappers are admitted lazily and published only after success; repeated requests reuse stable views. Catalog field reads do not execute input or domain checks. They share the source session's operation gate and cancellation scope; rejected admission preserves previous views and permits another attempt after other owners are released. Scalar identity getters read the retained declaration without querying the catalog.
 
@@ -625,6 +629,46 @@ UQA_API uqa_status UQA_CALL uqa_value_create_array_n(
     uqa_engine engine, const char *type_name, size_t type_name_size,
     const uqa_array_dimension *dimensions, uint32_t rank,
     const uqa_value_view *elements, uint64_t element_count, uqa_value *out);
+typedef uint32_t uqa_range_flags;
+
+typedef struct uqa_range_bounds {
+    uqa_value_view lower;
+    uqa_value_view upper;
+    uqa_range_flags flags;
+} uqa_range_bounds;
+
+#define UQA_RANGE_EMPTY UINT32_C(1)
+#define UQA_RANGE_LOWER_INCLUSIVE UINT32_C(2)
+#define UQA_RANGE_UPPER_INCLUSIVE UINT32_C(4)
+#define UQA_RANGE_LOWER_UNBOUNDED UINT32_C(8)
+#define UQA_RANGE_UPPER_UNBOUNDED UINT32_C(16)
+
+
+/* A NULL endpoint pointer is unbounded. An explicit UNBOUNDED flag requires a
+ * NULL pointer. EMPTY requires two NULL pointers and no other flags. SQL NULL
+ * endpoints also become unbounded after native type conversion. */
+UQA_API uqa_status UQA_CALL uqa_value_create_range(
+    uqa_engine engine, const char *type_name, uqa_value_view lower,
+    uqa_value_view upper, uqa_range_flags flags, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_range_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    uqa_value_view lower, uqa_value_view upper, uqa_range_flags flags,
+    uqa_value *out);
+/* Members are copied, ordered and merged by SQL. SQL NULL members fail. */
+UQA_API uqa_status UQA_CALL uqa_value_create_multirange(
+    uqa_engine engine, const char *type_name, const uqa_value_view *ranges,
+    uint32_t range_count, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_multirange_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const uqa_value_view *ranges, uint32_t range_count, uqa_value *out);
+/* Bounds and members borrow their parent. An empty range has only EMPTY set;
+ * a present infinite endpoint is a value, distinct from an unbounded endpoint. */
+UQA_API uqa_status UQA_CALL uqa_value_get_range_bounds(
+    uqa_value_view value, uqa_range_bounds *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_range_count(
+    uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_range(
+    uqa_value_view value, uint32_t index, uqa_value_view *out);
 UQA_API uqa_status UQA_CALL uqa_buffer_create(uqa_buffer *out);
 UQA_API uqa_status UQA_CALL uqa_value_format_sql(
     uqa_value_view value, uqa_buffer buffer);
@@ -634,6 +678,16 @@ UQA_API uqa_status UQA_CALL uqa_buffer_get_bytes(uqa_buffer buffer, uqa_bytes_vi
 Owned values and borrowed value views are immutable after construction. Scalar constructors retain their explicit SQL type through `SQLParam::TypedScalar`, so INT16/32/64 select their own SQL overloads and overflow rules, FLOAT32 remains REAL, and TEXT remains a typed text parameter. Typed getters do not hide conversions: INT16 widens to int32/int64, INT32 widens to int64, and FLOAT32 widens to double; wider declared types cannot use narrower getters even when a particular value would fit. FLOAT, NUMERIC, and TEXT are not implicitly converted to integers. SQL casts use the SQL owner. A typed getter on NULL returns `UQA_ERROR_NULL`; an incompatible getter returns `UQA_ERROR_TYPE`; index or representation bounds return `UQA_ERROR_RANGE`. `uqa_value_get_is_null` inspects nullness without reading a typed payload and returns `UQA_OK` with a 0/1 output. Native decoding failures retain SQL diagnostics.
 
 `uqa_value_get_type` returns a descriptor borrowed from the value and with the same lifetime. `uqa_value_create_null` creates an untyped NULL, whose type getter returns `UQA_DONE` with a NULL descriptor. Copying a typed result NULL preserves its existing descriptor without reading a payload. Owned vector parameters retain their dimension descriptor; vector input passes through SQL's `SQLParam::vector_with_control`, which validates the positive 32-bit dimension and finite float32 elements before retaining the copied input.
+
+`uqa_value_create_range` and `_n` copy lower and upper values before entering native construction. The type name selects a range or a domain over one. NULL endpoint pointers represent unbounded endpoints; supplied SQL NULL values become unbounded after endpoint conversion. `UQA_RANGE_LOWER_INCLUSIVE` and `UQA_RANGE_UPPER_INCLUSIVE` select inclusion, and explicit `UQA_RANGE_LOWER_UNBOUNDED` / `UQA_RANGE_UPPER_UNBOUNDED` flags require corresponding NULL pointers. Unbounded endpoints never retain inclusion. `UQA_RANGE_EMPTY` requires two NULL pointers and no other flags. Unknown or conflicting flags are invalid C arguments. For integer bounds 1 and 4, `UQA_RANGE_UPPER_INCLUSIVE` constructs the canonical range `[2,5)`.
+
+`uqa_value_create_multirange` and `_n` copy a span of range values into the selected multirange or domain. Zero members permit a NULL span and produce a present empty multirange. SQL resolves every source identity before conversion, converts members to the associated range type, removes empty ranges, sorts and merges overlapping or adjacent members. A SQL NULL member reports `22004`. Ordinary text members can use explicit native range input; admitted catalog range values retain their physical identity without rerunning input. The outer domain check follows native construction.
+
+Both constructors admit the returned C owner before any input effects. SQL owns endpoint conversion and normalization; Execution invokes selected catalog comparison and canonical support; Engine supplies the original statement and transaction scope. Lower input precedes upper input, and a construction error prevents the outer domain check. Failed statements retain ordinary implicit rollback, failed-frame and savepoint behavior. Original child handles may be released after successful construction.
+
+`uqa_value_get_range_bounds` returns borrowed lower/upper value handles and canonical flags. Empty ranges have only `UQA_RANGE_EMPTY` and two NULL handles; unbounded endpoints have NULL handles and corresponding unbounded flags. A present infinite DATE or timestamp endpoint remains a typed value, independently of unboundedness. `uqa_value_get_range_count` and `uqa_value_get_range` read a normalized multirange's ordered members using zero-based positions. A range cannot use multirange getters, a multirange cannot use the bounds getter, and an out-of-range member reports `UQA_ERROR_RANGE`. Typed NULL reports `UQA_ERROR_NULL`; failures clear output slots.
+
+Range observation uses the native admitted-value reader and member encoder. Catalog type input, domain checks and canonical routines do not run again. Native bounds and requested child wrappers are cached under their original allowance, with stable addresses for the parent's lifetime. Copies remain independent. Observation respects the owning session gate, both cancellation sources and live catalog availability; failed admission preserves existing values and permits a retry after other owners are released. The C interface follows the native declaration capabilities and does not add range DDL.
 
 `uqa_value_create_tensor_f32` copies `row_count * dimensions` finite floats in row-major order. The dimension is positive even for an empty tensor; zero rows permit a NULL data pointer. Checked shape arithmetic rejects an unaddressable span before reading it. SQL's packed `SQLTensor` parameter retains the declared dimension independently of the row count, including through copies, preparation and cursor binding. `uqa_type_get_dimensions` returns VECTOR/TENSOR dimensions, or `UQA_DONE` with zero for other types; a domain exposes this through its base descriptor.
 

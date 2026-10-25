@@ -175,6 +175,30 @@ pub struct UQAFieldDescriptor {
     pub collation_oid: u32,
 }
 
+pub const UQA_RANGE_EMPTY: u32 = 1;
+pub const UQA_RANGE_LOWER_INCLUSIVE: u32 = 2;
+pub const UQA_RANGE_UPPER_INCLUSIVE: u32 = 4;
+pub const UQA_RANGE_LOWER_UNBOUNDED: u32 = 8;
+pub const UQA_RANGE_UPPER_UNBOUNDED: u32 = 16;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UQARangeBounds {
+    pub lower: *const crate::value::UQAValue,
+    pub upper: *const crate::value::UQAValue,
+    pub flags: u32,
+}
+
+impl Default for UQARangeBounds {
+    fn default() -> Self {
+        Self {
+            lower: std::ptr::null(),
+            upper: std::ptr::null(),
+            flags: 0,
+        }
+    }
+}
+
 impl Default for UQAFieldDescriptor {
     fn default() -> Self {
         Self {

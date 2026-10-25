@@ -259,6 +259,93 @@ fn reference() -> serde_json::Value {
 }
 
 #[test]
+fn structural_range_construction_and_observation_do_not_repeat_input_or_canonical_calls() {
+    use uqa_sql::expr::{RangeBoundsInput, RangeComparisonValue};
+    let inputs = Inputs::new(&reference());
+    let budget = MemoryBudget::new(262_144);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let bounds = || RangeBoundsInput::Bounds {
+        lower: control
+            .finish(Some(Value::Int(1)), control.empty_reservation())
+            .unwrap(),
+        upper: control
+            .finish(Some(Value::Int(3)), control.empty_reservation())
+            .unwrap(),
+        lower_inclusive: true,
+        upper_inclusive: true,
+    };
+    let oid = |ty: &ColumnType| uqa_sql::catalog::type_metadata::pg_type_oid(ty) as u32;
+    let ty = inputs.target("cr");
+    let range = construct_range(&inputs.context(), oid(&ty), bounds(), &control).unwrap();
+    assert_eq!(inputs.canonical_calls.get(), 1);
+    assert_eq!(inputs.endpoint_calls.get(), 0);
+    assert_eq!(
+        *inputs.output(&range, &ty, &control),
+        Value::Str("[1,3]".into())
+    );
+    let multi_type = inputs.target("crs");
+    let multi = construct_multirange(
+        &inputs.context(),
+        oid(&multi_type),
+        std::slice::from_ref(&range),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(inputs.canonical_calls.get(), 1);
+    let observed = RangeComparisonValue::from_type_with_control(
+        &multi,
+        &multi_type,
+        Some(&inputs.values),
+        &control,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(observed.member_count(), Some(1));
+    let member = observed
+        .member_value_with_control(0, Some(&inputs.values), &control)
+        .unwrap()
+        .unwrap();
+    let decoded =
+        RangeComparisonValue::from_type_with_control(&member, &ty, Some(&inputs.values), &control)
+            .unwrap()
+            .unwrap();
+    assert_eq!(decoded.bounds().unwrap().lower, Some(&Value::Int(1)));
+    assert_eq!(
+        *inputs.output(&member, &ty, &control),
+        Value::Str("[1,3]".into())
+    );
+    assert_eq!(inputs.canonical_calls.get(), 1);
+    assert_eq!(inputs.endpoint_calls.get(), 0);
+    let domain = inputs.target("dr");
+    let domain_range =
+        construct_range(&inputs.context(), oid(&domain), bounds(), &control).unwrap();
+    assert_eq!(inputs.endpoint_calls.get(), 0);
+    assert_eq!(
+        *inputs.output(&domain_range, &domain, &control),
+        Value::Str("[1,3]".into())
+    );
+    let empty = construct_range(
+        &inputs.context(),
+        oid(&ty),
+        RangeBoundsInput::Empty,
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        *inputs.output(&empty, &ty, &control),
+        Value::Str("empty".into())
+    );
+    assert_eq!(inputs.canonical_calls.get(), 1);
+    drop((empty, domain_range, decoded, member, observed, multi, range));
+    assert_eq!(budget.used(), 0);
+    inputs.null_canonical.set(true);
+    let error = construct_range(&inputs.context(), oid(&ty), bounds(), &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn declared_range_input_matches_postgresql_values_effects_and_error_order() {
     let reference = reference();
     let inputs = Inputs::new(&reference);

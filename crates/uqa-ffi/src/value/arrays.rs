@@ -26,6 +26,24 @@ impl Children {
             memory: control.empty_reservation(),
         }
     }
+
+    pub(super) fn get_or_create(
+        &mut self,
+        index: u64,
+        control: &ProductionControl<'_>,
+        create: impl FnOnce() -> boundary::Result<Box<UQAValue>>,
+    ) -> boundary::Result<*const UQAValue> {
+        control.check()?;
+        if let Some(child) = self.values.get(&index) {
+            return Ok(std::ptr::from_ref(&**child));
+        }
+        let node = control.reserve(OwnedMap::<u64, Box<UQAValue>>::entry_bytes())?;
+        let child = create()?;
+        let pointer = std::ptr::from_ref(&*child);
+        self.values.insert(index, child);
+        self.memory = control.combine(self.memory.take(), node);
+        Ok(pointer)
+    }
 }
 
 fn array(value: &UQAValue) -> boundary::Result<&ArrayValue> {
@@ -82,12 +100,6 @@ ffi_fn!(uqa_value_get_element(value: *const UQAValue, index: u64, out: *mut *con
     let element = array.element_at_row_major_with_control(position, &value.control())?
         .ok_or_else(|| UQAError::new(UQA_ERROR_RANGE, "array element index is out of range"))?;
     let mut children = value.array_children.lock();
-    if let Some(child) = children.values.get(&index) { *out = std::ptr::from_ref(&**child); return Ok(UQA_OK); }
-    let node = value.control().reserve(OwnedMap::<u64, Box<UQAValue>>::entry_bytes())?;
-    let child = UQAValue::borrowed_with_session(element, element_type(value), value.session.as_ref())?;
-    let pointer = std::ptr::from_ref(&*child);
-    children.values.insert(index, child);
-    children.memory = value.control().combine(children.memory.take(), node);
-    *out = pointer;
+    *out = children.get_or_create(index, &value.control(), || UQAValue::borrowed_with_session(element, element_type(value), value.session.as_ref()))?;
     Ok(UQA_OK)
 });

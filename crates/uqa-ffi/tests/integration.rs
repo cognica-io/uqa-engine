@@ -38,3 +38,6 @@ mod values;
 
 #[path = "cases/record_values.rs"]
 mod record_values;
+
+#[path = "cases/range_values.rs"]
+mod range_values;

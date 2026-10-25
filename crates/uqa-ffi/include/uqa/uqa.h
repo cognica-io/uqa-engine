@@ -36,6 +36,7 @@ typedef uint32_t uqa_type_kind;
 typedef uint32_t uqa_notice_level;
 typedef uint32_t uqa_notification_failure_kind;
 typedef uint32_t uqa_open_flags;
+typedef uint32_t uqa_range_flags;
 
 typedef uqa_status (UQA_CALL *uqa_user_data_destroy_fn)(void *user_data);
 
@@ -84,6 +85,18 @@ typedef struct uqa_array_shape {
     uint32_t rank;
     uint64_t element_count;
 } uqa_array_shape;
+
+typedef struct uqa_range_bounds {
+    uqa_value_view lower;
+    uqa_value_view upper;
+    uqa_range_flags flags;
+} uqa_range_bounds;
+
+#define UQA_RANGE_EMPTY UINT32_C(1)
+#define UQA_RANGE_LOWER_INCLUSIVE UINT32_C(2)
+#define UQA_RANGE_UPPER_INCLUSIVE UINT32_C(4)
+#define UQA_RANGE_LOWER_UNBOUNDED UINT32_C(8)
+#define UQA_RANGE_UPPER_UNBOUNDED UINT32_C(16)
 
 /* Native encrypted compressed SQLite container identity and exact state.
  * Persist the fields in an external trusted store; this struct is not a wire
@@ -377,6 +390,10 @@ UQA_API uqa_status UQA_CALL uqa_type_get_name(uqa_type type, uqa_string_view *ou
 UQA_API uqa_status UQA_CALL uqa_type_get_schema(uqa_type type, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_base_type(uqa_type type, uqa_type *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_element_type(uqa_type type, uqa_type *out);
+/* Subtype applies to ranges and multiranges; range_type applies to multiranges.
+ * Domains expose these through their base type. Other types return UQA_DONE. */
+UQA_API uqa_status UQA_CALL uqa_type_get_range_subtype(uqa_type type, uqa_type *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_range_type(uqa_type type, uqa_type *out);
 /* Live zero-based fields of a named composite; other types return UQA_DONE.
  * Domains expose fields through their base type. Dropped slots are excluded;
  * number retains pg_attribute.attnum. Earlier views survive catalog changes. */
@@ -451,7 +468,6 @@ UQA_API uqa_status UQA_CALL uqa_value_get_tensor_f32(
     uqa_value_view value, uqa_tensor_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_array_shape(
     uqa_value_view value, uqa_array_shape *out);
-/* type_name is an array declaration; elements are copied in row-major order. */
 /* Construct a named composite/domain or anonymous record from positional fields.
  * Inputs are copied before native execution; SQL NULL uses a value handle. */
 UQA_API uqa_status UQA_CALL uqa_value_create_record(
@@ -460,6 +476,7 @@ UQA_API uqa_status UQA_CALL uqa_value_create_record(
 UQA_API uqa_status UQA_CALL uqa_value_create_record_n(
     uqa_engine engine, const char *type_name, size_t type_name_size,
     const uqa_value_view *fields, uint32_t field_count, uqa_value *out);
+/* type_name is an array declaration; elements are copied in row-major order. */
 UQA_API uqa_status UQA_CALL uqa_value_create_array(
     uqa_engine engine, const char *type_name,
     const uqa_array_dimension *dimensions, uint32_t rank,
@@ -470,6 +487,31 @@ UQA_API uqa_status UQA_CALL uqa_value_create_array_n(
     const uqa_value_view *elements, uint64_t element_count, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_element(
     uqa_value_view value, uint64_t index, uqa_value_view *out);
+/* A NULL endpoint pointer is unbounded. An explicit UNBOUNDED flag requires a
+ * NULL pointer. EMPTY requires two NULL pointers and no other flags. SQL NULL
+ * endpoints also become unbounded after native type conversion. */
+UQA_API uqa_status UQA_CALL uqa_value_create_range(
+    uqa_engine engine, const char *type_name, uqa_value_view lower,
+    uqa_value_view upper, uqa_range_flags flags, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_range_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    uqa_value_view lower, uqa_value_view upper, uqa_range_flags flags,
+    uqa_value *out);
+/* Members are copied, ordered and merged by SQL. SQL NULL members fail. */
+UQA_API uqa_status UQA_CALL uqa_value_create_multirange(
+    uqa_engine engine, const char *type_name, const uqa_value_view *ranges,
+    uint32_t range_count, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_multirange_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const uqa_value_view *ranges, uint32_t range_count, uqa_value *out);
+/* Bounds and members borrow their parent. An empty range has only EMPTY set;
+ * a present infinite endpoint is a value, distinct from an unbounded endpoint. */
+UQA_API uqa_status UQA_CALL uqa_value_get_range_bounds(
+    uqa_value_view value, uqa_range_bounds *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_range_count(
+    uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_range(
+    uqa_value_view value, uint32_t index, uqa_value_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_copy(
     uqa_value_view value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_is_null(

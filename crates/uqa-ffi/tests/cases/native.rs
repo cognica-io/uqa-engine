@@ -57,6 +57,8 @@ native_clients!(array_values, "array_values.c");
 #[cfg(unix)]
 native_clients!(record_values, "record_values.c");
 #[cfg(unix)]
+native_clients!(range_values, "range_values.c");
+#[cfg(unix)]
 native_clients!(udf_options, "udf_options.c");
 #[cfg(unix)]
 native_clients!(udf, "udf.c");
