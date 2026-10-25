@@ -86,19 +86,3 @@ impl ForeignTableRemovalContext<'_> {
         Ok(removed.is_some())
     }
 }
-
-/// Remove a session's temporary foreign definitions, security and in-memory FDW rows.
-pub fn discard_temporary_foreign_tables(
-    publication: &dyn ForeignTableAlterPublication,
-    schema: &str,
-) {
-    publication
-        .tables_write()
-        .retain(|relation, _| relation.schema != schema);
-    publication
-        .security_write()
-        .retain(|relation, _| relation.schema != schema);
-    publication
-        .memory_tables_write()
-        .retain(|relation, _| relation.schema != schema);
-}

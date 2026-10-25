@@ -23,6 +23,11 @@ pub(crate) struct SessionTerminations {
     gate_depth: AtomicUsize,
     /// Counts the session's busy periods, so that a termination scheduled for an idle period that has ended does nothing.
     busy_epoch: Arc<AtomicU64>,
+    scheduled: Arc<ScheduledTerminations>,
+}
+
+#[derive(Default)]
+struct ScheduledTerminations {
     idle: Mutex<Option<ScheduledAction>>,
     /// The termination scheduled for the open transaction, with the start of the transaction it belongs to.
     transaction: Mutex<Option<(i64, ScheduledAction)>>,
@@ -34,8 +39,17 @@ impl SessionTerminations {
             tracks_idle,
             gate_depth: AtomicUsize::new(0),
             busy_epoch: Arc::new(AtomicU64::new(0)),
-            idle: Mutex::new(None),
-            transaction: Mutex::new(None),
+            scheduled: Arc::new(ScheduledTerminations::default()),
+        }
+    }
+
+    /// The termination worker retires the owning session's timers without tracking another idle period.
+    fn for_termination(&self) -> Self {
+        Self {
+            tracks_idle: false,
+            gate_depth: AtomicUsize::new(0),
+            busy_epoch: Arc::clone(&self.busy_epoch),
+            scheduled: Arc::clone(&self.scheduled),
         }
     }
 
@@ -56,8 +70,8 @@ impl SessionTerminations {
 
     /// Cancel every scheduled termination, as closing the session does.
     pub(crate) fn disarm(&self) {
-        *self.idle.lock() = None;
-        *self.transaction.lock() = None;
+        *self.scheduled.idle.lock() = None;
+        *self.scheduled.transaction.lock() = None;
     }
 }
 
@@ -81,9 +95,12 @@ fn timeout(engine: &Engine, name: &str) -> Option<Duration> {
 impl Engine {
     /// A busy period begins: the idle termination no longer applies, and a statement outside a transaction block starts the transaction that `transaction_timeout` limits.
     pub(crate) fn session_became_busy(&self) {
+        if !self.session.closure.is_open() {
+            return;
+        }
         let terminations = &self.runtime.terminations;
         terminations.busy_epoch.fetch_add(1, Ordering::AcqRel);
-        *terminations.idle.lock() = None;
+        *terminations.scheduled.idle.lock() = None;
         if self.transaction_depth() == 0 {
             self.schedule_transaction_termination(uqa_sql::expr::clock_timestamp_micros());
         }
@@ -91,6 +108,9 @@ impl Engine {
 
     /// An idle period begins: a terminated session finishes its termination, and otherwise the idle and transaction terminations that apply to it are scheduled.
     pub(crate) fn session_became_idle(&self) {
+        if !self.session.closure.is_open() {
+            return;
+        }
         if self.runtime.cancellation.termination().is_some() {
             self.session_terminator_engine()
                 .finish_session_termination();
@@ -109,7 +129,7 @@ impl Engine {
                 CancellationReason::IdleInTransactionSessionTimeout,
             )
         } else {
-            *self.runtime.terminations.transaction.lock() = None;
+            *self.runtime.terminations.scheduled.transaction.lock() = None;
             (
                 "idle_session_timeout",
                 CancellationReason::IdleSessionTimeout,
@@ -122,12 +142,13 @@ impl Engine {
         let expected = epoch.load(Ordering::Acquire);
         let action =
             self.termination_action(reason, TerminationScope::IdlePeriod { epoch, expected });
-        *self.runtime.terminations.idle.lock() = Some(uqa_core::cancel::schedule(after, action));
+        *self.runtime.terminations.scheduled.idle.lock() =
+            Some(uqa_core::cancel::schedule(after, action));
     }
 
     /// Schedule the termination of the transaction that began at `started` (microseconds since the epoch) once it outlasts `transaction_timeout`, unless one is already scheduled for it.
     fn schedule_transaction_termination(&self, started: i64) {
-        let mut scheduled = self.runtime.terminations.transaction.lock();
+        let mut scheduled = self.runtime.terminations.scheduled.transaction.lock();
         if scheduled
             .as_ref()
             .is_some_and(|(start, _)| *start == started)
@@ -160,6 +181,9 @@ impl Engine {
         let token = self.runtime.cancellation.clone();
         let terminator = self.session_terminator_engine();
         move || {
+            if !terminator.session.closure.is_open() {
+                return;
+            }
             let applies = match &scope {
                 TerminationScope::IdlePeriod { epoch, expected } => {
                     epoch.load(Ordering::Acquire) == *expected
@@ -195,31 +219,14 @@ impl Engine {
 
     /// Roll back every transaction frame of the terminated session and drop what it holds, once, as the backend's exit does.
     fn finish_session_termination(&self) {
-        if self
-            .session
-            .termination_finished
-            .swap(true, Ordering::AcqRel)
-        {
-            return;
-        }
-        while self.transaction_depth() != 0 {
-            if self.rollback().is_err() {
-                break;
-            }
-        }
-        if let Some(cache) = self.session.regex_cache.lock().take() {
-            cache.clear();
-        }
-        let _ = self.clear_notification_listener_without_transaction();
-        self.release_automatic_statistics_client();
+        let _ = self.close_terminated_session();
     }
 
-    /// An engine that works for this session on another thread: it shares the session, its storage, its locks and its statement gate, holds a token of its own, and tracks no idle periods.
+    /// Finalize the same session on another thread, retaining its transaction, catalog epochs, cancellation signal and scheduled timers. Cleanup defers cancellation only while it holds the statement gate and tracks no idle periods.
     fn session_terminator_engine(&self) -> Engine {
-        let mut epochs = crate::EpochCoordinator::new();
-        epochs.share_published_from(&self.epochs);
-        let mut runtime = crate::QueryRuntime::new(
+        let mut runtime = crate::QueryRuntime::with_cancellation(
             self.sql_function_depth_limit(),
+            self.runtime.cancellation.clone(),
             self.session.state.client_level(),
         );
         runtime.function_context = std::sync::Arc::clone(&self.runtime.function_context);
@@ -227,13 +234,14 @@ impl Engine {
         runtime.statement_gate = Arc::clone(&self.runtime.statement_gate);
         runtime.notices = Arc::clone(&self.runtime.notices);
         runtime.notifications = Arc::clone(&self.runtime.notifications);
-        runtime.terminations = SessionTerminations::new(false);
+        runtime.notification_wake = Arc::clone(&self.runtime.notification_wake);
+        runtime.terminations = self.runtime.terminations.for_termination();
         Engine {
             storage: crate::StorageContext::shared_from(&self.storage),
             durable: Arc::clone(&self.durable),
             session: Arc::clone(&self.session),
             extensions: crate::RuntimeExtensions::shared_from(&self.extensions),
-            epochs,
+            epochs: Arc::clone(&self.epochs),
             runtime,
             row_locks: Arc::clone(&self.row_locks),
             statistics: Arc::clone(&self.statistics),

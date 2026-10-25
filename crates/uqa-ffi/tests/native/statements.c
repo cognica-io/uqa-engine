@@ -801,6 +801,95 @@ static void utility_statements(uqa_engine engine, uqa_result result) {
     sqlstate("42704");
 }
 
+static void temporary_catalog_cleanup(void) {
+    const char *directory = getenv("UQA_TEST_DATABASE_DIR");
+    char path[4096];
+    uqa_engine engine = NULL;
+    uqa_result result = NULL;
+    int size = snprintf(path, sizeof(path), "%s/temporary-cleanup", directory);
+    assert(size > 0 && (size_t)size < sizeof(path));
+    CHECK(test_database_open_path(path, NULL, &engine));
+    CHECK(uqa_result_create(&result));
+    CHECK(uqa_engine_execute(engine,
+        "CREATE DOMAIN pg_temp.c_cleanup_domain AS integer; "
+        "CREATE TABLE c_cleanup_table(n integer,d pg_temp.c_cleanup_domain); "
+        "INSERT INTO c_cleanup_table VALUES(7,1); "
+        "CREATE VIEW c_cleanup_view AS SELECT d FROM c_cleanup_table", result));
+    CHECK(uqa_engine_execute(engine, "BEGIN READ ONLY; DISCARD TEMP", result));
+    CHECK(uqa_engine_execute(engine,
+        "SELECT count(*) FROM pg_attribute WHERE attrelid='c_cleanup_table'::regclass "
+        "AND attnum>0 AND NOT attisdropped", result));
+    assert(integer(result, 0) == 1);
+    CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+    CHECK(uqa_engine_execute(engine, "SELECT d FROM c_cleanup_table", result));
+    assert(integer(result, 0) == 1);
+    CHECK(uqa_result_destroy(&result));
+    CHECK(uqa_engine_close(&engine));
+    CHECK(uqa_engine_close(&engine));
+    if (test_database_flags() != UQA_OPEN_MEMORY) {
+        CHECK(test_database_open_path(path, NULL, &engine));
+        CHECK(uqa_result_create(&result));
+        CHECK(uqa_engine_execute(engine,
+            "SELECT n,(SELECT count(*) FROM pg_type WHERE typname='c_cleanup_domain'),"
+            "(SELECT count(*) FROM pg_class WHERE relname='c_cleanup_view') FROM c_cleanup_table", result));
+        assert(integer(result, 0) == 7 && integer(result, 1) == 0 && integer(result, 2) == 0);
+        CHECK(uqa_engine_execute(engine,
+            "SELECT count(*) FROM pg_attribute WHERE attrelid='c_cleanup_table'::regclass "
+            "AND attnum>0 AND NOT attisdropped", result));
+        assert(integer(result, 0) == 1);
+        CHECK(uqa_result_destroy(&result));
+        CHECK(uqa_engine_close(&engine));
+    }
+}
+
+static void temporary_catalog_timeout(void) {
+    if (test_database_flags() == UQA_OPEN_MEMORY) {
+        return;
+    }
+    const char *directory = getenv("UQA_TEST_DATABASE_DIR");
+    char path[4096];
+    uqa_engine engine = NULL;
+    uqa_engine peer = NULL;
+    uqa_result result = NULL;
+    int size = snprintf(path, sizeof(path), "%s/temporary-timeout", directory);
+    assert(size > 0 && (size_t)size < sizeof(path));
+    CHECK(test_database_open_path(path, NULL, &engine));
+    CHECK(uqa_engine_open_session(engine, &peer));
+    CHECK(uqa_result_create(&result));
+    CHECK(uqa_engine_execute(engine,
+        "CREATE DOMAIN pg_temp.c_timeout_domain AS integer; "
+        "CREATE TABLE c_timeout_table(n integer,d pg_temp.c_timeout_domain); "
+        "INSERT INTO c_timeout_table VALUES(7,1); "
+        "CREATE VIEW c_timeout_view AS SELECT d FROM c_timeout_table", result));
+    CHECK(uqa_engine_execute(engine, "SET idle_session_timeout='100ms'", result));
+    for (unsigned attempt = 0;; ++attempt) {
+        CHECK(uqa_engine_execute(peer,
+            "SELECT count(*) FROM pg_type WHERE typname='c_timeout_domain'", result));
+        if (integer(result, 0) == 0) {
+            break;
+        }
+        assert(attempt < 2000);
+        CHECK(uqa_engine_execute(peer, "SELECT pg_sleep(0.01)", result));
+    }
+    CHECK(uqa_engine_execute(peer,
+        "SELECT n,(SELECT count(*) FROM pg_class WHERE relname='c_timeout_view'),"
+        "(SELECT count(*) FROM pg_attribute WHERE attrelid='c_timeout_table'::regclass "
+        "AND attnum>0 AND NOT attisdropped) FROM c_timeout_table", result));
+    assert(integer(result, 0) == 7 && integer(result, 1) == 0 && integer(result, 2) == 1);
+    assert(uqa_engine_execute(engine, "SELECT 1", result) == UQA_ERROR_SQL);
+    sqlstate("57P05");
+    CHECK(uqa_result_destroy(&result));
+    CHECK(uqa_engine_close(&engine));
+    CHECK(uqa_engine_close(&peer));
+    CHECK(test_database_open_path(path, NULL, &engine));
+    CHECK(uqa_result_create(&result));
+    CHECK(uqa_engine_execute(engine,
+        "SELECT n,(SELECT count(*) FROM pg_type WHERE typname='c_timeout_domain') FROM c_timeout_table", result));
+    assert(integer(result, 0) == 7 && integer(result, 1) == 0);
+    CHECK(uqa_result_destroy(&result));
+    CHECK(uqa_engine_close(&engine));
+}
+
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -1003,5 +1092,7 @@ int main(void) {
     xml_values(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
+    temporary_catalog_cleanup();
+    temporary_catalog_timeout();
     return 0;
 }

@@ -61,7 +61,7 @@ impl Engine {
             durable: Arc::new(super::DurableCatalogState::new()),
             extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
-            epochs: super::EpochCoordinator::new(),
+            epochs: Arc::new(super::EpochCoordinator::new()),
             runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
@@ -289,12 +289,12 @@ impl Engine {
                 )
             })?
             .change_version()?;
+        let epochs =
+            Arc::get_mut(&mut session.epochs).expect("new session owns its catalog epoch state");
         if storage_version_before_restore == storage_version_after_restore {
-            session
-                .epochs
-                .share_published_from_at(&self.epochs, observed_epochs);
+            epochs.share_published_from_at(&self.epochs, observed_epochs);
         } else {
-            session.epochs.share_published_from(&self.epochs);
+            epochs.share_published_from(&self.epochs);
         }
         // A commit that raced the load advanced a shared publication beyond
         // the generation or storage version captured before the session
@@ -416,7 +416,7 @@ impl Engine {
             durable: Arc::new(super::DurableCatalogState::new()),
             extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
-            epochs: super::EpochCoordinator::new(),
+            epochs: Arc::new(super::EpochCoordinator::new()),
             runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,

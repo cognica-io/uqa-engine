@@ -1,0 +1,402 @@
+{
+  "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "cleanup": "DISCARD TEMP",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        },
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        },
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    },
+    {
+      "cleanup": "DISCARD TEMP READ ONLY",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        },
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        },
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    },
+    {
+      "cleanup": "DISCARD ALL",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        },
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    },
+    {
+      "cleanup": "close",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    },
+    {
+      "cleanup": "idle_session_timeout",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "arm": "SET idle_session_timeout='1000ms';",
+      "busy": false,
+      "sqlstate": "57P05",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        }
+      ],
+      "after_termination": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    },
+    {
+      "cleanup": "idle_in_transaction_session_timeout",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "arm": "SET idle_in_transaction_session_timeout='1000ms';BEGIN; UPDATE lifetime_test.dependent SET n=99;",
+      "busy": false,
+      "sqlstate": "25P03",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        }
+      ],
+      "after_termination": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    },
+    {
+      "cleanup": "transaction_timeout",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "arm": "SET transaction_timeout='1000ms';BEGIN; UPDATE lifetime_test.dependent SET n=99;",
+      "busy": false,
+      "sqlstate": "25P04",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        }
+      ],
+      "after_termination": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    },
+    {
+      "cleanup": "transaction_timeout busy",
+      "setup": "\nCREATE SCHEMA lifetime_test;\nCREATE DOMAIN pg_temp.lifetime_domain AS integer CHECK(VALUE > 0);\nCREATE TYPE pg_temp.lifetime_enum AS ENUM ('ready');\nCREATE TYPE pg_temp.lifetime_composite AS (n integer);\nCREATE TYPE pg_temp.lifetime_shell;\nCREATE TABLE lifetime_test.dependent (n integer, d pg_temp.lifetime_domain, e pg_temp.lifetime_enum, c pg_temp.lifetime_composite);\nINSERT INTO lifetime_test.dependent (n,d) VALUES(7,1);\nCREATE VIEW lifetime_test.dependent_view AS SELECT d FROM lifetime_test.dependent;\nCREATE FUNCTION lifetime_test.dependent_routine(pg_temp.lifetime_domain) RETURNS integer LANGUAGE SQL AS 'SELECT $1::integer';\n",
+      "observe": "\nSELECT json_build_object(\n 'types',(SELECT count(*) FROM pg_type WHERE typname IN ('lifetime_domain','lifetime_enum','lifetime_composite','lifetime_shell')),\n 'columns',(SELECT json_agg(attname ORDER BY attnum) FROM pg_attribute WHERE attrelid='lifetime_test.dependent'::regclass AND attnum>0 AND NOT attisdropped),\n 'rows',(SELECT json_agg(n ORDER BY n) FROM lifetime_test.dependent),\n 'view',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='lifetime_test' AND c.relname='dependent_view'),\n 'routine',(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='lifetime_test' AND p.proname='dependent_routine')\n);\n",
+      "arm": "SET transaction_timeout='1000ms';",
+      "busy": true,
+      "sqlstate": "25P04",
+      "observations": [
+        {
+          "types": 4,
+          "columns": [
+            "n",
+            "d",
+            "e",
+            "c"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 1,
+          "routine": 1
+        }
+      ],
+      "after_termination": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ],
+      "after_close": [
+        {
+          "types": 0,
+          "columns": [
+            "n"
+          ],
+          "rows": [
+            7
+          ],
+          "view": 0,
+          "routine": 0
+        }
+      ]
+    }
+  ]
+}

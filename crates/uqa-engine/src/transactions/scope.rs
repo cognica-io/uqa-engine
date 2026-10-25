@@ -22,6 +22,28 @@ pub(super) struct TransactionScope<'engine> {
 }
 
 impl<'engine> TransactionScope<'engine> {
+    /// Finalization owns a fresh read-write transaction independently of the closing session's default characteristics.
+    pub(super) fn begin_cleanup(engine: &'engine Engine) -> Result<Self, SQLError> {
+        let mut stack = engine.session.transactions.lock();
+        if !stack.is_empty() {
+            return Err(SQLError::Internal(
+                "session cleanup started before existing transaction completion".into(),
+            ));
+        }
+        engine.begin_transaction_frame(
+            &mut stack,
+            false,
+            true,
+            super::TransactionFrameKind::ImplicitStatement,
+            super::TransactionCharacteristicsState::default(),
+        )?;
+        Ok(Self {
+            engine,
+            depth_before: 0,
+            state: TransactionScopeState::Active,
+        })
+    }
+
     pub(super) fn begin_implicit_statement(
         engine: &'engine Engine,
         read_only: bool,

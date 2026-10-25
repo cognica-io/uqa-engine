@@ -9,6 +9,8 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "temporary_namespace_oids/lifetime.rs"]
+mod lifetime;
 #[path = "temporary_namespace_oids/types.rs"]
 mod types;
 

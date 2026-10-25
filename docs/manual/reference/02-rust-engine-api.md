@@ -16,7 +16,7 @@ The `uqa` facade is the primary application dependency and re-exports the `uqa-e
 | `Engine::open_compressed_encrypted_with_anchor(...)` | Compressed and encrypted container with a trusted rollback anchor |
 | `Engine::from_persistent_provider(provider)` | Engine over a `PersistentStorageProvider`, including redb |
 
-Use `Engine::close()` when the application needs an explicit close boundary. Normal Rust ownership still closes resources when the engine is dropped.
+Use `Engine::close()` when the application needs an explicit close boundary. It rolls back open transactions, then removes the session's temporary objects and their dependents in a separately completed cleanup transaction. Cancellation and read-only session defaults do not prevent finalization, and the original cancellation signal remains set. A failed completion retains its transaction receipt and returns an error so the caller can retry close; successful close is idempotent. Session timeouts use the same finalization owner, including temporary-object cleanup before explicit close. Drop attempts the same cleanup before releasing the physical owner, but cannot report a failure. Do not submit new work after successful close.
 
 ## Execute SQL
 

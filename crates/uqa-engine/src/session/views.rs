@@ -8,9 +8,11 @@
 
 use super::{Engine, SQLError, StoredView, StoredViewKind};
 #[cfg(test)]
-use super::{QueryPlan, RelationIdentity, StorageBackendError, StorageBackendResult};
+use super::{QueryPlan, StorageBackendError, StorageBackendResult};
 #[cfg(test)]
 use uqa_sql::binding::view_dependencies::restoration::bind_stored_view_relations;
+#[cfg(test)]
+use uqa_storage::RelationIdentity;
 
 impl Engine {
     #[cfg(test)]

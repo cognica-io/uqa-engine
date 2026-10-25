@@ -241,7 +241,7 @@ pub struct Engine {
     durable: Arc<DurableCatalogState>,
     session: Arc<SessionContext>,
     extensions: RuntimeExtensions,
-    epochs: EpochCoordinator,
+    epochs: Arc<EpochCoordinator>,
     runtime: QueryRuntime,
     row_locks: Arc<row_locks::RowLockManager>,
     statistics: Arc<statistics::StatisticsCoordinator>,
@@ -789,6 +789,7 @@ fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, Analyze
 impl Drop for Engine {
     fn drop(&mut self) {
         if self.owns_session_registration {
+            let _ = self.close();
             self.session.portals.lock().clear();
             if let Some(backend) = self.storage.backend.as_ref() {
                 if backend.in_transaction() {

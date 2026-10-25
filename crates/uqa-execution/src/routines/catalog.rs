@@ -109,10 +109,3 @@ pub(super) fn temporary_snapshot(registry: &RoutineRegistry) -> RoutineRegistry 
         .map(|(name, overloads)| (name.clone(), overloads.clone()))
         .collect()
 }
-
-/// Temporary routines have the namespace's session lifetime, including DISCARD TEMP and enclosing rollback.
-pub fn discard_temporary(registry: &mut RoutineRegistry, schema: &str) {
-    registry.retain(|name, _| {
-        !uqa_sql::schema::namespaces::removal::routine_name_occupies_schema(name, schema)
-    });
-}

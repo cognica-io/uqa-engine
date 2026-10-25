@@ -276,7 +276,7 @@ impl Engine {
             });
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Temp) {
-            self.discard_temporary_relations();
+            self.discard_temporary_objects()?;
             if self.transaction_depth() == 0 {
                 self.row_locks.close_temporary_roles(self.session_id);
             }
@@ -314,88 +314,18 @@ impl Engine {
         Ok(())
     }
 
-    fn discard_temporary_relations(&self) {
+    pub(crate) fn discard_temporary_objects(&self) -> Result<(), SQLError> {
+        use uqa_execution::schema::deletion::CatalogRemovalInputs;
+        if !self.temporary_namespace_allocated() {
+            return Ok(());
+        }
         let schema = self.temporary_schema_name();
-        uqa_execution::routines::catalog::discard_temporary(
-            &mut self.durable.sql_user_functions.write(),
-            &schema,
-        );
-        uqa_execution::schema::foreign_removal::discard_temporary_foreign_tables(self, &schema);
-        let temporary_tables = self
-            .storage
-            .tables
-            .read()
-            .keys()
-            .filter(|relation| relation.schema == schema)
-            .cloned()
-            .collect::<Vec<_>>();
-        let temporary_table_names = temporary_tables
-            .iter()
-            .map(super::RelationIdentity::qualified_name)
-            .collect::<std::collections::BTreeSet<_>>();
-        self.storage
-            .tables
-            .write()
-            .retain(|relation, _| relation.schema != schema);
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(table, _), _| !temporary_table_names.contains(table));
-        self.durable
-            .catalog_indexes
-            .write()
-            .retain(|_, index| !temporary_table_names.contains(&index.table_name));
-        self.durable
-            .views
-            .write()
-            .retain(|relation, _| relation.schema != schema);
-        let temporary_sequences = self
-            .durable
-            .sequence_persistence
-            .read()
-            .iter()
-            .filter(|(relation, persistence)| {
-                relation.schema == schema
-                    && **persistence == uqa_sql::ast::RelationPersistence::Temporary
-            })
-            .map(|(relation, _)| relation.clone())
-            .collect::<std::collections::BTreeSet<_>>();
-        self.durable
-            .sequences
-            .write()
-            .retain(|relation, _| !temporary_sequences.contains(relation));
-        self.durable
-            .sequence_object_ids
-            .write()
-            .retain(|relation, _| !temporary_sequences.contains(relation));
-        self.durable
-            .sequence_persistence
-            .write()
-            .retain(|relation, _| !temporary_sequences.contains(relation));
-        self.durable
-            .sequence_security
-            .write()
-            .retain(|relation, _| !temporary_sequences.contains(relation));
-        let mut session = self.session.state.write();
-        session
-            .sequence_currvals
-            .retain(|relation, _| !temporary_sequences.contains(relation));
-        if session
-            .last_sequence
-            .as_ref()
-            .is_some_and(|last| temporary_sequences.contains(&last.relation))
-        {
-            session.last_sequence = None;
-        }
-        drop(session);
-        self.session
-            .sequence_caches
-            .lock()
-            .retain(|relation, _| !temporary_sequences.contains(relation));
-        if !temporary_tables.is_empty() {
-            self.note_table_catalog_changed();
-        }
-        self.note_catalog_registry_changed();
+        self.with_definition_publication(|engine| {
+            uqa_execution::schema::deletion::remove_namespace_members(
+                &engine.catalog_removal_context(),
+                &schema,
+            )
+        })
     }
 }
 

@@ -314,8 +314,8 @@ pub(super) struct SessionContext {
     pub(super) parameters: Mutex<crate::session::SessionParameterRegistry>,
     /// The bytes a query workspace may hold before it spills when the host bounds it below `work_mem`; 0 leaves `work_mem` in effect.
     pub(super) query_memory_limit: std::sync::atomic::AtomicUsize,
-    /// Whether a terminated session has rolled back its transaction and dropped what it held.
-    pub(super) termination_finished: AtomicBool,
+    /// Explicit close, owner Drop and automatic termination share one cleanup owner and its retained completion responsibility.
+    pub(super) closure: crate::transactions::SessionClosure,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
@@ -394,7 +394,7 @@ impl SessionContext {
             state: SessionStateLock::new(state),
             parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
             query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
-            termination_finished: AtomicBool::new(false),
+            closure: crate::transactions::SessionClosure::default(),
             prepared: RwLock::new(BTreeMap::new()),
             next_prepared_handle: std::sync::atomic::AtomicU64::new(0),
             sequence_caches: Mutex::new(BTreeMap::new()),

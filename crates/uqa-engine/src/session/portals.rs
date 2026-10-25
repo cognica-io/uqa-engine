@@ -603,7 +603,7 @@ impl Engine {
             durable: std::sync::Arc::clone(&self.durable),
             session: std::sync::Arc::clone(&self.session),
             extensions: RuntimeExtensions::shared_from(&self.extensions),
-            epochs,
+            epochs: std::sync::Arc::new(epochs),
             runtime,
             row_locks: std::sync::Arc::clone(&self.row_locks),
             statistics: std::sync::Arc::clone(&self.statistics),

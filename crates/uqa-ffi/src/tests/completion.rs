@@ -23,6 +23,9 @@ mod operations;
 #[path = "completion/rollback.rs"]
 mod rollback;
 
+#[path = "completion/cleanup.rs"]
+mod cleanup;
+
 #[path = "completion/configurations.rs"]
 mod configurations;
 
