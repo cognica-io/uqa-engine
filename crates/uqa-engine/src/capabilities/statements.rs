@@ -69,6 +69,21 @@ impl Engine {
 }
 
 impl context::PhysicalExplainPlanning for Engine {
+    fn explained_plan_estimate(
+        &self,
+        body: &uqa_sql::plan::UnifiedPlan,
+        params: &[uqa_sql::SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::result::explain::ExplainPlanEstimate, uqa_sql::SQLError> {
+        uqa_planner::explain::estimate_plan(
+            self.statement_statistics_context(),
+            &self.statement_planning_context().analysis,
+            body,
+            params,
+            control,
+        )
+    }
+
     fn plan_explained_statement(
         &self,
         body: &uqa_sql::plan::UnifiedPlan,

@@ -180,6 +180,7 @@ impl PreparedPlanOptimization for Inputs {
         Ok(crate::plan_cost::PlanCost {
             rows: 1.0,
             execution: if generic { 10_000.0 } else { 1.0 },
+            startup: 0.0,
             relations: 0,
         })
     }

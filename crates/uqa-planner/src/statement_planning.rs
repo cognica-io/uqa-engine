@@ -24,19 +24,36 @@ pub fn estimate_plan(
     context: StatementStatisticsContext<'_>,
     plan: &UnifiedPlan,
 ) -> Result<crate::plan_cost::PlanCost, SQLError> {
+    estimate_plan_with_control(
+        context,
+        plan,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn estimate_plan_with_control(
+    context: StatementStatisticsContext<'_>,
+    plan: &UnifiedPlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<crate::plan_cost::PlanCost, SQLError> {
     let error = std::cell::RefCell::new(None);
     let statistics = CatalogSourceStatistics {
         context,
         error: &error,
     };
-    let estimate = crate::plan_cost::PlanCostEstimator::new(&statistics).estimate(plan);
+    let estimate =
+        crate::plan_cost::PlanCostEstimator::new(&statistics).estimate_with_control(plan, control);
     if let Some(error) = error.into_inner() {
         return Err(error);
     }
+    let estimate = estimate?;
     if !estimate.execution.is_finite()
         || estimate.execution < 0.0
         || !estimate.rows.is_finite()
         || estimate.rows < 0.0
+        || !estimate.startup.is_finite()
+        || estimate.startup < 0.0
+        || estimate.startup > estimate.execution
     {
         return Err(SQLError::Internal(
             "prepared plan produced an invalid cost estimate".into(),

@@ -12,6 +12,15 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 #[cfg(test)]
 mod tests;
 
+/// Native optimizer estimates, independent of measurements from an invocation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExplainPlanEstimate {
+    pub startup: f64,
+    pub total: f64,
+    pub rows: f64,
+    pub width: u64,
+}
+
 /// Physical diagnostic values keep numeric primitives inline and retain only admitted containers and copied text. Field names and fixed labels borrow static definitions.
 #[derive(Debug)]
 pub enum ExplainValue {

@@ -258,6 +258,7 @@ pub struct ExplainAnalysis {
 #[derive(Debug, Default)]
 pub struct ExplainPhysicalPlan {
     pub nodes: Vec<explain::ExplainValue>,
+    pub estimate: Option<explain::ExplainPlanEstimate>,
     /// Nondefault planning parameters captured from the invoking session before execution.
     pub settings: Vec<(&'static str, String)>,
     /// Time spent producing this invocation's optimized plan and physical metadata.

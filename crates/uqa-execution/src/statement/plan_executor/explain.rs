@@ -175,6 +175,15 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             settings.costs,
             &control,
         )?;
+        let estimate = if settings.costs {
+            Some(self.context.physical_explain.explained_plan_estimate(
+                body,
+                self.params,
+                &control,
+            )?)
+        } else {
+            None
+        };
         let shown = if settings.settings {
             self.context.validation.session.explain_settings(&control)?
         } else {
@@ -183,6 +192,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         let (shown, shown_memory) = shown.into_parts();
         let (mut physical, physical_memory) = physical.into_parts();
         physical.settings = shown;
+        physical.estimate = estimate;
         physical.planning_elapsed = Some(planning_started.elapsed());
         let physical = control.finish(physical, control.combine(physical_memory, shown_memory))?;
         let analysis = if settings.analyze {

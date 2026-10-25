@@ -30,6 +30,12 @@ pub type PhysicalExplainRenderer = fn(
 pub trait PhysicalExplainPlanning: Sync {
     /// Optimize the already analyzed body only after the command has interpreted its options.
     fn plan_explained_statement(&self, body: &UnifiedPlan) -> Result<UnifiedPlan, SQLError>;
+    fn explained_plan_estimate(
+        &self,
+        body: &UnifiedPlan,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::result::explain::ExplainPlanEstimate, SQLError>;
     fn physical_explain_plan(
         &self,
         body: &UnifiedPlan,

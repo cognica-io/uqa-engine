@@ -19,7 +19,9 @@ use uqa_sql::{
 pub use uqa_sql::result::ExplainAnalysis;
 use uqa_sql::result::ExplainPhysicalPlan;
 
+mod costs;
 mod formats;
+pub use costs::estimate_plan;
 mod physical;
 mod properties;
 #[cfg(test)]
@@ -181,6 +183,13 @@ fn plan_text(
     if settings.format != uqa_sql::explain::ExplainFormat::Text {
         return Ok(text.finish()?);
     }
+    if let Some(estimate) = physical.estimate.filter(|_| settings.costs) {
+        let _ = write!(
+            text,
+            "\n  cost={:.2}..{:.2} rows={:.0} width={}",
+            estimate.startup, estimate.total, estimate.rows, estimate.width
+        );
+    }
     for node in &physical.nodes {
         let rendered = formats::json(&properties::Property::Captured(node), control)?;
         for line in rendered.lines() {
@@ -244,6 +253,12 @@ fn structured_plan<'a>(
     let mut plan = Object::new(control);
     plan.insert("Node Type", P::Text(node))?;
     plan.insert("UQA Plan", P::Lines(text))?;
+    if let Some(estimate) = physical.estimate.filter(|_| settings.costs) {
+        plan.insert("Startup Cost", P::Float(estimate.startup))?;
+        plan.insert("Total Cost", P::Float(estimate.total))?;
+        plan.insert("Plan Rows", P::Float(estimate.rows.round()))?;
+        plan.insert("Plan Width", P::Unsigned(estimate.width))?;
+    }
     if let Some(analysis) = analysis {
         plan.insert("Actual Rows", P::Unsigned(analysis.rows))?;
         plan.insert("Affected Rows", P::Unsigned(analysis.affected_rows))?;

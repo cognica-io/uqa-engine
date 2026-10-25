@@ -330,6 +330,44 @@ static void explained_stream_and_settings(uqa_engine engine, uqa_result result) 
     CHECK(uqa_engine_execute(engine, "RESET work_mem", result));
 }
 
+static void explained_costs(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_result inspected = NULL;
+    uqa_value document = NULL;
+    uqa_value_view view = NULL;
+    CHECK(uqa_result_create(&inspected));
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        const char *sql = enabled
+            ? "EXPLAIN (FORMAT JSON, COSTS TRUE) SELECT 1::smallint, 2::integer, 3::bigint, true"
+            : "EXPLAIN (FORMAT JSON, COSTS FALSE) SELECT 1::smallint, 2::integer, 3::bigint, true";
+        CHECK(uqa_statement_prepare(engine, sql, &statement));
+        CHECK(uqa_statement_execute(statement, result));
+        CHECK(uqa_statement_finalize(&statement));
+        CHECK(uqa_result_get_value(result, 0, 0, &view));
+        CHECK(uqa_value_create_copy(view, &document));
+        CHECK(uqa_statement_prepare(engine,
+            "SELECT ($1::json->0->'Plan'->>'Plan Width')::integer, "
+            "($1::json->0->'Plan'->>'Plan Rows')::numeric::integer, "
+            "CASE WHEN ($1::json->0->'Plan'->>'Total Cost')::numeric >= "
+            "($1::json->0->'Plan'->>'Startup Cost')::numeric THEN 1 ELSE 0 END",
+            &statement));
+        CHECK(uqa_statement_bind(statement, 1, document));
+        CHECK(uqa_value_destroy(&document));
+        CHECK(uqa_statement_execute(statement, inspected));
+        if (enabled) {
+            assert(integer(inspected, 0) == 15 && integer(inspected, 1) == 1);
+            assert(integer(inspected, 2) == 1);
+        } else {
+            uint8_t is_null = 0;
+            CHECK(uqa_result_get_value(inspected, 0, 0, &view));
+            CHECK(uqa_value_get_is_null(view, &is_null));
+            assert(is_null == 1 && integer(inspected, 2) == 0);
+        }
+        CHECK(uqa_statement_finalize(&statement));
+    }
+    CHECK(uqa_result_destroy(&inspected));
+}
+
 static void explained_physical_metadata(uqa_engine engine, uqa_result result) {
     CHECK(uqa_engine_execute(engine,
         "CREATE TABLE c_explain_vectors (id integer, embedding tensor(2)); "
@@ -753,6 +791,7 @@ int main(void) {
     explained_results(engine, result);
     explained_stream_and_settings(engine, result);
     explained_physical_metadata(engine, result);
+    explained_costs(engine, result);
     explained_generic_parameters(engine, result);
     explained_read_only_destination(engine, result);
     xml_values(engine, result);

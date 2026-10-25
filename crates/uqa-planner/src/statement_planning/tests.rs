@@ -29,6 +29,7 @@ struct FailingCatalog {
     table: RefCell<Option<Arc<TableGeneration>>>,
     retained: Weak<TableGeneration>,
     reads: RefCell<Vec<&'static str>>,
+    cancel: Option<uqa_core::CancellationToken>,
 }
 
 impl PlannerStatisticsCatalog for FailingCatalog {
@@ -43,6 +44,9 @@ impl PlannerStatisticsCatalog for FailingCatalog {
     fn hierarchy_scan_tables(&self, _: &str) -> Result<Vec<String>, SQLError> {
         assert!(self.retained.upgrade().is_some());
         self.reads.borrow_mut().push("hierarchy");
+        if let Some(cancel) = &self.cancel {
+            cancel.cancel();
+        }
         Err(SQLError::TypeMismatch("hierarchy metadata failed".into()))
     }
 
@@ -109,6 +113,7 @@ fn relation_statistics_retain_table_generation_and_first_failure() {
         retained: Arc::downgrade(&table),
         table: RefCell::new(Some(table)),
         reads: RefCell::default(),
+        cancel: None,
     };
     let error = RefCell::new(None);
     let statistics = CatalogSourceStatistics {
@@ -128,4 +133,48 @@ fn relation_statistics_retain_table_generation_and_first_failure() {
         error.borrow().as_ref(),
         Some(SQLError::TypeMismatch(message)) if message == "hierarchy metadata failed"
     ));
+}
+
+#[test]
+fn cost_catalog_failure_precedes_cancellation_observed_after_the_callback() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    for original_cancelled in [true, false] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let budget = MemoryBudget::new(4096);
+        let table = Arc::new(TableGeneration);
+        let catalog = FailingCatalog {
+            retained: Arc::downgrade(&table),
+            table: RefCell::new(Some(table)),
+            reads: RefCell::default(),
+            cancel: Some(if original_cancelled {
+                original.clone()
+            } else {
+                invoking.clone()
+            }),
+        };
+        let plan = uqa_sql::plan::UnifiedPlan::lower(
+            uqa_sql::compile("SELECT value FROM items")
+                .unwrap()
+                .remove(0),
+        );
+        let error = super::estimate_plan_with_control(
+            StatementStatisticsContext {
+                catalog: &catalog,
+                volatility: &catalog,
+                retrieval: &catalog,
+            },
+            &plan,
+            &ProductionControl::new(&budget, &original, &invoking),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, SQLError::TypeMismatch(message) if message == "hierarchy metadata failed")
+        );
+        assert_eq!(budget.used(), 0);
+        assert!(catalog.retained.upgrade().is_none());
+    }
 }

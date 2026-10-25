@@ -1,0 +1,285 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "EXPLAIN (FORMAT TEXT) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "TEXT",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (FORMAT JSON) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "JSON",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (FORMAT XML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "XML",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (FORMAT YAML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "YAML",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT TEXT) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "TEXT",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT JSON) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "JSON",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT XML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "XML",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT YAML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "YAML",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT TEXT) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "TEXT",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT JSON) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "JSON",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT XML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "XML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT YAML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "YAML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT TEXT) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "TEXT",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT JSON) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "JSON",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT XML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "XML",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT YAML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "YAML",
+      "costs": true,
+      "rows": 1,
+      "width": 15
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT TEXT) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "TEXT",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT JSON) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "JSON",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT XML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "XML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT YAML) SELECT 1::smallint, 2::integer, 3::bigint, true",
+      "format": "YAML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (FORMAT TEXT) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "TEXT",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (FORMAT JSON) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "JSON",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (FORMAT XML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "XML",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (FORMAT YAML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "YAML",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT TEXT) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "TEXT",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT JSON) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "JSON",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT XML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "XML",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS, FORMAT YAML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "YAML",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT TEXT) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "TEXT",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT JSON) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "JSON",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT XML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "XML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, FORMAT YAML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "YAML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT TEXT) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "TEXT",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT JSON) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "JSON",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT XML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "XML",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS FALSE, COSTS TRUE, FORMAT YAML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "YAML",
+      "costs": true,
+      "rows": 2,
+      "width": 12
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT TEXT) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "TEXT",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT JSON) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "JSON",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT XML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "XML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    },
+    {
+      "sql": "EXPLAIN (COSTS TRUE, COSTS FALSE, FORMAT YAML) VALUES (1, 2::bigint), (3, 4::bigint)",
+      "format": "YAML",
+      "costs": false,
+      "rows": null,
+      "width": null
+    }
+  ]
+}
