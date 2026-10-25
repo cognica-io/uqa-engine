@@ -8,6 +8,11 @@
 
 use serde::{Deserialize, Serialize};
 
+mod borrowed;
+pub use borrowed::{RelationName, RelationReference};
+#[cfg(test)]
+mod tests;
+
 /// Durable identity of a SQL relation.
 ///
 /// The schema and local name are stored separately so `foo` and
@@ -81,12 +86,16 @@ impl RelationIdentity {
     /// Parse a possibly-unqualified SQL relation reference without choosing a
     /// search-path schema. Components use `PostgreSQL` double-quote escaping.
     pub fn parse_reference(value: &str) -> Result<(Option<String>, String), String> {
-        let components = parse_relation_components(value)?;
-        match components.as_slice() {
-            [name] => Ok((None, name.clone())),
-            [schema, name] => Ok((Some(schema.clone()), name.clone())),
-            _ => Err(format!("invalid persisted relation name `{value}`")),
-        }
+        let reference = borrowed::parse(value).map_err(|error| error.message(value))?;
+        Ok((
+            reference.schema.map(|schema| schema.to_string()),
+            reference.name.to_string(),
+        ))
+    }
+
+    /// Parse a relation reference without allocating decoded names or error text. Qualified references retain their separate schema component.
+    pub fn borrowed_reference(value: &str) -> Option<RelationReference<'_>> {
+        borrowed::parse(value).ok()
     }
 }
 
@@ -104,62 +113,4 @@ fn render_relation_component(component: &str) -> String {
     } else {
         format!("\"{}\"", component.replace('"', "\"\""))
     }
-}
-
-fn parse_relation_components(value: &str) -> Result<Vec<String>, String> {
-    if value.is_empty() {
-        return Err("persisted relation name is empty".to_string());
-    }
-    let mut components = Vec::with_capacity(2);
-    let mut chars = value.char_indices().peekable();
-    while chars.peek().is_some() {
-        let mut component = String::new();
-        if chars.peek().is_some_and(|(_, ch)| *ch == '"') {
-            chars.next();
-            let mut terminated = false;
-            while let Some((_, ch)) = chars.next() {
-                if ch != '"' {
-                    component.push(ch);
-                    continue;
-                }
-                if chars.peek().is_some_and(|(_, next)| *next == '"') {
-                    chars.next();
-                    component.push('"');
-                } else {
-                    terminated = true;
-                    break;
-                }
-            }
-            if !terminated {
-                return Err(format!("unterminated quoted relation name `{value}`"));
-            }
-            if chars.peek().is_some_and(|(_, ch)| *ch != '.') {
-                return Err(format!("invalid persisted relation name `{value}`"));
-            }
-        } else {
-            while let Some((_, ch)) = chars.peek() {
-                if *ch == '.' {
-                    break;
-                }
-                if *ch == '"' {
-                    return Err(format!("invalid persisted relation name `{value}`"));
-                }
-                component.push(*ch);
-                chars.next();
-            }
-        }
-        if component.is_empty() {
-            return Err(format!("invalid persisted relation name `{value}`"));
-        }
-        components.push(component);
-        if components.len() > 2 {
-            return Err(format!("invalid persisted relation name `{value}`"));
-        }
-        match chars.next() {
-            Some((_, '.')) if chars.peek().is_some() => {}
-            Some(_) => return Err(format!("invalid persisted relation name `{value}`")),
-            None => break,
-        }
-    }
-    Ok(components)
 }

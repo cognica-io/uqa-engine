@@ -161,9 +161,11 @@ pub use floating::{
 pub use in_range::{in_range, in_range_with_engine};
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
-pub(crate) use scalar_helpers::{append_sql_literal, quote_ident_with_control};
+pub(crate) use scalar_helpers::append_sql_literal;
 use scalar_helpers::{point_xy, typeof_value};
-pub use scalar_helpers::{quote_ident, quote_literal_with_control, CompiledLikePattern};
+pub use scalar_helpers::{
+    quote_ident, quote_ident_with_control, quote_literal_with_control, CompiledLikePattern,
+};
 pub use statement_cancellation::{
     check_statement_cancellation, statement_cancellation, StatementCancellationScope,
 };

@@ -6,13 +6,18 @@
 
 //! Relational execution and replanning costs in the shared physical cost units.
 
-use uqa_core::memory::{BudgetedSharedMap, MemoryBudget, ProductionControl};
+use uqa_core::memory::ProductionControl;
 use uqa_sql::SQLError;
+
+pub mod nodes;
+mod scope;
+use nodes::{Capture, PlanCostInput};
+use scope::{Definition, Definitions, Namespace, ProducerState};
 
 #[cfg(test)]
 mod tests;
 
-type Scope<'a> = BudgetedSharedMap<&'a str, PlanCost>;
+type Scope<'p, 's> = Option<Namespace<'p, 's>>;
 
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, JoinKind, SetOpKind};
@@ -27,7 +32,7 @@ use crate::{
 const DEFAULT_ROWS: f64 = 1_000.0;
 
 /// Work required by one executable plan, independent of a particular invocation.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PlanCost {
     pub rows: f64,
     pub execution: f64,
@@ -76,6 +81,27 @@ impl<'a> PlanCostEstimator<'a, 'static> {
         plan: &UnifiedPlan,
         control: &ProductionControl<'_>,
     ) -> Result<PlanCost, SQLError> {
+        self.estimate_captured(plan, control, None)
+    }
+
+    /// Capture native query/source costs during the same lexical traversal used for the root estimate.
+    pub fn estimate_nodes_with_control<'p>(
+        &self,
+        plan: &'p UnifiedPlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<nodes::PlanCostTree<'p>, SQLError> {
+        control.check()?;
+        let capture = Capture::new(*control);
+        let cost = self.estimate_captured(plan, control, Some(&capture))?;
+        capture.finish(cost)
+    }
+
+    fn estimate_captured<'p>(
+        &self,
+        plan: &'p UnifiedPlan,
+        control: &ProductionControl<'_>,
+        capture: Option<&Capture<'p, '_>>,
+    ) -> Result<PlanCost, SQLError> {
         let estimator = PlanCostEstimator {
             statistics: self.statistics,
             costs: self.costs.clone(),
@@ -83,14 +109,9 @@ impl<'a> PlanCostEstimator<'a, 'static> {
             control: *control,
         };
         estimator.control.check()?;
-        let memory = control
-            .budget()
-            .cloned()
-            .unwrap_or_else(|| MemoryBudget::new(usize::MAX));
-        let scope = Scope::new(&memory);
         match plan {
-            UnifiedPlan::Query(query) => estimator.query(query, &scope),
-            UnifiedPlan::Command(command) => estimator.command(command, &scope),
+            UnifiedPlan::Query(query) => estimator.query(query, None, capture),
+            UnifiedPlan::Command(command) => estimator.command(command, None, capture),
         }
     }
 }
@@ -100,45 +121,86 @@ impl PlanCostEstimator<'_, '_> {
         self.costs.estimate_unary(kind, rows).total()
     }
 
-    fn ctes<'p>(&self, ctes: &'p [CtePlan], scope: &mut Scope<'p>) -> Result<PlanCost, SQLError> {
-        let mut total = PlanCost::default();
-        for cte in ctes {
-            self.control.check()?;
-            if cte.recursive {
-                scope.try_insert(
-                    cte.name.as_str(),
-                    PlanCost {
-                        rows: DEFAULT_ROWS,
-                        ..PlanCost::default()
-                    },
-                )?;
-            }
-            let cost = match &cte.body {
-                CtePlanBody::Query(query) => self.query(query, scope)?,
-                CtePlanBody::Command(command) => self.command(command, scope)?,
-            };
-            total.add_child(cost);
-            scope.try_insert(
-                cte.name.as_str(),
-                PlanCost {
-                    rows: cost.rows,
-                    startup: cost.startup,
+    fn producer<'p>(
+        &self,
+        definition: Definition<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
+    ) -> Result<PlanCost, SQLError> {
+        self.control.check()?;
+        match definition.state() {
+            ProducerState::Estimated(cost) => return Ok(cost),
+            ProducerState::Estimating => {
+                return Ok(PlanCost {
+                    rows: DEFAULT_ROWS,
                     ..PlanCost::default()
-                },
-            )?;
+                })
+            }
+            ProducerState::Unestimated => {}
         }
-        Ok(total)
+        definition.set_state(ProducerState::Estimating);
+        let scope = definition.namespace();
+        let cost = Capture::at_parent(capture, definition.parent(), || {
+            match &definition.plan().body {
+                CtePlanBody::Query(query) => self.query(query, scope, capture),
+                CtePlanBody::Command(command) => self.command(command, scope, capture),
+            }
+        })?;
+        definition.set_state(ProducerState::Estimated(cost));
+        Ok(cost)
     }
 
-    fn query<'p>(&self, query: &'p QueryPlan, outer: &Scope<'p>) -> Result<PlanCost, SQLError> {
+    fn finish_definitions<'p>(
+        &self,
+        definitions: &Definitions<'p, '_>,
+        order: &[usize],
+        cost: &mut PlanCost,
+        capture: Option<&Capture<'p, '_>>,
+    ) -> Result<(), SQLError> {
+        for index in order {
+            self.control.check()?;
+            let definition = definitions.definition(*index);
+            if definition.plan().body.modifies_data() {
+                self.producer(definition, capture)?;
+            }
+        }
+        for state in definitions.states() {
+            self.control.check()?;
+            if let ProducerState::Estimated(producer) = state {
+                cost.startup += producer.startup;
+                cost.add_child(producer);
+            }
+        }
+        Ok(())
+    }
+
+    fn query<'p>(
+        &self,
+        query: &'p QueryPlan,
+        outer: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
+    ) -> Result<PlanCost, SQLError> {
+        Capture::node(capture, PlanCostInput::Query(query), || {
+            self.query_cost(query, outer, capture)
+        })
+    }
+
+    fn query_cost<'p>(
+        &self,
+        query: &'p QueryPlan,
+        outer: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
+    ) -> Result<PlanCost, SQLError> {
         self.control.check()?;
-        let mut scope = outer.clone();
-        let ctes = self.ctes(&query.ctes, &mut scope)?;
+        let order =
+            uqa_sql::semantics::reachable_query_cte_order_with_control(query, self.control)?;
+        let definitions =
+            Definitions::new(&query.ctes, outer, Capture::parent(capture), self.control)?;
+        let scope = definitions.namespace();
         let mut cost = match &query.root {
-            RelationalPlan::QueryBlock(block) => self.block(block, &scope)?,
+            RelationalPlan::QueryBlock(block) => self.block(block, scope, capture)?,
             RelationalPlan::Values { rows, subqueries } => {
                 let mut cost = self.values(rows);
-                self.subqueries(&mut cost, subqueries, &scope)?;
+                self.subqueries(&mut cost, subqueries, scope, capture)?;
                 cost
             }
             RelationalPlan::SetOp {
@@ -152,8 +214,8 @@ impl PlanCostEstimator<'_, '_> {
                 subqueries,
                 ..
             } => {
-                let mut left = self.query(left, &scope)?;
-                let right = self.query(right, &scope)?;
+                let mut left = self.query(left, scope, capture)?;
+                let right = self.query(right, scope, capture)?;
                 let input_rows = left.rows + right.rows;
                 left.add_child(right);
                 left.rows = match kind {
@@ -165,7 +227,7 @@ impl PlanCostEstimator<'_, '_> {
                     left.execution += self.unary(OperatorKind::HashAggregate, input_rows);
                     left.startup = left.execution;
                 }
-                self.subqueries(&mut left, subqueries, &scope)?;
+                self.subqueries(&mut left, subqueries, scope, capture)?;
                 self.finish(
                     &mut left,
                     !order_by.is_empty(),
@@ -175,18 +237,19 @@ impl PlanCostEstimator<'_, '_> {
                 left
             }
         };
-        cost.add_child(ctes);
+        self.finish_definitions(&definitions, &order, &mut cost, capture)?;
         Ok(cost)
     }
 
     fn block<'p>(
         &self,
         block: &'p QueryBlockPlan,
-        scope: &Scope<'p>,
+        scope: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
     ) -> Result<PlanCost, SQLError> {
         self.control.check()?;
         let mut cost = match &block.from {
-            Some(source) => self.source(source, block.r#where.as_ref(), scope)?,
+            Some(source) => self.source(source, block.r#where.as_ref(), scope, capture)?,
             None => {
                 let mut cost = PlanCost {
                     rows: 1.0,
@@ -196,7 +259,7 @@ impl PlanCostEstimator<'_, '_> {
                 cost
             }
         };
-        self.subqueries(&mut cost, &block.subqueries, scope)?;
+        self.subqueries(&mut cost, &block.subqueries, scope, capture)?;
         match block.compute {
             ComputePlan::Aggregate => {
                 cost.execution += self.unary(OperatorKind::HashAggregate, cost.rows);
@@ -264,28 +327,42 @@ impl PlanCostEstimator<'_, '_> {
         &self,
         source: &'p SourcePlan,
         predicate: Option<&ScalarExpr>,
-        scope: &Scope<'p>,
+        scope: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
+    ) -> Result<PlanCost, SQLError> {
+        Capture::node(capture, PlanCostInput::Source(source), || {
+            self.source_cost(source, predicate, scope, capture)
+        })
+    }
+
+    fn source_cost<'p>(
+        &self,
+        source: &'p SourcePlan,
+        predicate: Option<&ScalarExpr>,
+        scope: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
     ) -> Result<PlanCost, SQLError> {
         self.control.check()?;
-        if let SourcePlan::Table {
-            name,
-            executable_query: None,
-            ..
-        } = source
-        {
-            if scope.get(name.as_str()).is_none() {
-                return self.table(name, predicate);
-            }
-        }
         let mut cost = match source {
             SourcePlan::Table {
-                executable_query: Some(query),
+                name,
+                executable_query,
                 ..
-            } => self.query(query, scope)?,
-            SourcePlan::Table { name, .. } => {
-                let mut cost = *scope.get(name.as_str()).expect("visible CTE cost");
-                cost.execution += self.unary(OperatorKind::Project, cost.rows);
-                cost
+            } => {
+                let cte = scope.and_then(|scope| scope.resolve(name));
+                if let Some(query) = executable_query {
+                    // Retained folded CTEs use their definition namespace; stored views have an independent namespace.
+                    self.query(query, cte.and_then(Definition::namespace), capture)?
+                } else if let Some(cte) = cte {
+                    let producer = self.producer(cte, capture)?;
+                    PlanCost {
+                        rows: producer.rows,
+                        execution: self.unary(OperatorKind::Project, producer.rows),
+                        ..PlanCost::default()
+                    }
+                } else {
+                    return self.table(name, predicate);
+                }
             }
             SourcePlan::Values { rows, .. } => self.values(rows),
             SourcePlan::RetainedRows(source) => PlanCost {
@@ -294,7 +371,7 @@ impl PlanCostEstimator<'_, '_> {
                 relations: 0,
                 startup: 0.0,
             },
-            SourcePlan::Subquery { body, .. } => self.query(body, scope)?,
+            SourcePlan::Subquery { body, .. } => self.query(body, scope, capture)?,
             SourcePlan::Join {
                 left,
                 right,
@@ -306,8 +383,8 @@ impl PlanCostEstimator<'_, '_> {
                 lateral,
                 ..
             } => {
-                let left = self.source(left, None, scope)?;
-                let right = self.source(right, None, scope)?;
+                let left = self.source(left, None, scope, capture)?;
+                let right = self.source(right, None, scope, capture)?;
                 let equality = on.as_ref().is_some_and(has_equality) || using.is_some() || *natural;
                 let operator = if matches!(kind, JoinKind::Cross) {
                     OperatorKind::CrossJoin
@@ -320,7 +397,21 @@ impl PlanCostEstimator<'_, '_> {
                 } else {
                     OperatorKind::NestedLoopJoin
                 };
-                self.join_cost(*kind, operator, *lateral, left, right)
+                let selectivity = on.as_ref().map_or_else(
+                    || {
+                        if using.is_some() || *natural {
+                            self.cardinality.default_selectivity
+                        } else {
+                            1.0
+                        }
+                    },
+                    |predicate| {
+                        self.cardinality
+                            .scalar_selectivity(predicate, &RelationStats::default())
+                            .raw()
+                    },
+                );
+                self.join_cost(*kind, operator, *lateral, left, right, selectivity)
             }
             SourcePlan::Function { .. } => {
                 self.statistics.source_access_estimate(source).map_or_else(
@@ -357,6 +448,7 @@ impl PlanCostEstimator<'_, '_> {
         lateral: bool,
         mut left: PlanCost,
         right: PlanCost,
+        selectivity: f64,
     ) -> PlanCost {
         left.startup = if matches!(
             operator,
@@ -382,13 +474,7 @@ impl PlanCostEstimator<'_, '_> {
             left.execution += right.execution * (left.rows - 1.0).max(0.0);
         }
         left.add_child(right);
-        let rows = left.rows
-            * right.rows
-            * if matches!(kind, JoinKind::Cross) {
-                1.0
-            } else {
-                self.cardinality.default_selectivity
-            };
+        let rows = left.rows * right.rows * selectivity;
         left.rows = match kind {
             JoinKind::Left => rows.max(left.rows),
             JoinKind::Right => rows.max(right.rows),
@@ -421,10 +507,11 @@ impl PlanCostEstimator<'_, '_> {
         &self,
         cost: &mut PlanCost,
         queries: &'p [QueryPlan],
-        scope: &Scope<'p>,
+        scope: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
     ) -> Result<(), SQLError> {
         for query in queries {
-            let mut child = self.query(query, scope)?;
+            let mut child = self.query(query, scope, capture)?;
             cost.startup += child.execution;
             child.execution *= cost.rows.max(1.0);
             cost.add_child(child);
@@ -466,27 +553,46 @@ impl PlanCostEstimator<'_, '_> {
     fn command<'p>(
         &self,
         command: &'p CommandPlan,
-        outer: &Scope<'p>,
+        outer: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
+    ) -> Result<PlanCost, SQLError> {
+        Capture::node(capture, PlanCostInput::Command(command), || {
+            self.command_cost(command, outer, capture)
+        })
+    }
+
+    fn command_cost<'p>(
+        &self,
+        command: &'p CommandPlan,
+        outer: Scope<'p, '_>,
+        capture: Option<&Capture<'p, '_>>,
     ) -> Result<PlanCost, SQLError> {
         self.control.check()?;
-        let mut scope = outer.clone();
-        let ctes = self.ctes(command.ctes(), &mut scope)?;
+        let order =
+            uqa_sql::semantics::reachable_command_cte_order_with_control(command, self.control)?;
+        let definitions = Definitions::new(
+            command.ctes(),
+            outer,
+            Capture::parent(capture),
+            self.control,
+        )?;
+        let scope = definitions.namespace();
         let mut cost = match command {
             CommandPlan::Insert(plan) => plan.source.as_ref().map_or_else(
                 || Ok(self.values(&plan.rows)),
-                |query| self.query(query, &scope),
+                |query| self.query(query, scope, capture),
             )?,
             CommandPlan::Update(plan) => self.table(&plan.table, plan.predicate.as_ref())?,
             CommandPlan::Delete(plan) => self.table(&plan.table, plan.predicate.as_ref())?,
             CommandPlan::Merge(plan) => self.table(&plan.target, plan.target_predicate.as_ref())?,
             CommandPlan::Explain { body, .. } => match body.as_ref() {
-                UnifiedPlan::Query(query) => self.query(query, &scope)?,
-                UnifiedPlan::Command(command) => self.command(command, &scope)?,
+                UnifiedPlan::Query(query) => self.query(query, scope, capture)?,
+                UnifiedPlan::Command(command) => self.command(command, scope, capture)?,
             },
             _ => PlanCost::default(),
         };
         if let Some(source) = command.source_input() {
-            let source = self.source(source, None, &scope)?;
+            let source = self.source(source, None, scope, capture)?;
             cost.startup += source.startup;
             cost.execution += self
                 .costs
@@ -494,11 +600,11 @@ impl PlanCostEstimator<'_, '_> {
                 .total();
             cost.add_child(source);
         }
-        self.subqueries(&mut cost, command.scalar_subqueries(), &scope)?;
+        self.subqueries(&mut cost, command.scalar_subqueries(), scope, capture)?;
         if command.mutation_target().is_some() {
             cost.execution += self.unary(OperatorKind::TableScan, cost.rows);
         }
-        cost.add_child(ctes);
+        self.finish_definitions(&definitions, &order, &mut cost, capture)?;
         Ok(cost)
     }
 }

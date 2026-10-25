@@ -440,6 +440,52 @@ static void explained_named_inputs(uqa_engine engine, uqa_result result) {
         "DROP VIEW c_named_input; DROP SEQUENCE c_named_effect", result));
 }
 
+static void explained_node_estimates(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_value document = NULL;
+    uqa_value_view view = NULL;
+    CHECK(uqa_statement_prepare(engine,
+        "EXPLAIN (FORMAT JSON, SUMMARY FALSE) "
+        "WITH x AS MATERIALIZED (VALUES (1),(2),(3)) "
+        "SELECT * FROM (WITH x AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM x) local_x CROSS JOIN x",
+        &statement));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_result_get_value(result, 0, 0, &view));
+    CHECK(uqa_value_create_copy(view, &document));
+    view = document;
+    CHECK(uqa_engine_execute_params(engine,
+        "SELECT count(*), sum((node->>'Plan Rows')::numeric)::bigint, "
+        "min((node->>'Plan Rows')::numeric)::bigint, max((node->>'Plan Rows')::numeric)::bigint, "
+        "sum(CASE WHEN (node->>'Parent Node ID')::bigint < (node->>'Node ID')::bigint "
+        "AND (node->>'Startup Cost')::numeric <= (node->>'Total Cost')::numeric THEN 1 ELSE 0 END)::bigint "
+        "FROM json_array_elements($1->0->'Node Estimates') AS nodes(node) WHERE node->>'Relation Name'='x'",
+        &view, 1, result));
+    CHECK(uqa_value_destroy(&document));
+    assert(integer(result, 0) == 2);
+    assert(integer(result, 1) == 5);
+    assert(integer(result, 2) == 2);
+    assert(integer(result, 3) == 3);
+    assert(integer(result, 4) == 2);
+    CHECK(uqa_engine_execute(engine,
+        "EXPLAIN (FORMAT JSON, SUMMARY FALSE) "
+        "WITH x AS NOT MATERIALIZED (VALUES (1),(2),(3)) "
+        "SELECT a.column1 FROM x a CROSS JOIN x b", result));
+    CHECK(uqa_result_get_value(result, 0, 0, &view));
+    CHECK(uqa_value_create_copy(view, &document));
+    view = document;
+    CHECK(uqa_engine_execute_params(engine,
+        "SELECT count(*) FILTER (WHERE node->>'Node Type'='Named Query'), "
+        "count(*) FILTER (WHERE node->>'Node Type'='Values'), "
+        "($1->0->'Plan'->>'Plan Rows')::numeric::bigint "
+        "FROM json_array_elements($1->0->'Node Estimates') AS nodes(node)",
+        &view, 1, result));
+    CHECK(uqa_value_destroy(&document));
+    assert(integer(result, 0) == 2);
+    assert(integer(result, 1) == 2);
+    assert(integer(result, 2) == 9);
+}
+
 static void explained_execution(uqa_engine engine, uqa_result result) {
     const struct {
         const char *sql;
@@ -1200,6 +1246,7 @@ int main(void) {
     explained_physical_metadata(engine, result);
     explained_costs(engine, result);
     explained_named_inputs(engine, result);
+    explained_node_estimates(engine, result);
     pruned_rule_subqueries(engine, result);
     explained_execution(engine, result);
     explained_serialization(engine, result);

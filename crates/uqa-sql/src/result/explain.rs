@@ -18,7 +18,16 @@ pub struct ExplainPlanEstimate {
     pub startup: f64,
     pub total: f64,
     pub rows: f64,
-    pub width: u64,
+    pub width: Option<u64>,
+}
+
+/// One native query or source estimate from the root's original lexical traversal. Parent indices describe this captured plan, not a runtime operator identity.
+#[derive(Debug)]
+pub struct ExplainNodeEstimate {
+    pub parent: Option<usize>,
+    pub kind: &'static str,
+    pub relation: Option<String>,
+    pub estimate: ExplainPlanEstimate,
 }
 
 /// Accumulated work at an executed native plan boundary. Renderers divide rows and durations by completed loops; an unexecuted boundary retains zero loops.

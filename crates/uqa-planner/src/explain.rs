@@ -20,6 +20,7 @@ pub use uqa_sql::result::ExplainAnalysis;
 use uqa_sql::result::ExplainPhysicalPlan;
 
 mod costs;
+mod estimates;
 mod formats;
 mod measurements;
 pub use costs::estimate_plan;
@@ -188,9 +189,13 @@ fn plan_text(
     if let Some(estimate) = physical.estimate.filter(|_| settings.costs) {
         let _ = write!(
             text,
-            "\n  cost={:.2}..{:.2} rows={:.0} width={}",
-            estimate.startup, estimate.total, estimate.rows, estimate.width
+            "\n  cost={:.2}..{:.2} rows={:.0}",
+            estimate.startup, estimate.total, estimate.rows
         );
+        if let Some(width) = estimate.width {
+            let _ = write!(text, " width={width}");
+        }
+        estimates::append_text(&mut text, &physical.estimates, control)?;
     }
     for node in &physical.nodes {
         let rendered = formats::json(&properties::Property::Captured(node), control)?;
@@ -254,10 +259,7 @@ fn structured_plan<'a>(
     plan.insert("Node Type", P::Text(node))?;
     plan.insert("UQA Plan", P::Lines(text))?;
     if let Some(estimate) = physical.estimate.filter(|_| settings.costs) {
-        plan.insert("Startup Cost", P::Float(estimate.startup))?;
-        plan.insert("Total Cost", P::Float(estimate.total))?;
-        plan.insert("Plan Rows", P::Float(estimate.rows.round()))?;
-        plan.insert("Plan Width", P::Unsigned(estimate.width))?;
+        estimates::fields(&mut plan, estimate)?;
     }
     if let Some(analysis) = analysis {
         measurements::properties(&mut plan, analysis.root, settings.timing)?;
@@ -265,6 +267,12 @@ fn structured_plan<'a>(
     }
     let mut payload = Object::new(control);
     payload.insert("Plan", plan.finish()?)?;
+    if settings.costs && !physical.estimates.is_empty() {
+        payload.insert(
+            "Node Estimates",
+            estimates::structured(&physical.estimates, control)?,
+        )?;
+    }
     if settings.settings {
         payload.insert(
             "Settings",

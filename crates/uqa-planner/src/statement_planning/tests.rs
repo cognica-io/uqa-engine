@@ -141,7 +141,9 @@ fn cost_catalog_failure_precedes_cancellation_observed_after_the_callback() {
         memory::{MemoryBudget, ProductionControl},
         CancellationToken,
     };
-    for original_cancelled in [true, false] {
+    for (original_cancelled, capture_nodes) in
+        [(true, false), (false, false), (true, true), (false, true)]
+    {
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
         let budget = MemoryBudget::new(4096);
@@ -161,16 +163,17 @@ fn cost_catalog_failure_precedes_cancellation_observed_after_the_callback() {
                 .unwrap()
                 .remove(0),
         );
-        let error = super::estimate_plan_with_control(
-            StatementStatisticsContext {
-                catalog: &catalog,
-                volatility: &catalog,
-                retrieval: &catalog,
-            },
-            &plan,
-            &ProductionControl::new(&budget, &original, &invoking),
-        )
-        .unwrap_err();
+        let context = StatementStatisticsContext {
+            catalog: &catalog,
+            volatility: &catalog,
+            retrieval: &catalog,
+        };
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let error = if capture_nodes {
+            super::estimate_plan_nodes_with_control(context, &plan, &control).unwrap_err()
+        } else {
+            super::estimate_plan_with_control(context, &plan, &control).unwrap_err()
+        };
         assert!(
             matches!(error, SQLError::TypeMismatch(message) if message == "hierarchy metadata failed")
         );

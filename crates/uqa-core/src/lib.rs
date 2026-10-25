@@ -37,7 +37,7 @@ pub use posting_list::{GeneralizedPostingList, PostingList};
 pub use predicate::{sql_null_test, Predicate};
 pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
-pub use relation_identity::RelationIdentity;
+pub use relation_identity::{RelationIdentity, RelationName, RelationReference};
 pub use types::{
     compare_bytes_with_control, fixed_char_comparison_text_with_control, jsonb_equality_key,
     jsonb_equality_key_with_control, write_jsonb_comparison_key, write_jsonb_equality_key,

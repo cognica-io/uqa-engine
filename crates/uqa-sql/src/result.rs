@@ -264,6 +264,8 @@ pub struct ExplainAnalysis {
 pub struct ExplainPhysicalPlan {
     pub nodes: Vec<explain::ExplainValue>,
     pub estimate: Option<explain::ExplainPlanEstimate>,
+    /// Query and source costs captured together under their original CTE scopes.
+    pub estimates: Vec<explain::ExplainNodeEstimate>,
     /// Nondefault planning parameters captured from the invoking session before execution.
     pub settings: Vec<(&'static str, String)>,
     /// Time spent producing this invocation's optimized plan and physical metadata.

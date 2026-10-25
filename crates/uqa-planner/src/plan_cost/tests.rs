@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_core::CancellationToken;
+use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 fn plan(sql: &str) -> UnifiedPlan {
     UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
@@ -143,4 +143,40 @@ fn hash_startup_respects_inner_and_outer_build_ownership_for_unequal_inputs() {
             );
         }
     }
+}
+
+#[test]
+fn join_cardinality_uses_its_qualification_including_an_unqualified_inner_join() {
+    let statistics = |_: &str| {
+        Some(RelationStats {
+            row_count: 3,
+            ..Default::default()
+        })
+    };
+    let estimator = PlanCostEstimator::new(&statistics);
+    for (join, rows) in [
+        ("CROSS JOIN", 9.0),
+        ("JOIN", 9.0),
+        ("LEFT JOIN", 3.0),
+        ("FULL JOIN", 3.0),
+    ] {
+        let sql = if join == "CROSS JOIN" {
+            "SELECT * FROM a CROSS JOIN b".to_owned()
+        } else {
+            format!("SELECT * FROM a {join} b ON {}", join == "JOIN")
+        };
+        assert_eq!(estimator.estimate(&plan(&sql)).rows, rows, "{sql}");
+    }
+    let mut body = plan("SELECT * FROM a CROSS JOIN b");
+    let UnifiedPlan::Query(query) = &mut body else {
+        unreachable!()
+    };
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        unreachable!()
+    };
+    let SourcePlan::Join { kind, .. } = block.from.as_mut().unwrap() else {
+        unreachable!()
+    };
+    *kind = JoinKind::Inner;
+    assert_eq!(estimator.estimate(&body).rows, 9.0);
 }

@@ -6,12 +6,16 @@
 
 //! Explain the native cost model using SQL-owned output types without evaluating rows.
 
-use crate::statement_planning::{estimate_plan_with_control, StatementStatisticsContext};
-use uqa_core::memory::ProductionControl;
+use crate::statement_planning::{estimate_plan_nodes_with_control, StatementStatisticsContext};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_sql::{
-    binding::statements::StatementAnalysisContext, plan::UnifiedPlan,
-    result::explain::ExplainPlanEstimate, ColumnType, SQLError, SQLParam,
+    binding::statements::StatementAnalysisContext,
+    plan::UnifiedPlan,
+    result::explain::{ExplainNodeEstimate, ExplainPlanEstimate},
+    ColumnType, SQLError, SQLParam,
 };
+
+mod nodes;
 
 pub fn estimate_plan(
     statistics: StatementStatisticsContext<'_>,
@@ -19,9 +23,9 @@ pub fn estimate_plan(
     body: &UnifiedPlan,
     params: &[SQLParam],
     control: &ProductionControl<'_>,
-) -> Result<ExplainPlanEstimate, SQLError> {
+) -> Result<Produced<Vec<ExplainNodeEstimate>>, SQLError> {
     control.check()?;
-    let cost = estimate_plan_with_control(statistics, body, control)?;
+    let tree = estimate_plan_nodes_with_control(statistics, body, control)?;
     let mut width = None;
     analysis.scopes.with_scope(&mut |scope| {
         control.check()?;
@@ -41,28 +45,41 @@ pub fn estimate_plan(
                 &binding,
             )?,
         };
-        let mut bytes = 0_u64;
-        if let Some(schema) = schema {
-            for ty in schema.column_types() {
-                control.check()?;
-                bytes = bytes
-                    .checked_add(ty.as_ref().map_or(32, type_width))
-                    .ok_or_else(|| {
-                        SQLError::Internal("EXPLAIN estimated row width overflow".into())
-                    })?;
-            }
-        }
-        width = Some(bytes);
+        width = Some(
+            schema
+                .as_ref()
+                .map_or(Ok(0), |schema| row_width(schema, control))?,
+        );
         Ok(())
     })?;
-    control.check()?;
-    Ok(ExplainPlanEstimate {
-        startup: cost.startup,
-        total: cost.execution,
-        rows: cost.rows,
-        width: width
-            .ok_or_else(|| SQLError::Internal("EXPLAIN result analysis did not run".into()))?,
-    })
+    let root_width =
+        width.ok_or_else(|| SQLError::Internal("EXPLAIN result analysis did not run".into()))?;
+    let mut output = ProductionVec::new(*control);
+    for (index, node) in tree.nodes.iter().enumerate() {
+        let width = if index == 0 {
+            Some(root_width)
+        } else {
+            nodes::output_schema(node.input)
+                .map(|schema| row_width(schema, control))
+                .transpose()?
+        };
+        output.push_produced(nodes::capture(node, width, *control)?)?;
+    }
+    Ok(output.finish()?)
+}
+
+fn row_width(
+    schema: &uqa_sql::RowSchema,
+    control: &ProductionControl<'_>,
+) -> Result<u64, SQLError> {
+    let mut bytes = 0_u64;
+    for ty in schema.column_types() {
+        control.check()?;
+        bytes = bytes
+            .checked_add(ty.as_ref().map_or(32, type_width))
+            .ok_or_else(|| SQLError::Internal("EXPLAIN estimated row width overflow".into()))?;
+    }
+    Ok(bytes)
 }
 
 /// Use the SQL physical width where fixed, then declared bounds or the conventional variable-width estimate. These are plan estimates, never measured Rust allocations.

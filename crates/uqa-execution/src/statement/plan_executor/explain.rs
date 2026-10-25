@@ -178,14 +178,12 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             settings.costs,
             &control,
         )?;
-        let estimate = if settings.costs {
-            Some(self.context.physical_explain.explained_plan_estimate(
-                body,
-                self.params,
-                &control,
-            )?)
+        let estimates = if settings.costs {
+            self.context
+                .physical_explain
+                .explained_plan_estimates(body, self.params, &control)?
         } else {
-            None
+            control.finish(Vec::new(), control.empty_reservation())?
         };
         let shown = if settings.settings {
             self.context.validation.session.explain_settings(&control)?
@@ -195,9 +193,17 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         let (shown, shown_memory) = shown.into_parts();
         let (mut physical, physical_memory) = physical.into_parts();
         physical.settings = shown;
-        physical.estimate = estimate;
+        let (estimates, estimate_memory) = estimates.into_parts();
+        physical.estimate = estimates.first().map(|node| node.estimate);
+        physical.estimates = estimates;
         physical.planning_elapsed = Some(planning_started.elapsed());
-        let physical = control.finish(physical, control.combine(physical_memory, shown_memory))?;
+        let physical = control.finish(
+            physical,
+            control.combine(
+                control.combine(physical_memory, shown_memory),
+                estimate_memory,
+            ),
+        )?;
         let analysis = if settings.analyze {
             Some(self.analyze_explained(body, destination, settings, control)?)
         } else {

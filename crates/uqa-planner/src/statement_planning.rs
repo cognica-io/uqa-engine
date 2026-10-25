@@ -36,17 +36,46 @@ pub fn estimate_plan_with_control(
     plan: &UnifiedPlan,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<crate::plan_cost::PlanCost, SQLError> {
+    let estimate = with_statistics(context, |statistics| {
+        crate::plan_cost::PlanCostEstimator::new(statistics).estimate_with_control(plan, control)
+    })?;
+    validate_cost(estimate)?;
+    Ok(estimate)
+}
+
+pub fn estimate_plan_nodes_with_control<'p>(
+    context: StatementStatisticsContext<'_>,
+    plan: &'p UnifiedPlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<crate::plan_cost::nodes::PlanCostTree<'p>, SQLError> {
+    let tree = with_statistics(context, |statistics| {
+        crate::plan_cost::PlanCostEstimator::new(statistics)
+            .estimate_nodes_with_control(plan, control)
+    })?;
+    for node in tree.nodes.iter() {
+        control.check()?;
+        validate_cost(node.cost)?;
+    }
+    Ok(tree)
+}
+
+fn with_statistics<T>(
+    context: StatementStatisticsContext<'_>,
+    estimate: impl FnOnce(&CatalogSourceStatistics<'_>) -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
     let error = std::cell::RefCell::new(None);
     let statistics = CatalogSourceStatistics {
         context,
         error: &error,
     };
-    let estimate =
-        crate::plan_cost::PlanCostEstimator::new(&statistics).estimate_with_control(plan, control);
+    let estimate = estimate(&statistics);
     if let Some(error) = error.into_inner() {
         return Err(error);
     }
-    let estimate = estimate?;
+    estimate
+}
+
+fn validate_cost(estimate: crate::plan_cost::PlanCost) -> Result<(), SQLError> {
     if !estimate.execution.is_finite()
         || estimate.execution < 0.0
         || !estimate.rows.is_finite()
@@ -59,7 +88,7 @@ pub fn estimate_plan_with_control(
             "prepared plan produced an invalid cost estimate".into(),
         ));
     }
-    Ok(estimate)
+    Ok(())
 }
 
 pub fn optimize_plan(
