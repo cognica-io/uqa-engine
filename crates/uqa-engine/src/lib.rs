@@ -77,6 +77,9 @@
 pub mod functions;
 pub mod migration;
 pub mod operator_tree_bridge;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use uqa_storage::test_support as storage_test_support;
 mod queries;
 /// SQL result formatting, type metadata and bounded cursors.
 pub use uqa_execution::result as sql;

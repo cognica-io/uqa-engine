@@ -442,7 +442,10 @@ impl Engine {
             if nested || backend.in_transaction() {
                 if let Err(error) = backend.rollback_transaction() {
                     if let Some(error) = Self::retain_pending_completion(stack, &error, true) {
-                        return Err(error);
+                        return Err(Self::rollback_cleanup_error(
+                            &error,
+                            format!("{finish_error}; storage rollback failed: {error}"),
+                        ));
                     }
                     if backend.in_transaction() {
                         for frame in stack.iter_mut() {

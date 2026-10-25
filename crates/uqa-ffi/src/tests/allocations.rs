@@ -22,8 +22,7 @@ mod arrow;
 #[path = "allocations/callbacks.rs"]
 mod callbacks;
 #[cfg(feature = "test-support")]
-#[path = "allocations/fixtures.rs"]
-mod fixtures;
+use super::database as fixtures;
 #[cfg(feature = "test-support")]
 #[path = "allocations/handles.rs"]
 mod handles;

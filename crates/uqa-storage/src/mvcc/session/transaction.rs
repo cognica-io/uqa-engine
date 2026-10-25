@@ -652,7 +652,13 @@ impl Transaction {
             .as_ref()
             .or(self.prepared.as_ref())
             .expect("prepared once");
-        match persistence.commit(allocation, prepared, control) {
+        #[cfg(feature = "test-support")]
+        let published = crate::test_support::commit(allocation, || {
+            persistence.commit(allocation, prepared, control)
+        });
+        #[cfg(not(feature = "test-support"))]
+        let published = persistence.commit(allocation, prepared, control);
+        match published {
             Ok(receipt)
                 if receipt.transaction == allocation
                     && receipt.fingerprint == prepared.fingerprint() =>
@@ -754,9 +760,11 @@ impl Transaction {
         let Some(id) = self.allocation else {
             return Ok(());
         };
-        let status = persistence
-            .abort(id, control)
-            .map_err(|error| self.retain_uncertain_outcome(id, error.into()))?;
+        #[cfg(feature = "test-support")]
+        let aborted = crate::test_support::abort(id, || persistence.abort(id, control));
+        #[cfg(not(feature = "test-support"))]
+        let aborted = persistence.abort(id, control);
+        let status = aborted.map_err(|error| self.retain_uncertain_outcome(id, error.into()))?;
         match status {
             CommitStatus::Aborted => {
                 self.outcome = Some(CommitErrorOutcome::Aborted(id));

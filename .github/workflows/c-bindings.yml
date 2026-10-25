@@ -75,6 +75,9 @@ jobs:
           fi
           cargo build -p uqa-ffi --locked --profile test "${args[@]}"
           cargo test -p uqa-ffi --locked --lib "${args[@]}"
+          if [[ '${{ matrix.features }}' == minimal ]]; then
+            cargo test -p uqa-storage --locked --features test-support --lib test_support::tests
+          fi
           suffix=so
           if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
           python3 scripts/verify-c-clients.py --library "target/debug/libuqa.$suffix"

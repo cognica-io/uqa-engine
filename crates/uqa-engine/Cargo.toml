@@ -22,6 +22,7 @@ arrow = ["uqa-fdw/arrow", "dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema"
 duckdb = ["dep:duckdb", "uqa-fdw/duckdb"]
 nori = ["uqa-analysis/nori"]
 kuromoji = ["uqa-analysis/kuromoji"]
+test-support = ["uqa-storage/test-support"]
 
 [dependencies]
 uqa-storage-sqlite = { workspace = true }

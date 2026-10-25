@@ -51,3 +51,11 @@ mod record_values;
 
 #[path = "tests/range_values.rs"]
 mod range_values;
+
+#[cfg(feature = "test-support")]
+#[path = "tests/database.rs"]
+mod database;
+
+#[cfg(feature = "test-support")]
+#[path = "tests/completion.rs"]
+mod completion;

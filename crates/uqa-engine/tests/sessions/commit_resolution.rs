@@ -48,11 +48,14 @@ const REJECT_OTHER: u8 = 9;
 const REJECT_DEPENDENCY: u8 = 10;
 const LOSE_CONFLICT_REPLY: u8 = 11;
 const LOSE_ABORT_REPLY_ONCE: u8 = 12;
+const REJECT_MEMORY_ABORT_UNKNOWN: u8 = 13;
 
 fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
     use uqa_storage::mvcc::{CommitSequence, VersionError};
     Some(match fault {
-        REJECT_MEMORY => uqa_core::memory::MemoryError::SizeOverflow.into(),
+        REJECT_MEMORY | REJECT_MEMORY_ABORT_UNKNOWN => {
+            uqa_core::memory::MemoryError::SizeOverflow.into()
+        }
         REJECT_CANCELLED => uqa_core::QueryCancelled::USER_REQUEST.into(),
         REJECT_CONSTRAINT => StorageBackendError::backend(
             "fixture",
@@ -299,6 +302,16 @@ impl VersionedPersistence for FaultPersistence {
         }
         if fault == UNAVAILABLE {
             return Err(StorageBackendError::Other("injected unavailable abort".into()).into());
+        }
+        if fault == REJECT_MEMORY_ABORT_UNKNOWN {
+            return Err(StorageBackendError::backend(
+                "fixture",
+                CommitFailure::Indeterminate {
+                    transaction,
+                    source: StorageBackendError::Other("injected unavailable abort".into()),
+                },
+            )
+            .into());
         }
         let status = self.inner.abort(transaction, control)?;
         if matches!(fault, LOSE_ABORT_REPLY | HIDE_AFTER_ABORT_RECEIPT) {

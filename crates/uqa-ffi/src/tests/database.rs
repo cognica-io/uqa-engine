@@ -4,7 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Real provider handles and observable allowance/transaction state for allocation failures.
+//! Real provider handles and observable allowance/transaction state for native failures.
+
+#![allow(unsafe_code)]
 
 use crate::*;
 use std::{
@@ -22,11 +24,16 @@ pub(super) const PROVIDERS: [UQAOpenFlags; 4] = [
 pub(super) struct Database {
     pub engine: *mut UQAEngine,
     pub result: *mut UQAResult,
-    _directory: tempfile::TempDir,
+    flags: UQAOpenFlags,
+    directory: tempfile::TempDir,
 }
 
 impl Database {
     pub fn new(flags: UQAOpenFlags) -> Self {
+        Self::with_config(flags, ptr::null_mut())
+    }
+
+    pub fn with_config(flags: UQAOpenFlags, config: *mut UQAConfig) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let path = CString::new(directory.path().join("allocation.db").to_str().unwrap()).unwrap();
         let mut engine = ptr::null_mut();
@@ -40,7 +47,7 @@ impl Database {
                         path.as_ptr()
                     },
                     flags,
-                    ptr::null_mut(),
+                    config,
                     &raw mut engine
                 ),
                 UQA_OK
@@ -50,7 +57,8 @@ impl Database {
         Self {
             engine,
             result,
-            _directory: directory,
+            flags,
+            directory,
         }
     }
 
@@ -65,6 +73,10 @@ impl Database {
 
     pub fn integer(&self, sql: &CStr) -> i64 {
         self.sql(sql);
+        self.retained_integer()
+    }
+
+    pub fn retained_integer(&self) -> i64 {
         let mut value = ptr::null();
         let mut integer = 0;
         unsafe {
@@ -90,6 +102,26 @@ impl Database {
             );
         }
         state
+    }
+
+    pub fn reopen(&mut self, config: *mut UQAConfig) {
+        let path = CString::new(
+            self.directory
+                .path()
+                .join("allocation.db")
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap();
+        unsafe {
+            assert_eq!(uqa_result_destroy(&raw mut self.result), UQA_OK);
+            assert_eq!(uqa_engine_close(&raw mut self.engine), UQA_OK);
+            assert_eq!(
+                uqa_engine_open(path.as_ptr(), self.flags, config, &raw mut self.engine),
+                UQA_OK
+            );
+            assert_eq!(uqa_result_create(&raw mut self.result), UQA_OK);
+        }
     }
 }
 
