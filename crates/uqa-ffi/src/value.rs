@@ -36,6 +36,8 @@ mod dense;
 pub use dense::*;
 mod record_input;
 pub use record_input::*;
+mod records;
+pub use records::*;
 mod array_input;
 mod arrays;
 pub use array_input::*;
@@ -63,6 +65,7 @@ pub struct UQAValue {
     tensor_data: OnceLock<Produced<uqa_sql::params::SQLTensor>>,
     array_shape: OnceLock<Produced<Vec<crate::abi::UQAArrayDimension>>>,
     array_children: Mutex<arrays::Children>,
+    record_views: Mutex<records::RecordViews>,
     ranges: OnceLock<Box<ranges::RangeViews>>,
     parameter_type: Option<ColumnType>,
     types: crate::types::TypeViews,
@@ -101,6 +104,7 @@ impl UQAValue {
             tensor_data: OnceLock::new(),
             array_shape: OnceLock::new(),
             array_children: Mutex::new(arrays::Children::new(&control)),
+            record_views: Mutex::new(records::RecordViews::new(&control)),
             ranges: OnceLock::new(),
             types: crate::types::TypeViews::new(&control),
             parameter_type: None,
@@ -146,6 +150,11 @@ impl UQAValue {
             ),
             ranges: OnceLock::new(),
             parameter_type,
+            record_views: Mutex::new(records::RecordViews::new(
+                &session
+                    .as_ref()
+                    .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
+            )),
             session,
             _memory: memory,
         })
@@ -270,6 +279,7 @@ impl UQAValue {
                     | ColumnType::OidVector
                     | ColumnType::AnyArray
             ),
+            ScalarAccess::Record => matches!(ty, ColumnType::Composite(_) | ColumnType::Record),
         };
         if accepted {
             Ok(())
@@ -307,7 +317,7 @@ impl UQAValue {
                 SQLParam::DeferredError { .. } => {
                     return Err(UQAError::state(
                         "internal deferred parameter is not a C value",
-                    ))
+                    ));
                 }
                 SQLParam::TypedTensor(tensor) => {
                     let (tensor, memory) = tensor.copy_with_control(control)?.into_parts();
@@ -482,6 +492,7 @@ enum ScalarAccess {
     Vector,
     Tensor,
     Array,
+    Record,
 }
 
 macro_rules! scalar_getter {

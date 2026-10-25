@@ -487,6 +487,13 @@ UQA_API uqa_status UQA_CALL uqa_value_create_array_n(
     const uqa_value_view *elements, uint64_t element_count, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_element(
     uqa_value_view value, uint64_t index, uqa_value_view *out);
+/* Record positions are zero-based and exclude dropped attributes. Children
+ * borrow the parent; each published child retains its selected type and value
+ * even when a later observation uses a changed composite descriptor. */
+UQA_API uqa_status UQA_CALL uqa_value_get_field_count(
+    uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_field(
+    uqa_value_view value, uint32_t index, uqa_value_view *out);
 /* A NULL endpoint pointer is unbounded. An explicit UNBOUNDED flag requires a
  * NULL pointer. EMPTY requires two NULL pointers and no other flags. SQL NULL
  * endpoints also become unbounded after native type conversion. */

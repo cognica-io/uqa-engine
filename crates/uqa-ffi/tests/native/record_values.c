@@ -451,6 +451,124 @@ static void retained_input_checks(uqa_engine engine, uqa_result result, unsigned
     }
 }
 
+static void field_values(uqa_engine engine, uqa_result result) {
+    uqa_value value = NULL, copy = NULL;
+    uqa_value_view first = NULL, next = NULL, old = NULL;
+    uqa_type type = NULL;
+    uint32_t count = 0, kind = 0;
+    int32_t number = 0, modifier = 0;
+    int64_t wide = 0;
+    uint8_t is_null = 0;
+    CHECK(uqa_engine_execute(engine, "CREATE TYPE c_field_values AS (a integer,b integer,c integer)", result));
+    CHECK(uqa_value_create_from_text(engine, "c_field_values", "(1,2,3)", &value));
+    CHECK(uqa_value_get_field_count(value, &count)); assert(count == 3);
+    CHECK(uqa_value_get_field(value, 0, &first));
+    CHECK(uqa_value_get_field(value, 1, &old));
+    CHECK(uqa_value_get_int32(first, &number)); assert(number == 1);
+    CHECK(uqa_value_get_field(value, 0, &next)); assert(first == next);
+    CHECK(uqa_engine_execute(engine, "BEGIN; ALTER TYPE c_field_values ALTER ATTRIBUTE a TYPE bigint", result));
+    CHECK(uqa_value_get_field(value, 0, &next)); assert(first != next);
+    CHECK(uqa_value_get_int64(next, &wide)); assert(wide == INT64_C(8589934593));
+    CHECK(uqa_value_get_int32(first, &number)); assert(number == 1);
+    CHECK(uqa_value_get_field(value, 1, &next)); assert(old != next);
+    CHECK(uqa_value_get_int32(next, &number)); assert(number == 3);
+    CHECK(uqa_value_get_int32(old, &number)); assert(number == 2);
+    CHECK(uqa_value_get_field(value, 2, &next));
+    CHECK(uqa_value_get_is_null(next, &is_null)); assert(!is_null);
+    sql_error(uqa_value_get_int32(next, &number), "XX001");
+    CHECK(uqa_transaction_rollback(engine));
+    CHECK(uqa_value_get_field(value, 0, &next)); assert(first == next);
+    CHECK(uqa_engine_execute(engine,
+        "ALTER TYPE c_field_values RENAME ATTRIBUTE a TO renamed; "
+        "ALTER TYPE c_field_values DROP ATTRIBUTE b; "
+        "ALTER TYPE c_field_values ADD ATTRIBUTE added varchar(3)", result));
+    CHECK(uqa_value_get_field_count(value, &count)); assert(count == 3);
+    CHECK(uqa_value_get_field(value, 0, &next)); formatted(next, "1");
+    CHECK(uqa_value_get_field(value, 1, &next)); formatted(next, "3");
+    CHECK(uqa_value_get_field(value, 2, &next));
+    CHECK(uqa_value_get_is_null(next, &is_null)); assert(is_null);
+    CHECK(uqa_value_get_type(next, &type));
+    CHECK(uqa_type_get_kind(type, &kind)); assert(kind == UQA_TYPE_VARCHAR);
+    CHECK(uqa_type_get_modifier(type, &modifier)); assert(modifier == 7);
+    assert(uqa_value_get_field_count(next, &count) == UQA_ERROR_NULL && count == 0);
+    assert(uqa_value_get_field(value, UINT32_MAX, &next) == UQA_ERROR_RANGE && next == NULL);
+    count = 9;
+    assert(uqa_value_get_field_count(first, &count) == UQA_ERROR_TYPE && count == 0);
+    CHECK(uqa_value_create_copy(old, &copy));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_value_get_int32(copy, &number)); assert(number == 2);
+    CHECK(uqa_value_destroy(&copy));
+
+    CHECK(uqa_engine_execute(engine, "SELECT ROW(0.1::real, NULL::numeric(7,-2), ARRAY[4,5])", result));
+    CHECK(uqa_result_get_value(result, 0, 0, &first));
+    CHECK(uqa_value_get_field_count(first, &count)); assert(count == 3);
+    CHECK(uqa_value_get_field(first, 0, &next));
+    { float real = 0; CHECK(uqa_value_get_float32(next, &real)); assert(real == 0.1f); }
+    CHECK(uqa_value_get_field(first, 1, &next));
+    CHECK(uqa_value_get_is_null(next, &is_null)); assert(is_null);
+    CHECK(uqa_value_get_type(next, &type));
+    CHECK(uqa_type_get_modifier(type, &modifier)); assert(modifier == 460802);
+    CHECK(uqa_value_get_field(first, 2, &next));
+    CHECK(uqa_value_get_element(next, 1, &old));
+    CHECK(uqa_value_get_int32(old, &number)); assert(number == 5);
+}
+
+static void retained_output_fields(uqa_engine engine, uqa_result result) {
+    const char *sql = "SELECT ROW(16909060,84281096,287454020)::c_field_output";
+    uqa_result outputs[3] = {NULL, NULL, NULL};
+    uqa_statement statement = NULL;
+    uqa_cursor cursor = NULL;
+    uqa_value_view values[3] = {NULL, NULL, NULL}, children[3] = {NULL, NULL, NULL};
+    CHECK(uqa_engine_execute(engine, "CREATE TYPE c_field_output AS (a integer,b integer,c integer)", result));
+    for (size_t i = 0; i < 3; ++i) CHECK(uqa_result_create(&outputs[i]));
+    CHECK(uqa_engine_execute(engine, sql, outputs[0]));
+    CHECK(uqa_statement_prepare(engine, sql, &statement));
+    CHECK(uqa_statement_execute(statement, outputs[1]));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_cursor_open(engine, sql, &cursor));
+    CHECK(uqa_cursor_fetch(cursor, 1, outputs[2]));
+    CHECK(uqa_cursor_close(&cursor));
+    for (size_t i = 0; i < 3; ++i) {
+        CHECK(uqa_result_get_value(outputs[i], 0, 0, &values[i]));
+        CHECK(uqa_value_get_field(values[i], 0, &children[i]));
+    }
+    CHECK(uqa_engine_execute(engine, "BEGIN; ALTER TYPE c_field_output ALTER ATTRIBUTE a TYPE bigint", result));
+    for (size_t i = 0; i < 3; ++i) {
+        uqa_value_view current = NULL;
+        int64_t wide = 0;
+        int32_t original = 0;
+        CHECK(uqa_value_get_field(values[i], 0, &current));
+        CHECK(uqa_value_get_int64(current, &wide)); assert(wide == INT64_C(361984551007945476));
+        CHECK(uqa_value_get_int32(children[i], &original)); assert(original == 16909060);
+    }
+    CHECK(uqa_transaction_rollback(engine));
+    for (size_t i = 0; i < 3; ++i) CHECK(uqa_result_destroy(&outputs[i]));
+
+    CHECK(uqa_engine_execute(engine,
+        "CREATE FUNCTION c_field_mutate(v integer) RETURNS integer LANGUAGE plpgsql AS $$BEGIN "
+        "ALTER TYPE c_field_output RENAME ATTRIBUTE a TO renamed; RETURN v; END$$", result));
+    CHECK(uqa_engine_execute(engine, "SELECT ROW(7,c_field_mutate(8),9)::c_field_output", result));
+    CHECK(uqa_result_get_value(result, 0, 0, &values[0]));
+    CHECK(uqa_value_get_field(values[0], 0, &children[0])); formatted(children[0], "7");
+    CHECK(uqa_value_get_field(values[0], 1, &children[0])); formatted(children[0], "8");
+
+    CHECK(uqa_engine_execute(engine, "CREATE TABLE c_field_table(a integer,b integer,c integer); INSERT INTO c_field_table VALUES(1,2,3)", result));
+    CHECK(uqa_result_create(&outputs[0]));
+    CHECK(uqa_engine_execute(engine, "SELECT t FROM c_field_table t(alias_a)", outputs[0]));
+    CHECK(uqa_result_get_value(outputs[0], 0, 0, &values[0]));
+    CHECK(uqa_value_get_field(values[0], 0, &children[0]));
+    CHECK(uqa_engine_execute(engine, "ALTER TABLE c_field_table RENAME COLUMN a TO renamed; ALTER TABLE c_field_table DROP COLUMN b", result));
+    {
+        uint32_t count = 0;
+        uqa_value_view current = NULL;
+        CHECK(uqa_value_get_field_count(values[0], &count)); assert(count == 2);
+        CHECK(uqa_value_get_field(values[0], 0, &current)); formatted(current, "1");
+        CHECK(uqa_value_get_field(values[0], 1, &current)); formatted(current, "3");
+        formatted(children[0], "1");
+    }
+    CHECK(uqa_result_destroy(&outputs[0]));
+}
+
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -468,6 +586,8 @@ int main(void) {
     retained_nested(engine, result);
     retained_input_checks(engine, result, 0);
     retained_input_checks(engine, result, 1);
+    field_values(engine, result);
+    retained_output_fields(engine, result);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     if (test_database_flags() != UQA_OPEN_MEMORY) {
