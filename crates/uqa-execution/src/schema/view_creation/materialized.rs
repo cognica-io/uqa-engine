@@ -118,18 +118,18 @@ pub fn explain_existing_target(
 fn execute_materialized_source(
     context: &ViewCreationContext<'_>,
     plan: &QueryPlan,
-    executable: Option<&QueryPlan>,
+    explained: Option<crate::query::measurement::ExplainedQuery<'_>>,
     params: &[SQLParam],
     output_columns: &[String],
 ) -> Result<Vec<uqa_sql::ResultRow>, SQLError> {
     let optimized;
-    let executable = if let Some(executable) = executable {
-        executable
+    let (executable, measurement) = if let Some(query) = explained {
+        (query.plan, Some(query.measurement))
     } else {
         optimized = context.queries.optimize(plan)?;
-        &optimized
+        (&optimized, None)
     };
-    let result = context.queries.execute(executable, params)?;
+    let result = context.queries.execute(executable, params, measurement)?;
     materialized_rows(&result, output_columns)
 }
 
@@ -141,7 +141,7 @@ pub fn register_materialized_view_plan(
         name,
         column_names,
         mut plan,
-        executable,
+        explained,
         if_not_exists,
         with_no_data,
         options,
@@ -188,7 +188,7 @@ pub fn register_materialized_view_plan(
         let materialized_rows = if with_no_data {
             Vec::new()
         } else {
-            execute_materialized_source(context, &plan, executable, params, &output_columns)?
+            execute_materialized_source(context, &plan, explained, params, &output_columns)?
         };
         let affected_rows = u64::try_from(materialized_rows.len())
             .map_err(|_| SQLError::Internal("materialized-view row count exceeds u64".into()))?;
@@ -298,7 +298,7 @@ pub fn refresh_materialized_view(
                 let _stored = SetPlacementScope::stored_definition();
                 context.query_owners.with_owner(
                     &owner,
-                    Box::new(|queries| queries.execute(&view.query, &[])),
+                    Box::new(|queries| queries.execute(&view.query, &[], None)),
                 )
             }?;
             replace_materialized_rows(&mut view, Some(&result))?;

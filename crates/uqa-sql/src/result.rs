@@ -254,7 +254,7 @@ pub mod vector;
 pub struct ExplainAnalysis {
     pub vector_searches: vector::ExplainVectorSearches,
     pub elapsed: std::time::Duration,
-    pub rows: u64,
+    pub root: explain::ExplainNodeMetrics,
     pub affected_rows: u64,
     pub serialization: explain::ExplainSerializationMetrics,
 }

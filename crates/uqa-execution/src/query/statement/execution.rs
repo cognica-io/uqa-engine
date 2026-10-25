@@ -42,6 +42,19 @@ pub fn execute_query_plan_with_ctes<S: Clone + Send + Sync + 'static>(
     materialized::collect(|mode| execute_query_plan_output(context, plan, params, ctes, mode))
 }
 
+/// Keep the ordinary public-row and borrowed-storage paths while measuring a selected relation destination's source query.
+pub fn execute_query_plan_measured<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+    measurement: Option<&crate::query::measurement::QueryMeasurement>,
+) -> Result<SQLResult, SQLError> {
+    materialized::collect_measured(measurement, |mode| {
+        execute_query_plan_output(context, plan, params, ctes, mode)
+    })
+}
+
 pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
     context: &QueryContext<'_, S>,
     plan: &QueryPlan,

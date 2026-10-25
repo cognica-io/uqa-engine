@@ -21,6 +21,15 @@ pub struct ExplainPlanEstimate {
     pub width: u64,
 }
 
+/// Accumulated work at an executed native plan boundary. Renderers divide rows and durations by completed loops; an unexecuted boundary retains zero loops.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExplainNodeMetrics {
+    pub rows: u64,
+    pub loops: u64,
+    pub startup: std::time::Duration,
+    pub total: std::time::Duration,
+}
+
 /// Actual `DataRow` payload construction, excluding transport headers and network I/O.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ExplainSerializationMetrics {

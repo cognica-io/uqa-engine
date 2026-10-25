@@ -30,7 +30,7 @@ pub struct MaterializedViewRegistration<'a> {
     pub column_names: &'a [String],
     pub plan: QueryPlan,
     /// EXPLAIN's selected executable; the unoptimized definition remains the stored view body.
-    pub executable: Option<&'a QueryPlan>,
+    pub explained: Option<crate::query::measurement::ExplainedQuery<'a>>,
     pub if_not_exists: bool,
     pub with_no_data: bool,
     pub options: &'a [(String, String)],

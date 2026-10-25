@@ -86,13 +86,19 @@ impl TableAsQuerySource for Engine {
     fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError> {
         crate::capabilities::statement_planning::optimize_engine_query(self, plan)
     }
-    fn execute(&self, plan: &QueryPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
+    fn execute(
+        &self,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        measurement: Option<&uqa_execution::query::measurement::QueryMeasurement>,
+    ) -> Result<SQLResult, SQLError> {
         let mut scope = super::query_scope::new_for_current_routine(self);
-        uqa_execution::query::statement::execute_query_plan_with_ctes(
+        uqa_execution::query::statement::execute_query_plan_measured(
             &self.query_execution_context(),
             plan,
             params,
             &mut scope,
+            measurement,
         )
     }
 }

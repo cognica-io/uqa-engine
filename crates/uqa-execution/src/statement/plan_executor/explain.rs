@@ -215,29 +215,29 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
     ) -> Result<uqa_sql::result::ExplainAnalysis, SQLError> {
         let diagnostics = self.context.diagnostics.diagnostics_scope()?;
         let started = std::time::Instant::now();
+        let measurement = crate::query::measurement::QueryMeasurement::new(settings.timing);
         let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
         executor
             .privilege_subject
             .clone_from(&self.privilege_subject);
-        let (affected_rows, rows, serialization) = if let Some(destination) = destination {
+        let (affected_rows, serialization) = if let Some(destination) = destination {
             crate::statement::validation::validate_plan(
                 &self.context.validation,
                 self.context.runtime.cancellation,
                 body,
             )?;
-            let result = executor.execute_explained_destination(destination, body)?;
+            let result = executor.execute_explained_destination(destination, body, &measurement)?;
             (
-                result.affected_rows,
                 result.affected_rows,
                 uqa_sql::result::explain::ExplainSerializationMetrics::default(),
             )
         } else {
-            executor.consume_explained_output(body, settings, control)?
+            executor.consume_explained_output(body, settings, control, &measurement)?
         };
         Ok(uqa_sql::result::ExplainAnalysis {
             vector_searches: diagnostics.finish()?,
             elapsed: started.elapsed(),
-            rows,
+            root: measurement.metrics(),
             affected_rows,
             serialization,
         })
@@ -248,14 +248,8 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         body: &UnifiedPlan,
         settings: &ExplainSettings,
         control: uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<
-        (
-            u64,
-            u64,
-            uqa_sql::result::explain::ExplainSerializationMetrics,
-        ),
-        SQLError,
-    > {
+        measurement: &crate::query::measurement::QueryMeasurement,
+    ) -> Result<(u64, uqa_sql::result::explain::ExplainSerializationMetrics), SQLError> {
         let serialization = if settings.serialize == uqa_sql::explain::ExplainSerialization::None {
             None
         } else {
@@ -273,18 +267,20 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             serialization::RowSerialization::new(settings.serialize, settings.timing, hook, control)
         };
         let consumer = std::rc::Rc::new(
-            consumer::ExplainConsumer::new(self.context.runtime.cancellation)
+            consumer::ExplainConsumer::new(self.context.runtime.cancellation, measurement)
                 .with_serialization(serialization),
         );
-        let output = self.execute_for_output_mode(
-            body,
-            super::QueryOutputMode::physical_consumer(consumer.clone()),
-        )?;
+        let output = measurement.run(|| {
+            self.execute_for_output_mode(
+                body,
+                super::QueryOutputMode::physical_consumer(consumer.clone()),
+            )
+        })?;
         match output {
-            super::StatementOutput::Query(_) => Ok((0, consumer.rows(), consumer.serialization())),
+            super::StatementOutput::Query(_) => Ok((0, consumer.serialization())),
             super::StatementOutput::Mutation(output) => {
                 let affected_rows = output.affected_rows;
-                Ok((affected_rows, consumer.rows(), consumer.serialization()))
+                Ok((affected_rows, consumer.serialization()))
             }
             super::StatementOutput::Command(_) => Err(SQLError::Internal(
                 "EXPLAIN query execution returned a utility result".into(),
@@ -325,12 +321,17 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         &self,
         destination: &CommandPlan,
         source: &UnifiedPlan,
+        measurement: &crate::query::measurement::QueryMeasurement,
     ) -> Result<SQLResult, SQLError> {
         let UnifiedPlan::Query(executable) = source else {
             return Err(SQLError::Internal(
                 "explained relation destination requires a query".into(),
             ));
         };
+        let explained = Some(crate::query::measurement::ExplainedQuery {
+            plan: executable,
+            measurement,
+        });
         match destination {
             CommandPlan::CreateTableAs {
                 name,
@@ -351,7 +352,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                     persistence: *persistence,
                     on_commit: *on_commit,
                     query,
-                    executable: Some(executable),
+                    explained,
                     params: self.params,
                 },
             ),
@@ -369,7 +370,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                         name,
                         column_names,
                         plan: (**query).clone(),
-                        executable: Some(executable),
+                        explained,
                         if_not_exists: *if_not_exists,
                         with_no_data: *with_no_data,
                         options,

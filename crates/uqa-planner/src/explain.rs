@@ -21,6 +21,7 @@ use uqa_sql::result::ExplainPhysicalPlan;
 
 mod costs;
 mod formats;
+mod measurements;
 pub use costs::estimate_plan;
 mod physical;
 mod properties;
@@ -219,11 +220,8 @@ fn plan_text(
     if let Some(analysis) = analysis {
         vector::append_text(&mut text, analysis, control)?;
         serialization::append_text(&mut text, settings, analysis)?;
-        let _ = write!(
-            text,
-            "\n  actual_rows={}\n  affected_rows={}",
-            analysis.rows, analysis.affected_rows
-        );
+        measurements::append_text(&mut text, analysis.root, settings.timing)?;
+        let _ = write!(text, "\n  affected_rows={}", analysis.affected_rows);
         if settings.summary {
             let _ = write!(
                 text,
@@ -262,7 +260,7 @@ fn structured_plan<'a>(
         plan.insert("Plan Width", P::Unsigned(estimate.width))?;
     }
     if let Some(analysis) = analysis {
-        plan.insert("Actual Rows", P::Unsigned(analysis.rows))?;
+        measurements::properties(&mut plan, analysis.root, settings.timing)?;
         plan.insert("Affected Rows", P::Unsigned(analysis.affected_rows))?;
     }
     let mut payload = Object::new(control);

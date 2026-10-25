@@ -10,7 +10,8 @@ pub mod consumer;
 pub mod context;
 mod execution;
 pub use execution::{
-    collect_query_operator, execute_query_plan_output, execute_query_plan_with_ctes,
+    collect_query_operator, execute_query_plan_measured, execute_query_plan_output,
+    execute_query_plan_with_ctes,
 };
 
 pub mod directional;

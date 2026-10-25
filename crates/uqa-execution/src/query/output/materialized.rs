@@ -18,6 +18,7 @@ pub struct MaterializedResultSink<'a> {
     schema: &'a RowSchema,
     rows: &'a mut ResultRows,
     cancellation: &'a uqa_core::CancellationToken,
+    measurement: Option<&'a crate::query::measurement::QueryMeasurement>,
 }
 
 impl<'a> MaterializedResultSink<'a> {
@@ -30,7 +31,16 @@ impl<'a> MaterializedResultSink<'a> {
             schema,
             rows,
             cancellation,
+            measurement: None,
         }
+    }
+
+    pub(crate) fn with_measurement(
+        mut self,
+        measurement: Option<&'a crate::query::measurement::QueryMeasurement>,
+    ) -> Self {
+        self.measurement = measurement;
+        self
     }
 
     /// Check the original statement token between bounded input pages, including pages rejected by the predicate.
@@ -51,6 +61,18 @@ impl<'a> MaterializedResultSink<'a> {
                 "borrowed materialized row has an incompatible physical width".into(),
             ));
         }
+        if let Some(measurement) = self.measurement {
+            measurement.output(1, || {
+                self.append_row(values);
+                Ok(())
+            })?;
+        } else {
+            self.append_row(values);
+        }
+        Ok(())
+    }
+
+    fn append_row(&mut self, values: &[&Value]) {
         if let Some(positional) = &mut self.rows.positional {
             positional.push(
                 self.rows
@@ -73,7 +95,6 @@ impl<'a> MaterializedResultSink<'a> {
                 .expect("public result layout was prepared")
                 .materialize_borrowed(values),
         );
-        Ok(())
     }
 }
 

@@ -401,6 +401,50 @@ static void explained_named_inputs(uqa_engine engine, uqa_result result) {
         "DROP VIEW c_named_input; DROP SEQUENCE c_named_effect", result));
 }
 
+static void explained_execution(uqa_engine engine, uqa_result result) {
+    const struct {
+        const char *sql;
+        int64_t rows;
+        int64_t loops;
+        int64_t timing;
+    } cases[] = {
+        {"EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, FORMAT JSON) VALUES (1),(2),(3)", 3, 1, 1},
+        {"EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) VALUES (1),(2),(3)", 3, 1, 0},
+        {"EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE c_measured AS VALUES (1),(2) WITH NO DATA", 0, 0, 1},
+        {"EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE c_measured AS VALUES (1),(2)", 2, 1, 0},
+        {"EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, FORMAT JSON) SELECT 1 WHERE false", 0, 1, 1},
+        {"EXPLAIN (SUMMARY FALSE, FORMAT JSON) SELECT 1", -1, -1, 0}
+    };
+    for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+        uqa_statement statement = NULL;
+        uqa_value document = NULL;
+        uqa_value_view view = NULL;
+        CHECK(uqa_statement_prepare(engine, cases[index].sql, &statement));
+        CHECK(uqa_statement_execute(statement, result));
+        CHECK(uqa_statement_finalize(&statement));
+        CHECK(uqa_result_get_value(result, 0, 0, &view));
+        CHECK(uqa_value_create_copy(view, &document));
+        view = document;
+        CHECK(uqa_engine_execute_params(engine,
+            "SELECT COALESCE(($1->0->'Plan'->>'Actual Rows')::numeric::bigint,-1), "
+            "COALESCE(($1->0->'Plan'->>'Actual Loops')::bigint,-1), "
+            "CASE WHEN $1->0->'Plan'->>'Actual Startup Time' IS NULL THEN 0 ELSE 1 END, "
+            "CASE WHEN $1->0->'Plan'->>'Actual Total Time' IS NULL THEN 0 ELSE 1 END, "
+            "CASE WHEN ($1->0->'Plan'->>'Actual Total Time')::numeric >= "
+            "($1->0->'Plan'->>'Actual Startup Time')::numeric THEN 1 ELSE 0 END, "
+            "CASE WHEN $1->0->>'Execution Time' IS NULL THEN 0 ELSE 1 END",
+            &view, 1, result));
+        CHECK(uqa_value_destroy(&document));
+        assert(integer(result, 0) == cases[index].rows);
+        assert(integer(result, 1) == cases[index].loops);
+        assert(integer(result, 2) == cases[index].timing);
+        assert(integer(result, 3) == cases[index].timing);
+        assert(integer(result, 4) == cases[index].timing);
+        assert(integer(result, 5) == 0);
+        CHECK(uqa_engine_execute(engine, "DROP TABLE IF EXISTS c_measured", result));
+    }
+}
+
 static void explained_serialization(uqa_engine engine, uqa_result result) {
     for (int binary = 0; binary < 2; ++binary) {
         uqa_statement statement = NULL;
@@ -1117,6 +1161,7 @@ int main(void) {
     explained_physical_metadata(engine, result);
     explained_costs(engine, result);
     explained_named_inputs(engine, result);
+    explained_execution(engine, result);
     explained_serialization(engine, result);
     explained_rule_delivery(engine, result);
     explained_mutation_rule_delivery(engine, result);
