@@ -595,13 +595,13 @@ impl<'a> BinaryReader<'a> {
             }),
             2 => Ok(TemporalValue::TimeTz {
                 micros: self.read_i64("time with time zone")?,
-                offset_minutes: self.read_i32("time zone offset")?,
+                offset_seconds: self.read_i32("time zone offset")?,
             }),
             3 => Ok(TemporalValue::Timestamp {
-                micros: self.read_i64("timestamp")?,
+                postgres_micros: self.read_i64("timestamp")?,
             }),
             4 => Ok(TemporalValue::TimestampTz {
-                micros: self.read_i64("timestamp with time zone")?,
+                postgres_micros: self.read_i64("timestamp with time zone")?,
             }),
             5 => Ok(TemporalValue::Interval {
                 months: self.read_i32("interval months")?,

@@ -125,7 +125,10 @@ fn temporal_inputs(plan: &UnifiedPlan) -> Vec<i64> {
     let mut values = Vec::new();
     plan.clone().rewrite_scalar_expressions(&mut |expression| {
         if let ScalarExpr::TypedLiteral {
-            value: Value::Temporal(uqa_core::TemporalValue::Timestamp { micros }),
+            value:
+                Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                    postgres_micros: micros,
+                }),
             ..
         } = expression
         {
@@ -415,14 +418,17 @@ fn invalidation_reads_original_inputs_and_only_publishes_successful_analysis() {
         let mut values = Vec::new();
         selected.rewrite_scalar_expressions(&mut |expression| {
             if let ScalarExpr::TypedLiteral {
-                value: Value::Temporal(uqa_core::TemporalValue::Timestamp { micros }),
+                value:
+                    Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                        postgres_micros: micros,
+                    }),
                 ..
             } = expression
             {
                 values.push(*micros);
             }
         });
-        assert_eq!(values, [expected]);
+        assert_eq!(values, [expected - uqa_core::POSTGRES_EPOCH_MICROS]);
         assert!(!inputs.entry.borrow().as_ref().unwrap().needs_analysis);
     }
     let identity = {
@@ -457,7 +463,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
         let _clock = uqa_sql::expr::TransactionClockScope::enter(190_123_456_789);
         assert_eq!(
             temporal_inputs(&inputs.select().unwrap().unwrap()),
-            [90_123_456_789]
+            [90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
         );
     }
     assert_eq!(
@@ -474,7 +480,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
         let _clock = uqa_sql::expr::TransactionClockScope::enter(290_123_456_789);
         assert_eq!(
             temporal_inputs(&inputs.select().unwrap().unwrap()),
-            [290_123_456_789]
+            [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
         );
     }
     assert_eq!(
@@ -498,7 +504,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
     assert!(Arc::ptr_eq(&updated.source_plan, &original.source_plan));
     assert_eq!(
         temporal_inputs(updated.plan.as_ref().unwrap()),
-        [290_123_456_789]
+        [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     let current_path = updated.effective_search_path.as_ref().unwrap();
     assert_eq!(
@@ -526,7 +532,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
     let _clock = uqa_sql::expr::TransactionClockScope::enter(390_123_456_789);
     assert_eq!(
         temporal_inputs(&inputs.select().unwrap().unwrap()),
-        [290_123_456_789]
+        [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     assert!(Arc::ptr_eq(
         &inputs.entry.borrow().as_ref().unwrap().logical_plan,
@@ -560,7 +566,7 @@ fn changed_namespace_descriptor_failure_does_not_publish_the_new_analysis() {
         assert_eq!(entry.effective_search_path, original.effective_search_path);
         assert_eq!(
             temporal_inputs(entry.plan.as_ref().unwrap()),
-            [90_123_456_789]
+            [90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
         );
         assert_eq!(entry.generic_cost, original.generic_cost);
         assert_eq!(entry.generic_plans, original.generic_plans);
@@ -577,7 +583,7 @@ fn changed_namespace_descriptor_failure_does_not_publish_the_new_analysis() {
     inputs.entry.borrow_mut().as_mut().unwrap().result_schema = original.result_schema;
     assert_eq!(
         temporal_inputs(&inputs.select().unwrap().unwrap()),
-        [290_123_456_789]
+        [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     assert_eq!(inputs.entry.borrow().as_ref().unwrap().generic_plans, 1);
 }
@@ -604,7 +610,7 @@ fn namespace_read_failure_does_not_reuse_or_publish_the_cached_plan() {
     assert_eq!(entry.effective_search_path, original.effective_search_path);
     assert_eq!(
         temporal_inputs(entry.plan.as_ref().unwrap()),
-        [90_123_456_789]
+        [90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     assert_eq!(entry.generic_cost, original.generic_cost);
     assert_eq!(entry.generic_plans, original.generic_plans);

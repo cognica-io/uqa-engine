@@ -259,14 +259,14 @@ fn binary_keys_cover_every_value_variant_without_structural_collisions() {
         Value::Temporal(TemporalValue::Time { micros: 7 }),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 3_600_000_000,
-            offset_minutes: 60,
+            offset_seconds: 3600,
         }),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 0,
-            offset_minutes: 0,
+            offset_seconds: 0,
         }),
-        Value::Temporal(TemporalValue::Timestamp { micros: 9 }),
-        Value::Temporal(TemporalValue::TimestampTz { micros: 9 }),
+        Value::Temporal(TemporalValue::Timestamp { postgres_micros: 9 }),
+        Value::Temporal(TemporalValue::TimestampTz { postgres_micros: 9 }),
         Value::Temporal(TemporalValue::Interval {
             months: 1,
             days: 0,

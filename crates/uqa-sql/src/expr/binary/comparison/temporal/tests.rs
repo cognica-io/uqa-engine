@@ -101,7 +101,9 @@ fn temporal_comparison_observes_only_reached_civil_time_and_keeps_carrier_identi
     };
     let control = ProductionControl::uncontrolled();
     let date = Value::Temporal(TemporalValue::Date { days: 0 });
-    let timestamp = Value::Temporal(TemporalValue::Timestamp { micros: 0 });
+    let timestamp = Value::Temporal(TemporalValue::Timestamp {
+        postgres_micros: (0) - uqa_core::POSTGRES_EPOCH_MICROS,
+    });
     assert_ne!(date, timestamp);
     assert!(
         crate::expr::compare_typed_values_with_control(&date, &timestamp, &control)
@@ -117,7 +119,9 @@ fn temporal_comparison_observes_only_reached_civil_time_and_keeps_carrier_identi
         ),
         (
             Value::Null,
-            Value::Temporal(TemporalValue::TimestampTz { micros: 0 }),
+            Value::Temporal(TemporalValue::TimestampTz {
+                postgres_micros: (0) - uqa_core::POSTGRES_EPOCH_MICROS,
+            }),
             None,
         ),
     ] {
@@ -194,7 +198,9 @@ fn date_timestamp_comparison_preserves_original_and_invoking_cancellation() {
         let error = eval_comparison_truth_with_engine(
             BinaryOp::Equal,
             &Value::Temporal(TemporalValue::Date { days: 0 }),
-            &Value::Temporal(TemporalValue::TimestampTz { micros: 0 }),
+            &Value::Temporal(TemporalValue::TimestampTz {
+                postgres_micros: (0) - uqa_core::POSTGRES_EPOCH_MICROS,
+            }),
             &control,
             Some(&session),
             None,

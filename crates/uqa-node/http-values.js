@@ -126,13 +126,26 @@ function decodeHTTPValue(value) {
   }
   if (kind === "time_tz"
       && exactHTTPObject(value, ["$uqa_type", "micros", "offset_minutes"])
-      && isInt64(value.micros) && isHTTPInt32(value.offset_minutes)) {
-    return `${formatHTTPTime(value.micros)}${formatHTTPOffset(value.offset_minutes)}`;
+      && isInt64(value.micros) && isHTTPInt32(value.offset_minutes)
+      && isHTTPInt32(value.offset_minutes * 60)) {
+    return `${formatHTTPTime(value.micros)}${formatHTTPOffset(value.offset_minutes * 60)}`;
+  }
+  if (kind === "time_tz_seconds"
+      && exactHTTPObject(value, ["$uqa_type", "micros", "offset_seconds"])
+      && isInt64(value.micros) && isHTTPInt32(value.offset_seconds)) {
+    return `${formatHTTPTime(value.micros)}${formatHTTPOffset(value.offset_seconds)}`;
   }
   if ((kind === "timestamp" || kind === "timestamp_tz")
       && exactHTTPObject(value, ["$uqa_type", "micros"])
-      && isInt64(value.micros)) {
+      && isInt64(value.micros)
+      && (BigInt(value.micros) === MIN_INT64 || BigInt(value.micros) === MIN_INT64 + 1n
+        || BigInt(value.micros) - 946_684_800_000_000n > MIN_INT64)) {
     return formatHTTPTimestamp(value.micros, kind === "timestamp_tz");
+  }
+  if ((kind === "postgres_timestamp" || kind === "postgres_timestamp_tz")
+      && exactHTTPObject(value, ["$uqa_type", "postgres_micros"])
+      && isInt64(value.postgres_micros)) {
+    return formatHTTPTimestamp(value.postgres_micros, kind === "postgres_timestamp_tz", true);
   }
   if (kind === "interval"
       && exactHTTPObject(value, ["$uqa_type", "months", "days", "micros"])
@@ -269,18 +282,21 @@ function formatClock(micros) {
 }
 
 function formatHTTPOffset(source) {
-  const minutes = requireSafeHTTPInteger(source);
-  const sign = minutes < 0 ? "-" : "+";
-  const absolute = Math.abs(minutes);
-  const hours = `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}`;
-  return absolute % 60 === 0 ? hours : `${hours}:${String(absolute % 60).padStart(2, "0")}`;
+  const seconds = requireSafeHTTPInteger(source);
+  const sign = seconds < 0 ? "-" : "+";
+  const absolute = Math.abs(seconds);
+  const hours = `${sign}${String(Math.floor(absolute / 3600)).padStart(2, "0")}`;
+  const minutes = `${hours}:${String(Math.floor(absolute / 60) % 60).padStart(2, "0")}`;
+  if (absolute % 60 !== 0) return `${minutes}:${String(absolute % 60).padStart(2, "0")}`;
+  return absolute % 3600 === 0 ? hours : minutes;
 }
 
-function formatHTTPTimestamp(source, utc) {
-  const micros = BigInt(source);
-  // Timestamp endpoints occupy the unrepresentable lower Unix-microsecond range; i64::MAX is finite.
+function formatHTTPTimestamp(source, utc, postgres = false) {
+  let micros = BigInt(source);
+  // Each wire tag retains its own epoch and infinity sentinels.
   if (micros === MIN_INT64) return "-infinity";
-  if (micros === MIN_INT64 + 1n) return "infinity";
+  if (micros === (postgres ? MAX_INT64 : MIN_INT64 + 1n)) return "infinity";
+  if (postgres) micros += 946_684_800_000_000n;
   const day = 86_400_000_000n;
   const remainder = ((micros % day) + day) % day;
   const days = Number((micros - remainder) / day);

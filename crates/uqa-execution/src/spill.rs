@@ -50,7 +50,7 @@ pub(crate) use batch_layout::EncodedBatchLayout;
 pub(crate) use indexed::BufferedIndexedSpill;
 pub use indexed::IndexedSpill;
 
-const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x01\n";
+const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x02\n";
 
 /// Incremental exact size of one not-yet-encoded batch. When the first row with lock origins arrives, the binary format adds an empty origin-count field to every preceding origin-free row, so accounting must update those already-buffered rows as well as the new record.
 #[derive(Clone, Copy)]

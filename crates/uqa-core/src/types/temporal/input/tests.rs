@@ -98,27 +98,35 @@ fn special_dates_resolve_against_the_transaction_start() {
     assert_eq!(TemporalValue::date_input("epoch", NOW), Ok(date(0)));
     assert_eq!(
         TemporalValue::timestamp_input("now", NOW),
-        Ok(TemporalValue::Timestamp { micros: NOW })
+        Ok(TemporalValue::Timestamp {
+            postgres_micros: (NOW) - crate::POSTGRES_EPOCH_MICROS
+        })
     );
     assert_eq!(
         TemporalValue::timestamp_tz_input("now", NOW),
-        Ok(TemporalValue::TimestampTz { micros: NOW })
+        Ok(TemporalValue::TimestampTz {
+            postgres_micros: (NOW) - crate::POSTGRES_EPOCH_MICROS
+        })
     );
     assert_eq!(
         TemporalValue::timestamp_input("today 10:00", NOW),
         Ok(TemporalValue::Timestamp {
-            micros: i64::from(today) * DAY + 10 * 3_600_000_000
+            postgres_micros: (i64::from(today) * DAY + 10 * 3_600_000_000)
+                - crate::POSTGRES_EPOCH_MICROS
         })
     );
     assert_eq!(
         TemporalValue::timestamp_tz_input("tomorrow 10:00+02", NOW),
         Ok(TemporalValue::TimestampTz {
-            micros: i64::from(today + 1) * DAY + 8 * 3_600_000_000
+            postgres_micros: (i64::from(today + 1) * DAY + 8 * 3_600_000_000)
+                - crate::POSTGRES_EPOCH_MICROS
         })
     );
     assert_eq!(
         TemporalValue::timestamp_input("epoch", NOW),
-        Ok(TemporalValue::Timestamp { micros: 0 })
+        Ok(TemporalValue::Timestamp {
+            postgres_micros: (0) - crate::POSTGRES_EPOCH_MICROS
+        })
     );
     for text in ["now 10:00", "epoch 10:00", "allballs"] {
         assert_eq!(
@@ -197,7 +205,11 @@ fn times_read_fractions_meridians_and_the_sixtieth_second() {
 
 #[test]
 fn zones_apply_to_instants_and_report_their_own_errors() {
-    let instant = |micros| Ok(TemporalValue::TimestampTz { micros });
+    let instant = |micros| {
+        Ok(TemporalValue::TimestampTz {
+            postgres_micros: (micros) - crate::POSTGRES_EPOCH_MICROS,
+        })
+    };
     let base = 19_723 * DAY + 10 * 3_600_000_000;
     assert_eq!(
         TemporalValue::timestamp_tz_input("2024-01-01 10:00:00", NOW),
@@ -283,13 +295,15 @@ fn date_only_timestamps_read_separate_and_adjacent_numeric_zone_fields() {
         assert_eq!(
             TemporalValue::timestamp_tz_input(text, NOW),
             Ok(TemporalValue::TimestampTz {
-                micros: base - seconds_east * 1_000_000
+                postgres_micros: (base - seconds_east * 1_000_000) - crate::POSTGRES_EPOCH_MICROS
             }),
             "{text}"
         );
         assert_eq!(
             TemporalValue::timestamp_input(text, NOW),
-            Ok(TemporalValue::Timestamp { micros: base }),
+            Ok(TemporalValue::Timestamp {
+                postgres_micros: (base) - crate::POSTGRES_EPOCH_MICROS
+            }),
             "{text}"
         );
         assert_eq!(
@@ -305,7 +319,7 @@ fn date_only_timestamps_read_separate_and_adjacent_numeric_zone_fields() {
     assert_eq!(
         TemporalValue::timestamp_tz_input("2024-01-01 12:00 +05:30", NOW),
         Ok(TemporalValue::TimestampTz {
-            micros: base + 23_400_000_000
+            postgres_micros: (base + 23_400_000_000) - crate::POSTGRES_EPOCH_MICROS
         })
     );
 }
@@ -355,7 +369,9 @@ fn date_only_zone_inputs_apply_the_era_and_then_check_the_final_instant() {
     ] {
         assert_eq!(
             TemporalValue::timestamp_tz_input(text, NOW),
-            Ok(TemporalValue::TimestampTz { micros }),
+            Ok(TemporalValue::TimestampTz {
+                postgres_micros: (micros) - crate::POSTGRES_EPOCH_MICROS
+            }),
             "{text}"
         );
     }
@@ -371,20 +387,22 @@ fn timestamps_ignore_offsets_and_validate_their_fields() {
     // A `timestamp` reads and ignores the offset; a `timetz` keeps it.
     assert_eq!(
         TemporalValue::timestamp_input("2024-01-01 10:00:00+05", NOW),
-        Ok(TemporalValue::Timestamp { micros: base })
+        Ok(TemporalValue::Timestamp {
+            postgres_micros: (base) - crate::POSTGRES_EPOCH_MICROS
+        })
     );
     assert_eq!(
         TemporalValue::time_tz_input("10:00+05:30", NOW),
         Ok(TemporalValue::TimeTz {
             micros: 36_000_000_000,
-            offset_minutes: 330
+            offset_seconds: 19800
         })
     );
     assert_eq!(
         TemporalValue::time_tz_input("allballs", NOW),
         Ok(TemporalValue::TimeTz {
             micros: 0,
-            offset_minutes: 0
+            offset_seconds: 0
         })
     );
     assert_eq!(
@@ -398,7 +416,7 @@ fn timestamps_ignore_offsets_and_validate_their_fields() {
     assert_eq!(
         TemporalValue::timestamp_input("2024-01-01 23:59:60", NOW),
         Ok(TemporalValue::Timestamp {
-            micros: 19_724 * DAY
+            postgres_micros: (19_724 * DAY) - crate::POSTGRES_EPOCH_MICROS
         })
     );
     assert_eq!(
@@ -489,7 +507,8 @@ fn eras_count_years_before_the_common_era() {
     assert_eq!(
         TemporalValue::timestamp_tz_input("0002-06-15 10:00 BC", NOW),
         Ok(TemporalValue::TimestampTz {
-            micros: i64::from(days(-1, 6, 15)) * DAY + 10 * 3_600_000_000
+            postgres_micros: (i64::from(days(-1, 6, 15)) * DAY + 10 * 3_600_000_000)
+                - crate::POSTGRES_EPOCH_MICROS
         })
     );
     for text in ["0000-01-01", "0000-01-01 BC"] {
@@ -513,7 +532,9 @@ fn timestamp_input_checks_the_julian_boundary_after_the_zone_offset() {
     const MINIMUM: i64 = -210_866_803_200_000_000;
     assert_eq!(
         TemporalValue::timestamp_input("4714-11-24 BC", NOW),
-        Ok(TemporalValue::Timestamp { micros: MINIMUM })
+        Ok(TemporalValue::Timestamp {
+            postgres_micros: (MINIMUM) - crate::POSTGRES_EPOCH_MICROS
+        })
     );
     assert_eq!(
         TemporalValue::timestamp_input("4714-11-23 23:59:59.999999 BC", NOW),
@@ -522,7 +543,9 @@ fn timestamp_input_checks_the_julian_boundary_after_the_zone_offset() {
     for text in ["4714-11-24 00:00:00+00 BC", "4714-11-23 12:00:00-12 BC"] {
         assert_eq!(
             TemporalValue::timestamp_tz_input(text, NOW),
-            Ok(TemporalValue::TimestampTz { micros: MINIMUM }),
+            Ok(TemporalValue::TimestampTz {
+                postgres_micros: (MINIMUM) - crate::POSTGRES_EPOCH_MICROS
+            }),
             "{text}"
         );
     }
@@ -536,9 +559,19 @@ fn timestamp_input_checks_the_julian_boundary_after_the_zone_offset() {
             "{text}"
         );
     }
-    assert!(!TemporalValue::timestamp_micros_in_range(MINIMUM - 1));
-    assert!(TemporalValue::timestamp_micros_in_range(MINIMUM));
-    assert!(TemporalValue::timestamp_micros_in_range(i64::MAX));
+    assert!(!TemporalValue::timestamp_micros_in_range(
+        MINIMUM - crate::POSTGRES_EPOCH_MICROS - 1
+    ));
+    assert!(TemporalValue::timestamp_micros_in_range(
+        MINIMUM - crate::POSTGRES_EPOCH_MICROS
+    ));
+    assert!(!TemporalValue::timestamp_micros_in_range(i64::MAX));
+    assert!(TemporalValue::timestamp_micros_in_range(
+        9_223_371_331_199_999_999
+    ));
+    assert!(!TemporalValue::timestamp_micros_in_range(
+        9_223_371_331_200_000_000
+    ));
 }
 
 #[test]

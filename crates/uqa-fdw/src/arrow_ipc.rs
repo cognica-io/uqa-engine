@@ -176,7 +176,7 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
             days: downcast_value!(Date32Array),
         }),
         DataType::Date64 => Value::Temporal(TemporalValue::Timestamp {
-            micros: checked_scale_micros(downcast_value!(Date64Array), 1_000, "Date64")?,
+            postgres_micros: timestamp_micros(downcast_value!(Date64Array), 1_000, "Date64")?,
         }),
         DataType::Time64(TimeUnit::Microsecond) => Value::Temporal(TemporalValue::Time {
             micros: downcast_value!(Time64MicrosecondArray),
@@ -188,7 +188,7 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
             )?,
         }),
         DataType::Timestamp(TimeUnit::Second, _) => Value::Temporal(TemporalValue::Timestamp {
-            micros: checked_scale_micros(
+            postgres_micros: timestamp_micros(
                 downcast_value!(TimestampSecondArray),
                 1_000_000,
                 "second timestamp",
@@ -196,7 +196,7 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
         }),
         DataType::Timestamp(TimeUnit::Millisecond, _) => {
             Value::Temporal(TemporalValue::Timestamp {
-                micros: checked_scale_micros(
+                postgres_micros: timestamp_micros(
                     downcast_value!(TimestampMillisecondArray),
                     1_000,
                     "millisecond timestamp",
@@ -205,12 +205,20 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
         }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
             Value::Temporal(TemporalValue::Timestamp {
-                micros: downcast_value!(TimestampMicrosecondArray),
+                postgres_micros: timestamp_micros(
+                    downcast_value!(TimestampMicrosecondArray),
+                    1,
+                    "microsecond timestamp",
+                )?,
             })
         }
         DataType::Timestamp(TimeUnit::Nanosecond, _) => Value::Temporal(TemporalValue::Timestamp {
-            micros: checked_nanos_to_micros(
-                downcast_value!(TimestampNanosecondArray),
+            postgres_micros: timestamp_micros(
+                checked_nanos_to_micros(
+                    downcast_value!(TimestampNanosecondArray),
+                    "nanosecond timestamp",
+                )?,
+                1,
                 "nanosecond timestamp",
             )?,
         }),
@@ -222,8 +230,13 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
     })
 }
 
-fn checked_scale_micros(value: i64, factor: i64, context: &str) -> Result<i64, FDWError> {
-    value.checked_mul(factor).ok_or_else(|| {
+fn timestamp_micros(value: i64, factor: i64, context: &str) -> Result<i64, FDWError> {
+    i64::try_from(
+        i128::from(value) * i128::from(factor) - i128::from(uqa_core::POSTGRES_EPOCH_MICROS),
+    )
+    .ok()
+    .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
+    .ok_or_else(|| {
         FDWError::UnsupportedValue(format!(
             "Arrow {context} value {value} is outside UQA's microsecond timestamp range"
         ))
@@ -253,6 +266,35 @@ mod tests {
     use std::sync::Arc;
 
     use arrow_array::{Float64Array, Int64Array, TimestampSecondArray, UInt64Array};
+
+    #[test]
+    fn timestamp_units_cross_the_unix_boundary_without_truncation_or_overflow() {
+        for (array, expected) in [
+            (
+                Box::new(TimestampMicrosecondArray::from(vec![0])) as Box<dyn Array>,
+                "1970-01-01 00:00:00",
+            ),
+            (
+                Box::new(TimestampMicrosecondArray::from(vec![-1])),
+                "1969-12-31 23:59:59.999999",
+            ),
+            (
+                Box::new(TimestampSecondArray::from(vec![9_224_318_015_999])),
+                "294276-12-31 23:59:59",
+            ),
+            (
+                Box::new(Date64Array::from(vec![946_684_800_000])),
+                "2000-01-01 00:00:00",
+            ),
+        ] {
+            let Value::Temporal(actual) = arrow_value(array.as_ref(), 0).unwrap() else {
+                panic!("timestamp carrier");
+            };
+            assert_eq!(actual.to_sql_string(), expected);
+        }
+        assert!(timestamp_micros(9_224_318_016_000, 1_000_000, "second").is_err());
+        assert!(timestamp_micros(-210_866_803_201, 1_000_000, "second").is_err());
+    }
     use arrow_ipc::writer::FileWriter;
     use arrow_schema::{Field, Schema};
 

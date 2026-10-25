@@ -78,7 +78,7 @@ fn local_calendar_and_subday_offsets_match_postgresql_transition_results() {
         assert_eq!(
             value,
             Value::Temporal(TemporalValue::TimestampTz {
-                micros: expected_seconds * 1_000_000
+                postgres_micros: (expected_seconds * 1_000_000) - uqa_core::POSTGRES_EPOCH_MICROS
             }),
             "{input} {zone} {unit}"
         );
@@ -153,7 +153,7 @@ fn session_zone_obeys_selected_builtin_and_dynamic_callback_precedence() {
     assert_eq!(
         eval_builtin_function_call("date_trunc", args, &context).unwrap(),
         Value::Temporal(TemporalValue::TimestampTz {
-            micros: 1_704_121_200_000_000
+            postgres_micros: (1_704_121_200_000_000) - uqa_core::POSTGRES_EPOCH_MICROS
         })
     );
     let invalid = Session {
@@ -209,7 +209,7 @@ fn explicit_zone_strictness_and_control_preserve_nulls_and_resource_scopes() {
     assert_eq!(
         *result,
         Value::Temporal(TemporalValue::TimestampTz {
-            micros: 1_704_121_200_000_000
+            postgres_micros: (1_704_121_200_000_000) - uqa_core::POSTGRES_EPOCH_MICROS
         })
     );
     assert_eq!(result.reserved_bytes(), 0);

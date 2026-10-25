@@ -38,6 +38,13 @@ pub(super) trait KeyOutput {
         false
     }
 
+    fn unix_temporal_reservation(&self) -> bool {
+        false
+    }
+
+    fn omit_reservation(&mut self) {}
+    fn encoded_temporal(&mut self, _value: &uqa_core::TemporalValue) {}
+
     fn check(&self) -> ExecResult<()> {
         if let Some(control) = self.control() {
             control.check().map_err(resource_error)?;

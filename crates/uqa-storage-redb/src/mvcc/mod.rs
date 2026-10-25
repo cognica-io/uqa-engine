@@ -38,7 +38,7 @@ use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
 /// Every owner preserves expanded record field bindings and their original tuple bytes.
-const RECORD_FORMAT: u64 = 62;
+const RECORD_FORMAT: u64 = 63;
 
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
 const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");

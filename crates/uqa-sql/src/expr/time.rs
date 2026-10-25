@@ -10,8 +10,8 @@
 //! months/days/micros model, and `age()` produces the symbolic
 //! year/month decomposition.
 
-use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Timelike, Utc};
-use uqa_core::{memory::ProductionControl, TemporalValue, Value};
+use chrono::{NaiveDate, NaiveDateTime};
+use uqa_core::{memory::ProductionControl, TemporalDate, TemporalDateTime, TemporalValue, Value};
 
 use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
@@ -20,8 +20,11 @@ use super::conversion::to_f64_with_control;
 use super::{datetime_out_of_range, float_to_i64_rounded, out_of_range};
 
 mod calendar;
+mod construct;
+pub(super) use construct::{make_date, make_timestamp};
 mod date_trunc;
 mod extract;
+mod format;
 mod infinite;
 mod interval;
 mod number_format;
@@ -38,24 +41,21 @@ const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
 const MICROS_PER_HOUR: i64 = 3_600 * MICROS_PER_SECOND;
 const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
-fn epoch_date() -> NaiveDate {
-    DateTime::<Utc>::UNIX_EPOCH.date_naive()
+
+fn timestamp_fields(micros: i64) -> TemporalDateTime {
+    TemporalDateTime::from_postgres_micros(micros)
 }
 
-fn naive_from_micros(micros: i64) -> Result<NaiveDateTime> {
-    chrono::DateTime::from_timestamp_micros(micros)
-        .map(|dt| dt.naive_utc())
+fn timestamp_micros(value: TemporalDateTime) -> Result<i64> {
+    value
+        .postgres_micros()
         .ok_or_else(|| datetime_out_of_range("timestamp"))
-}
-
-fn micros_from_naive(naive: NaiveDateTime) -> i64 {
-    naive.and_utc().timestamp_micros()
 }
 
 /// Shift the date of a timestamp by whole months, clamping the day-of-month to the end
 /// of the target month exactly like `PostgreSQL` (`Jan 31 + 1 mon` ->
 /// `Feb 29` in a leap year). `timestamp_pl_interval` reports any overflow as the timestamp's.
-fn shift_months(date: NaiveDate, months: i32) -> Result<NaiveDate> {
+fn shift_months(date: TemporalDate, months: i32) -> Result<TemporalDate> {
     let total = i64::from(date.year())
         .checked_mul(12)
         .and_then(|value| value.checked_add(i64::from(date.month0())))
@@ -67,23 +67,12 @@ fn shift_months(date: NaiveDate, months: i32) -> Result<NaiveDate> {
         u32::try_from(total.rem_euclid(12)).map_err(|_| datetime_out_of_range("timestamp"))? + 1;
     let day = date.day();
     let last = days_in_month(year, month);
-    NaiveDate::from_ymd_opt(year, month, day.min(last))
+    TemporalDate::from_calendar(year, month, day.min(last))
         .ok_or_else(|| datetime_out_of_range("timestamp"))
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if NaiveDate::from_ymd_opt(year, 2, 29).is_some() {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 30,
-    }
+    TemporalDate::days_in_month(year, month)
 }
 
 /// `timestamp + interval` (calendar-aware): months first with day
@@ -213,29 +202,29 @@ fn temporal_pair_arith(
         (T::Date { days }, T::Time { micros }, BinaryOp::Add)
         | (T::Time { micros }, T::Date { days }, BinaryOp::Add) => {
             Ok(Value::Temporal(T::Timestamp {
-                micros: date_time_micros(*days, *micros, 0)?,
+                postgres_micros: date_time_micros(*days, *micros, 0)?,
             }))
         }
         (
             T::Date { days },
             T::TimeTz {
                 micros,
-                offset_minutes,
+                offset_seconds,
             },
             BinaryOp::Add,
         )
         | (
             T::TimeTz {
                 micros,
-                offset_minutes,
+                offset_seconds,
             },
             T::Date { days },
             BinaryOp::Add,
         ) => Ok(Value::Temporal(T::TimestampTz {
-            micros: date_time_micros(
+            postgres_micros: date_time_micros(
                 *days,
                 *micros,
-                i64::from(*offset_minutes) * MICROS_PER_MINUTE,
+                i64::from(*offset_seconds) * MICROS_PER_SECOND,
             )?,
         })),
         (_, T::Interval { .. }, BinaryOp::Add) => {
@@ -285,10 +274,13 @@ fn date_time_micros(days: i32, time: i64, offset: i64) -> Result<i64> {
     if let Some(infinity) = (TemporalValue::Date { days }).infinity() {
         return Ok(infinite::timestamp_micros(infinity));
     }
-    i64::from(days)
-        .checked_mul(MICROS_PER_DAY)
-        .and_then(|date| date.checked_add(time))
-        .and_then(|local| local.checked_sub(offset))
+    let micros = (i128::from(days) - i128::from(uqa_core::POSTGRES_EPOCH_DAYS))
+        * i128::from(MICROS_PER_DAY)
+        + i128::from(time)
+        - i128::from(offset);
+    i64::try_from(micros)
+        .ok()
+        .filter(|value| TemporalValue::timestamp_micros_in_range(*value))
         .ok_or_else(|| datetime_out_of_range("timestamp"))
 }
 
@@ -330,19 +322,23 @@ fn add_interval_to_temporal(
             let ts = date_time_micros(*base_days, 0, 0)?;
             let span = calendar_span()?;
             Ok(Value::Temporal(T::Timestamp {
-                micros: timestamp_plus_interval(ts, span.months, span.days, span.micros)?,
+                postgres_micros: timestamp_plus_interval(ts, span.months, span.days, span.micros)?,
             }))
         }
-        T::Timestamp { micros: ts } => {
+        T::Timestamp {
+            postgres_micros: ts,
+        } => {
             let span = calendar_span()?;
             Ok(Value::Temporal(T::Timestamp {
-                micros: timestamp_plus_interval(*ts, span.months, span.days, span.micros)?,
+                postgres_micros: timestamp_plus_interval(*ts, span.months, span.days, span.micros)?,
             }))
         }
-        T::TimestampTz { micros: ts } => {
+        T::TimestampTz {
+            postgres_micros: ts,
+        } => {
             let span = calendar_span()?;
             Ok(Value::Temporal(T::TimestampTz {
-                micros: timestamp_tz_plus_interval(*ts, span, engine, control)?,
+                postgres_micros: timestamp_tz_plus_interval(*ts, span, engine, control)?,
             }))
         }
         // time +/- interval wraps within the day; months/days vanish.
@@ -351,10 +347,10 @@ fn add_interval_to_temporal(
         })),
         T::TimeTz {
             micros: t,
-            offset_minutes,
+            offset_seconds,
         } => Ok(Value::Temporal(T::TimeTz {
             micros: wrap_time(*t, span.micros, subtract),
-            offset_minutes: *offset_minutes,
+            offset_seconds: *offset_seconds,
         })),
         T::Interval { .. } => Err(SQLError::TypeMismatch(
             "cannot add interval to interval through this path".into(),
@@ -377,7 +373,12 @@ pub(super) fn temporal_timestamp_micros(t: &TemporalValue) -> Result<i64> {
     use TemporalValue as T;
     match t {
         T::Date { days } => date_time_micros(*days, 0, 0),
-        T::Timestamp { micros } | T::TimestampTz { micros } => Ok(*micros),
+        T::Timestamp {
+            postgres_micros: micros,
+        }
+        | T::TimestampTz {
+            postgres_micros: micros,
+        } => Ok(*micros),
         other => Err(SQLError::TypeMismatch(format!(
             "expected date or timestamp, got {other:?}"
         ))),
@@ -423,8 +424,8 @@ pub(super) fn coerce_temporal_with_control(
     }
 }
 
-fn temporal_naive(t: &TemporalValue) -> Result<NaiveDateTime> {
-    naive_from_micros(temporal_timestamp_micros(t)?)
+fn temporal_fields(t: &TemporalValue) -> Result<TemporalDateTime> {
+    Ok(timestamp_fields(temporal_timestamp_micros(t)?))
 }
 
 /// `age(a, b)`: symbolic year/month/day decomposition of `a - b`,
@@ -438,16 +439,12 @@ pub(super) fn age_between(a: &TemporalValue, b: &TemporalValue) -> Result<Value>
     }
     let sign: i64 = if am >= bm { 1 } else { -1 };
     let (hi, lo) = if am >= bm { (am, bm) } else { (bm, am) };
-    let hi_dt = naive_from_micros(hi)?;
-    let lo_dt = naive_from_micros(lo)?;
+    let hi_dt = timestamp_fields(hi);
+    let lo_dt = timestamp_fields(lo);
     let mut years = i64::from(hi_dt.year()) - i64::from(lo_dt.year());
     let mut months = i64::from(hi_dt.month()) - i64::from(lo_dt.month());
     let mut days = i64::from(hi_dt.day()) - i64::from(lo_dt.day());
-    let time_of = |dt: NaiveDateTime| -> i64 {
-        i64::from(dt.num_seconds_from_midnight()) * MICROS_PER_SECOND
-            + i64::from(dt.and_utc().timestamp_subsec_micros())
-    };
-    let mut time = time_of(hi_dt) - time_of(lo_dt);
+    let mut time = hi_dt.time_micros() - lo_dt.time_micros();
     if time < 0 {
         time += MICROS_PER_DAY;
         days -= 1;
@@ -474,33 +471,6 @@ pub(super) fn date_trunc_value(
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
     date_trunc::truncate(unit, value, control)
-}
-
-pub(super) fn make_timestamp(
-    year: i32,
-    month: u32,
-    day: u32,
-    hour: u32,
-    minute: u32,
-    second: f64,
-) -> Result<Value> {
-    if !second.is_finite() || !(0.0..60.0).contains(&second) {
-        return Err(SQLError::TypeMismatch(
-            "make_timestamp: seconds must be finite and between 0 and 60".into(),
-        ));
-    }
-    let date = NaiveDate::from_ymd_opt(year, month, day)
-        .ok_or_else(|| SQLError::TypeMismatch("make_timestamp: bad date".into()))?;
-    let base = date
-        .and_hms_opt(hour, minute, 0)
-        .ok_or_else(|| SQLError::TypeMismatch("make_timestamp: bad time".into()))?;
-    let micros = float_to_i64_rounded(second * MICROS_PER_SECOND as f64, "time")?;
-    let naive = base
-        .checked_add_signed(chrono::Duration::microseconds(micros))
-        .ok_or_else(|| datetime_out_of_range("timestamp"))?;
-    Ok(Value::Temporal(TemporalValue::Timestamp {
-        micros: micros_from_naive(naive),
-    }))
 }
 
 pub(super) fn pg_to_chrono_fmt(fmt: &str) -> String {
@@ -532,22 +502,31 @@ pub(super) fn format_pg_number(value: &Value, fmt: &str) -> Result<String> {
 
 /// `to_char(temporal, fmt)` for typed temporal values.
 pub(super) fn format_temporal(value: &TemporalValue, fmt: &str) -> Result<String> {
+    format_temporal_with_control(value, fmt, &ProductionControl::uncontrolled()).map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary temporal formatting")
+    })
+}
+
+pub(super) fn format_temporal_with_control(
+    value: &TemporalValue,
+    fmt: &str,
+    control: &ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<String>> {
+    control.check()?;
     use TemporalValue as T;
-    let naive = match value {
-        T::Date { .. } | T::Timestamp { .. } | T::TimestampTz { .. } => temporal_naive(value)?,
-        T::Time { micros } | T::TimeTz { micros, .. } => {
-            let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(
-                (micros.rem_euclid(MICROS_PER_DAY) / MICROS_PER_SECOND) as u32,
-                ((micros.rem_euclid(MICROS_PER_DAY) % MICROS_PER_SECOND) * 1_000) as u32,
-            )
-            .ok_or_else(|| SQLError::TypeMismatch("to_char: bad time".into()))?;
-            NaiveDateTime::new(epoch_date(), time)
-        }
-        T::Interval { .. } => {
-            return Err(SQLError::Unsupported("to_char(interval, text)".into()));
-        }
+    let fields = match value {
+        T::Date { days } => TemporalDate::from_unix_days(*days)
+            .at_time(0)
+            .expect("midnight"),
+        T::Timestamp { .. } | T::TimestampTz { .. } => temporal_fields(value)?,
+        T::Time { micros } | T::TimeTz { micros, .. } => TemporalDate::from_unix_days(0)
+            .at_time(micros.rem_euclid(MICROS_PER_DAY))
+            .expect("normalized time"),
+        T::Interval { .. } => return Err(SQLError::Unsupported("to_char(interval, text)".into())),
     };
-    Ok(naive.format(&pg_to_chrono_fmt(fmt)).to_string())
+    Ok(format::format(fields, fmt, control)?)
 }
 
 pub(super) fn hex_encode(bytes: &[u8]) -> String {
@@ -562,7 +541,7 @@ pub(super) fn hex_encode(bytes: &[u8]) -> String {
 
 /// Parse a timestamp string into a UTC `DateTime`. Accepts:
 /// - RFC3339 (`2025-01-31T12:00:00Z`, `2025-01-31T12:00:00+09:00`)
-/// - PostgreSQL-ish `YYYY-MM-DD HH:MM:SS[.fff]` (assumed UTC)
+/// - `PostgreSQL`-ish `YYYY-MM-DD HH:MM:SS[.fff]` (assumed UTC)
 /// - Bare date `YYYY-MM-DD` (midnight UTC).
 pub(super) fn parse_timestamp(s: &str) -> Result<chrono::DateTime<chrono::Utc>> {
     use chrono::{TimeZone, Utc};

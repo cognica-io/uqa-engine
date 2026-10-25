@@ -31,7 +31,7 @@ fn physical_leaf_encoding_borrows_payloads_and_uses_inline_fixed_width_scratch()
         (
             Value::Temporal(TemporalValue::TimeTz {
                 micros: 1,
-                offset_minutes: 60,
+                offset_seconds: 3600,
             }),
             ColumnType::TimeTz,
             [

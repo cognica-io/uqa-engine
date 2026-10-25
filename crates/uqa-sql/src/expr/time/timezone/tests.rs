@@ -145,7 +145,9 @@ fn finite_conversion_rejects_overflow_without_creating_an_infinite_value() {
             days: 0,
             micros: -1_000_000,
         }),
-        Value::Temporal(TemporalValue::Timestamp { micros: i64::MAX }),
+        Value::Temporal(TemporalValue::Timestamp {
+            postgres_micros: 9_223_371_331_199_999_999,
+        }),
     ];
     assert_eq!(
         eval_timezone(&args, None, &ProductionControl::uncontrolled())

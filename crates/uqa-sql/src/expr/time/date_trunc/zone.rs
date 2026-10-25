@@ -12,7 +12,7 @@ use super::{decode_unit, truncate_timestamp, Unit};
 use crate::expr::context::EvalContext;
 use crate::expr::conversion::value_to_string;
 use crate::expr::time::timezone::{unknown_zone, zone_name};
-use crate::expr::time::{micros_from_naive, naive_from_micros};
+use crate::expr::time::{timestamp_fields, timestamp_micros};
 use crate::expr::{datetime_out_of_range, Result, SQLError};
 use uqa_core::{memory::ProductionControl, TemporalValue, Value};
 
@@ -58,7 +58,12 @@ fn truncate(
     control: &ProductionControl<'_>,
 ) -> Result<Value> {
     control.check()?;
-    let Value::Temporal(temporal @ TemporalValue::TimestampTz { micros }) = value else {
+    let Value::Temporal(
+        temporal @ TemporalValue::TimestampTz {
+            postgres_micros: micros,
+        },
+    ) = value
+    else {
         return Err(SQLError::TypeMismatch(
             "date_trunc with a time zone requires timestamp with time zone".into(),
         ));
@@ -69,26 +74,30 @@ fn truncate(
     }
     let out_of_range = || datetime_out_of_range("timestamp");
     let offset = zone
-        .offset_at(micros.div_euclid(1_000_000))
+        .offset_at_postgres_micros(*micros)
         .ok_or_else(out_of_range)?;
     let local = micros
         .checked_add(i64::from(offset) * 1_000_000)
         .ok_or_else(out_of_range)?;
-    let truncated = micros_from_naive(truncate_timestamp(unit, naive_from_micros(local)?)?);
+    let truncated = timestamp_micros(truncate_timestamp(unit, timestamp_fields(local))?)?;
     let offset = if matches!(
         unit,
         Unit::Hour | Unit::Minute | Unit::Second | Unit::Milliseconds | Unit::Microseconds
     ) {
         offset
     } else {
-        zone.offset_for_local(truncated.div_euclid(1_000_000))
-            .ok_or_else(out_of_range)?
+        zone.offset_for_local(
+            truncated.div_euclid(1_000_000) + uqa_core::POSTGRES_EPOCH_MICROS / 1_000_000,
+        )
+        .ok_or_else(out_of_range)?
     };
     let micros = truncated
         .checked_sub(i64::from(offset) * 1_000_000)
         .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
         .ok_or_else(out_of_range)?;
-    Ok(Value::Temporal(TemporalValue::TimestampTz { micros }))
+    Ok(Value::Temporal(TemporalValue::TimestampTz {
+        postgres_micros: micros,
+    }))
 }
 
 #[cfg(test)]

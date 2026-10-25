@@ -116,7 +116,9 @@ fn timestamp(text: &str) -> Value {
 }
 
 fn zoned(micros: i64) -> Value {
-    Value::Temporal(TemporalValue::TimestampTz { micros })
+    Value::Temporal(TemporalValue::TimestampTz {
+        postgres_micros: (micros) - uqa_core::POSTGRES_EPOCH_MICROS,
+    })
 }
 
 #[test]

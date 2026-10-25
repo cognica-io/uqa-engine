@@ -177,7 +177,9 @@ pub(super) fn temporal(
         let names: &[&str] = match tag.as_str() {
             "date" => &["days"],
             "time" | "timestamp" | "timestamp_tz" => &["micros"],
+            "postgres_timestamp" | "postgres_timestamp_tz" => &["postgres_micros"],
             "time_tz" => &["micros", "offset_minutes"],
+            "time_tz_seconds" => &["micros", "offset_seconds"],
             "interval" => &["months", "days", "micros"],
             _ => return Err(JsonReadError::InvalidJson),
         };
@@ -204,7 +206,13 @@ pub(super) fn temporal(
             let name = string(item.key.expect("temporal field"), control)?;
             if !matches!(
                 name.as_str(),
-                "$uqa_type" | "days" | "micros" | "offset_minutes" | "months"
+                "$uqa_type"
+                    | "days"
+                    | "micros"
+                    | "postgres_micros"
+                    | "offset_minutes"
+                    | "offset_seconds"
+                    | "months"
             ) || fields.contains_key(name.as_str())
             {
                 return Err(JsonReadError::InvalidJson);
@@ -222,7 +230,9 @@ pub(super) fn temporal(
         Some(Value::Str(kind)) => match kind.as_str() {
             "date" => &["$uqa_type", "days"],
             "time" | "timestamp" | "timestamp_tz" => &["$uqa_type", "micros"],
+            "postgres_timestamp" | "postgres_timestamp_tz" => &["$uqa_type", "postgres_micros"],
             "time_tz" => &["$uqa_type", "micros", "offset_minutes"],
+            "time_tz_seconds" => &["$uqa_type", "micros", "offset_seconds"],
             "interval" => &["$uqa_type", "months", "days", "micros"],
             _ => return Err(JsonReadError::InvalidJson),
         },
@@ -262,7 +272,7 @@ fn temporal_number(
     control: &StorageReadControl,
 ) -> Result<Budgeted<Value>, JsonReadError> {
     let value = super::integer(input, control, true)?;
-    if field != "micros" {
+    if !matches!(field, "micros" | "postgres_micros") {
         i32::try_from(value).map_err(|_| JsonReadError::InvalidJson)?;
     }
     Ok(Budgeted::new(

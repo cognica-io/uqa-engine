@@ -1,0 +1,516 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET TIME ZONE 'UTC'",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE IF EXISTS temporal_carriers",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE temporal_carriers(id integer PRIMARY KEY, d date, t time, z timetz, ts timestamp, tz timestamptz, i interval)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO temporal_carriers VALUES (1, '4714-11-24 BC', '00:00:00', '00:00:00+00:00:01', '4714-11-24 BC', '4714-11-24+00 BC', '1 mon -2 days 00:00:00.000003'), (2, '5874897-12-31', '24:00:00', '24:00:00-15:59:59', '294276-12-31 23:59:59.999999', '294276-12-31 23:59:59.999999+00', 'infinity'), (3, 'infinity', '12:34:56.123456', '12:34:56.123456+15:59:59', 'infinity', '-infinity', '-infinity')",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX temporal_stamp_key ON temporal_carriers(ts)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX temporal_zone_key ON temporal_carriers(z)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM temporal_carriers ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "d",
+            "t",
+            "z",
+            "ts",
+            "tz",
+            "i"
+          ],
+          "type_oids": [
+            23,
+            1082,
+            1083,
+            1266,
+            1114,
+            1184,
+            1186
+          ],
+          "rows": [
+            [
+              "1",
+              "4714-11-24 BC",
+              "00:00:00",
+              "00:00:00+00:00:01",
+              "4714-11-24 00:00:00 BC",
+              "4714-11-24 00:00:00+00 BC",
+              "1 mon -2 days +00:00:00.000003"
+            ],
+            [
+              "2",
+              "5874897-12-31",
+              "24:00:00",
+              "24:00:00-15:59:59",
+              "294276-12-31 23:59:59.999999",
+              "294276-12-31 23:59:59.999999+00",
+              "infinity"
+            ],
+            [
+              "3",
+              "infinity",
+              "12:34:56.123456",
+              "12:34:56.123456+15:59:59",
+              "infinity",
+              "-infinity",
+              "-infinity"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM temporal_carriers WHERE ts >= '294276-01-01'::timestamp ORDER BY ts",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT id FROM temporal_carriers WHERE z >= '00:00:00+00:00:01'::timetz ORDER BY z",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT extract(epoch FROM ts), extract(year FROM ts), extract(week FROM ts), extract(dow FROM ts), date_trunc('month',ts), to_char(ts,'YYYY-MM-DD HH24:MI:SS.US') FROM temporal_carriers WHERE id = 2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "extract",
+            "extract",
+            "extract",
+            "extract",
+            "date_trunc",
+            "to_char"
+          ],
+          "type_oids": [
+            1700,
+            1700,
+            1700,
+            1700,
+            1114,
+            25
+          ],
+          "rows": [
+            [
+              "9224318016000.000000",
+              "294276",
+              "52",
+              "0",
+              "294276-12-01 00:00:00",
+              "294276-12-31 23:59:59.999999"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT timestamp '294276-12-31 23:59:59.999999' - interval '1 mon', timestamp '294276-12-31 23:59:59.999999' - interval '1 day', age(timestamp '294276-12-31',timestamp '294275-12-31')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "?column?",
+            "?column?",
+            "age"
+          ],
+          "type_oids": [
+            1114,
+            1114,
+            1186
+          ],
+          "rows": [
+            [
+              "294276-11-30 23:59:59.999999",
+              "294276-12-30 23:59:59.999999",
+              "1 year"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT make_timestamp(294276,12,31,23,59,59.999999), make_date(5874897,12,31), make_timestamp(-1,1,1,0,0,0), make_timestamp(2000,1,1,24,0,0), make_timestamp(2000,1,1,23,59,60)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "make_timestamp",
+            "make_date",
+            "make_timestamp",
+            "make_timestamp",
+            "make_timestamp"
+          ],
+          "type_oids": [
+            1114,
+            1082,
+            1114,
+            1114,
+            1114
+          ],
+          "rows": [
+            [
+              "294276-12-31 23:59:59.999999",
+              "5874897-12-31",
+              "0001-01-01 00:00:00 BC",
+              "2000-01-02 00:00:00",
+              "2000-01-02 00:00:00"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT CAST(timestamp '2000-01-01 00:00:00.5' AS timestamp(0)), CAST(timestamp '1999-12-31 23:59:59.5' AS timestamp(0)), CAST(timestamp '294276-12-31 23:59:59.999999' AS timestamp(0))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamp",
+            "timestamp",
+            "timestamp"
+          ],
+          "type_oids": [
+            1114,
+            1114,
+            1114
+          ],
+          "rows": [
+            [
+              "2000-01-01 00:00:01",
+              "1999-12-31 23:59:59",
+              "294277-01-01 00:00:00"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT timestamp '294276-12-31 23:59:59.999999' + interval '1 microsecond'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range"
+      },
+      "results": [],
+      "reopen": true
+    },
+    {
+      "sql": "SELECT timestamp '4714-11-24 BC' - interval '1 microsecond'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range"
+      },
+      "results": [],
+      "reopen": true
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT temporal_retry",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO temporal_carriers(id,ts) VALUES (4,'294276-12-31 23:59:59.999999')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"temporal_stamp_key\""
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK TO temporal_retry",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE temporal_carriers SET ts=ts-interval '1 day' WHERE id=2",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM temporal_carriers ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "d",
+            "t",
+            "z",
+            "ts",
+            "tz",
+            "i"
+          ],
+          "type_oids": [
+            23,
+            1082,
+            1083,
+            1266,
+            1114,
+            1184,
+            1186
+          ],
+          "rows": [
+            [
+              "1",
+              "4714-11-24 BC",
+              "00:00:00",
+              "00:00:00+00:00:01",
+              "4714-11-24 00:00:00 BC",
+              "4714-11-24 00:00:00+00 BC",
+              "1 mon -2 days +00:00:00.000003"
+            ],
+            [
+              "2",
+              "5874897-12-31",
+              "24:00:00",
+              "24:00:00-15:59:59",
+              "294276-12-31 23:59:59.999999",
+              "294276-12-31 23:59:59.999999+00",
+              "infinity"
+            ],
+            [
+              "3",
+              "infinity",
+              "12:34:56.123456",
+              "12:34:56.123456+15:59:59",
+              "infinity",
+              "-infinity",
+              "-infinity"
+            ]
+          ]
+        }
+      ],
+      "reopen": true
+    }
+  ],
+  "provenance": {
+    "collector": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "container_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25"
+  }
+}

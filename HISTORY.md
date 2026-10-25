@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve the full PostgreSQL timestamp range with native microseconds since 2000-01-01 and retain TIMETZ offsets in seconds. Readers convert predecessor encodings; SQLite record format 67 and redb record format 63 exclude incompatible writers. See the [upgrade requirements](docs/manual/reference/10-upgrading.md#unreleased).
 - Share immutable named and anonymous composite metadata through SQL construction, controlled copies and result conversion. Rust `RecordValue` callers now use explicit positional values and borrowed field iteration instead of a mutable pair-vector dereference; see the [Rust API migration](docs/manual/reference/02-rust-engine-api.md#composite-value-metadata). SQL observations and persistent formats are preserved.
 
 ### Fixed

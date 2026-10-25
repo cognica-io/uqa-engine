@@ -21,7 +21,7 @@ fn values() -> Vec<Value> {
         Value::Bytes(vec![0, 1, 127, 128, 255]),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 42,
-            offset_minutes: -330,
+            offset_seconds: -19800,
         }),
         Value::Decimal(DecimalValue::parse("-12345678901234567890.00100").unwrap()),
         Value::Decimal(DecimalValue::parse("NaN").unwrap()),

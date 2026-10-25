@@ -5,7 +5,8 @@
     "datestyle": "ISO, YMD",
     "intervalstyle": "postgres",
     "source": "Independent psql capture; carrier units are Unix days/microseconds and TemporalInfinity endpoints.",
-    "wide_calendar_source": "PostgreSQL 18.4 SQL text plus timestamp_send/timestamptz_send network-order integers, translated exactly from the PostgreSQL epoch to Unix microseconds; DATE uses integer day subtraction. No floating-point epoch extraction."
+    "wide_calendar_source": "PostgreSQL 18.4 SQL text plus timestamp_send/timestamptz_send network-order integers, translated exactly from the PostgreSQL epoch to Unix microseconds; DATE uses integer day subtraction. No floating-point epoch extraction.",
+    "postgres_epoch_source": "PostgreSQL 18.4 timestamp_send/timestamptz_send integers and timetz_send seconds; explicit wire tags distinguish these from retained Unix epoch and minute-offset fixtures."
   },
   "cases": [
     {
@@ -331,6 +332,198 @@
       "wire": "{\"$uqa_type\":\"timestamp_tz\",\"micros\":9223372036854775807}",
       "expected": "294247-01-10 04:00:54.775807+00",
       "browser_safe": false
+    },
+    {
+      "sql": "SELECT '-infinity'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-9223372036854775808}",
+      "expected": "-infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT 'infinity'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9223372036854775807}",
+      "expected": "infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0001-01-01 00:00:00 BC'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-63113904000000000}",
+      "expected": "0001-01-01 00:00:00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0002-12-31 23:59:59.999999 BC'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-63113904000000001}",
+      "expected": "0002-12-31 23:59:59.999999 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '1969-12-31 23:59:59.999999'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-946684800000001}",
+      "expected": "1969-12-31 23:59:59.999999",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1970-01-01 00:00:00.000001'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-946684799999999}",
+      "expected": "1970-01-01 00:00:00.000001",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '10000-01-01 00:00:00'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":252455616000000000}",
+      "expected": "10000-01-01 00:00:00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '-infinity'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-9223372036854775808}",
+      "expected": "-infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT 'infinity'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":9223372036854775807}",
+      "expected": "infinity",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0001-01-01 00:00:00 BC'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-63113904000000000}",
+      "expected": "0001-01-01 00:00:00+00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '0002-12-31 23:59:59.999999 BC'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-63113904000000001}",
+      "expected": "0002-12-31 23:59:59.999999+00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '1969-12-31 23:59:59.999999'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-946684800000001}",
+      "expected": "1969-12-31 23:59:59.999999+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '1970-01-01 00:00:00.000001'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-946684799999999}",
+      "expected": "1970-01-01 00:00:00.000001+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '10000-01-01 00:00:00'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":252455616000000000}",
+      "expected": "10000-01-01 00:00:00+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '24:00+09'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":86400000000,\"offset_seconds\":32400}",
+      "expected": "24:00:00+09",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '12:34:56.123456-03:30'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":45296123456,\"offset_seconds\":-12600}",
+      "expected": "12:34:56.123456-03:30",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '00:00+00'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":0,\"offset_seconds\":0}",
+      "expected": "00:00:00+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '00:00-09'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":0,\"offset_seconds\":-32400}",
+      "expected": "00:00:00-09",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamp '262143-01-01 00:00:00.000001'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":8209320192000000001}",
+      "expected": "262143-01-01 00:00:00.000001",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamp '294000-02-28 23:59:59.999999'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9214635081599999999}",
+      "expected": "294000-02-28 23:59:59.999999",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamp '294247-01-10 04:00:54.775807'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9222425352054775807}",
+      "expected": "294247-01-10 04:00:54.775807",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '262143-01-01 00:00:00.000001'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":8209320192000000001}",
+      "expected": "262143-01-01 00:00:00.000001+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '294000-02-28 23:59:59.999999'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":9214635081599999999}",
+      "expected": "294000-02-28 23:59:59.999999+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '294247-01-10 04:00:54.775807'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":9222425352054775807}",
+      "expected": "294247-01-10 04:00:54.775807+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '294276-12-31 23:59:59.999999'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9223371331199999999}",
+      "expected": "294276-12-31 23:59:59.999999",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '294276-01-01'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9223339708800000000}",
+      "expected": "294276-01-01 00:00:00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '4714-11-24 BC'::timestamp",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-211813488000000000}",
+      "expected": "4714-11-24 00:00:00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '294277-01-01 00:00:00+00:00:01'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":9223371331199000000}",
+      "expected": "294276-12-31 23:59:59+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '4714-11-23 12:00:00-12 BC'::timestamptz",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-211813488000000000}",
+      "expected": "4714-11-24 00:00:00+00 BC",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT '12:34:56.123456+15:59:59'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":45296123456,\"offset_seconds\":57599}",
+      "expected": "12:34:56.123456+15:59:59",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '24:00:00-15:59:59'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":86400000000,\"offset_seconds\":-57599}",
+      "expected": "24:00:00-15:59:59",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT '00:00:00+00:00:01'::timetz",
+      "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":0,\"offset_seconds\":1}",
+      "expected": "00:00:00+00:00:01",
+      "browser_safe": true
     }
   ]
 }

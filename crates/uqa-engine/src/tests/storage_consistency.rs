@@ -419,7 +419,9 @@ fn portal_temporal_inputs_keep_the_transaction_clock_through_fetch_and_hold() {
     fn verify(engine: &Engine) {
         let _caller_clock = uqa_sql::expr::TransactionClockScope::enter(17);
         let started_at = 90_123_456_789;
-        let expected = Value::Temporal(uqa_core::TemporalValue::Timestamp { micros: started_at });
+        let expected = Value::Temporal(uqa_core::TemporalValue::Timestamp {
+            postgres_micros: (started_at) - uqa_core::POSTGRES_EPOCH_MICROS,
+        });
         for (holdable, fetch_before_commit) in [(false, true), (true, false), (true, true)] {
             engine.sql("BEGIN", &[]).unwrap();
             engine.session.transactions.lock()[0].started_at_micros = started_at;

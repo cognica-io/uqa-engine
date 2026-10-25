@@ -775,17 +775,21 @@ fn encode_temporal(writer: &mut impl Write, value: &TemporalValue) -> ExecResult
         }
         TemporalValue::TimeTz {
             micros,
-            offset_minutes,
+            offset_seconds,
         } => {
             write_tag(writer, 2)?;
             write_raw(writer, &micros.to_le_bytes(), "time with time zone")?;
-            write_raw(writer, &offset_minutes.to_le_bytes(), "time zone offset")
+            write_raw(writer, &offset_seconds.to_le_bytes(), "time zone offset")
         }
-        TemporalValue::Timestamp { micros } => {
+        TemporalValue::Timestamp {
+            postgres_micros: micros,
+        } => {
             write_tag(writer, 3)?;
             write_raw(writer, &micros.to_le_bytes(), "timestamp")
         }
-        TemporalValue::TimestampTz { micros } => {
+        TemporalValue::TimestampTz {
+            postgres_micros: micros,
+        } => {
             write_tag(writer, 4)?;
             write_raw(writer, &micros.to_le_bytes(), "timestamp with time zone")
         }

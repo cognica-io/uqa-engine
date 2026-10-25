@@ -26,7 +26,12 @@ pub(super) fn cast_timestamp(
     {
         base = underlying;
     }
-    if let Value::Temporal(value @ TemporalValue::TimestampTz { micros }) = value {
+    if let Value::Temporal(
+        value @ TemporalValue::TimestampTz {
+            postgres_micros: micros,
+        },
+    ) = value
+    {
         if matches!(
             base,
             ColumnType::Date | ColumnType::Timestamp | ColumnType::TimestampPrecision(_)
@@ -41,19 +46,23 @@ pub(super) fn cast_timestamp(
             }
             let zone = session_zone(engine, control)?;
             let offset = zone
-                .offset_at_micros(*micros)
+                .offset_at_postgres_micros(*micros)
                 .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?;
             let local = i128::from(*micros) + i128::from(offset) * 1_000_000;
             let value = if matches!(base, ColumnType::Date) {
-                let days = i32::try_from(local.div_euclid(86_400_000_000))
-                    .map_err(|_| crate::expr::datetime_out_of_range("date"))?;
+                let days = i32::try_from(
+                    local.div_euclid(86_400_000_000) + i128::from(uqa_core::POSTGRES_EPOCH_DAYS),
+                )
+                .map_err(|_| crate::expr::datetime_out_of_range("date"))?;
                 TemporalValue::Date { days }
             } else {
                 let micros = i64::try_from(local)
                     .ok()
                     .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
                     .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?;
-                TemporalValue::Timestamp { micros }
+                TemporalValue::Timestamp {
+                    postgres_micros: micros,
+                }
             };
             return Ok(Some(Value::Temporal(value)));
         }
@@ -74,21 +83,26 @@ pub(super) fn cast_timestamp(
         }
     }
     let local = match value {
-        Value::Temporal(TemporalValue::Timestamp { micros }) => *micros,
-        Value::Temporal(TemporalValue::Date { days }) => i64::from(*days)
-            .checked_mul(86_400_000_000)
-            .ok_or_else(out_of_range)?,
+        Value::Temporal(TemporalValue::Timestamp {
+            postgres_micros: micros,
+        }) => *micros,
+        Value::Temporal(TemporalValue::Date { days }) => (i64::from(*days)
+            - i64::from(uqa_core::POSTGRES_EPOCH_DAYS))
+        .checked_mul(86_400_000_000)
+        .ok_or_else(out_of_range)?,
         _ => return Ok(None),
     };
     let zone = session_zone(engine, control)?;
     let offset = zone
-        .offset_for_local(local.div_euclid(1_000_000))
+        .offset_for_local(local.div_euclid(1_000_000) + uqa_core::POSTGRES_EPOCH_MICROS / 1_000_000)
         .ok_or_else(out_of_range)?;
     let micros = local
         .checked_sub(i64::from(offset) * 1_000_000)
         .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
         .ok_or_else(out_of_range)?;
-    Ok(Some(Value::Temporal(TemporalValue::TimestampTz { micros })))
+    Ok(Some(Value::Temporal(TemporalValue::TimestampTz {
+        postgres_micros: micros,
+    })))
 }
 
 fn session_zone(

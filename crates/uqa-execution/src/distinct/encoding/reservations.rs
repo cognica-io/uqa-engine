@@ -11,9 +11,10 @@ use smallvec::{smallvec, SmallVec};
 use uqa_sql::expr::SQLValueCatalog;
 
 #[cfg(test)]
-pub(crate) fn canonical_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 3]> {
-    let [previous, legacy] = legacy_row_lock_keys(values)?;
-    Ok([canonical_row_key(values)?, previous, legacy])
+pub(crate) fn canonical_row_lock_keys(values: &[Value]) -> ExecResult<SmallVec<[Vec<u8>; 4]>> {
+    let mut keys = smallvec![canonical_row_key(values)?];
+    keys.extend(legacy_row_lock_keys(values)?);
+    Ok(keys)
 }
 
 /// Selected physical values and range fields use their SQL equality class for reservations. Observation does not invoke SQL hash support; predecessor aliases keep their original representation.
@@ -22,8 +23,8 @@ pub(crate) fn canonical_row_lock_keys_with_catalog(
     catalog: &dyn SQLValueCatalog,
 ) -> ExecResult<SmallVec<[Vec<u8>; 4]>> {
     let current = comparison_key(values, Some(catalog))?;
-    let [previous, legacy] = legacy_row_lock_keys(values)?;
-    let mut keys = smallvec![current.bytes, previous, legacy];
+    let mut keys = smallvec![current.bytes];
+    keys.extend(legacy_row_lock_keys(values)?);
     if current.normalized {
         keys.push(canonical_row_key(values)?);
     }
@@ -54,22 +55,33 @@ fn comparison_key<'a>(
     Ok(current)
 }
 
-fn legacy_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 2]> {
-    let mut previous = ReservationAlias {
-        bytes: Vec::new(),
-        legacy_numeric: false,
-    };
-    let mut legacy = ReservationAlias {
-        bytes: Vec::new(),
-        legacy_numeric: true,
-    };
-    for output in [&mut previous, &mut legacy] {
-        encode_len(values.len(), output)?;
+fn legacy_row_lock_keys(values: &[Value]) -> ExecResult<SmallVec<[Vec<u8>; 3]>> {
+    let mut keys = SmallVec::new();
+    let mut needs_unix_alias = false;
+    for format in [
+        ReservationFormat::DayWrapped,
+        ReservationFormat::RoundedNumeric,
+        ReservationFormat::UnixMicros,
+    ] {
+        if matches!(format, ReservationFormat::UnixMicros) && !needs_unix_alias {
+            continue;
+        }
+        let mut output = ReservationAlias {
+            bytes: Vec::new(),
+            format,
+            representable: true,
+            needs_unix_alias: false,
+        };
+        encode_len(values.len(), &mut output)?;
         for value in values {
-            encode_value(value, output)?;
+            encode_value(value, &mut output)?;
+        }
+        needs_unix_alias |= output.needs_unix_alias;
+        if output.representable {
+            keys.push(output.bytes);
         }
     }
-    Ok([previous.bytes, legacy.bytes])
+    Ok(keys)
 }
 
 struct DeclaredReservation<'a> {
@@ -101,9 +113,21 @@ impl KeyOutput for DeclaredReservation<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ReservationFormat {
+    /// Exact numeric encoding and the original day-wrapped temporal key.
+    DayWrapped,
+    /// Rounded numeric text with that same day-wrapped temporal key.
+    RoundedNumeric,
+    /// Exact numeric encoding, Unix timestamps and minute-offset TIMETZ.
+    UnixMicros,
+}
+
 struct ReservationAlias {
     bytes: Vec<u8>,
-    legacy_numeric: bool,
+    format: ReservationFormat,
+    representable: bool,
+    needs_unix_alias: bool,
 }
 
 impl KeyOutput for ReservationAlias {
@@ -118,11 +142,25 @@ impl KeyOutput for ReservationAlias {
     }
 
     fn legacy_numeric_reservation(&self) -> bool {
-        self.legacy_numeric
+        matches!(self.format, ReservationFormat::RoundedNumeric)
     }
 
     fn legacy_temporal_reservation(&self) -> bool {
-        true
+        !matches!(self.format, ReservationFormat::UnixMicros)
+    }
+    fn unix_temporal_reservation(&self) -> bool {
+        matches!(self.format, ReservationFormat::UnixMicros)
+    }
+    fn omit_reservation(&mut self) {
+        self.representable = false;
+    }
+    fn encoded_temporal(&mut self, value: &uqa_core::TemporalValue) {
+        self.needs_unix_alias |= matches!(
+            value,
+            uqa_core::TemporalValue::Timestamp { .. }
+                | uqa_core::TemporalValue::TimestampTz { .. }
+                | uqa_core::TemporalValue::TimeTz { .. }
+        );
     }
 }
 
@@ -132,13 +170,46 @@ mod tests {
     use uqa_core::DecimalValue;
 
     #[test]
+    fn new_temporal_carriers_emit_only_representable_predecessor_lock_addresses() {
+        for temporal in [
+            uqa_core::TemporalValue::Timestamp {
+                postgres_micros: 9_223_371_331_199_999_999,
+            },
+            uqa_core::TemporalValue::TimeTz {
+                micros: 0,
+                offset_seconds: 1,
+            },
+        ] {
+            let row = [Value::Row(vec![Value::Temporal(temporal)].into())];
+            let keys = canonical_row_lock_keys(&row).unwrap();
+            assert_eq!(keys.as_slice(), &[canonical_row_key(&row).unwrap()]);
+        }
+        let row = [Value::Temporal(uqa_core::TemporalValue::Timestamp {
+            postgres_micros: 0,
+        })];
+        let keys = canonical_row_lock_keys(&row).unwrap();
+        assert_eq!(keys.len(), 4);
+        assert_eq!(keys[1], keys[2]);
+        assert_eq!(keys[1], keys[3]);
+        assert_ne!(keys[0], keys[1]);
+        // Frozen predecessor row layout: one timestamp at the Unix offset of 2000-01-01.
+        let mut predecessor = vec![0, 0, 0, 0, 0, 0, 0, 1, 4, 3];
+        predecessor.extend_from_slice(&946_684_800_000_000_i64.to_be_bytes());
+        assert_eq!(keys[1], predecessor);
+    }
+
+    #[test]
     fn numeric_lock_alias_retains_predecessor_bytes_without_weakening_equality() {
         for (value, displayed) in [
             (0.1, "0.1"),
             (9_223_372_036_854_774_784_i64 as f64, "9223372036854775000"),
         ] {
             let values = [Value::Row(vec![Value::Float(value)].into())];
-            let [exact, previous, legacy] = canonical_row_lock_keys(&values).unwrap();
+            let [exact, previous, legacy]: [_; 3] = canonical_row_lock_keys(&values)
+                .unwrap()
+                .into_vec()
+                .try_into()
+                .unwrap();
             assert_eq!(exact, previous);
             let predecessor = canonical_row_key(&[Value::Row(
                 vec![Value::Decimal(DecimalValue::parse(displayed).unwrap())].into(),
@@ -154,7 +225,11 @@ mod tests {
             Value::Float(f64::NAN),
             Value::Float(f64::INFINITY),
         ] {
-            let [exact, previous, legacy] = canonical_row_lock_keys(&[value]).unwrap();
+            let [exact, previous, legacy]: [_; 3] = canonical_row_lock_keys(&[value])
+                .unwrap()
+                .into_vec()
+                .try_into()
+                .unwrap();
             assert_eq!(exact, previous);
             assert_eq!(exact, legacy);
         }
@@ -167,12 +242,13 @@ mod tests {
                 Value::Float(0.1),
                 Value::Temporal(uqa_core::TemporalValue::TimeTz {
                     micros: 46_800_000_000,
-                    offset_minutes: 60,
+                    offset_seconds: 3600,
                 }),
             ]
             .into(),
         )];
-        let [current, previous, legacy] = canonical_row_lock_keys(&row).unwrap();
+        let [current, previous, legacy, _unix] =
+            canonical_row_lock_keys(&row).unwrap().into_inner().unwrap();
         let predecessor = |decimal: &[u8]| {
             // Frozen predecessor layout: one row, two fields, finite numeric text and day-wrapped TIMETZ.
             let mut bytes = vec![0, 0, 0, 0, 0, 0, 0, 1, 10, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0];

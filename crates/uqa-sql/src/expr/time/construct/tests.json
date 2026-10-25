@@ -1,0 +1,534 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT make_timestamp(0,1,1,0,0,0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date field value out of range: 0-01-01"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        0,
+        1,
+        1
+      ],
+      "time_fields": [
+        0,
+        0
+      ],
+      "second": "0"
+    },
+    {
+      "sql": "SELECT make_timestamp(2147483647,1,1,0,0,0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: 2147483647-01-01"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2147483647,
+        1,
+        1
+      ],
+      "time_fields": [
+        0,
+        0
+      ],
+      "second": "0"
+    },
+    {
+      "sql": "SELECT make_timestamp(-2147483648,1,1,0,0,0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date field value out of range: -2147483648-01-01"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        -2147483648,
+        1,
+        1
+      ],
+      "time_fields": [
+        0,
+        0
+      ],
+      "second": "0"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,-1,0,0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: -1:00:00"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        -1,
+        0
+      ],
+      "second": "0"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,0,-1,0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 0:-1:00"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        0,
+        -1
+      ],
+      "second": "0"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,0,0,-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 0:00:-1"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        0,
+        0
+      ],
+      "second": "-1"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,24,0,0.1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 24:00:0.1"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "0.1"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,0,0,61)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 0:00:61"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        0,
+        0
+      ],
+      "second": "61"
+    },
+    {
+      "sql": "SELECT make_date(2147483647,1,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: 2147483647-01-01"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        2147483647,
+        1,
+        1
+      ]
+    },
+    {
+      "sql": "SELECT make_date(-2147483648,1,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date field value out of range: -2147483648-01-01"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        -2147483648,
+        1,
+        1
+      ]
+    },
+    {
+      "sql": "SELECT make_date(0,1,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date field value out of range: 0-01-01"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "sql": "SELECT make_date(-4714,11,23)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: -4713-11-23"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        -4714,
+        11,
+        23
+      ]
+    },
+    {
+      "sql": "SELECT make_date(-4714,10,24)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: -4713-10-24"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        -4714,
+        10,
+        24
+      ]
+    },
+    {
+      "sql": "SELECT make_date(-1,13,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date field value out of range: 0-13-01"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        -1,
+        13,
+        1
+      ]
+    },
+    {
+      "sql": "SELECT make_date(-1,2,30)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date field value out of range: 0-02-30"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        -1,
+        2,
+        30
+      ]
+    },
+    {
+      "sql": "SELECT make_date(5874898,1,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: 5874898-01-01"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        5874898,
+        1,
+        1
+      ]
+    },
+    {
+      "sql": "SELECT make_date(5874898,6,1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "date out of range: 5874898-06-01"
+      },
+      "results": [],
+      "constructor": "make_date",
+      "date_fields": [
+        5874898,
+        6,
+        1
+      ]
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,24,0,'NaN'::float8)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 24:00:NaN"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "NaN"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,24,0,'Infinity'::float8)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 24:00:Infinity"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "Infinity"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,24,0,'-Infinity'::float8)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 24:00:-Infinity"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "-Infinity"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,24,0,12345678::float8)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 24:00:1.23457e+07"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "12345678"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,24,0,0.0000001::float8)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "make_timestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [
+            [
+              "2000-01-02 00:00:00"
+            ]
+          ]
+        }
+      ],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "0.0000001"
+    },
+    {
+      "sql": "SELECT make_timestamp(2000,1,1,24,0,0.12345678::float8)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "time field value out of range: 24:00:0.123457"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        2000,
+        1,
+        1
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "0.12345678"
+    },
+    {
+      "sql": "SELECT make_timestamp(294277,1,1,0,0,0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range: 294277-01-01 0:00:00"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        294277,
+        1,
+        1
+      ],
+      "time_fields": [
+        0,
+        0
+      ],
+      "second": "0"
+    },
+    {
+      "sql": "SELECT make_timestamp(-4714,11,23,24,0,0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "make_timestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [
+            [
+              "4714-11-24 00:00:00 BC"
+            ]
+          ]
+        }
+      ],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        -4714,
+        11,
+        23
+      ],
+      "time_fields": [
+        24,
+        0
+      ],
+      "second": "0"
+    },
+    {
+      "sql": "SELECT make_timestamp(-4714,11,23,23,59,59.999999)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22008",
+        "message": "timestamp out of range: -4714-11-23 23:59:60"
+      },
+      "results": [],
+      "constructor": "make_timestamp",
+      "date_fields": [
+        -4714,
+        11,
+        23
+      ],
+      "time_fields": [
+        23,
+        59
+      ],
+      "second": "59.999999"
+    }
+  ],
+  "provenance": {
+    "collector": "tests/parity/pg18/capture_command_completion_oracle.py",
+    "collector_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "postgresql_image": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25",
+    "capture": "capture(queries, \"dbname=postgres user=postgres\", include_rows=True) in uqa-pg18-projection-reference; queries are the cases below"
+  }
+}

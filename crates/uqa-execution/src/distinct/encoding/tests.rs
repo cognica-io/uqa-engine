@@ -147,7 +147,7 @@ fn controlled_keys_keep_all_canonical_domains_and_only_retain_the_output_buffer(
         Value::JsonB("{\"x\":1.00,\"a\":[true,null]}".into()),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 3_600_000_000,
-            offset_minutes: 60,
+            offset_seconds: 3600,
         }),
         Value::Array(
             ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Null], vec![-2]).unwrap(),

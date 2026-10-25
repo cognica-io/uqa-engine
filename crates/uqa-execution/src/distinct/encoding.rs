@@ -645,12 +645,20 @@ fn encode_float_numeric(
 }
 
 fn encode_temporal(value: &TemporalValue, output: &mut impl KeyOutput) -> ExecResult<()> {
+    output.encoded_temporal(value);
     output.push_byte(4)?;
-    if output.legacy_temporal_reservation() {
-        value.write_legacy_reservation_key(|bytes| output.extend_bytes(bytes))
+    let represented = if output.unix_temporal_reservation() {
+        value.write_unix_reservation_key(|bytes| output.extend_bytes(bytes))?
+    } else if output.legacy_temporal_reservation() {
+        value.write_legacy_reservation_key(|bytes| output.extend_bytes(bytes))?
     } else {
-        value.write_equality_key(|bytes| output.extend_bytes(bytes))
+        value.write_equality_key(|bytes| output.extend_bytes(bytes))?;
+        true
+    };
+    if !represented {
+        output.omit_reservation();
     }
+    Ok(())
 }
 
 fn encode_bytes(bytes: &[u8], output: &mut impl KeyOutput) -> ExecResult<()> {

@@ -510,11 +510,11 @@ fn canonical_cache_matches_the_value_equality_oracle_for_normalized_nested_value
         Value::Array(ArrayValue::with_lower_bounds(vec![Value::Int(1)], vec![1]).unwrap()),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 3_600_000_000,
-            offset_minutes: 60,
+            offset_seconds: 3600,
         }),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 0,
-            offset_minutes: 0,
+            offset_seconds: 0,
         }),
         Value::Map(BTreeMap::from([(
             "nested".into(),

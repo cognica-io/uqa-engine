@@ -45,18 +45,22 @@ fn prepared_temporal_constants_keep_the_preparation_clock() {
         assert_eq!(
             result.rows[0]["input_clock"],
             Value::Temporal(uqa_core::TemporalValue::Timestamp {
-                micros: prepared_at
+                postgres_micros: (prepared_at) - uqa_core::POSTGRES_EPOCH_MICROS
             })
         );
         assert_eq!(
             result.rows[0]["transaction_clock"],
-            Value::Temporal(uqa_core::TemporalValue::Timestamp { micros: clock })
+            Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                postgres_micros: (clock) - uqa_core::POSTGRES_EPOCH_MICROS
+            })
         );
         assert_eq!(result.rows[0]["implicit_input"], Value::Bool(false));
         for name in ["text_clock", "parameter_clock"] {
             assert_eq!(
                 result.rows[0][name],
-                Value::Temporal(uqa_core::TemporalValue::Timestamp { micros: clock })
+                Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                    postgres_micros: (clock) - uqa_core::POSTGRES_EPOCH_MICROS
+                })
             );
         }
         assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(5));
@@ -72,7 +76,7 @@ fn prepared_temporal_constants_keep_the_preparation_clock() {
         assert_eq!(
             result.rows[0][name],
             Value::Temporal(uqa_core::TemporalValue::Timestamp {
-                micros: 590_123_456_789
+                postgres_micros: (590_123_456_789) - uqa_core::POSTGRES_EPOCH_MICROS
             })
         );
     }
@@ -106,7 +110,7 @@ fn prepared_inputs_survive_local_and_sibling_data_only_refreshes() {
             )
             .unwrap();
         let expected_clock = Value::Temporal(TemporalValue::Timestamp {
-            micros: prepared_at,
+            postgres_micros: (prepared_at) - uqa_core::POSTGRES_EPOCH_MICROS,
         });
         assert_eq!(
             engine.sql("EXECUTE direct_clock", &[]).unwrap().rows[0]["input_clock"],
@@ -125,7 +129,7 @@ fn prepared_inputs_survive_local_and_sibling_data_only_refreshes() {
             assert_eq!(
                 result.rows[0]["input_clock"],
                 Value::Temporal(TemporalValue::Timestamp {
-                    micros: prepared_at
+                    postgres_micros: (prepared_at) - uqa_core::POSTGRES_EPOCH_MICROS
                 })
             );
             assert_eq!(result.rows[0]["row_count"], Value::Int(count));

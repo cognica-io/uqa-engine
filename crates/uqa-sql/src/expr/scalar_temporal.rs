@@ -108,7 +108,8 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     .ok_or_else(|| SQLError::TypeMismatch(format!("to_number: {s:?}")))
             }
             "clock_timestamp" => Ok(Value::Temporal(TemporalValue::TimestampTz {
-                micros: chrono::Utc::now().timestamp_micros(),
+                postgres_micros: chrono::Utc::now().timestamp_micros()
+                    - uqa_core::POSTGRES_EPOCH_MICROS,
             })),
             "timeofday" => Ok(Value::Str(
                 chrono::Utc::now()

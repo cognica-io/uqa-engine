@@ -259,7 +259,7 @@ fn range_reservations_observe_physical_fields_and_keep_predecessor_addresses() {
         let values = [value];
         let old = reservations::canonical_row_lock_keys(&values).unwrap();
         let new = reservations::canonical_row_lock_keys_with_catalog(&values, &catalog).unwrap();
-        assert_eq!(new.as_slice(), &old);
+        assert_eq!(new.as_slice(), old.as_slice());
     }
     let error =
         reservations::canonical_row_lock_keys_with_catalog(&[deferred], &catalog).unwrap_err();

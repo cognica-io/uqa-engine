@@ -88,7 +88,9 @@ fn generated_columns_accept_immutable_uuid_extraction_functions() {
     assert_eq!(row["version"], Value::Int(7));
     assert_eq!(
         row["extracted_at"],
-        Value::Temporal(uqa_core::TemporalValue::TimestampTz { micros: 1_000 })
+        Value::Temporal(uqa_core::TemporalValue::TimestampTz {
+            postgres_micros: 1_000
+        })
     );
 
     let error = engine

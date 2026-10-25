@@ -61,8 +61,12 @@ fn constant_folding_retains_selected_collation_metadata() {
 #[test]
 fn session_dependent_temporal_operators_remain_executable_after_parameter_binding() {
     use uqa_core::TemporalValue;
-    let zoned = ScalarExpr::Literal(Value::Temporal(TemporalValue::TimestampTz { micros: 0 }));
-    let plain = ScalarExpr::Literal(Value::Temporal(TemporalValue::Timestamp { micros: 0 }));
+    let zoned = ScalarExpr::Literal(Value::Temporal(TemporalValue::TimestampTz {
+        postgres_micros: 0,
+    }));
+    let plain = ScalarExpr::Literal(Value::Temporal(TemporalValue::Timestamp {
+        postgres_micros: 0,
+    }));
     let span = ScalarExpr::Literal(Value::Temporal(TemporalValue::Interval {
         months: 0,
         days: 1,
@@ -116,7 +120,7 @@ fn session_dependent_temporal_operators_remain_executable_after_parameter_bindin
     assert_eq!(
         literal_value(&folded).unwrap().as_deref(),
         Some(&Value::Temporal(TemporalValue::Timestamp {
-            micros: 86_400_000_000,
+            postgres_micros: 86_400_000_000,
         }))
     );
 }
@@ -581,7 +585,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
         ),
         (
             ColumnType::TimestampTz,
-            Value::Temporal(uqa_core::TemporalValue::TimestampTz { micros: 0 }),
+            Value::Temporal(uqa_core::TemporalValue::TimestampTz { postgres_micros: 0 }),
         ),
     ];
     for (ty, value) in values {

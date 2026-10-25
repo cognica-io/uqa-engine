@@ -12,6 +12,43 @@ use chrono::NaiveDate;
 mod interval_limits;
 
 #[test]
+fn second_precision_zones_retain_postgresql_timetz_binary_fields_and_output() {
+    // PostgreSQL 18.4 timetz_send returns local microseconds followed by seconds west of UTC.
+    for (text, binary) in [
+        ("12:34:56.123456+15:59:59", "0000000a8bdbfe40ffff1f01"),
+        ("24:00:00-15:59:59", "000000141dd760000000e0ff"),
+        ("00:00:00+00:00:01", "0000000000000000ffffffff"),
+    ] {
+        let expected = TemporalValue::TimeTz {
+            micros: u64::from_str_radix(&binary[..16], 16).unwrap() as i64,
+            offset_seconds: -(u32::from_str_radix(&binary[16..], 16).unwrap() as i32),
+        };
+        for limit in [0, 1024] {
+            let memory = MemoryBudget::new(limit);
+            let token = CancellationToken::new();
+            let control = ProductionControl::new(&memory, &token, &token);
+            let actual = TemporalValue::parse_time_tz_with_control(text, &control)
+                .unwrap()
+                .unwrap();
+            assert_eq!(actual, expected);
+            let output = actual.to_sql_string_with_control(&control);
+            if limit == 0 {
+                assert!(output.is_err());
+            } else {
+                assert_eq!(output.unwrap().as_str(), text);
+            }
+            assert_eq!(memory.used(), 0);
+        }
+    }
+    for text in ["00:00:00+16", "00:00:00-16", "00:00:00+00:00:60"] {
+        assert_eq!(
+            TemporalValue::time_tz_input(text, 0),
+            Err(crate::TemporalInputError::ZoneDisplacement)
+        );
+    }
+}
+
+#[test]
 fn integer_calendar_timestamp_input_and_output_match_postgresql() {
     let reference: serde_json::Value =
         serde_json::from_str(include_str!("tests/timestamps.json")).unwrap();
@@ -20,14 +57,15 @@ fn integer_calendar_timestamp_input_and_output_match_postgresql() {
     let control = ProductionControl::new(&budget, &token, &token);
     for case in reference["cases"].as_array().unwrap() {
         let text = case["input"].as_str().unwrap();
-        let micros = case["unix_micros"]
-            .as_str()
-            .unwrap()
-            .parse::<i64>()
-            .unwrap();
+        let micros =
+            u64::from_str_radix(case["postgresql_binary"].as_str().unwrap(), 16).unwrap() as i64;
         let expected = match case["type"].as_str().unwrap() {
-            "timestamp" => TemporalValue::Timestamp { micros },
-            "timestamptz" => TemporalValue::TimestampTz { micros },
+            "timestamp" => TemporalValue::Timestamp {
+                postgres_micros: micros,
+            },
+            "timestamptz" => TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            },
             other => panic!("unexpected PostgreSQL type {other}"),
         };
         for input in [
@@ -54,8 +92,8 @@ fn integer_calendar_timestamp_input_and_output_match_postgresql() {
 #[test]
 fn wide_timestamp_production_preserves_quotas_and_both_cancellation_scopes() {
     let value = TemporalValue::Timestamp {
-        // PostgreSQL 18.4 timestamp_send('294000-01-01') plus the Unix epoch delta.
-        micros: 9_215_576_668_800_000_000,
+        // PostgreSQL 18.4 timestamp_send('294000-01-01').
+        postgres_micros: 9_214_629_984_000_000_000,
     };
     let budget = MemoryBudget::new(0);
     let token = CancellationToken::new();
@@ -174,13 +212,13 @@ fn same_kind_input_uses_the_supplied_clock_and_retains_cancellation() {
         },
         TemporalValue::TimeTz {
             micros: 3_723_456_789,
-            offset_minutes: 0,
+            offset_seconds: 0,
         },
         TemporalValue::Timestamp {
-            micros: 90_123_456_789,
+            postgres_micros: (90_123_456_789) - crate::POSTGRES_EPOCH_MICROS,
         },
         TemporalValue::TimestampTz {
-            micros: 90_123_456_789,
+            postgres_micros: (90_123_456_789) - crate::POSTGRES_EPOCH_MICROS,
         },
     ];
     for expected in &kinds {
@@ -210,16 +248,20 @@ fn same_kind_parser_preserves_each_temporal_variant_and_cancellation() {
         (
             TemporalValue::TimeTz {
                 micros: 0,
-                offset_minutes: 0,
+                offset_seconds: 0,
             },
             "12:34:56.123+09",
         ),
         (
-            TemporalValue::Timestamp { micros: 0 },
+            TemporalValue::Timestamp {
+                postgres_micros: (0) - crate::POSTGRES_EPOCH_MICROS,
+            },
             "2024-02-29 12:34:56",
         ),
         (
-            TemporalValue::TimestampTz { micros: 0 },
+            TemporalValue::TimestampTz {
+                postgres_micros: (0) - crate::POSTGRES_EPOCH_MICROS,
+            },
             "2024-02-29 12:34:56+09",
         ),
         (
@@ -301,21 +343,21 @@ fn years_print_without_a_sign_and_with_the_bc_era() {
     );
     assert_eq!(
         TemporalValue::Timestamp {
-            micros: micros(99_999, 1, 1, 0)
+            postgres_micros: (micros(99_999, 1, 1, 0)) - crate::POSTGRES_EPOCH_MICROS
         }
         .to_sql_string(),
         "99999-01-01 00:00:00"
     );
     assert_eq!(
         TemporalValue::Timestamp {
-            micros: micros(0, 12, 31, 86_399)
+            postgres_micros: (micros(0, 12, 31, 86_399)) - crate::POSTGRES_EPOCH_MICROS
         }
         .to_sql_string(),
         "0001-12-31 23:59:59 BC"
     );
     assert_eq!(
         TemporalValue::TimestampTz {
-            micros: micros(-1, 6, 15, 36_000)
+            postgres_micros: (micros(-1, 6, 15, 36_000)) - crate::POSTGRES_EPOCH_MICROS
         }
         .to_sql_string(),
         "0002-06-15 10:00:00+00 BC"

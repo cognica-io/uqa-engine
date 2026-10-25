@@ -174,12 +174,9 @@ impl TemporalValue {
         let fields = decode(text, order)?;
         let micros = time_of_day(&fields, now_micros)?;
         let offset = fields.zone.unwrap_or(0);
-        if offset % 60 != 0 {
-            return Err(TemporalInputError::InvalidSyntax);
-        }
         Ok(Self::TimeTz {
             micros,
-            offset_minutes: i32::try_from(offset / 60)
+            offset_seconds: i32::try_from(offset)
                 .map_err(|_| TemporalInputError::ZoneDisplacement)?,
         })
     }
@@ -203,7 +200,9 @@ impl TemporalValue {
         if !Self::timestamp_micros_in_range(micros) {
             return Err(TemporalInputError::OutOfRange);
         }
-        Ok(Self::Timestamp { micros })
+        Ok(Self::Timestamp {
+            postgres_micros: micros,
+        })
     }
 
     /// `timestamptz_in`: as `timestamp_input`, with the UTC offset applied; a text without one is read in the `UTC` session time zone.
@@ -229,7 +228,9 @@ impl TemporalValue {
         if !Self::timestamp_micros_in_range(micros) {
             return Err(TemporalInputError::OutOfRange);
         }
-        Ok(Self::TimestampTz { micros })
+        Ok(Self::TimestampTz {
+            postgres_micros: micros,
+        })
     }
 }
 
@@ -252,7 +253,9 @@ fn instant(fields: &Fields, now_micros: i64) -> Input<i64> {
             if fields.time.is_some() {
                 return Err(TemporalInputError::InvalidSyntax);
             }
-            return Ok(now_micros);
+            return now_micros
+                .checked_sub(super::POSTGRES_EPOCH_MICROS)
+                .ok_or(TemporalInputError::OutOfRange);
         }
         Some(DatePart::Special(Special::Epoch)) if fields.time.is_some() => {
             return Err(TemporalInputError::InvalidSyntax)
@@ -260,10 +263,10 @@ fn instant(fields: &Fields, now_micros: i64) -> Input<i64> {
         Some(DatePart::Special(special)) => special_days(special, now_micros)?,
         None => return Err(TemporalInputError::InvalidSyntax),
     };
-    i64::from(days)
-        .checked_mul(MICROS_PER_DAY)
-        .and_then(|day| day.checked_add(fields.time.unwrap_or(0)))
-        .ok_or(TemporalInputError::OutOfRange)
+    let micros = i128::from(days) * i128::from(MICROS_PER_DAY)
+        + i128::from(fields.time.unwrap_or(0))
+        - i128::from(super::POSTGRES_EPOCH_MICROS);
+    i64::try_from(micros).map_err(|_| TemporalInputError::OutOfRange)
 }
 
 /// Days since 1970-01-01 of a special date value.

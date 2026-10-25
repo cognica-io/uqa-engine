@@ -80,8 +80,9 @@ pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingE
 pub use record::{RecordDescriptor, RecordIter, RecordIterMut, RecordValue};
 pub use row::{RecordFieldType, RowDescriptor, RowValue};
 pub use temporal::{
-    TemporalDateOrder, TemporalDateStyle, TemporalInfinity, TemporalInputError,
-    TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
+    TemporalDate, TemporalDateOrder, TemporalDateStyle, TemporalDateTime, TemporalInfinity,
+    TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
+    POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
 pub use value::{
     compare_bytes_with_control, fixed_char_comparison_text_with_control, JsonValueDecoder, Value,

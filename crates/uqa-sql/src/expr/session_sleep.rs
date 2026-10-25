@@ -68,7 +68,9 @@ fn sleep_seconds(
             }),
         ) => {
             let until = super::time::timestamp_tz_plus_interval(
-                clock(),
+                clock()
+                    .checked_sub(uqa_core::POSTGRES_EPOCH_MICROS)
+                    .ok_or_else(|| super::datetime_out_of_range("timestamp"))?,
                 super::IntervalFields {
                     months: *months,
                     days: *days,
@@ -79,9 +81,12 @@ fn sleep_seconds(
             )?;
             remaining_seconds(until, clock())
         }
-        ("pg_sleep_until", Value::Temporal(TemporalValue::TimestampTz { micros })) => {
-            remaining_seconds(*micros, clock())
-        }
+        (
+            "pg_sleep_until",
+            Value::Temporal(TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            }),
+        ) => remaining_seconds(*micros, clock()),
         (_, other) => Err(SQLError::TypeMismatch(format!(
             "{name} does not accept {other:?}"
         ))),
@@ -89,13 +94,18 @@ fn sleep_seconds(
 }
 
 fn remaining_seconds(until: i64, now: i64) -> Result<f64> {
+    let now = now
+        .checked_sub(uqa_core::POSTGRES_EPOCH_MICROS)
+        .ok_or_else(|| super::datetime_out_of_range("timestamp"))?;
     // PostgreSQL's SQL wrappers subtract numeric epoch values, then convert the
     // difference to float8. Raw timestamp subtraction loses infinities and can overflow.
     let control = ProductionControl::uncontrolled();
     let epoch = |micros| {
         super::time::extract_from_value(
             "epoch",
-            &Value::Temporal(TemporalValue::TimestampTz { micros }),
+            &Value::Temporal(TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            }),
             true,
             &control,
         )

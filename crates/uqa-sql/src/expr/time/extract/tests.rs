@@ -230,7 +230,7 @@ fn time_and_timetz_keep_24_hour_components_and_unwrapped_epoch() {
         (
             Value::Temporal(TemporalValue::TimeTz {
                 micros: 45_296_123_456,
-                offset_minutes: 330,
+                offset_seconds: 19800,
             }),
             "25496.123456",
             25_496.123_456,
@@ -242,7 +242,7 @@ fn time_and_timetz_keep_24_hour_components_and_unwrapped_epoch() {
         (
             Value::Temporal(TemporalValue::TimeTz {
                 micros: 1,
-                offset_minutes: -210,
+                offset_seconds: -12600,
             }),
             "12600.000001",
             12_600.000_001,
@@ -254,7 +254,7 @@ fn time_and_timetz_keep_24_hour_components_and_unwrapped_epoch() {
         (
             Value::Temporal(TemporalValue::TimeTz {
                 micros: 0,
-                offset_minutes: 840,
+                offset_seconds: 50400,
             }),
             "-50400.000000",
             -50_400.0,
@@ -355,7 +355,7 @@ fn extraction_diagnostics_distinguish_type_support_and_reserved_tokens() {
             "0A000",
         ),
         (
-            Value::Temporal(TemporalValue::TimestampTz { micros: 0 }),
+            Value::Temporal(TemporalValue::TimestampTz { postgres_micros: 0 }),
             "timestamp with time zone",
             "0A000",
         ),
@@ -367,7 +367,7 @@ fn extraction_diagnostics_distinguish_type_support_and_reserved_tokens() {
         (
             Value::Temporal(TemporalValue::TimeTz {
                 micros: 0,
-                offset_minutes: 0,
+                offset_seconds: 0,
             }),
             "time with time zone",
             "22023",

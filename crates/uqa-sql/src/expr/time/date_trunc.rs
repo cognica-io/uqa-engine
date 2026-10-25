@@ -7,10 +7,10 @@
 //! `timestamp_trunc` and `interval_trunc` with `DecodeUnits` names and diagnostics.
 
 use super::{
-    coerce_temporal_with_control, datetime_out_of_range, micros_from_naive, temporal_naive,
+    coerce_temporal_with_control, datetime_out_of_range, temporal_fields, timestamp_micros,
     units::{Unit, UnitName},
-    Datelike, IntervalFields, NaiveDate, NaiveDateTime, ProductionControl, Result, TemporalValue,
-    Timelike, Value, MICROS_PER_HOUR, MICROS_PER_MINUTE, MICROS_PER_SECOND,
+    IntervalFields, ProductionControl, Result, TemporalDate, TemporalDateTime, TemporalValue,
+    Value, MICROS_PER_HOUR, MICROS_PER_MINUTE, MICROS_PER_SECOND,
 };
 
 pub(super) mod zone;
@@ -38,16 +38,20 @@ pub(super) fn truncate(
     if let Some(interval) = IntervalFields::of(&temporal) {
         return Ok(Value::Temporal(truncate_interval(unit, interval).value()));
     }
-    let result = truncate_timestamp(unit, temporal_naive(&temporal)?)?;
-    let micros = micros_from_naive(result);
+    let result = truncate_timestamp(unit, temporal_fields(&temporal)?)?;
+    let micros = timestamp_micros(result)?;
     if !TemporalValue::timestamp_micros_in_range(micros) {
         return Err(datetime_out_of_range("timestamp"));
     }
     Ok(Value::Temporal(
         if matches!(temporal, TemporalValue::TimestampTz { .. }) {
-            TemporalValue::TimestampTz { micros }
+            TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            }
         } else {
-            TemporalValue::Timestamp { micros }
+            TemporalValue::Timestamp {
+                postgres_micros: micros,
+            }
         },
     ))
 }
@@ -98,10 +102,10 @@ fn truncate_interval(unit: Unit, mut interval: IntervalFields) -> IntervalFields
     interval
 }
 
-fn truncate_timestamp(unit: Unit, value: NaiveDateTime) -> Result<NaiveDateTime> {
+fn truncate_timestamp(unit: Unit, value: TemporalDateTime) -> Result<TemporalDateTime> {
     let date = value.date();
     let calendar_date = |year, month, day| {
-        NaiveDate::from_ymd_opt(year, month, day).and_then(|date| date.and_hms_opt(0, 0, 0))
+        TemporalDate::from_calendar(year, month, day).and_then(|date| date.at_hms(0, 0, 0))
     };
     let result = match unit {
         Unit::Millennium => calendar_date((date.year() - 1).div_euclid(1_000) * 1_000 + 1, 1, 1),
@@ -111,19 +115,17 @@ fn truncate_timestamp(unit: Unit, value: NaiveDateTime) -> Result<NaiveDateTime>
         Unit::Quarter => calendar_date(date.year(), date.month0() / 3 * 3 + 1, 1),
         Unit::Month => calendar_date(date.year(), date.month(), 1),
         Unit::Week => date
-            .checked_sub_signed(chrono::Duration::days(i64::from(
-                date.weekday().num_days_from_monday(),
-            )))
-            .and_then(|date| date.and_hms_opt(0, 0, 0)),
-        Unit::Day => date.and_hms_opt(0, 0, 0),
-        Unit::Hour => date.and_hms_opt(value.hour(), 0, 0),
-        Unit::Minute => date.and_hms_opt(value.hour(), value.minute(), 0),
-        Unit::Second => date.and_hms_opt(value.hour(), value.minute(), value.second()),
-        Unit::Milliseconds => date.and_hms_micro_opt(
+            .checked_add_days(-(date.weekday_monday() as i32))
+            .and_then(|date| date.at_hms(0, 0, 0)),
+        Unit::Day => date.at_hms(0, 0, 0),
+        Unit::Hour => date.at_hms(value.hour(), 0, 0),
+        Unit::Minute => date.at_hms(value.hour(), value.minute(), 0),
+        Unit::Second => date.at_hms(value.hour(), value.minute(), value.second()),
+        Unit::Milliseconds => date.at_hms_micro(
             value.hour(),
             value.minute(),
             value.second(),
-            value.and_utc().timestamp_subsec_micros() / 1_000 * 1_000,
+            value.subsecond_micros() / 1_000 * 1_000,
         ),
         Unit::Microseconds => Some(value),
         _ => unreachable!("timestamp units were validated before truncation"),

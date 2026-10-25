@@ -191,11 +191,11 @@ fn temporal_in_range(
         (
             T::TimeTz {
                 micros: val,
-                offset_minutes: val_offset,
+                offset_seconds: val_offset,
             },
             T::TimeTz {
                 micros: base,
-                offset_minutes,
+                offset_seconds,
             },
         ) => {
             if micros < 0 {
@@ -212,10 +212,10 @@ fn temporal_in_range(
             // This synthetic frame bound can exceed a stored time's domain. PostgreSQL's
             // timetz_cmp_internal uses signed 64-bit wrap for its UTC adjustment even here.
             let utc_micros =
-                |time: i64, offset: i32| time.wrapping_sub(i64::from(offset) * 60 * 1_000_000);
+                |time: i64, offset: i32| time.wrapping_sub(i64::from(offset) * 1_000_000);
             let ordering = utc_micros(*val, *val_offset)
-                .cmp(&utc_micros(target, *offset_minutes))
-                .then_with(|| offset_minutes.cmp(val_offset));
+                .cmp(&utc_micros(target, *offset_seconds))
+                .then_with(|| offset_seconds.cmp(val_offset));
             Ok(bound(ordering, less))
         }
         (T::Interval { .. }, T::Interval { .. }) => {
@@ -237,10 +237,10 @@ fn temporal_in_range(
             let zoned = matches!(base, T::TimestampTz { .. });
             // date2timestamp promotes both dates before validating the offset.
             let val = T::Timestamp {
-                micros: timestamp_micros(val)?,
+                postgres_micros: timestamp_micros(val)?,
             };
             let base = T::Timestamp {
-                micros: timestamp_micros(base)?,
+                postgres_micros: timestamp_micros(base)?,
             };
             if offset.value() < IntervalFields::ZERO.value() {
                 return Err(invalid_offset());
@@ -265,7 +265,12 @@ fn temporal_in_range(
                     offset.micros,
                 )?
             };
-            Ok(bound(val.cmp(&T::Timestamp { micros: target }), less))
+            Ok(bound(
+                val.cmp(&T::Timestamp {
+                    postgres_micros: target,
+                }),
+                less,
+            ))
         }
     }
 }
@@ -295,7 +300,12 @@ fn timestamp_micros(value: &TemporalValue) -> Result<i64> {
                 message: "date out of range for timestamp".into(),
             })
         }
-        TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros } => Ok(*micros),
+        TemporalValue::Timestamp {
+            postgres_micros: micros,
+        }
+        | TemporalValue::TimestampTz {
+            postgres_micros: micros,
+        } => Ok(*micros),
         other => Err(SQLError::Internal(format!(
             "RANGE frame ordering value {other:?} is not a date or timestamp"
         ))),

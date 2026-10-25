@@ -35,13 +35,27 @@ fn tagged_temporal_value(tag: &str, map: &BTreeMap<String, Value>) -> Option<Tem
         }),
         "time_tz" if map.len() == 3 => Some(TemporalValue::TimeTz {
             micros: int_field(map, "micros")?,
-            offset_minutes: int_field(map, "offset_minutes")?,
+            offset_seconds: int_field::<i32>(map, "offset_minutes")?.checked_mul(60)?,
+        }),
+        "time_tz_seconds" if map.len() == 3 => Some(TemporalValue::TimeTz {
+            micros: int_field(map, "micros")?,
+            offset_seconds: int_field(map, "offset_seconds")?,
         }),
         "timestamp" if map.len() == 2 => Some(TemporalValue::Timestamp {
-            micros: int_field(map, "micros")?,
+            postgres_micros: crate::types::temporal::serialization::legacy_timestamp(int_field(
+                map, "micros",
+            )?)?,
         }),
         "timestamp_tz" if map.len() == 2 => Some(TemporalValue::TimestampTz {
-            micros: int_field(map, "micros")?,
+            postgres_micros: crate::types::temporal::serialization::legacy_timestamp(int_field(
+                map, "micros",
+            )?)?,
+        }),
+        "postgres_timestamp" if map.len() == 2 => Some(TemporalValue::Timestamp {
+            postgres_micros: int_field(map, "postgres_micros")?,
+        }),
+        "postgres_timestamp_tz" if map.len() == 2 => Some(TemporalValue::TimestampTz {
+            postgres_micros: int_field(map, "postgres_micros")?,
         }),
         "interval" if map.len() == 4 => Some(TemporalValue::Interval {
             months: int_field(map, "months")?,

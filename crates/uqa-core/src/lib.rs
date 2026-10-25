@@ -47,11 +47,11 @@ pub use types::{
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError,
     LegacyVectorKind, LegacyVectorValue, PathExpr, PathSegment, Payload, PostingEntry,
     RecordDatumField, RecordDescriptor, RecordFieldType, RecordIter, RecordIterMut, RecordValue,
-    RowDescriptor, RowValue, TemporalDateOrder, TemporalDateStyle, TemporalInfinity,
-    TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue, TokenOccurrence,
-    TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError, VectorGeneration,
-    VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
-    MAX_ENUM_LABEL_KEY_BYTES,
+    RowDescriptor, RowValue, TemporalDate, TemporalDateOrder, TemporalDateStyle, TemporalDateTime,
+    TemporalInfinity, TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
+    TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError,
+    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
+    MAX_ENUM_LABEL_KEY_BYTES, POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
 
 mod scored_entry;
