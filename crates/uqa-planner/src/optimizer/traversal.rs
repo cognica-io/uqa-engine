@@ -38,6 +38,20 @@ pub(super) fn optimize_unified_plan(
     Ok(())
 }
 
+/// VALUES keeps the same bounded constant owner whether it is a command input, query root or range item.
+pub(super) fn optimize_values(
+    rows: &mut [Vec<uqa_sql::ScalarExpr>],
+    config: &OptimizerConfig,
+) -> Result<(), SQLError> {
+    if rows.iter().any(|row| !row.is_empty()) {
+        let values_config = config.for_values()?;
+        for expression in rows.iter_mut().flatten() {
+            optimize_scalar_slot(expression, &values_config)?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn optimize_cte(
     body: &mut crate::CtePlanBody,
     config: &OptimizerConfig,
@@ -116,11 +130,7 @@ pub(super) fn optimize_query(
             super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
         }
         RelationalPlan::Values { rows, subqueries } => {
-            for row in &mut *rows {
-                for expression in row {
-                    optimize_scalar_slot(expression, config)?;
-                }
-            }
+            optimize_values(rows, config)?;
             let live = super::subqueries::live_slots(rows.iter().flatten())?;
             super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
         }
@@ -248,11 +258,7 @@ pub(super) fn optimize_source(
             }
         }
         SourcePlan::Values { rows, .. } => {
-            for row in rows {
-                for expression in row {
-                    optimize_scalar_slot(expression, config)?;
-                }
-            }
+            optimize_values(rows, config)?;
         }
         SourcePlan::Function { args, .. } => {
             for expression in args {

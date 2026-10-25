@@ -58,7 +58,7 @@ pub struct OptimizerConfig<'a> {
     pub enable_join_reordering: bool,
     /// Shared scalar execution supplied by the engine composition boundary.
     pub constant_evaluator: ConstantEvaluator,
-    /// Shared storage for immutable builtin constants produced while optimizing INSERT VALUES.
+    /// Shared storage for immutable builtin constants produced while optimizing VALUES inputs.
     pub constant_storage: Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>,
     pub(super) retain_values_constants: bool,
     pub(crate) constant_storage_factory: Option<ConstantStorageFactory<'a>>,

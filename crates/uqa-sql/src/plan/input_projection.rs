@@ -52,15 +52,22 @@ fn substitute_input(
     let Some(input) = inputs.get(column) else {
         return Ok(());
     };
-    let mut replacement = input.scalar.clone();
+    *node = append_expression(arena, input.clone());
+    Ok(())
+}
+
+/// Transfer an expression into another scalar arena while retaining its selected query identities.
+pub(crate) fn append_expression(
+    arena: &mut Vec<super::QueryPlan>,
+    mut input: ExpressionPlan,
+) -> ScalarExpr {
     let offset = arena.len();
-    super::rewrite_scalar_expression(&mut replacement, &mut |node| match node {
+    super::rewrite_scalar_expression(&mut input.scalar, &mut |node| match node {
         ScalarExpr::ScalarSubquery(id)
         | ScalarExpr::Exists { subquery: id, .. }
         | ScalarExpr::InSubquery { subquery: id, .. } => *id += offset,
         _ => {}
     });
-    arena.extend(input.subqueries.iter().cloned());
-    *node = replacement;
-    Ok(())
+    arena.extend(input.subqueries);
+    input.scalar
 }

@@ -168,6 +168,10 @@ impl Preparation<'_> {
         }
         if let Some(source) = &insert.source {
             let mut output = self.query_output(source, outer, true)?;
+            if let Some(values) = &insert.rule_values_input {
+                let width = values.value_width(output.types.len())?;
+                output.types.truncate(width);
+            }
             self.insert_values(
                 &mut output.types,
                 &insert.columns,

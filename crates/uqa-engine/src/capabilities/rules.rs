@@ -20,6 +20,7 @@ impl Engine {
             rules: self,
             sources: self,
             returning: self,
+            domains: self,
             composites: uqa_sql::expr::EngineHook::composite_types(self),
         }
     }

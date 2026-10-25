@@ -130,7 +130,7 @@ fn prune_rule_inputs(
         _ => return Ok(()),
     };
     let table = context.rules.resolve_mutation_target(table, bound)?;
-    validate_rule_ctes(context, command, &table, event)?;
+    validate_rule_contracts(context, command, &table, event)?;
     if let CommandPlan::Update(plan) = command {
         uqa_sql::semantics::view_rewrite::validate_grouped_rule_inputs(
             context.views,
@@ -178,10 +178,12 @@ fn prune_rule_inputs(
                     }
                 }
             }
-            for row in &mut plan.rows {
-                for (position, expression) in row.iter_mut().enumerate() {
-                    if !positions.contains(&position) {
-                        *expression = ScalarExpr::Literal(Value::Null);
+            if plan.rows.len() == 1 || !requires_rows {
+                for row in &mut plan.rows {
+                    for (position, expression) in row.iter_mut().enumerate() {
+                        if !positions.contains(&position) {
+                            *expression = ScalarExpr::Literal(Value::Null);
+                        }
                     }
                 }
             }
@@ -258,7 +260,7 @@ fn prune_update_assignments(
     }
 }
 
-fn validate_rule_ctes(
+fn validate_rule_contracts(
     context: &RuleInputPlanningContext<'_>,
     command: &CommandPlan,
     table: &str,
@@ -269,6 +271,20 @@ fn validate_rule_ctes(
             context.rules,
             table,
             event,
+            |table, event| {
+                uqa_sql::semantics::view_rewrite::rule_inputs::original_rule_target(
+                    context.views,
+                    table,
+                    event,
+                )
+            },
+        )?;
+    }
+    if let CommandPlan::Insert(insert) = command {
+        uqa_sql::semantics::rules::validate_insert_rule_query_contract(
+            context.rules,
+            table,
+            insert,
             |table, event| {
                 uqa_sql::semantics::view_rewrite::rule_inputs::original_rule_target(
                     context.views,

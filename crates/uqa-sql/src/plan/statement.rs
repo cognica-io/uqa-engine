@@ -138,6 +138,7 @@ impl UnifiedPlan {
                     ctes,
                     rows,
                     source,
+                    rule_values_input: None,
                     on_conflict,
                     returning,
                     returning_aliases: statement.returning_aliases,

@@ -11,10 +11,10 @@ use super::{
     finish_mutation_publication, insert_statement_events, persist_auto_increment_identity,
     statement_end, Arc, CteScope, DmlReturningShape, InsertPlan, InsertSelectConsumer,
     InsertSelectIdentity, KnownNewInserts, MutationOutput, MutationOverlayScope,
-    MutationStatementContext, PreparedInsertSelect, PreparedInsertSpillRow, QueryOutputMode,
-    QueryPlan, Rc, SQLError, SQLParam,
+    MutationStatementContext, PreparedInsertSelect, PreparedInsertSpillRow, QueryPlan, Rc,
+    SQLError, SQLParam,
 };
-use crate::query::scope::StatementCommands;
+use crate::query::{scope::StatementCommands, statement::consumer::QueryOutputMode};
 
 pub(super) struct InsertQueryExecution<'a, S: Clone + 'static> {
     pub context: &'a MutationStatementContext<'a, S>,

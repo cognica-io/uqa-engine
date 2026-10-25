@@ -986,6 +986,1200 @@
         "event": null,
         "next": 1
       }
+    },
+    {
+      "name": "values-single",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-multiple",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL),(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-single-unused-effect",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(1,nextval('rule_ticks'))",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "values-multiple-unused-effect",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(1,nextval('rule_ticks')),(2,nextval('rule_ticks'))",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-single-unused-error",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(1,1/0)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "values-multiple-unused-error",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(1,1/0),(2,1/0)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "22012",
+      "message": "division by zero"
+    },
+    {
+      "name": "values-single-default",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.m,NEW.m)",
+      "sql": "INSERT INTO rule_event VALUES(1,DEFAULT)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-multiple-default",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.m,NEW.m)",
+      "sql": "INSERT INTO rule_event VALUES(1,DEFAULT),(2,DEFAULT)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-nested",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_hop(n bigint); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_hop VALUES(NEW.n); CREATE RULE hop AS ON INSERT TO rule_hop DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-nested-condition",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_hop(n bigint); CREATE RULE suppress AS ON INSERT TO rule_event DO INSTEAD NOTHING; CREATE RULE route AS ON INSERT TO rule_event WHERE NEW.n>0 DO ALSO INSERT INTO rule_hop VALUES(NEW.n); CREATE RULE hop AS ON INSERT TO rule_hop DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 2,
+            "m": 3,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 4
+      }
+    },
+    {
+      "name": "values-prepared",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "PREPARE p(bigint) AS INSERT INTO rule_event VALUES(nextval('rule_ticks')+$1,NULL); EXECUTE p(10)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 11,
+            "m": 12,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-view-omitted-default",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP VIEW rule_view AS SELECT * FROM rule_event; CREATE RULE outer_log AS ON INSERT TO rule_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.m); CREATE RULE base_log AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.m)",
+      "sql": "INSERT INTO rule_view(n) VALUES(1)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": 1,
+            "m": null,
+            "payload": null
+          }
+        ],
+        "event": [
+          1
+        ],
+        "next": 3
+      }
+    },
+    {
+      "name": "values-view-explicit-default",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP VIEW rule_view AS SELECT * FROM rule_event; CREATE RULE outer_log AS ON INSERT TO rule_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.m); CREATE RULE base_log AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.m)",
+      "sql": "INSERT INTO rule_view VALUES(1,DEFAULT)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": 1,
+            "m": null,
+            "payload": null
+          }
+        ],
+        "event": [
+          1
+        ],
+        "next": 3
+      }
+    },
+    {
+      "name": "values-view-multiple-defaults",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP VIEW rule_view AS SELECT * FROM rule_event; CREATE RULE outer_log AS ON INSERT TO rule_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.m); CREATE RULE base_log AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.m)",
+      "sql": "INSERT INTO rule_view VALUES(1,DEFAULT),(2,DEFAULT)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 3,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 4,
+            "payload": null
+          },
+          {
+            "n": 1,
+            "m": null,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": null,
+            "payload": null
+          }
+        ],
+        "event": [
+          1,
+          2
+        ],
+        "next": 5
+      }
+    },
+    {
+      "name": "values-partial-single",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint[], m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(array_lower(NEW.n,1),array_lower(NEW.n,1))",
+      "sql": "INSERT INTO rule_event(n[nextval('rule_ticks')::integer]) VALUES(7)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-partial-multiple",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint[], m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(array_lower(NEW.n,1),array_lower(NEW.n,1))",
+      "sql": "INSERT INTO rule_event(n[nextval('rule_ticks')::integer]) VALUES(7),(8)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": 3,
+            "m": 4,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 5
+      }
+    },
+    {
+      "name": "values-domain-single",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE FUNCTION pg_temp.rule_domain_check(bigint) RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('rule_ticks'); RETURN true; END $$; CREATE DOMAIN rule_domain AS bigint CHECK(pg_temp.rule_domain_check(VALUE)); CREATE TEMP TABLE rule_event(n rule_domain,m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(1,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-domain-multiple",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE FUNCTION pg_temp.rule_domain_check(bigint) RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('rule_ticks'); RETURN true; END $$; CREATE DOMAIN rule_domain AS bigint CHECK(pg_temp.rule_domain_check(VALUE)); CREATE TEMP TABLE rule_event(n rule_domain,m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(1,NULL),(2,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-discarded-input",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD NOTHING",
+      "sql": "INSERT INTO rule_event VALUES(1,1/0),(2,1/0)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": null,
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "query-discarded-explicit-columns",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD NOTHING",
+      "sql": "INSERT INTO rule_event(n,m) SELECT 1,1/0",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": null,
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "values-action-default",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output ALTER n SET DEFAULT nextval('rule_ticks'); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(DEFAULT,7)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 7,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 2
+      }
+    },
+    {
+      "name": "values-action-multiple-defaults",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output ALTER n SET DEFAULT nextval('rule_ticks'); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(DEFAULT,7),(DEFAULT,8)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 7,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 8,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "values-explicit-default-values",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.m,NEW.m)",
+      "sql": "INSERT INTO rule_event(m) DEFAULT VALUES",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "42601",
+      "message": "syntax error at or near \"DEFAULT\""
+    },
+    {
+      "name": "values-column-collation",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n text COLLATE \"C\",m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(payload) VALUES(pg_collation_for(NEW.n))",
+      "sql": "INSERT INTO rule_event VALUES('x',NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": null,
+            "m": null,
+            "payload": "\"C\""
+          }
+        ],
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "values-explicit-collation",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n text COLLATE \"C\",m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(payload) VALUES(pg_collation_for(NEW.n))",
+      "sql": "INSERT INTO rule_event VALUES('x' COLLATE \"POSIX\",NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": null,
+            "m": null,
+            "payload": "\"C\""
+          }
+        ],
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "query-explicit-collation",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n text COLLATE \"C\",m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(payload) VALUES(pg_collation_for(NEW.n))",
+      "sql": "INSERT INTO rule_event SELECT 'x' COLLATE \"POSIX\",NULL::bigint",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": null,
+            "m": null,
+            "payload": "\"C\""
+          }
+        ],
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "values-action-default-view",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output ALTER n SET DEFAULT nextval('rule_ticks'); CREATE TEMP VIEW rule_hop AS SELECT n,m FROM rule_output; CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_hop(n,m) VALUES(DEFAULT,7)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 7,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 2
+      }
+    },
+    {
+      "name": "values-action-mixed-default-view",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output ALTER n SET DEFAULT nextval('rule_ticks'); CREATE TEMP VIEW rule_hop AS SELECT n,m FROM rule_output; CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_hop(n,m) VALUES(DEFAULT,7),(99,8)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 7,
+            "payload": null
+          },
+          {
+            "n": 99,
+            "m": 8,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 2
+      }
+    },
+    {
+      "name": "values-action-default-view-rules",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_hop(n bigint DEFAULT nextval('rule_ticks')); CREATE TEMP VIEW rule_hop_view AS SELECT n FROM rule_hop; CREATE RULE view_route AS ON INSERT TO rule_hop_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,1); CREATE RULE base_route AS ON INSERT TO rule_hop DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,2); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_hop_view VALUES(DEFAULT)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": null,
+            "m": 1,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 2
+      }
+    },
+    {
+      "name": "values-action-mixed-default-view-rules",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_hop(n bigint DEFAULT nextval('rule_ticks')); CREATE TEMP VIEW rule_hop_view AS SELECT n FROM rule_hop; CREATE RULE view_route AS ON INSERT TO rule_hop_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,1); CREATE RULE base_route AS ON INSERT TO rule_hop DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,2); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_hop_view VALUES(DEFAULT),(99)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": 99,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": null,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 99,
+            "m": 1,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 2
+      }
+    },
+    {
+      "name": "values-action-default-rule-chain",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_hop(n bigint DEFAULT nextval('rule_ticks')); CREATE RULE hop_route AS ON INSERT TO rule_hop DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_hop VALUES(DEFAULT)",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "identity-default-single",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "identity-default-multiple",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(DEFAULT,NULL),(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "identity-omitted",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event(m) VALUES(NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "identity-override-single",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event OVERRIDING USER VALUE VALUES(99,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "identity-override-multiple",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event OVERRIDING USER VALUE VALUES(99,NULL),(99,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": 3,
+            "m": 4,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 5
+      }
+    },
+    {
+      "name": "domain-default-single",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE DOMAIN rule_default AS bigint DEFAULT nextval('rule_ticks'); CREATE TEMP TABLE rule_event(n rule_default,m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "domain-default-multiple",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE DOMAIN rule_default AS bigint DEFAULT nextval('rule_ticks'); CREATE TEMP TABLE rule_event(n rule_default,m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(DEFAULT,NULL),(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 2,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "domain-default-omitted-query",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE DOMAIN rule_default AS bigint DEFAULT nextval('rule_ticks'); CREATE TEMP TABLE rule_event(n rule_default,m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event(m) SELECT NULL::bigint FROM generate_series(1,2)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": 3,
+            "m": 4,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 5
+      }
+    },
+    {
+      "name": "action-identity-always-default",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output ALTER n SET NOT NULL; ALTER TABLE rule_output ALTER n ADD GENERATED ALWAYS AS IDENTITY; CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(DEFAULT,7)",
+      "sql": "INSERT INTO rule_event VALUES(9,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 7,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "action-identity-always-mixed",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output ALTER n SET NOT NULL; ALTER TABLE rule_output ALTER n ADD GENERATED ALWAYS AS IDENTITY; CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(DEFAULT,7),(9,8)",
+      "sql": "INSERT INTO rule_event VALUES(9,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "428C9",
+      "message": "cannot insert a non-DEFAULT value into column \"n\""
+    },
+    {
+      "name": "identity-mixed-default",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(DEFAULT,NULL),(99,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 1,
+            "payload": null
+          },
+          {
+            "n": 99,
+            "m": 99,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 2
+      }
+    },
+    {
+      "name": "identity-override-default-single",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event OVERRIDING USER VALUE VALUES(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 3
+      }
+    },
+    {
+      "name": "identity-override-default-multiple",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event OVERRIDING USER VALUE VALUES(DEFAULT,NULL),(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 2,
+            "payload": null
+          },
+          {
+            "n": 3,
+            "m": 4,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 5
+      }
+    },
+    {
+      "name": "identity-override-query",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event OVERRIDING USER VALUE SELECT nextval('rule_ticks'),NULL::bigint FROM generate_series(1,2)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 2,
+            "m": 3,
+            "payload": null
+          },
+          {
+            "n": 5,
+            "m": 6,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 7
+      }
+    },
+    {
+      "name": "identity-override-values-effect",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event OVERRIDING USER VALUE VALUES(nextval('rule_ticks'),NULL),(nextval('rule_ticks'),NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 2,
+            "m": 3,
+            "payload": null
+          },
+          {
+            "n": 5,
+            "m": 6,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 7
+      }
+    },
+    {
+      "name": "identity-also-single",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 2,
+            "m": 3,
+            "payload": null
+          }
+        ],
+        "event": [
+          1
+        ],
+        "next": 4
+      }
+    },
+    {
+      "name": "identity-also-multiple",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event VALUES(DEFAULT,NULL),(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 3,
+            "m": 3,
+            "payload": null
+          },
+          {
+            "n": 4,
+            "m": 4,
+            "payload": null
+          }
+        ],
+        "event": [
+          1,
+          2
+        ],
+        "next": 5
+      }
+    },
+    {
+      "name": "identity-also-override-default",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n)",
+      "sql": "INSERT INTO rule_event OVERRIDING USER VALUE VALUES(DEFAULT,NULL),(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 3,
+            "m": 4,
+            "payload": null
+          },
+          {
+            "n": 5,
+            "m": 6,
+            "payload": null
+          }
+        ],
+        "event": [
+          1,
+          2
+        ],
+        "next": 7
+      }
+    },
+    {
+      "name": "identity-always-view-default",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED ALWAYS AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n); CREATE TEMP VIEW rule_view AS SELECT * FROM rule_event; CREATE RULE view_log AS ON INSERT TO rule_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,9)",
+      "sql": "INSERT INTO rule_view VALUES(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 2,
+            "m": 3,
+            "payload": null
+          },
+          {
+            "n": null,
+            "m": 9,
+            "payload": null
+          }
+        ],
+        "event": [
+          1
+        ],
+        "next": 4
+      }
+    },
+    {
+      "name": "identity-always-view-written",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED ALWAYS AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n); CREATE TEMP VIEW rule_view AS SELECT * FROM rule_event; CREATE RULE view_log AS ON INSERT TO rule_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,9)",
+      "sql": "INSERT INTO rule_view VALUES(9,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "428C9",
+      "message": "cannot insert a non-DEFAULT value into column \"n\""
+    },
+    {
+      "name": "action-generated-default",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output DROP n; ALTER TABLE rule_output ADD n bigint GENERATED ALWAYS AS (m+1) STORED; CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(DEFAULT,7)",
+      "sql": "INSERT INTO rule_event VALUES(9,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 8,
+            "m": 7,
+            "payload": null
+          }
+        ],
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "action-generated-mixed",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); ALTER TABLE rule_output DROP n; ALTER TABLE rule_output ADD n bigint GENERATED ALWAYS AS (m+1) STORED; CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n,m) VALUES(DEFAULT,7),(9,8)",
+      "sql": "INSERT INTO rule_event VALUES(9,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "428C9",
+      "message": "cannot insert a non-DEFAULT value into column \"n\""
+    },
+    {
+      "name": "identity-view-override-default",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n); CREATE TEMP VIEW rule_view AS SELECT * FROM rule_event; CREATE RULE view_log AS ON INSERT TO rule_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,9)",
+      "sql": "INSERT INTO rule_view OVERRIDING USER VALUE VALUES(DEFAULT,NULL),(DEFAULT,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 3,
+            "m": 4,
+            "payload": null
+          },
+          {
+            "n": 5,
+            "m": 6,
+            "payload": null
+          },
+          {
+            "n": null,
+            "m": 9,
+            "payload": null
+          },
+          {
+            "n": null,
+            "m": 9,
+            "payload": null
+          }
+        ],
+        "event": [
+          1,
+          2
+        ],
+        "next": 7
+      }
+    },
+    {
+      "name": "identity-view-override-written",
+      "setup": "CREATE TEMP TABLE rule_event(n bigint GENERATED BY DEFAULT AS IDENTITY (SEQUENCE NAME rule_ticks),m bigint); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,NEW.n); CREATE TEMP VIEW rule_view AS SELECT * FROM rule_event; CREATE RULE view_log AS ON INSERT TO rule_view DO ALSO INSERT INTO rule_output(n,m) VALUES(NEW.n,9)",
+      "sql": "INSERT INTO rule_view OVERRIDING USER VALUE VALUES(99,NULL),(99,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 3,
+            "m": 4,
+            "payload": null
+          },
+          {
+            "n": 5,
+            "m": 6,
+            "payload": null
+          },
+          {
+            "n": 99,
+            "m": 9,
+            "payload": null
+          },
+          {
+            "n": 99,
+            "m": 9,
+            "payload": null
+          }
+        ],
+        "event": [
+          1,
+          2
+        ],
+        "next": 7
+      }
+    },
+    {
+      "name": "set-action-single",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint",
+      "sql": "INSERT INTO rule_event VALUES(1,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1000,
+            "m": null,
+            "payload": null
+          },
+          {
+            "n": 1001,
+            "m": null,
+            "payload": null
+          }
+        ],
+        "event": [
+          1
+        ],
+        "next": 1
+      }
+    },
+    {
+      "name": "set-action-multiple",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint",
+      "sql": "INSERT INTO rule_event VALUES(1,NULL),(2,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "0A000",
+      "message": "conditional UNION/INTERSECT/EXCEPT statements are not implemented"
+    },
+    {
+      "name": "set-action-query",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint",
+      "sql": "INSERT INTO rule_event SELECT 1,NULL::bigint",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "0A000",
+      "message": "conditional UNION/INTERSECT/EXCEPT statements are not implemented"
+    },
+    {
+      "name": "set-action-empty-query",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint",
+      "sql": "INSERT INTO rule_event SELECT 1,NULL::bigint WHERE false",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "0A000",
+      "message": "conditional UNION/INTERSECT/EXCEPT statements are not implemented"
+    },
+    {
+      "name": "set-action-error-before-input",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL),(2,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "0A000",
+      "message": "conditional UNION/INTERSECT/EXCEPT statements are not implemented",
+      "recover": true,
+      "result": {
+        "rows": null,
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "set-action-error-before-trigger",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint; CREATE FUNCTION pg_temp.rule_before() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('rule_ticks'); RETURN NULL; END $$; CREATE TRIGGER rule_before BEFORE INSERT ON rule_event FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.rule_before()",
+      "sql": "INSERT INTO rule_event VALUES(1,NULL),(2,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "0A000",
+      "message": "conditional UNION/INTERSECT/EXCEPT statements are not implemented",
+      "recover": true,
+      "result": {
+        "rows": null,
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "set-action-nested-error-before-input",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_hop(n bigint); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_hop VALUES(NEW.n); CREATE RULE nested_route AS ON INSERT TO rule_hop DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint",
+      "sql": "INSERT INTO rule_event VALUES(nextval('rule_ticks'),NULL),(2,NULL)",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "0A000",
+      "message": "conditional UNION/INTERSECT/EXCEPT statements are not implemented",
+      "recover": true,
+      "result": {
+        "rows": null,
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "recursive-conflict-before-input",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_event(n) VALUES(NEW.n+1)",
+      "sql": "INSERT INTO rule_event(n) VALUES(nextval('rule_ticks')) ON CONFLICT DO NOTHING",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "sqlstate": "42P17",
+      "message": "infinite recursion detected in rules for relation \"rule_event\"",
+      "recover": true,
+      "result": {
+        "rows": null,
+        "event": null,
+        "next": 1
+      }
+    },
+    {
+      "name": "set-action-default-values",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint, m bigint DEFAULT nextval('rule_ticks')); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_output(n) SELECT 1000::bigint UNION ALL SELECT 1001::bigint",
+      "sql": "INSERT INTO rule_event DEFAULT VALUES",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1000,
+            "m": null,
+            "payload": null
+          },
+          {
+            "n": 1001,
+            "m": null,
+            "payload": null
+          }
+        ],
+        "event": [
+          null
+        ],
+        "next": 2
+      }
     }
   ]
 }

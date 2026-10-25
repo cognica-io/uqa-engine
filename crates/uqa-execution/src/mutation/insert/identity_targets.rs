@@ -46,7 +46,12 @@ pub(super) fn validate_insert_identity_targets(
                 targets.len()
             };
             (0..targets.len())
-                .map(|position| position < width)
+                .map(|position| {
+                    position < width
+                        && uqa_sql::semantics::generated_values::insert_has_written_value(
+                            stmt, position,
+                        )
+                })
                 .collect::<Vec<_>>()
         }
         None => (0..targets.len())
@@ -80,13 +85,13 @@ pub(super) fn validate_insert_identity_targets(
     Ok(())
 }
 
-/// The identity columns of the statement's target table whose supplied values `OVERRIDING USER VALUE` discards without evaluating them, so that each draws its sequence value instead; empty without that clause and for a view whose rules receive the row.
+/// The identity columns of the statement's target table whose supplied values `OVERRIDING USER VALUE` discards without evaluating them, so that each draws its sequence value instead; empty without that clause.
 pub fn user_value_identity_columns(
     identities: InsertIdentityContext<'_>,
     stmt: &InsertPlan,
     columns: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> Result<BTreeSet<String>, SQLError> {
-    if stmt.overriding != Some(OverridingKind::UserValue) || !stmt.view_rule_relations.is_empty() {
+    if stmt.overriding != Some(OverridingKind::UserValue) {
         return Ok(BTreeSet::new());
     }
     let identity = GeneratedValueColumns::of(identities.columns, &stmt.table)?;

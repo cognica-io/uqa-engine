@@ -89,7 +89,8 @@ fn generated_columns_accept_immutable_uuid_extraction_functions() {
     assert_eq!(
         row["extracted_at"],
         Value::Temporal(uqa_core::TemporalValue::TimestampTz {
-            postgres_micros: 1_000
+            // PostgreSQL 18: 1970-01-01 00:00:00.001+00, measured from its 2000 epoch.
+            postgres_micros: -946_684_799_999_000
         })
     );
 

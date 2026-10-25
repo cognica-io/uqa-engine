@@ -383,12 +383,13 @@ pub(super) fn insert_input_width(
         return Ok(plan.rows.first().map_or(0, Vec::len));
     };
     let scope = dml_analysis_scope(services, &plan.ctes, &plan.subqueries, inherited_ctes)?;
-    Ok(
-        crate::semantics::view_rewrite::context::analyze_query_plan_schema(
-            services, source, params, &scope, None,
-        )?
-        .len(),
-    )
+    let width = crate::semantics::view_rewrite::context::analyze_query_plan_schema(
+        services, source, params, &scope, None,
+    )?
+    .len();
+    plan.rule_values_input
+        .as_ref()
+        .map_or(Ok(width), |values| values.value_width(width))
 }
 
 pub(super) fn returning_subquery_ids(returning: &[ProjectionPlan]) -> BTreeSet<usize> {

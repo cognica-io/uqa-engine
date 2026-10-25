@@ -79,6 +79,7 @@ def main():
         "MERGE INTO serialization_target t USING generate_series(1,8) g(n) ON t.n=g.n WHEN MATCHED THEN UPDATE SET n=t.n RETURNING nextval('serialization_rows'), NULL::aclitem",
         "INSERT INTO serialization_event SELECT nextval('serialization_rows') FROM generate_series(1,8) RETURNING n, NULL::aclitem",
         "INSERT INTO serialization_event SELECT n FROM generate_series(1,8) g(n) RETURNING n, nextval('serialization_rows'), NULL::aclitem",
+        "INSERT INTO serialization_event VALUES(nextval('serialization_rows')),(nextval('serialization_rows')) RETURNING n, NULL::aclitem",
         "INSERT INTO serialization_partial(n[nextval('serialization_rows')::integer]) SELECT 7 FROM generate_series(1,8) RETURNING n, NULL::aclitem",
         "INSERT INTO serialization_nested(n[nextval('serialization_rows')::integer].a) SELECT 7 FROM generate_series(1,8) RETURNING n, NULL::aclitem",
     ]
@@ -93,12 +94,13 @@ def main():
         if "serialization_nested" in mutation:
             setup += "; CREATE TYPE serialization_pair AS (a bigint,b bigint); CREATE TEMP TABLE serialization_nested(n serialization_pair[]); CREATE RULE serialization_route AS ON INSERT TO serialization_nested DO INSTEAD INSERT INTO serialization_target VALUES((NEW.n[1]).a) RETURNING ARRAY[ROW(n,NULL)::serialization_pair]"
         statement = "EXPLAIN (ANALYZE, SERIALIZE BINARY) " + mutation
-        script = setup + "; BEGIN; SAVEPOINT before_output; " + statement + "; ROLLBACK TO before_output; SELECT json_build_object('rows', currval('serialization_rows'), 'after', nextval('serialization_after')); ROLLBACK;"
-        result = subprocess.run(command + ["-XAtq", "-v", "ON_ERROR_STOP=0", "-v", "VERBOSITY=verbose"], input=script, capture_output=True, text=True, check=True)
-        error = re.search(r"ERROR:\s+([A-Z0-9]{5}): (.+)", result.stderr)
-        if error is None:
+        script = "BEGIN; CREATE SCHEMA serialization_capture; SET LOCAL search_path=serialization_capture,pg_temp,public; " + setup + "; SAVEPOINT before_output;\n\\set ON_ERROR_STOP off\n" + statement + ";\n\\set ON_ERROR_STOP on\nROLLBACK TO before_output; SELECT json_build_object('rows', currval('serialization_rows'), 'after', nextval('serialization_after')); ROLLBACK;"
+        result = subprocess.run(command + ["-XAtq", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose"], input=script, capture_output=True, text=True, check=True)
+        errors = re.findall(r"ERROR:\s+([A-Z0-9]{5}): (.+)", result.stderr)
+        if len(errors) != 1:
             raise RuntimeError(result.stderr)
-        failures.append({"setup": setup, "sql": statement, "sqlstate": error[1], "message": error[2], "effects": json.loads(result.stdout)})
+        state, message = errors[0]
+        failures.append({"setup": setup, "sql": statement, "sqlstate": state, "message": message, "effects": json.loads(result.stdout)})
     order_setup = "CREATE TEMP SEQUENCE delivery_qualification; CREATE TEMP SEQUENCE delivery_before; CREATE TEMP SEQUENCE delivery_output; CREATE TEMP TABLE delivery_rows(n bigint); INSERT INTO delivery_rows SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.delivery_before() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('delivery_before'); RETURN OLD; END $$; CREATE TRIGGER delivery_before BEFORE DELETE ON delivery_rows FOR EACH ROW EXECUTE FUNCTION pg_temp.delivery_before()"
     order_statement = "DELETE FROM delivery_rows WHERE nextval('delivery_qualification')>0 RETURNING n, currval('delivery_qualification') AS qualified, currval('delivery_before') AS before_row, nextval('delivery_output') AS output_row"
     order_rows = json.loads(sql(f"BEGIN; {order_setup}; WITH deleted AS ({order_statement}) SELECT json_agg(d) FROM deleted d; ROLLBACK"))

@@ -503,6 +503,28 @@ static void explained_rule_delivery(uqa_engine engine, uqa_result result) {
     assert(integer(result, 0) == 1);
     CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
     CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_prepare(engine,
+        "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO c_rule_event "
+        "VALUES(nextval('c_rule_rows')+$1::bigint),(nextval('c_rule_rows')+$1::bigint) RETURNING n,NULL::aclitem",
+        &statement));
+    CHECK(uqa_value_create_int64(0, &count));
+    CHECK(uqa_statement_bind(statement, 1, count));
+    CHECK(uqa_value_destroy(&count));
+    CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT before_values_output", result));
+    for (int attempt = 3; attempt <= 4; ++attempt) {
+        assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+        sqlstate("42883");
+        CHECK(uqa_transaction_get_state(engine, &state));
+        assert(state == UQA_TRANSACTION_FAILED);
+        CHECK(uqa_engine_execute(engine, "ROLLBACK TO before_values_output", result));
+        CHECK(uqa_engine_execute(engine,
+            "SELECT currval('c_rule_rows'),count(*) FROM c_rule_target", result));
+        assert(integer(result, 0) == attempt && integer(result, 1) == 0);
+    }
+    CHECK(uqa_engine_execute(engine, "SELECT nextval('c_rule_after')", result));
+    assert(integer(result, 0) == 2);
+    CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+    CHECK(uqa_statement_finalize(&statement));
     CHECK(uqa_engine_execute(engine,
         "DROP VIEW c_rule_event; DROP TABLE c_rule_target; "
         "DROP FUNCTION pg_temp.c_rule_after(); DROP SEQUENCE c_rule_rows; DROP SEQUENCE c_rule_after", result));

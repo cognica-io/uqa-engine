@@ -710,10 +710,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             PreparedMutationAction::Delete(prepared),
                         )?;
                     }
-                    SelectedMergeAction::Insert {
-                        mut document,
-                        overriding,
-                    } => {
+                    SelectedMergeAction::Insert { mut document } => {
                         let (auto_id_col, id_column, identity_source) = insert_identity_columns(
                             mutation.identities,
                             &target_table,
@@ -725,7 +722,6 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             &id_column,
                             identity_source,
                             auto_id_col.as_deref(),
-                            overriding,
                             &mut document,
                             "prepare MERGE INSERT identity",
                         )?;

@@ -20,77 +20,120 @@ use std::collections::{BTreeMap, BTreeSet};
 mod schedule;
 pub use schedule::InsertRuleQueries;
 mod assignments;
+#[cfg(test)]
+mod tests;
+mod values;
 
 /// An action can borrow a native query tree without converting its rows into constants.
-pub struct RuleAction {
-    pub statement: Statement,
-    pub input: Option<RuleQueryInput>,
+pub enum RuleAction {
+    Stored(Box<Statement>),
+    Rewritten(UnifiedPlan),
 }
 
 impl From<Statement> for RuleAction {
     fn from(statement: Statement) -> Self {
-        Self {
-            statement,
-            input: None,
-        }
+        Self::Stored(Box::new(statement))
     }
 }
 
 impl RuleAction {
-    pub fn lower(self, aggregates: &dyn AggregateClassifier) -> Result<UnifiedPlan, SQLError> {
-        let mut plan = UnifiedPlan::lower_with(self.statement, aggregates);
-        crate::binding::stored_routines::mark_catalog_statement_relations_bound(&mut plan)?;
-        if let Some(input) = self.input {
-            input.attach(&mut plan)?;
+    /// Bind native inputs with the rule's catalog metadata before capturing execution state.
+    pub fn bind(
+        context: crate::semantics::rules::analysis::RuleAnalysisContext<'_>,
+        aggregates: &dyn AggregateClassifier,
+        statement: Statement,
+        input: Option<RuleQueryInput>,
+    ) -> Result<Self, SQLError> {
+        let mut plan = Self::from(statement).lower(aggregates)?;
+        if let Some(input) = input {
+            input.attach(&mut plan, context)?;
         }
-        Ok(plan)
+        Ok(Self::Rewritten(plan))
+    }
+
+    pub fn lower(self, aggregates: &dyn AggregateClassifier) -> Result<UnifiedPlan, SQLError> {
+        match self {
+            Self::Stored(statement) => {
+                let mut plan = UnifiedPlan::lower_with(*statement, aggregates);
+                crate::binding::stored_routines::mark_catalog_statement_relations_bound(&mut plan)?;
+                Ok(plan)
+            }
+            Self::Rewritten(plan) => Ok(plan),
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct RuleQueryInput {
     pub query: QueryPlan,
+    pub inline: bool,
     pub relation: InternalRelationId,
     pub condition: Option<Expr>,
     pub expressions: BTreeMap<crate::ast::InternalColumnRef, crate::plan::ExpressionPlan>,
 }
 
 impl RuleQueryInput {
-    fn attach(self, plan: &mut UnifiedPlan) -> Result<(), SQLError> {
-        let source = SourcePlan::Subquery {
-            captured_output: Some(self.relation),
-            lateral: false,
-            body: Box::new(self.query),
-            alias: None,
-            column_aliases: Vec::new(),
+    fn attach(
+        self,
+        plan: &mut UnifiedPlan,
+        context: crate::semantics::rules::analysis::RuleAnalysisContext<'_>,
+    ) -> Result<(), SQLError> {
+        let (source, predicate) = if self.inline {
+            let mut query = self.query;
+            let RelationalPlan::QueryBlock(block) = &mut query.root else {
+                return Err(SQLError::Internal(
+                    "rule target list lost its query block".into(),
+                ));
+            };
+            if !query.ctes.is_empty() {
+                return Err(SQLError::Internal(
+                    "rule target list has an unexpected local CTE scope".into(),
+                ));
+            }
+            values::retain_authority(
+                &mut block.subqueries,
+                query.relation_privilege_subject.as_ref(),
+            );
+            let predicate = block
+                .r#where
+                .take()
+                .map(|scalar| crate::plan::ExpressionPlan {
+                    scalar,
+                    subqueries: std::mem::take(&mut block.subqueries),
+                });
+            (block.from.take(), predicate)
+        } else {
+            (
+                Some(SourcePlan::Subquery {
+                    captured_output: Some(self.relation),
+                    lateral: false,
+                    body: Box::new(self.query),
+                    alias: None,
+                    column_aliases: Vec::new(),
+                }),
+                None,
+            )
         };
         match plan {
-            UnifiedPlan::Query(query) => attach_query(query, source, self.condition),
+            UnifiedPlan::Query(query) => attach_query(query, source, predicate, self.condition),
             UnifiedPlan::Command(command) => match command.as_mut() {
                 CommandPlan::Insert(insert) => {
                     if insert.source.is_none() {
-                        insert.source = Some(Box::new(QueryPlan {
-                            analyzed_output: None,
-                            analyzed_source: None,
-                            analyzed_grouping: None,
-                            relation_privilege_subject: None,
-                            relations_bound: insert.relations_bound,
-                            ctes: Vec::new(),
-                            root: RelationalPlan::Values {
-                                rows: std::mem::take(&mut insert.rows),
-                                subqueries: insert.subqueries.clone(),
-                            },
-                        }));
+                        let mut values =
+                            values::ValuesInput::describe(insert)?.expect("VALUES action input");
+                        insert.source = Some(values.source(context, insert)?);
+                        values.project_layer(context, insert)?;
                     }
                     attach_query(
                         insert.source.as_mut().expect("insert source"),
                         source,
+                        predicate,
                         self.condition,
                     )
                 }
                 CommandPlan::Update(update) => {
-                    update.source =
-                        Some(Box::new(prepend(update.source.take().map(|s| *s), source)));
+                    update.source = prepend(update.source.take().map(|s| *s), source).map(Box::new);
+                    add_native_condition(&mut update.predicate, &mut update.subqueries, predicate);
                     add_condition(
                         &mut update.predicate,
                         &mut update.subqueries,
@@ -100,8 +143,8 @@ impl RuleQueryInput {
                     Ok(())
                 }
                 CommandPlan::Delete(delete) => {
-                    delete.source =
-                        Some(Box::new(prepend(delete.source.take().map(|s| *s), source)));
+                    delete.source = prepend(delete.source.take().map(|s| *s), source).map(Box::new);
+                    add_native_condition(&mut delete.predicate, &mut delete.subqueries, predicate);
                     add_condition(
                         &mut delete.predicate,
                         &mut delete.subqueries,
@@ -121,9 +164,23 @@ impl RuleQueryInput {
 
 fn attach_query(
     query: &mut QueryPlan,
-    source: SourcePlan,
+    source: Option<SourcePlan>,
+    predicate: Option<crate::plan::ExpressionPlan>,
     condition: Option<Expr>,
 ) -> Result<(), SQLError> {
+    if let RelationalPlan::Values { rows, subqueries } = &mut query.root {
+        if rows.len() == 1 {
+            let mut block = projection_block(
+                rows.pop()
+                    .expect("one VALUES row")
+                    .into_iter()
+                    .map(|expr| ProjectionPlan { expr, alias: None })
+                    .collect(),
+            );
+            block.subqueries = std::mem::take(subqueries);
+            query.root = RelationalPlan::QueryBlock(Box::new(block));
+        }
+    }
     if let RelationalPlan::Values { rows, subqueries } = &mut query.root {
         let relation = InternalRelationId::allocate();
         let width = rows.first().map_or(0, Vec::len);
@@ -149,14 +206,20 @@ fn attach_query(
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
-            block.from = Some(prepend(block.from.take(), source));
+            block.from = prepend(block.from.take(), source);
+            add_native_condition(&mut block.r#where, &mut block.subqueries, predicate);
             add_condition(&mut block.r#where, &mut block.subqueries, condition, None);
             Ok(())
         }
-        RelationalPlan::SetOp { left, right, .. } => {
-            attach_query(left, source.clone(), condition.clone())?;
-            attach_query(right, source, condition)
+        RelationalPlan::SetOp { .. }
+            if source.is_some() || predicate.is_some() || condition.is_some() =>
+        {
+            Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "conditional UNION/INTERSECT/EXCEPT statements are not implemented".into(),
+            })
         }
+        RelationalPlan::SetOp { .. } => Ok(()),
         RelationalPlan::Values { .. } => unreachable!("VALUES lowered to a relational source"),
     }
 }
@@ -192,8 +255,25 @@ fn add_condition(
     }
 }
 
-fn prepend(existing: Option<SourcePlan>, source: SourcePlan) -> SourcePlan {
-    match existing {
+fn add_native_condition(
+    predicate: &mut Option<ScalarExpr>,
+    subqueries: &mut Vec<QueryPlan>,
+    input: Option<crate::plan::ExpressionPlan>,
+) {
+    if let Some(input) = input {
+        let input = crate::plan::input_projection::append_expression(subqueries, input);
+        *predicate = Some(match predicate.take() {
+            Some(previous) => ScalarExpr::And(vec![previous, input]),
+            None => input,
+        });
+    }
+}
+
+fn prepend(existing: Option<SourcePlan>, source: Option<SourcePlan>) -> Option<SourcePlan> {
+    let Some(source) = source else {
+        return existing;
+    };
+    Some(match existing {
         Some(right) => SourcePlan::Join {
             comma: false,
             left: Box::new(source),
@@ -208,7 +288,7 @@ fn prepend(existing: Option<SourcePlan>, source: SourcePlan) -> SourcePlan {
             strategy: JoinExecutionStrategy::Auto,
         },
         None => source,
-    }
+    })
 }
 
 fn projection_block(projections: Vec<ProjectionPlan>) -> QueryBlockPlan {
@@ -330,7 +410,10 @@ impl InsertQueryResolver {
                 .source
                 .as_deref()
                 .and_then(|query| query.analyzed_output.as_ref())
-                .map_or(self.columns.len(), crate::RowSchema::len);
+                .map_or_else(
+                    || inline_width(insert).unwrap_or(self.columns.len()),
+                    crate::RowSchema::len,
+                );
             self.columns
                 .iter()
                 .take(width)
@@ -363,7 +446,10 @@ impl InsertQueryResolver {
                 .source
                 .as_deref()
                 .and_then(|source| source.analyzed_output.as_ref())
-                .map_or(definitions.len(), crate::RowSchema::len);
+                .map_or_else(
+                    || inline_width(insert).unwrap_or(definitions.len()),
+                    crate::RowSchema::len,
+                );
             definitions
                 .iter()
                 .take(width)
@@ -379,7 +465,7 @@ impl InsertQueryResolver {
         let mut columns = Vec::with_capacity(definitions.len());
         let mut old = BTreeMap::new();
         let mut expressions = BTreeMap::new();
-        for column in &definitions {
+        for (position, column) in definitions.iter().enumerate() {
             let ty = column.ty.catalog_name();
             let null = Expr::Cast {
                 implicit: true,
@@ -387,40 +473,50 @@ impl InsertQueryResolver {
                 ty: ty.clone(),
             };
             old.insert(column.name.clone(), null.clone());
+            let metadata = crate::semantics::rules::binding::RuleColumnMetadata {
+                ty: column.ty.clone(),
+                collation_oid: column.collation_oid,
+                uses_document_id: false,
+                position,
+            };
             if insert
                 .columns
                 .iter()
                 .any(|target| target.column == column.name && !target.is_whole_column())
             {
                 let reference = InternalRelationId::allocate().column(0);
-                expressions.insert(
-                    reference,
-                    assignments::column_expression(context, insert, column, relation)?,
-                );
+                let mut expression =
+                    assignments::column_expression(context, insert, column, relation)?;
+                expression.scalar = metadata.bind_input(expression.scalar);
+                expressions.insert(reference, expression);
                 columns.push((column.name.clone(), Expr::InternalColumn(reference)));
                 continue;
             }
-            let value = supplied
+            let supplied_position = supplied
                 .iter()
                 .position(|name| *name == column.name)
-                .map_or_else(
-                    || {
-                        column
-                            .default
-                            .clone()
-                            .unwrap_or(Expr::Literal(uqa_core::Value::Null))
-                    },
-                    |position| Expr::InternalColumn(relation.column(position)),
-                );
-            columns.push((
-                column.name.clone(),
-                Expr::Cast {
-                    implicit: true,
-                    expr: Box::new(value),
-                    ty,
-                },
-            ));
+                .filter(|_| !values::overrides_identity(column, insert.overriding));
+            let value = if let Some(position) = supplied_position {
+                Expr::InternalColumn(relation.column(position))
+            } else {
+                values::default_expression(context, column)?
+                    .unwrap_or(Expr::Literal(uqa_core::Value::Null))
+            };
+            let mut expression = crate::plan::ExpressionPlan::lower(Expr::Cast {
+                implicit: true,
+                expr: Box::new(value),
+                ty,
+            });
+            expression.scalar = metadata.bind_input(expression.scalar);
+            let reference = InternalRelationId::allocate().column(0);
+            expressions.insert(reference, expression);
+            columns.push((column.name.clone(), Expr::InternalColumn(reference)));
         }
+        let inputs = inline_input_expressions(insert, relation)?;
+        for expression in expressions.values_mut() {
+            crate::plan::input_projection::substitute_expression_inputs(expression, &inputs)?;
+        }
+        expressions.extend(inputs);
         if let Some(subject) = insert
             .source
             .as_ref()
@@ -441,4 +537,51 @@ impl InsertQueryResolver {
             expressions,
         })
     }
+}
+
+fn inline_width(insert: &crate::plan::InsertPlan) -> Option<usize> {
+    if !insert
+        .rule_values_input
+        .as_ref()
+        .is_some_and(crate::plan::RuleValuesInput::is_inline)
+    {
+        return None;
+    }
+    match &insert.source.as_ref()?.root {
+        RelationalPlan::QueryBlock(block) => Some(block.projections.len()),
+        _ => None,
+    }
+}
+
+fn inline_input_expressions(
+    insert: &crate::plan::InsertPlan,
+    relation: InternalRelationId,
+) -> Result<BTreeMap<crate::ast::InternalColumnRef, crate::plan::ExpressionPlan>, SQLError> {
+    let mut inputs = BTreeMap::new();
+    if !insert
+        .rule_values_input
+        .as_ref()
+        .is_some_and(crate::plan::RuleValuesInput::is_inline)
+    {
+        return Ok(inputs);
+    }
+    let source = insert.source.as_ref().expect("inline input query");
+    let RelationalPlan::QueryBlock(block) = &source.root else {
+        return Err(SQLError::Internal(
+            "rule target list lost its query block".into(),
+        ));
+    };
+    for (position, projection) in block.projections.iter().enumerate() {
+        let mut input = crate::plan::ExpressionPlan {
+            scalar: projection.expr.clone(),
+            subqueries: block.subqueries.clone(),
+        };
+        crate::plan::subqueries::prune_expression(&mut input);
+        values::retain_authority(
+            &mut input.subqueries,
+            source.relation_privilege_subject.as_ref(),
+        );
+        inputs.insert(relation.column(position), input);
+    }
+    Ok(inputs)
 }

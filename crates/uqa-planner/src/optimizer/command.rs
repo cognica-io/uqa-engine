@@ -32,14 +32,7 @@ pub(super) fn optimize_command(
             if let Some(source) = &mut plan.source {
                 optimize_query(source, config, aggregates)?;
             }
-            if plan.rows.iter().any(|row| !row.is_empty()) {
-                let values_config = config.for_values()?;
-                for row in &mut plan.rows {
-                    for expression in row {
-                        optimize_scalar_slot(expression, &values_config)?;
-                    }
-                }
-            }
+            super::traversal::optimize_values(&mut plan.rows, config)?;
             if let Some(conflict) = &mut plan.on_conflict {
                 if let ConflictActionPlan::Update {
                     assignments,

@@ -137,7 +137,7 @@ fn retained_values_preserve_raw_arrays_declared_names_and_parameter_origin() {
 }
 
 #[test]
-fn retained_constant_storage_is_created_only_for_values_commands() {
+fn retained_constant_storage_follows_values_inputs_in_commands_and_queries() {
     let calls = std::cell::Cell::new(0);
     let factory = || {
         calls.set(calls.get() + 1);
@@ -151,6 +151,12 @@ fn retained_constant_storage_is_created_only_for_values_commands() {
         ("INSERT INTO target SELECT 1", 0),
         ("INSERT INTO target DEFAULT VALUES", 0),
         ("INSERT INTO target VALUES (1), (2)", 1),
+        ("VALUES (1), (2)", 1),
+        ("SELECT * FROM (VALUES (1), (2)) AS input(n)", 1),
+        (
+            "INSERT INTO target SELECT * FROM (VALUES (1), (2)) AS input(n)",
+            1,
+        ),
         (
             "WITH inserted AS (INSERT INTO target VALUES (1) RETURNING id) SELECT * FROM inserted",
             1,
@@ -160,5 +166,57 @@ fn retained_constant_storage_is_created_only_for_values_commands() {
         let plan = uqa_sql::plan::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0));
         crate::optimizer::optimize(plan, &settings).unwrap();
         assert_eq!(calls.get(), expected, "{sql}");
+    }
+}
+
+#[test]
+fn values_queries_bound_folded_payloads_before_cloning_their_native_plans() {
+    let values = std::iter::repeat_n("(repeat('x',131072))", 128)
+        .collect::<Vec<_>>()
+        .join(",");
+    for sql in [
+        format!("VALUES {values}"),
+        format!("SELECT n FROM (VALUES {values}) AS input(n)"),
+        format!("INSERT INTO target SELECT n FROM (VALUES {values}) AS input(n)"),
+    ] {
+        let storage = Arc::new(uqa_execution::scalar::RetainedConstants::new(4096));
+        let factory = || {
+            Ok(Some(
+                storage.clone() as Arc<dyn uqa_sql::ir::ConstantValueStorage>
+            ))
+        };
+        let mut settings =
+            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        settings.constant_storage_factory =
+            Some(crate::optimizer::ConstantStorageFactory(&factory));
+        let mut input =
+            uqa_sql::plan::UnifiedPlan::lower(uqa_sql::compile(&sql).unwrap().remove(0));
+        input.rewrite_scalar_expressions(&mut |expression| {
+            if matches!(expression, ScalarExpr::Func { name, .. } if name == "repeat") {
+                *expression = repeated();
+            }
+        });
+        let mut output = None;
+        let allocation = allocation_counter::measure(|| {
+            let plan = crate::optimizer::optimize(input, &settings).unwrap();
+            output = Some((plan.clone(), plan));
+        });
+        assert!(allocation.bytes_max < 8 * 1024 * 1024, "{allocation:?}");
+        let (copy, plan) = output.unwrap();
+        for query in [copy, plan] {
+            let mut count = 0;
+            query.visit_scalar_expressions(&mut |expression| {
+                expression.visit(&mut |scalar| {
+                    if let ScalarExpr::RetainedLiteral(_) = scalar {
+                        assert_eq!(
+                            uqa_execution::scalar::eval_constant_scalar(scalar).unwrap(),
+                            Value::Str("x".repeat(131_072)),
+                        );
+                        count += 1;
+                    }
+                });
+            });
+            assert_eq!(count, 128);
+        }
     }
 }

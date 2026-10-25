@@ -13,9 +13,8 @@ use super::{
         push_prepared_insert_spill_row, PreparedInsertSpillRow,
     },
     known_new::KnownNewInserts,
-    pending::{PendingInsertRow, PendingInsertRows},
     rows::prepare_values_insert_row,
-    source::{InsertInputRows, InsertSelectConsumer, InsertSelectIdentity, PreparedInsertSelect},
+    source::{InsertSelectConsumer, InsertSelectIdentity, PreparedInsertSelect},
     supplied_identities::SuppliedIdentities,
     triggers::insert_statement_events,
 };
@@ -39,7 +38,7 @@ use crate::{
         statement_end,
         triggers::queue::StatementEvent,
     },
-    query::{statement::consumer::QueryOutputMode, CteScope},
+    query::CteScope,
 };
 use std::{collections::BTreeSet, rc::Rc, sync::Arc};
 use uqa_sql::assignment::columns::validate_mutation_targets;
@@ -48,9 +47,6 @@ use uqa_sql::{
     semantics::{
         conflict::InferenceContext,
         returning::{validate_returning_alias_relations, ReturningAnalysisContext},
-        rules::insert_inputs::{
-            required_view_rule_insert_input_positions, view_rule_insert_column_type,
-        },
     },
     SQLError, SQLParam,
 };
@@ -216,6 +212,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             .iter()
             .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
     if insert_original_query {
+        if !stmt.view_rule_relations.is_empty() {
+            super::identity_targets::validate_insert_identity_targets(mutation.identities, stmt)?;
+        }
         crate::mutation::routine_calls::insert(context, stmt, params, inherited_ctes)?;
     }
     let has_before_insert_statement_trigger = insert_original_query
@@ -293,7 +292,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 scope,
             )?;
             scope.scalar_subqueries = stmt.subqueries.as_slice().into();
-            let query_rules = (has_any_insert_rules && stmt.source.is_some())
+            let query_rules = (has_any_insert_rules || stmt.rule_values_input.is_some())
                 .then(|| {
                     uqa_sql::semantics::rules::binding::InsertRuleQueries::bind(
                         mutation.rules.rules.analysis,
@@ -318,77 +317,41 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             // Resolve the column that names an inserted row: the table's single PRIMARY KEY column, whether a sequence generates its values or not, and otherwise the conventional legacy `id` slot of a table without declared columns. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
             let (auto_id_col, id_column, identity_source) =
                 insert_identity_columns(mutation.identities, &stmt.table, "INSERT")?;
-            let mut rule_source_rows = None;
             // INSERT ... SELECT: the query executor feeds each positional physical row directly into the INSERT sink. Ordinary source scans and scalar subqueries retain the statement snapshot, while a VOLATILE callback observes the logical mutations staged by preceding rows of this command.
-            if let Some(source) = stmt.source.as_deref() {
-                let surviving_view_rules_require_rows =
-                    uqa_sql::semantics::rules::analysis::surviving_view_rules_require_event_rows(
-                        mutation.rules.rules.analysis,
-                        &stmt.view_rule_relations,
-                        uqa_sql::ast::RuleEvent::Insert,
-                    )?;
-                if !view_original_query && !surviving_view_rules_require_rows {
-                    rule_source_rows = Some(InsertInputRows::values(&[]));
-                } else if !has_any_insert_rules || query_rules.is_some() {
-                    let output = query::run(query::InsertQueryExecution {
-                        context,
-                        read_context,
-                        stmt,
-                        source: query_rules
-                            .as_ref()
-                            .and_then(|queries| queries.original.as_deref())
-                            .unwrap_or(source),
+            if let Some(source) = stmt.source.as_deref().or_else(|| {
+                query_rules
+                    .as_ref()
+                    .and_then(|queries| queries.original.as_deref())
+            }) {
+                let output = query::run(query::InsertQueryExecution {
+                    context,
+                    read_context,
+                    stmt,
+                    source: query_rules
+                        .as_ref()
+                        .and_then(|queries| queries.original.as_deref())
+                        .unwrap_or(source),
+                    params,
+                    scope,
+                    identity: InsertSelectIdentity {
+                        auto_id_column: auto_id_col,
+                        id_column,
+                        identity_source,
+                    },
+                    conflict_update_columns: conflict_update_columns.as_deref(),
+                    statement_commands: &statement_commands,
+                })?;
+                if let Some(queries) = &query_rules {
+                    crate::mutation::rules::run_insert_query_rules(
+                        &mutation.rules.rules,
+                        preparation.returning,
+                        queries,
                         params,
                         scope,
-                        identity: InsertSelectIdentity {
-                            auto_id_column: auto_id_col,
-                            id_column,
-                            identity_source,
-                        },
-                        conflict_update_columns: conflict_update_columns.as_deref(),
-                        statement_commands: &statement_commands,
-                    })?;
-                    if let Some(queries) = &query_rules {
-                        crate::mutation::rules::run_insert_query_rules(
-                            &mutation.rules.rules,
-                            preparation.returning,
-                            queries,
-                            params,
-                            scope,
-                            planning.prune_source_outputs,
-                        )?;
-                    }
-                    return Ok(output);
-                }
-                if rule_source_rows.is_none() {
-                    let mut source = source.clone();
-                    if !view_original_query {
-                        if let Some(required_positions) = required_view_rule_insert_input_positions(
-                            mutation.rules.rules.analysis,
-                            stmt,
-                        )? {
-                            (planning.prune_source_outputs)(
-                                mutation.rules.rules.volatility,
-                                &mut source,
-                                &required_positions,
-                                stmt.columns.len(),
-                            );
-                        }
-                    }
-                    let mut source_scope = scope.returning_statement_snapshot_scope();
-                    source_scope.enable_command_progress_streaming();
-                    let result = crate::query::statement::execute_query_plan_output(
-                        &read_context.query,
-                        &source,
-                        params,
-                        &mut source_scope,
-                        QueryOutputMode::SharedSpill,
+                        planning.prune_source_outputs,
                     )?;
-                    rule_source_rows = Some(InsertInputRows::query(
-                        result,
-                        context.query.source.relational.runtime.cancellation_token(),
-                    )?);
                 }
+                return Ok(output);
             }
 
             let implicit_columns = stmt.columns.is_empty();
@@ -427,8 +390,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let snapshot_scope = scope.returning_statement_snapshot_scope();
             let overlay = MutationOverlayScope::new(mutation.state);
             let mut conflict_locks = InsertConflictLocks::new(&preparation.referential);
-            let input_rows =
-                rule_source_rows.unwrap_or_else(|| InsertInputRows::values(&stmt.rows));
             let prepared_schema = prepared_insert_spill_schema();
             let mut prepared_rows = crate::SpillBuffer::new(
                 crate::query::projection::physical_work_mem_bytes(
@@ -440,22 +401,13 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let mut has_prepared_effect = false;
             let mut has_prepared_auto_identity = false;
-            let work_mem = prepared_rows.budget_bytes();
-            let mut pending_rule_rows = PendingInsertRows::new(work_mem, cancel.clone());
             let discarded_identities = super::identity_targets::user_value_identity_columns(
                 mutation.identities,
                 stmt,
                 columns.iter().map(|column| column.column.as_str()),
             )?;
-            let required_rule_input_positions = (!view_original_query)
-                .then(|| {
-                    required_view_rule_insert_input_positions(mutation.rules.rules.analysis, stmt)
-                })
-                .transpose()?
-                .flatten();
-            for row in input_rows {
+            for row in &stmt.rows {
                 cancel.check()?;
-                let row = row?;
                 if row.len() > columns.len() || (!implicit_columns && row.len() != columns.len()) {
                     return Err(SQLError::Routine {
                         sqlstate: "42601".into(),
@@ -472,60 +424,26 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     if discarded_identities.contains(&col.column) {
                         continue;
                     }
-                    if required_rule_input_positions
-                        .as_ref()
-                        .is_some_and(|required| !required.contains(&i))
-                    {
-                        continue;
-                    }
-                    let value = if has_any_insert_rules
-                        && matches!(row[i], uqa_sql::ScalarExpr::Default)
-                    {
-                        None
-                    } else if !view_original_query {
-                        let ty =
-                            view_rule_insert_column_type(mutation.rules.views.rewrite, stmt, i)?;
-                        Some(crate::mutation::assignment::eval_typed_assignment(
-                            read_assignment,
-                            &snapshot_scope,
-                            crate::mutation::assignment::TypedAssignmentTarget {
-                                target: col,
-                                ty: ty.as_ref(),
-                                current: document.get(&col.column),
-                                final_column_write: !columns[i + 1..]
-                                    .iter()
-                                    .any(|next| next.column == col.column),
-                            },
-                            &row[i],
-                            None,
-                            params,
-                        )?)
-                    } else {
-                        eval_mutation_assignment(
-                            read_assignment,
-                            &snapshot_scope,
-                            MutationAssignmentTarget {
-                                table: &stmt.table,
-                                target: col,
-                                current: document.get(&col.column),
-                                final_column_write: !columns[i + 1..]
-                                    .iter()
-                                    .any(|next| next.column == col.column),
-                                action: "INSERT",
-                                new_row: true,
-                            },
-                            &row[i],
-                            None,
-                            params,
-                        )?
-                    };
+                    let value = eval_mutation_assignment(
+                        read_assignment,
+                        &snapshot_scope,
+                        MutationAssignmentTarget {
+                            table: &stmt.table,
+                            target: col,
+                            current: document.get(&col.column),
+                            final_column_write: !columns[i + 1..]
+                                .iter()
+                                .any(|next| next.column == col.column),
+                            action: "INSERT",
+                            new_row: true,
+                        },
+                        &row[i],
+                        None,
+                        params,
+                    )?;
                     if let Some(value) = value {
                         document.insert(col.column.clone(), value);
                     }
-                }
-                if has_any_insert_rules {
-                    pending_rule_rows.push(document, None)?;
-                    continue;
                 }
                 apply_missing_column_defaults(assignment, &stmt.table, &mut document, params)?;
                 let prepared_auto_identity = prepare_auto_increment_identity(
@@ -534,7 +452,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     &id_column,
                     identity_source,
                     auto_id_col.as_deref(),
-                    stmt.overriding,
                     &mut document,
                     "prepare INSERT identity",
                 )?;
@@ -577,174 +494,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     insert_identity,
                     &mut conflict_locks,
                 )? {
-                    if let Some(returning) = staged.returning {
-                        returning_rows.push_to(
-                            returning,
-                            context.mutation.preparation.returning.destination,
-                        )?;
-                    }
-                    events.append_after_rows(staged.after_row_events, &triggers)?;
-                    if staged.prepared_effect {
-                        affected += 1;
-                        has_prepared_effect = true;
-                    }
-                    supplied_identities.note(&staged.target_table, &staged.prepared);
-                    push_prepared_insert_spill_row(
-                        &mut prepared_rows,
-                        &prepared_schema,
-                        PreparedInsertSpillRow {
-                            target_table: staged.target_table,
-                            document: Arc::unwrap_or_clone(staged.document),
-                            conflict: staged.prepared,
-                        },
-                    )?;
-                }
-            }
-            let mut view_rule_rows =
-                crate::mutation::rules::RuleRowBuffer::new(work_mem, cancel.clone());
-            for index in 0..pending_rule_rows.len() {
-                let document = pending_rule_rows.get(index)?.document;
-                let rule_doc_id = crate::mutation::identity::supplied_document_identity(
-                    identity_source,
-                    &document,
-                    &id_column,
-                )?;
-                view_rule_rows.push(crate::mutation::rules::RuleRowImage {
-                    old_storage_table: None,
-                    old_doc_id: None,
-                    old: None,
-                    new_storage_table: None,
-                    new_doc_id: rule_doc_id,
-                    new: Some(document),
-                    context: None,
-                })?;
-            }
-            let view_rule_rows = view_rule_rows.finish();
-            let view_rule_batches = crate::mutation::rules::views::prepare_view_rule_batches(
-                crate::mutation::rules::views::ViewRuleBatchRequest {
-                    context: mutation.rules,
-                    relations: &stmt.view_rule_relations,
-                    event: uqa_sql::ast::RuleEvent::Insert,
-                    rows: &view_rule_rows,
-                    params,
-                    scope: &snapshot_scope,
-                    insert_plans: &stmt.view_rule_insert_plans,
-                    update_plans: &[],
-                    document_relation: None,
-                },
-            )?;
-            let mut pending_base_rows = PendingInsertRows::new(work_mem, cancel.clone());
-            for index in 0..pending_rule_rows.len() {
-                if view_rule_batches.suppresses(index)? {
-                    continue;
-                }
-                let mut document = pending_rule_rows.get(index)?.document;
-                apply_missing_column_defaults(assignment, &stmt.table, &mut document, params)?;
-                let prepared_auto_identity = prepare_auto_increment_identity(
-                    mutation.identities,
-                    &stmt.table,
-                    &id_column,
-                    identity_source,
-                    auto_id_col.as_deref(),
-                    stmt.overriding,
-                    &mut document,
-                    "prepare INSERT identity",
-                )?;
-                has_prepared_auto_identity |= prepared_auto_identity.is_some();
-                pending_base_rows.push(document, prepared_auto_identity)?;
-            }
-            let rule_batch = (has_insert_rules && view_original_query)
-                .then(|| {
-                    let rule_rows = crate::mutation::rules::RuleRows::from_rows(
-                        (0..pending_base_rows.len()).map(|index| {
-                            let mut rule_document = pending_base_rows.get(index)?.document;
-                            crate::mutation::assignment::refresh_stored_generated_columns(
-                                assignment,
-                                &stmt.table,
-                                &mut rule_document,
-                            )?;
-                            let rule_doc_id =
-                                crate::mutation::identity::supplied_document_identity(
-                                    identity_source,
-                                    &rule_document,
-                                    &id_column,
-                                )?;
-                            Ok(crate::mutation::rules::RuleRowImage {
-                                old_storage_table: None,
-                                old_doc_id: None,
-                                old: None,
-                                new_storage_table: None,
-                                new_doc_id: rule_doc_id,
-                                new: Some(rule_document),
-                                context: None,
-                            })
-                        }),
-                        work_mem,
-                        cancel.clone(),
-                    )?;
-                    crate::mutation::rules::prepare_retained_rule_batch(
-                        &mutation.rules.rules,
-                        &stmt.table,
-                        uqa_sql::ast::RuleEvent::Insert,
-                        rule_rows,
-                    )
-                })
-                .transpose()?;
-            if has_any_insert_rules {
-                for rule_index in 0..pending_base_rows.len() {
-                    if rule_batch
-                        .as_ref()
-                        .map(|rule_batch| rule_batch.suppresses(rule_index))
-                        .transpose()?
-                        .unwrap_or(false)
-                    {
-                        continue;
-                    }
-                    let PendingInsertRow {
-                        mut document,
-                        identity: prepared_auto_identity,
-                    } = pending_base_rows.get(rule_index)?;
-                    let target_table = partition_insert_target(
-                        preparation.referential.constraints,
-                        statement,
-                        &stmt.table,
-                        &document,
-                        params,
-                        stmt.include_descendants,
-                    )?;
-                    preparation.referential.locking.session.lock_relation(
-                        &target_table,
-                        crate::row_locks::RelationLockMode::RowExclusive,
-                    )?;
-                    let insert_identity = match prepared_auto_identity {
-                        Some(identity) => identity,
-                        None => prepare_insert_identity(
-                            mutation.identities,
-                            &target_table,
-                            &id_column,
-                            identity_source,
-                            None,
-                            &mut document,
-                            "prepare INSERT identity",
-                        )?,
-                    };
-                    let Some(staged) = prepare_values_insert_row(
-                        preparation,
-                        stmt,
-                        statement,
-                        params,
-                        &snapshot_scope,
-                        conflict_update_columns.as_deref().unwrap_or(&[]),
-                        &id_column,
-                        identity_source,
-                        target_table,
-                        document,
-                        insert_identity,
-                        &mut conflict_locks,
-                    )?
-                    else {
-                        continue;
-                    };
                     if let Some(returning) = staged.returning {
                         returning_rows.push_to(
                             returning,
@@ -826,49 +575,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 ),
                 events.into_after_rows(),
             )?;
-            let (rule_returning, rule_affected, rule_sets_command_tag) =
-                if let Some(rule_batch) = rule_batch.as_ref() {
-                    let outcome = rule_batch.execute_actions_with_affected(
-                        &mutation.rules.rules.with_projection(
-                            &crate::mutation::rules::RuleOutputProjection::insert(
-                                mutation.preparation.returning,
-                                stmt,
-                                params,
-                                scope,
-                            ),
-                        ),
-                        crate::mutation::rules::RuleReturningRequest::from_plan(
-                            &stmt.returning,
-                            &stmt.returning_aliases,
-                            &stmt.subqueries,
-                        ),
-                    )?;
-                    (
-                        outcome.returning,
-                        outcome.affected_rows,
-                        outcome.sets_command_tag,
-                    )
-                } else {
-                    (None, 0, false)
-                };
-            let view_rule_outcome = view_rule_batches.execute_actions_with_affected(
-                &mutation.rules.rules,
-                stmt.view_rule_returning.as_ref(),
-                mutation.preparation.returning,
-                params,
-                scope,
-            )?;
-            let view_rule_returning = view_rule_outcome.returning;
-            if view_rule_returning.is_some() && rule_returning.is_some() {
-                return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: "cannot have RETURNING lists in multiple rules".into(),
-                });
-            }
             if !stmt.returning.is_empty() {
-                if let Some(view_rule_returning) = view_rule_returning {
-                    return view_rule_returning.project(preparation.returning, params, scope, None);
-                }
                 let shape = DmlReturningShape {
                     table: &stmt.table,
                     target_qualifier: &stmt.target_qualifier,
@@ -878,9 +585,6 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     ctes: scope,
                     supplemental_schema: None,
                 };
-                if let Some(rule_returning) = rule_returning {
-                    return rule_returning.project(preparation.returning, shape);
-                }
                 return dml_returning_result(
                     preparation.returning,
                     shape,
@@ -888,20 +592,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     affected,
                 );
             }
-            let rule_affected = if view_rule_outcome.sets_command_tag {
-                view_rule_outcome.affected_rows
-            } else if rule_sets_command_tag {
-                rule_affected
-            } else {
-                0
-            };
-            Ok(MutationOutput::from_affected(
-                if affected == 0 && !insert_original_query {
-                    rule_affected
-                } else {
-                    affected
-                },
-            ))
+            Ok(MutationOutput::from_affected(affected))
         };
     let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),

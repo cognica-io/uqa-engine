@@ -102,7 +102,7 @@ pub fn supplied_document_identity(
 use crate::query::locking::context::QueryRowLockSession;
 use uqa_sql::{
     assignment::{columns::AssignmentColumnCatalog, AssignmentContext},
-    ast::{AutoIncrement, AutoIncrementKind, OverridingKind},
+    ast::{AutoIncrement, AutoIncrementKind},
     semantics::{doc_id_value, partition::PartitionCatalog, returning::document_supplied_id},
 };
 pub trait InsertIdentityCatalog {
@@ -157,18 +157,13 @@ pub fn insert_identity_columns(
     Ok((auto_increment, id_column, source))
 }
 
-/// Draw the values an inserted row leaves to its identity columns from their sequences, and select the identity of a row that a legacy counter column decides. A sequence value is an ordinary column value: when its column is the table's single primary key it names the row as any supplied key value does, so the caller selects the identity of every row this returns none for. A value the row supplies, NULL included, is kept; a `GENERATED ALWAYS` column accepts one only under `OVERRIDING SYSTEM VALUE`. `OVERRIDING USER VALUE` leaves every identity column out of the row before this runs.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the identity columns and the OVERRIDING clause select one row's identity"
-)]
+/// Generate missing identity values after statement analysis has validated user-supplied targets. A value already produced by a rewritten DEFAULT is retained, including for GENERATED ALWAYS. OVERRIDING USER VALUE removes supplied identity values before this boundary; the row cannot reconstruct their original provenance.
 pub fn prepare_auto_increment_identity(
     context: InsertIdentityContext<'_>,
     table: &str,
     id_column: &str,
     source: IdentitySource,
     auto_id_column: Option<&str>,
-    overriding: Option<OverridingKind>,
     document: &mut Document,
     action: &str,
 ) -> Result<Option<(DocId, bool)>, SQLError> {
@@ -184,13 +179,6 @@ pub fn prepare_auto_increment_identity(
             continue;
         }
         if document.contains_key(column) {
-            if provenance.kind == AutoIncrementKind::IdentityAlways
-                && overriding != Some(OverridingKind::SystemValue)
-            {
-                return Err(
-                    uqa_sql::semantics::generated_values::generated_always_insert_error(column),
-                );
-            }
             continue;
         }
         let sequence =

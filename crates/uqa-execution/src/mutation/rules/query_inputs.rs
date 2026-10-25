@@ -106,6 +106,10 @@ fn execute_insert_query_rules<S: Clone + 'static>(
                 }
                 Some(RuleQueryInput {
                     query,
+                    inline: insert
+                        .rule_values_input
+                        .as_ref()
+                        .is_some_and(uqa_sql::plan::RuleValuesInput::is_inline),
                     relation,
                     condition,
                     expressions: resolver.expressions,
@@ -116,10 +120,7 @@ fn execute_insert_query_rules<S: Clone + 'static>(
                     uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition(
                     );
                 context.statements.execute(
-                    RuleAction {
-                        statement: bound,
-                        input,
-                    },
+                    RuleAction::bind(context.analysis, context.returning.aggregates, bound, input)?,
                     params,
                     Some(scope),
                     &privilege_subject,

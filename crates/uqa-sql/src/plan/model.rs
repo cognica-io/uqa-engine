@@ -443,6 +443,9 @@ pub struct InsertPlan {
     pub ctes: Vec<CtePlan>,
     pub rows: Vec<Vec<ScalarExpr>>,
     pub source: Option<Box<QueryPlan>>,
+    /// VALUES provenance and unresolved defaults survive attached rule inputs and automatic view rewrites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_values_input: Option<RuleValuesInput>,
     pub on_conflict: Option<ConflictPlan>,
     pub returning: Vec<ProjectionPlan>,
     pub returning_aliases: crate::ast::ReturningAliases,
@@ -451,6 +454,38 @@ pub struct InsertPlan {
     pub view_rule_relations: Vec<String>,
     pub view_rule_insert_plans: Vec<ViewRuleInsertPlan>,
     pub view_rule_returning: Option<ViewRuleReturningPlan>,
+}
+
+/// The target values and private DEFAULT flags carried by a rewritten VALUES input.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RuleValuesInput {
+    pub(crate) width: usize,
+    pub(crate) inline: bool,
+    pub(crate) defaults: Vec<usize>,
+    pub(crate) unresolved: std::collections::BTreeSet<usize>,
+    pub(crate) written: std::collections::BTreeSet<usize>,
+}
+
+impl RuleValuesInput {
+    /// Whether any original VALUES row supplies a value other than DEFAULT at this position.
+    pub fn has_written_value(&self, position: usize) -> bool {
+        self.written.contains(&position)
+    }
+
+    pub fn is_inline(&self) -> bool {
+        self.inline
+    }
+
+    /// Validate private rewrite fields before excluding them from INSERT target assignment.
+    pub fn value_width(&self, source_width: usize) -> Result<usize, crate::SQLError> {
+        let flags = if self.inline { 0 } else { self.defaults.len() };
+        if source_width != self.width + flags {
+            return Err(crate::SQLError::Internal(
+                "rewritten VALUES input lost its target values or DEFAULT flags".into(),
+            ));
+        }
+        Ok(self.width)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
