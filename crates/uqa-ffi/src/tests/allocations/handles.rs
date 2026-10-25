@@ -10,11 +10,11 @@ use super::{
     fixtures::{Database, PROVIDERS},
     target,
 };
+use crate::*;
 use std::{
     ffi::{c_char, CString},
     ptr,
 };
-use uqa_ffi::*;
 
 unsafe fn fail_then_open(
     path: *const c_char,

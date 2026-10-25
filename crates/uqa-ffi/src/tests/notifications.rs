@@ -7,8 +7,7 @@
 // The receive is admitted before close starts; no new use of its retired handle is allowed.
 #![allow(unsafe_code)]
 
-use std::{ptr, time::Duration};
-use uqa_ffi::{
+use crate::{
     uqa_engine_close, uqa_engine_execute, uqa_engine_open, uqa_engine_open_session,
     uqa_notification_create, uqa_notification_destroy, uqa_notification_get_payload,
     uqa_notification_get_sequence, uqa_result_create, uqa_result_destroy, uqa_subscription_close,
@@ -17,6 +16,7 @@ use uqa_ffi::{
     UQA_ERROR_STATE, UQA_OK, UQA_OPEN_MEMORY, UQA_OPEN_SQLITE_NATIVE,
     UQA_SUBSCRIPTION_OPTIONS_VERSION, UQA_TIMEOUT,
 };
+use std::{ptr, time::Duration};
 
 fn options() -> UQASubscriptionOptions {
     UQASubscriptionOptions {

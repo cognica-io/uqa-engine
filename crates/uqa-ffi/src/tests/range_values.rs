@@ -8,8 +8,8 @@
 
 #![allow(unsafe_code)]
 
+use crate::*;
 use std::{ffi::CString, ptr};
-use uqa_ffi::*;
 
 #[test]
 fn range_admission_failure_cancellation_and_retry_preserve_native_state_on_all_providers() {

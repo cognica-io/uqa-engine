@@ -52,10 +52,10 @@ cargo fmt --all -- --check
 cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
-cargo test --workspace --doc --exclude uqa-node --locked
+cargo test --workspace --doc --exclude uqa-node --exclude uqa-ffi --locked
 ```
 
-The Node.js addon is a `cdylib` with no Rust doctest target. An explicit `--doc` request overrides its `doctest = false` declaration, so documentation-only commands exclude `uqa-node`; the workspace unit tests, native addon builds and JavaScript binding checks still include it.
+The Node.js addon and C binding emit native libraries without a Rust doctest target. An explicit `--doc` request overrides `doctest = false`, so documentation-only commands exclude `uqa-node` and `uqa-ffi`. Workspace tests retain both crates, and the dedicated binding workflows build and execute their actual native artifacts.
 
 The workspace declares `unsafe_code = "deny"` and `unused_must_use = "deny"`. Clippy enables `all` and `pedantic` with an explicit small allowlist in the root manifest.
 

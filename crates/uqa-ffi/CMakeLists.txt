@@ -15,7 +15,7 @@ find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
 
 # Cargo owns compilation and dependency selection. This project links the native
 # distribution from that exact archive with a platform-specific ABI export list.
-set(UQA_RUST_STATIC_LIBRARY "" CACHE FILEPATH "Cargo staticlib-only uqa_ffi archive")
+set(UQA_RUST_STATIC_LIBRARY "" CACHE FILEPATH "Cargo staticlib-only uqa archive")
 set(UQA_NATIVE_LINK_FLAGS "" CACHE STRING "Exact rustc --print=native-static-libs output")
 set(UQA_SOURCE_REVISION "" CACHE STRING "Source revision embedded in the Rust library")
 set(UQA_FEATURES "" CACHE STRING "Explicit comma-separated enabled Cargo features")

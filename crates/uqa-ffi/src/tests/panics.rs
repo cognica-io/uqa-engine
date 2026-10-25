@@ -8,6 +8,7 @@
 
 #![allow(unsafe_code)]
 
+use crate::*;
 use std::{
     ffi::{c_void, CString},
     ptr,
@@ -17,7 +18,6 @@ use std::{
     },
 };
 use uqa_core::Value;
-use uqa_ffi::*;
 
 struct Released(Arc<AtomicUsize>);
 impl Drop for Released {

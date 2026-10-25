@@ -10,8 +10,8 @@ use super::{
     fixtures::{Database, PROVIDERS},
     target,
 };
+use crate::*;
 use std::ptr;
-use uqa_ffi::*;
 
 unsafe fn integer(value: *const UQAValue) -> i64 {
     let mut number = 0;
@@ -32,7 +32,7 @@ fn result_and_each_batch_slot_are_allocated_before_native_effects() {
             );
             let bytes = db.bytes();
             assert_eq!(
-                target::reject_named("uqa_ffi::result::ResultData", 0, || uqa_engine_execute(
+                target::reject_named("uqa::result::ResultData", 0, || uqa_engine_execute(
                     db.engine,
                     c"INSERT INTO allocation_effects VALUES (1)".as_ptr(),
                     db.result
@@ -68,7 +68,7 @@ fn result_and_each_batch_slot_are_allocated_before_native_effects() {
             for skip in 0..2 {
                 let bytes = db.bytes();
                 assert_eq!(
-                    target::reject_named("uqa_ffi::result::ResultData", skip, || {
+                    target::reject_named("uqa::result::ResultData", skip, || {
                         uqa_engine_execute_batch(
                             db.engine,
                             requests.as_ptr(),
@@ -121,7 +121,7 @@ fn live_composite_type_and_field_allocation_failures_preserve_prior_views() {
             assert_eq!(uqa_type_get_field(ty, 0, &raw mut first), UQA_OK);
             for name in [
                 std::any::type_name::<UQAType>(),
-                "uqa_ffi::types::fields::Field",
+                "uqa::types::fields::Field",
             ] {
                 let bytes = db.bytes();
                 let mut second = UQAFieldDescriptor::default();
@@ -147,7 +147,7 @@ fn live_composite_type_and_field_allocation_failures_preserve_prior_views() {
                 UQA_OK
             );
             for name in [
-                "uqa_ffi::value::records::Generation",
+                "uqa::value::records::Generation",
                 std::any::type_name::<UQAValue>(),
             ] {
                 let bytes = db.bytes();

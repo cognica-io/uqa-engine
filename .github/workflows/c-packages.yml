@@ -89,7 +89,7 @@ jobs:
           python scripts/verify-c-package.py --prefix 'target/relocated C package'
       - name: Qualify native allocator failures and panic cleanup
         run: |
-          cargo test --locked --release --target '${{ matrix.target }}' -p uqa-ffi --features test-support --test integration -- --skip native::
+          cargo test --locked --release --target '${{ matrix.target }}' -p uqa-ffi --features test-support --lib
       - name: Archive the qualified native package
         shell: bash
         run: |

@@ -77,7 +77,7 @@ def main() -> None:
     metadata_path.write_text(metadata)
     target_directory = Path(json.loads(metadata)["target_directory"])
     archive = target_directory / args.target / ("release" if args.profile == "release" else "debug")
-    archive /= "uqa_ffi.lib" if "windows" in args.target else "libuqa_ffi.a"
+    archive /= "uqa.lib" if "windows" in args.target else "libuqa.a"
     configure = ["cmake", "-S", str(ROOT / "crates/uqa-ffi"), "-B", str(build / "cmake"),
                  f"-DUQA_RUST_STATIC_LIBRARY={archive}", f"-DUQA_NATIVE_LINK_FLAGS={flags}",
                  f"-DUQA_SOURCE_REVISION={revision}", f"-DUQA_FEATURES={','.join(features)}",

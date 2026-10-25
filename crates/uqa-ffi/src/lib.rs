@@ -54,3 +54,6 @@ pub use subscription::*;
 pub use types::*;
 pub use udf::*;
 pub use value::*;
+
+#[cfg(test)]
+mod tests;

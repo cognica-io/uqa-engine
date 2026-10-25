@@ -8,21 +8,21 @@
 
 #![allow(unsafe_code)]
 
-use std::ptr;
-use uqa_ffi::{
+use crate::{
     uqa_config_create, uqa_config_destroy, uqa_config_set_ffi_memory_limit, uqa_engine_close,
     uqa_engine_execute, uqa_engine_open, uqa_result_create, uqa_result_destroy,
     uqa_result_get_value, uqa_value_create_copy, uqa_value_destroy, uqa_value_get_is_null,
     uqa_value_get_numeric, uqa_value_get_numeric_scale, uqa_value_get_text, UQAStringView,
     UQA_ERROR_BUSY, UQA_ERROR_LIMIT, UQA_OK, UQA_OPEN_MEMORY,
 };
+use std::ptr;
 
 #[test]
 fn concurrent_owned_observers_publish_one_immutable_numeric_and_uuid_view() {
-    use std::sync::{Arc, Barrier};
-    use uqa_ffi::{
+    use crate::{
         uqa_value_create_numeric, uqa_value_create_uuid, uqa_value_get_uuid_bytes, UQABytesView,
     };
+    use std::sync::{Arc, Barrier};
     let mut numeric = ptr::null_mut();
     let mut uuid = ptr::null_mut();
     let input = std::ffi::CString::new(format!("1{}", "0".repeat(4096))).unwrap();
@@ -89,7 +89,7 @@ fn concurrent_owned_observers_publish_one_immutable_numeric_and_uuid_view() {
 
 #[test]
 fn contextual_handle_allocation_precedes_domain_input_and_transaction_effects() {
-    use uqa_ffi::{
+    use crate::{
         uqa_transaction_begin, uqa_transaction_get_state, uqa_transaction_rollback,
         uqa_value_create_from_text, uqa_value_create_typed_null, uqa_value_get_int64,
         UQA_TRANSACTION_ACTIVE,

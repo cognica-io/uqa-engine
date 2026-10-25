@@ -7,12 +7,12 @@
 // Callbacks use live stack data; the worker joins before either Engine can be released.
 #![allow(unsafe_code)]
 
-use std::{ffi::c_void, ptr};
-use uqa_ffi::{
+use crate::{
     uqa_engine_close, uqa_engine_copy_to, uqa_engine_execute, uqa_engine_open, uqa_error_get_last,
     uqa_error_get_status, uqa_result_create, uqa_result_destroy, UQAEngine, UQAStatus, UQA_DONE,
     UQA_ERROR_BUSY, UQA_ERROR_STATE, UQA_OK, UQA_OPEN_MEMORY,
 };
+use std::{ffi::c_void, ptr};
 
 struct Invocation {
     other: *mut UQAEngine,

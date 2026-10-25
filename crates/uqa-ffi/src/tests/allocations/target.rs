@@ -49,7 +49,7 @@ pub(super) fn reject_named<R>(name: &'static str, skip: usize, operation: impl F
     REJECTIONS.with(|state| assert!(state.get().is_none()));
     TARGET.with(|target| assert!(target.replace(Some((name, skip))).is_none()));
     let reset = Reset;
-    let result = uqa_ffi::test_support::observe_handle_allocations(observe, operation);
+    let result = crate::test_support::observe_handle_allocations(observe, operation);
     let reached = TARGET.with(|target| target.get().is_none());
     let rejected = REJECTIONS.with(|state| state.get().map(|state| state.count));
     drop(reset);

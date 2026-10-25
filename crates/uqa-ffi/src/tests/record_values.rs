@@ -8,8 +8,8 @@
 
 #![allow(unsafe_code)]
 
+use crate::*;
 use std::{ffi::CString, fmt::Write as _, ptr};
-use uqa_ffi::*;
 
 #[test]
 fn field_admission_and_cancellation_keep_existing_descriptors_on_every_provider() {

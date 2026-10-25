@@ -10,12 +10,12 @@ use super::{
     fixtures::{Database, PROVIDERS},
     target,
 };
+use crate::*;
 use std::ptr;
-use uqa_ffi::*;
 
 const OWNERS: [&str; 2] = [
-    "uqa_ffi::arrow::export::SchemaOwner",
-    "uqa_ffi::arrow::export::ArrayOwner",
+    "uqa::arrow::export::SchemaOwner",
+    "uqa::arrow::export::ArrayOwner",
 ];
 
 fn unpublished(schema: &UQAArrowSchema, array: &UQAArrowArray) {

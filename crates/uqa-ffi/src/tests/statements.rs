@@ -8,14 +8,14 @@
 
 #![allow(unsafe_code)]
 
-use std::{ffi::CString, ptr};
-use uqa_ffi::{
+use crate::{
     uqa_config_create, uqa_config_destroy, uqa_config_set_ffi_memory_limit, uqa_engine_close,
     uqa_engine_execute, uqa_engine_open, uqa_result_create, uqa_result_destroy,
     uqa_result_get_value, uqa_statement_bind, uqa_statement_execute, uqa_statement_finalize,
     uqa_statement_prepare, uqa_value_create_int64, uqa_value_create_text_n, uqa_value_destroy,
     uqa_value_get_int64, UQA_ERROR_LIMIT, UQA_OK, UQA_OPEN_MEMORY,
 };
+use std::{ffi::CString, ptr};
 
 #[test]
 fn failed_prepared_admission_removes_native_definition_and_binding_failure_keeps_old_value() {

@@ -7,8 +7,7 @@
 // Tests provide live C storage and release owned handles through the public ABI.
 #![allow(unsafe_code)]
 
-use std::{ffi::CString, ptr};
-use uqa_ffi::{
+use crate::{
     uqa_config_create, uqa_config_destroy, uqa_config_set_compression,
     uqa_config_set_ffi_memory_limit, uqa_engine_close, uqa_engine_execute,
     uqa_engine_execute_params, uqa_engine_get_capabilities, uqa_engine_open,
@@ -19,6 +18,7 @@ use uqa_ffi::{
     UQA_ERROR_INVALID_ARGUMENT, UQA_ERROR_LIMIT, UQA_ERROR_TYPE, UQA_ERROR_UNSUPPORTED, UQA_OK,
     UQA_OPEN_MEMORY, UQA_OPEN_SQLITE_NATIVE, UQA_TRANSACTION_IDLE,
 };
+use std::{ffi::CString, ptr};
 
 #[test]
 fn persistent_siblings_share_data_but_own_transactions_and_lifetimes() {

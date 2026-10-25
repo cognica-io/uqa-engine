@@ -8,12 +8,12 @@
 
 #![allow(unsafe_code)]
 
+use crate::*;
 use std::{
     ffi::CString,
     ptr,
     sync::{Arc, Barrier},
 };
-use uqa_ffi::*;
 
 #[test]
 fn child_admission_preserves_existing_views_and_recovers_on_every_provider() {

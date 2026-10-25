@@ -141,7 +141,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("needs: build", shard)
         self.assertIn("--archive-file", shard)
         self.assertNotIn("cargo test", shard)
-        self.assertIn("--workspace --locked --doc --exclude uqa-node", workspace)
+        self.assertIn("--workspace --locked --doc --exclude uqa-node --exclude uqa-ffi", workspace)
         archive = workspace.split("      - name: Build workspace tests once\n", 1)[1].split("      - uses:", 1)[0]
         self.assertNotIn("--exclude uqa-node", archive)
         self.assertIn("Verify independent analyzer features", workspace)

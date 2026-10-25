@@ -10,8 +10,8 @@ use super::{
     fixtures::{Database, PROVIDERS},
     target,
 };
+use crate::*;
 use std::ptr;
-use uqa_ffi::*;
 
 fn options() -> UQASubscriptionOptions {
     UQASubscriptionOptions {
@@ -79,7 +79,7 @@ fn failed_subscription_and_notification_allocation_preserves_capacity_and_queue(
             db.sql(c"NOTIFY allocation_channel, 'replacement'");
             let bytes = db.bytes();
             assert_eq!(
-                target::reject_named("uqa_ffi::notification::NotificationData", 0, || {
+                target::reject_named("uqa::notification::NotificationData", 0, || {
                     uqa_subscription_wait(subscription, 5000, notification)
                 }),
                 UQA_ERROR_OUT_OF_MEMORY

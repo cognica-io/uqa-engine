@@ -6,11 +6,11 @@
 
 //! Real provider handles and observable allowance/transaction state for allocation failures.
 
+use crate::*;
 use std::{
     ffi::{CStr, CString},
     ptr,
 };
-use uqa_ffi::*;
 
 pub(super) const PROVIDERS: [UQAOpenFlags; 4] = [
     UQA_OPEN_MEMORY,

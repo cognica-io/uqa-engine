@@ -10,12 +10,12 @@ use super::{
     fixtures::{Database, PROVIDERS},
     target,
 };
+use crate::*;
 use std::{
     ffi::{c_void, CStr},
     ptr,
     sync::atomic::{AtomicUsize, Ordering},
 };
-use uqa_ffi::*;
 
 #[derive(Default)]
 struct Host {
@@ -256,9 +256,9 @@ fn callback_argument_state_and_result_failures_close_created_resources_and_recov
         for (kind, target, skip, created) in [
             (Kind::Scalar, value, 0, 0),
             (Kind::Scalar, value, 1, 0),
-            (Kind::Table, "uqa_ffi::udf::table::Scan", 0, 0),
+            (Kind::Table, "uqa::udf::table::Scan", 0, 0),
             (Kind::Table, value, 0, 1),
-            (Kind::Aggregate, "uqa_ffi::udf::aggregate::State", 0, 0),
+            (Kind::Aggregate, "uqa::udf::aggregate::State", 0, 0),
             (Kind::Aggregate, value, 0, 1),
             (Kind::Aggregate, value, 1, 1),
         ] {

@@ -7,16 +7,16 @@
 // Tests supply valid C addresses and retain all borrowed storage until the call completes.
 #![allow(unsafe_code)]
 
-use std::{ffi::CString, ptr};
-use uqa_core::Value;
-use uqa_engine::Engine;
-use uqa_ffi::{
+use crate::{
     uqa_config_create, uqa_config_destroy, uqa_config_set_ffi_memory_limit, uqa_cursor_close,
     uqa_cursor_fetch, uqa_cursor_open, uqa_engine_close, uqa_engine_open, uqa_error_get_completion,
     uqa_error_get_last, uqa_result_create, uqa_result_destroy, uqa_result_get_value,
     uqa_value_get_int64, UQACursor, UQAStatus, UQA_COMPLETION_COMMITTED, UQA_COMPLETION_NONE,
     UQA_DONE, UQA_ERROR_BUSY, UQA_ERROR_LIMIT, UQA_OK, UQA_OPEN_MEMORY, UQA_OPEN_SQLITE_NATIVE,
 };
+use std::{ffi::CString, ptr};
+use uqa_core::Value;
+use uqa_engine::Engine;
 
 #[test]
 fn cursor_admission_precedes_evaluation_and_descriptor_failure_reports_completed_effects() {

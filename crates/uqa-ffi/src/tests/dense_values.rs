@@ -8,8 +8,8 @@
 
 #![allow(unsafe_code)]
 
+use crate::*;
 use std::{ffi::CString, ptr};
-use uqa_ffi::*;
 
 #[test]
 fn vector_observation_releases_failed_admission_on_every_provider() {

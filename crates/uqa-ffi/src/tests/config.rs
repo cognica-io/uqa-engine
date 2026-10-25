@@ -7,13 +7,13 @@
 // Tests supply valid allocated C storage and exercise the exported unsafe boundary.
 #![allow(unsafe_code)]
 
-use std::ptr;
-use uqa_ffi::{
+use crate::{
     uqa_config_create, uqa_config_destroy, uqa_config_get_encryption_key,
     uqa_config_get_ffi_memory_limit, uqa_config_set_encryption_key_n,
     uqa_config_set_ffi_memory_limit, uqa_error_get_last, uqa_error_get_message, UQAStringView,
     UQA_DONE, UQA_ERROR_INVALID_ARGUMENT, UQA_ERROR_RANGE, UQA_OK,
 };
+use std::ptr;
 
 #[test]
 fn config_pairs_preserve_previous_values_and_managed_diagnostics() {

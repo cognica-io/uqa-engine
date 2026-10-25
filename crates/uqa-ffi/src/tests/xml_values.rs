@@ -8,8 +8,8 @@
 
 #![allow(unsafe_code)]
 
+use crate::*;
 use std::{ffi::CString, ptr};
-use uqa_ffi::*;
 
 fn open(flags: u32, path: &CString) -> (*mut UQAEngine, *mut UQAResult) {
     unsafe {

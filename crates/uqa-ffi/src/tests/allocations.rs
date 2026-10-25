@@ -8,12 +8,12 @@
 
 #![allow(unsafe_code)]
 
+use crate::*;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
     ptr,
 };
-use uqa_ffi::*;
 
 #[cfg(all(feature = "test-support", feature = "arrow-export"))]
 #[path = "allocations/arrow.rs"]
