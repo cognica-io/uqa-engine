@@ -22,9 +22,7 @@ mod types;
 pub(crate) use types::field_type_with_control;
 pub(crate) use types::type_by_oid_with_control;
 
-pub(in crate::expr) struct ValueCompositeCatalog<'a>(
-    pub(in crate::expr) Option<&'a dyn SQLValueCatalog>,
-);
+pub(crate) struct ValueCompositeCatalog<'a>(pub(crate) Option<&'a dyn SQLValueCatalog>);
 
 impl super::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
     fn composite_type(

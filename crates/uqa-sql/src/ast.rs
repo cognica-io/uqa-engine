@@ -56,7 +56,9 @@ mod types;
 
 pub use acl_role_specification::AclRoleSpecification;
 pub use array_access::{ArrayAccess, ArraySliceBounds, MAX_ARRAY_SUBSCRIPT_DIMENSIONS};
-pub use assignment_target::{AssignmentStep, AssignmentTarget, AssignmentTargets};
+pub use assignment_target::{
+    AssignmentBinding, AssignmentPathStep, AssignmentStep, AssignmentTarget, AssignmentTargets,
+};
 pub use composites::*;
 pub use constraints::*;
 pub use cte::*;

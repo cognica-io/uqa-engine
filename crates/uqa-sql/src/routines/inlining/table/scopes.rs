@@ -140,6 +140,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
         analyzed_output: None,
         analyzed_source: None,
         analyzed_grouping: None,
+        relation_privilege_subject: None,
         relations_bound: body.relations_bound,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {

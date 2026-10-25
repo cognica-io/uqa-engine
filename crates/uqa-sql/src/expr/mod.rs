@@ -107,7 +107,7 @@ mod statement_cancellation;
 mod temporal_input;
 mod value_catalog;
 pub mod variadic_any;
-pub(crate) use value_catalog::type_by_oid_with_control;
+pub(crate) use value_catalog::{type_by_oid_with_control, ValueCompositeCatalog};
 pub use value_catalog::{EngineValueCatalog, SQLRecordFields, SQLRecordView, SQLValueCatalog};
 
 #[cfg(test)]

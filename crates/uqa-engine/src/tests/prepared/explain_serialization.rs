@@ -196,17 +196,69 @@ fn returning_conversion_failure_stops_rows_before_after_statement_triggers(
             )
             .unwrap();
         assert_eq!(
-            effects.value_at(0, 0),
-            Some(&Value::Int(case["effects"]["rows"].as_i64().unwrap())),
-            "{case}"
-        );
-        assert_eq!(
-            effects.value_at(0, 1),
-            Some(&Value::Int(case["effects"]["after"].as_i64().unwrap())),
+            (effects.value_at(0, 0), effects.value_at(0, 1)),
+            (
+                Some(&Value::Int(case["effects"]["rows"].as_i64().unwrap())),
+                Some(&Value::Int(case["effects"]["after"].as_i64().unwrap())),
+            ),
             "{case}"
         );
         engine.sql("ROLLBACK", &[]).unwrap();
     }
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn rule_query_inputs_match_postgresql(#[case] provider: Provider) {
+    let reference: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/rules_query_inputs.expected.json"
+    ))
+    .unwrap();
+    let mut failures = Vec::new();
+    for case in reference["cases"].as_array().unwrap() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = provider.open(&directory.path().join("rules.db"));
+        engine.sql(case["setup"].as_str().unwrap(), &[]).unwrap();
+        let recover = case["recover"].as_bool().unwrap_or(false);
+        if recover {
+            engine.sql("BEGIN; SAVEPOINT before_rule", &[]).unwrap();
+        }
+        let result = engine.sql(case["sql"].as_str().unwrap(), &[]);
+        if let Some(state) = case["sqlstate"].as_str() {
+            if result.as_ref().err().and_then(|error| error.sqlstate()) != Some(state) {
+                failures.push(format!("{} expected {state}, got {result:?}", case["name"]));
+            }
+            if recover {
+                engine.sql("ROLLBACK TO before_rule", &[]).unwrap();
+            } else {
+                continue;
+            }
+        }
+        if !recover {
+            if let Err(error) = result {
+                failures.push(format!("{}: {error}", case["name"]));
+                continue;
+            }
+        }
+        let result = engine.sql(case["query"].as_str().unwrap(), &[]).unwrap();
+        let Value::Json(text) = result.value_at(0, 0).unwrap() else {
+            panic!("JSON result")
+        };
+        let observed: serde_json::Value = serde_json::from_str(text).unwrap();
+        if observed != case["result"] {
+            failures.push(format!(
+                "{}: {observed} != {}",
+                case["name"], case["result"]
+            ));
+        }
+        if recover {
+            engine.sql("ROLLBACK", &[]).unwrap();
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[rstest::rstest]

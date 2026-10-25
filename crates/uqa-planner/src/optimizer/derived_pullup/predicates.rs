@@ -183,7 +183,10 @@ fn candidate(query: &QueryPlan) -> Option<Candidate<'_>> {
     else {
         return None;
     };
-    if !body.ctes.is_empty() || body.relations_bound != query.relations_bound {
+    if !body.ctes.is_empty()
+        || body.relations_bound != query.relations_bound
+        || body.relation_privilege_subject.is_some()
+    {
         return None;
     }
     let (Some(input), Some(producer_input)) = (&query.analyzed_source, &body.analyzed_source)

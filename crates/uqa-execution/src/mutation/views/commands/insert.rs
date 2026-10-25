@@ -52,12 +52,18 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 .ok_or_else(|| SQLError::UnknownColumn(column.column.clone()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let original_query_survives =
-        !uqa_sql::semantics::rules::analysis::relation_suppresses_original_query(
-            context.mutation.rules.rules.analysis,
-            &target.canonical_name,
-            uqa_sql::ast::RuleEvent::Insert,
-        )?;
+    let original_query_survives = !std::iter::once(&target.canonical_name)
+        .chain(&stmt.view_rule_relations)
+        .try_fold(false, |suppressed, relation| {
+            Ok::<_, SQLError>(
+                suppressed
+                    || uqa_sql::semantics::rules::analysis::relation_suppresses_original_query(
+                        context.mutation.rules.rules.analysis,
+                        relation,
+                        uqa_sql::ast::RuleEvent::Insert,
+                    )?,
+            )
+        })?;
     let has_before_statement_trigger = original_query_survives
         && !context
             .mutation
@@ -121,6 +127,51 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 ctes,
             )?;
             ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
+            let mut has_rules = false;
+            for relation in std::iter::once(&target.canonical_name).chain(&stmt.view_rule_relations)
+            {
+                if !context
+                    .mutation
+                    .rules
+                    .rules
+                    .analysis
+                    .rules
+                    .rules_for(relation, uqa_sql::ast::RuleEvent::Insert)?
+                    .is_empty()
+                {
+                    has_rules = true;
+                    break;
+                }
+            }
+            let query_rules = (has_rules && stmt.source.is_some())
+                .then(|| {
+                    uqa_sql::semantics::rules::binding::InsertRuleQueries::bind(
+                        context.mutation.rules.rules.analysis,
+                        stmt,
+                        &|table| {
+                            context
+                                .mutation
+                                .rules
+                                .rules
+                                .security
+                                .privilege_subject(table)
+                        },
+                        ctes.privilege_subject()?,
+                    )
+                })
+                .transpose()?;
+            if let Some(queries) = &query_rules {
+                if queries.original.is_none() {
+                    return crate::mutation::rules::run_insert_query_rules(
+                        &context.mutation.rules.rules,
+                        context.mutation.preparation.returning,
+                        queries,
+                        params,
+                        ctes,
+                        prune_source_outputs,
+                    );
+                }
+            }
             let suppressed_source_is_unused = stmt.source.is_some()
                 && !uqa_sql::semantics::rules::analysis::relation_rules_require_event_rows(
                     context.mutation.rules.rules.analysis,
@@ -132,7 +183,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 && (stmt.source.is_none() || suppressed_source_is_unused)
             {
                 return run_suppressed_view_insert_rules(
-                    context.mutation.rules.rules,
+                    &context.mutation.rules.rules,
                     &context.mutation.preparation.returning,
                     &read_context.mutation.preparation.referential.assignment,
                     stmt,
@@ -152,24 +203,12 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?);
-            let mut has_rules = false;
-            for relation in std::iter::once(&target.canonical_name).chain(&stmt.view_rule_relations)
-            {
-                if !context
-                    .mutation
-                    .rules
-                    .rules
-                    .analysis
-                    .rules
-                    .rules_for(relation, uqa_sql::ast::RuleEvent::Insert)?
-                    .is_empty()
-                {
-                    has_rules = true;
-                    break;
-                }
-            }
-            if !has_rules {
+            if !has_rules || query_rules.is_some() {
                 if let Some(source) = stmt.source.as_deref() {
+                    let source = query_rules
+                        .as_ref()
+                        .and_then(|queries| queries.original.as_deref())
+                        .unwrap_or(source);
                     let mut source_scope = ctes.returning_statement_snapshot_scope();
                     source_scope.enable_command_progress_streaming();
                     crate::query::statement::execute_query_plan_output(
@@ -193,6 +232,16 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     std::slice::from_ref(&view_statement),
                     crate::mutation::triggers::events::AfterRowEvents::default(),
                 )?;
+                if let Some(queries) = &query_rules {
+                    crate::mutation::rules::run_insert_query_rules(
+                        &context.mutation.rules.rules,
+                        context.mutation.preparation.returning,
+                        queries,
+                        params,
+                        ctes,
+                        prune_source_outputs,
+                    )?;
+                }
                 return row_output.finish();
             }
             let rule_context = context.mutation.rules.rules;
@@ -217,7 +266,12 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                                     .then_some(position)
                             })
                             .collect::<BTreeSet<_>>();
-                        prune_source_outputs(&mut source, &required_positions, columns.len());
+                        prune_source_outputs(
+                            context.mutation.rules.rules.volatility,
+                            &mut source,
+                            &required_positions,
+                            columns.len(),
+                        );
                     }
                 }
                 let mut source_scope = ctes.returning_statement_snapshot_scope();
@@ -300,7 +354,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 },
             )?;
             let rule_batch = crate::mutation::rules::prepare_retained_rule_batch(
-                rule_context,
+                &rule_context,
                 &target.canonical_name,
                 uqa_sql::ast::RuleEvent::Insert,
                 rule_rows.clone(),
@@ -335,7 +389,15 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             }
             let mut result = row_output.finish()?;
             let rule_outcome = rule_batch.execute_actions_with_affected(
-                context.mutation.rules.rules,
+                &context.mutation.rules.rules.with_projection(
+                    &crate::mutation::rules::RuleOutputProjection::insert(
+                        context.mutation.preparation.returning,
+                        stmt,
+                        params,
+                        ctes,
+                    )
+                    .with_table(&target.canonical_name),
+                ),
                 crate::mutation::rules::RuleReturningRequest::from_plan(
                     &stmt.returning,
                     &stmt.returning_aliases,
@@ -343,8 +405,11 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 ),
             )?;
             let outer_rule_outcome = outer_rule_batches.execute_actions_with_affected(
-                context.mutation.rules.rules,
+                &context.mutation.rules.rules,
                 stmt.view_rule_returning.as_ref(),
+                context.mutation.preparation.returning,
+                params,
+                ctes,
             )?;
             if rule_outcome.returning.is_some() && outer_rule_outcome.returning.is_some() {
                 return Err(SQLError::Routine {

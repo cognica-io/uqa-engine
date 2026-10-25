@@ -18,6 +18,9 @@ use crate::{AggregateClassifier, QueryPlan, RelationalPlan, SourcePlan, UnifiedP
 
 type Demand = BTreeSet<usize>;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn prune(
     plan: &mut UnifiedPlan,
     config: &OptimizerConfig<'_>,
@@ -209,12 +212,19 @@ impl Context<'_, '_> {
             }
         }
         match source {
-            SourcePlan::Subquery { body, .. }
-            | SourcePlan::Table {
+            SourcePlan::Subquery {
+                body,
+                captured_output,
+                ..
+            } => {
+                self.outputs(body, analysis, demand, *captured_output);
+                self.query(body)
+            }
+            SourcePlan::Table {
                 executable_query: Some(body),
                 ..
             } => {
-                self.outputs(body, analysis, demand);
+                self.outputs(body, analysis, demand, None);
                 self.query(body)
             }
             SourcePlan::Join { .. } => self.join(source, analysis, demand, subqueries),
@@ -222,14 +232,22 @@ impl Context<'_, '_> {
         }
     }
 
-    fn outputs(&self, query: &mut QueryPlan, analysis: &AnalyzedSource, demand: &Demand) {
+    fn outputs(
+        &self,
+        query: &mut QueryPlan,
+        analysis: &AnalyzedSource,
+        demand: &Demand,
+        captured: Option<uqa_sql::ast::InternalRelationId>,
+    ) {
         let routines = self.config.routine_inlining.as_ref();
         super::derived_projection::prune_positions(
             query,
             &|position| {
-                analysis
-                    .schema
-                    .slot(position)
+                captured
+                    .map_or_else(
+                        || analysis.schema.slot(position),
+                        |relation| analysis.schema.internal_slot(relation.column(position)),
+                    )
                     .is_some_and(|slot| demand.contains(&slot))
             },
             None,
@@ -252,6 +270,7 @@ impl Context<'_, '_> {
             on,
             using,
             natural,
+            lateral,
             ..
         } = source
         else {
@@ -296,7 +315,7 @@ impl Context<'_, '_> {
             Some(&children.1),
             subqueries,
             &[],
-            false,
+            *lateral,
         );
         self.source(left, &children.0, &left_demand, subqueries)
     }

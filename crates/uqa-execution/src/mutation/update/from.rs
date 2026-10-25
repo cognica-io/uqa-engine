@@ -394,7 +394,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     let mut rule_batch = (has_update_rules && view_original_query)
         .then(|| {
             crate::mutation::rules::prepare_retained_rule_batch(
-                context.mutation.rules.rules,
+                &context.mutation.rules.rules,
                 &target,
                 uqa_sql::ast::RuleEvent::Update,
                 rule_rows.select_indices(
@@ -419,14 +419,24 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         }
     }
     let view_rule_outcome = view_rule_batches.execute_actions_with_affected(
-        context.mutation.rules.rules,
+        &context.mutation.rules.rules,
         stmt.view_rule_returning.as_ref(),
+        context.mutation.preparation.returning,
+        params,
+        ctes,
     )?;
     let rule_outcome = rule_batch
         .as_ref()
         .map(|rule_batch| {
             rule_batch.execute_actions_with_affected(
-                context.mutation.rules.rules,
+                &context.mutation.rules.rules.with_projection(
+                    &crate::mutation::rules::RuleOutputProjection::update(
+                        context.mutation.preparation.returning,
+                        stmt,
+                        params,
+                        ctes,
+                    ),
+                ),
                 crate::mutation::rules::RuleReturningRequest::from_plan(
                     &stmt.returning,
                     &stmt.returning_aliases,

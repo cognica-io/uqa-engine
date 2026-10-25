@@ -5,15 +5,16 @@
 //
 
 use super::*;
-use std::sync::Arc;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
-use uqa_sql::{
+use crate::assignment::containers::assign_array_with_control;
+use crate::{
     ast::CompositeTypeReference,
     expr::{
         composites::{CompositeAttribute, CompositeTypeCatalog, CompositeTypeDescriptor},
         EngineHook,
     },
 };
+use std::sync::Arc;
+use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 struct Catalog;
 
@@ -71,43 +72,52 @@ impl EngineHook for Catalog {
 }
 
 fn physical_input() -> Value {
-    uqa_sql::expr::composites::composite_from_text(&Catalog, "(7,\"{1,2}\")", 20_001).unwrap()
+    crate::expr::composites::composite_from_text(&Catalog, "(7,\"{1,2}\")", 20_001).unwrap()
 }
 
 #[test]
 fn nested_partial_write_reads_physical_containers_without_repeating_input() {
     let original = physical_input();
-    let steps = [AssignmentStep::Index(Box::new(ScalarExpr::Literal(
-        Value::Int(2),
-    )))];
-    let levels = [
-        targets::AssignmentLevel::Field("items"),
-        targets::AssignmentLevel::Subscripts(&steps),
+    let path = [
+        AssignmentContainer::Field {
+            type_oid: 20_001,
+            number: 2,
+        },
+        AssignmentContainer::subscripts(&[(None, Some(2))], false).unwrap(),
     ];
-    let result = assign_levels(
+    let result = assign_with_control(
         &original,
-        &[
-            composite_type(),
-            ColumnType::Array(Box::new(ColumnType::Integer)),
-            ColumnType::Integer,
-        ],
-        &levels,
-        &[vec![], vec![(None, Some(2))]],
-        Value::Int(9),
-        &Catalog,
+        &path,
+        &Value::Int(9),
+        Some(&crate::expr::EngineValueCatalog(&Catalog)),
+        &ProductionControl::uncontrolled(),
     )
+    .unwrap()
+    .into_uncontrolled()
     .unwrap();
-    let Value::Record(record) = result else {
-        panic!("rebuilt record")
+    let Value::Datum(record) = result else {
+        panic!("retained rebuilt record");
     };
-    let Value::Array(array) = record.get(1).unwrap().1 else {
-        panic!("rebuilt array")
+    let field = |name: &str| {
+        let value = crate::expr::datums::read_composite_field_with_control(
+            &record,
+            name,
+            Some(&Catalog),
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap();
+        match &*value {
+            Value::Datum(datum) => {
+                crate::expr::datums::read_with_catalog(datum, Some(&Catalog)).unwrap()
+            }
+            value => value.clone(),
+        }
+    };
+    let Value::Array(array) = field("items") else {
+        panic!("rebuilt array");
     };
     assert_eq!(array.element_at(&[2]), Some(&Value::Int(9)));
-    let Value::Datum(datum) = record.get(0).unwrap().1 else {
-        panic!("untouched field")
-    };
-    assert_eq!(uqa_sql::expr::datums::read(datum).unwrap(), Value::Int(7));
+    assert_eq!(field("a"), Value::Int(7));
     assert!(matches!(original, Value::Datum(_)));
 }
 
@@ -116,7 +126,7 @@ fn physical_array_assignment_keeps_read_and_copy_under_one_allowance() {
     let Value::Datum(record) = physical_input() else {
         panic!("physical tuple")
     };
-    let array = uqa_sql::expr::datums::read_composite_field_with_control(
+    let array = crate::expr::datums::read_composite_field_with_control(
         &record,
         "items",
         Some(&Catalog),
@@ -132,7 +142,7 @@ fn physical_array_assignment_keeps_read_and_copy_under_one_allowance() {
             &Value::Null,
             &[(Some(1), Some(2))],
             true,
-            Some(&Catalog),
+            Some(&crate::expr::EngineValueCatalog(&Catalog)),
             &control,
         );
         if bytes == 0 {

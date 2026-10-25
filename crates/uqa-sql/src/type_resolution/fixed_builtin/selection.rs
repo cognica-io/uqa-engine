@@ -56,7 +56,7 @@ pub(super) fn resolve_overload_with_control(
                     builtin: true,
                     dispatch: None,
                     invocation: None,
-                    composite_field: None,
+                    value_binding: None,
                     resolution_error: None,
                     input_collation: None,
                 },

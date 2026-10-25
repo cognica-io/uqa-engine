@@ -39,6 +39,9 @@ pub struct QueryPlan {
     /// Whether relation references in this tree are stored catalog identities rather than names that must be resolved in the executing session.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub relations_bound: bool,
+    /// Relation authorization retained when a rewritten query is nested beneath another statement's owner. SQL-visible identity and function privileges remain the invoking session's.
+    #[serde(skip)]
+    pub relation_privilege_subject: Option<crate::catalog::roles::RoleReference>,
     pub ctes: Vec<CtePlan>,
     pub root: RelationalPlan,
 }

@@ -489,7 +489,7 @@ fn composite_constant_field(
         return None;
     };
     let resolved;
-    let field = if let Some(field) = binding.composite_field.as_deref() {
+    let field = if let Some(field) = binding.composite_field() {
         field
     } else {
         let descriptor =

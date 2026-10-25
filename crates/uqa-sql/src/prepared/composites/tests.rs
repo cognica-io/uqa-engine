@@ -311,14 +311,14 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
         } = node
         {
             if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect) {
-                binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+                binding.set_composite_field(crate::ast::CompositeFieldBinding {
                     collation_oid: Some(951),
                     type_oid: 20_001,
                     number: 2,
                     result_type: ColumnType::Text,
                     dropped: false,
                     changed_type: None,
-                }));
+                });
             }
         }
     });
@@ -337,7 +337,7 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
                     ..
                 } = node
                 {
-                    if let Some(field) = &binding.composite_field {
+                    if let Some(field) = binding.composite_field() {
                         fields += 1;
                         assert_eq!(field.result_type, ColumnType::Text);
                         assert_eq!(field.collation_oid, Some(951));

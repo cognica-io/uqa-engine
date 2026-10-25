@@ -48,10 +48,10 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut scope = ctes.clone();
+    let mut lookup = scope.enter_query_plan_scope(plan)?;
     for cte in uqa_sql::semantics::ordered_plan_ctes(plan)? {
-        scope.insert_deferred(cte.clone());
+        lookup.insert_deferred(cte.clone());
     }
-    let mut lookup = scope.enter_relation_lookup_mode(plan.relations_bound)?;
     let mut visible = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &mut *visible;
     for scheduled in crate::query::cte::strategy::schedule_plan_ctes(context.volatility, plan)? {

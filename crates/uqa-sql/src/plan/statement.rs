@@ -49,6 +49,7 @@ impl UnifiedPlan {
                     analyzed_output: None,
                     analyzed_source: None,
                     analyzed_grouping: None,
+                    relation_privilege_subject: None,
                     relations_bound: false,
                     ctes: Vec::new(),
                     root: RelationalPlan::Values { rows, subqueries },

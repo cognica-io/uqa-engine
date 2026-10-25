@@ -222,7 +222,7 @@ fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
                 object_id: None,
                 dispatch: None,
                 invocation: None,
-                composite_field: None,
+                value_binding: None,
                 resolution_error: None,
                 input_collation: None,
             })
@@ -741,14 +741,14 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
     } = &mut call
     {
         binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
-        binding.composite_field = Some(Box::new(uqa_sql::ast::CompositeFieldBinding {
+        binding.set_composite_field(uqa_sql::ast::CompositeFieldBinding {
             collation_oid: None,
             type_oid: 20001,
             number: 2,
             result_type: ColumnType::Text,
             dropped: false,
             changed_type: None,
-        }));
+        });
     }
     let mut incompatible = call.clone();
     if let ScalarExpr::Func {
@@ -756,7 +756,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         ..
     } = &mut incompatible
     {
-        binding.composite_field.as_mut().unwrap().changed_type = Some(ColumnType::Varchar(Some(8)));
+        binding.composite_field_mut().unwrap().changed_type = Some(ColumnType::Varchar(Some(8)));
     }
     let error =
         fold_literal_expression(incompatible, |_| panic!("field must check its descriptor"))
@@ -802,7 +802,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         ..
     } = &mut call
     {
-        binding.composite_field.as_mut().unwrap().dropped = true;
+        binding.composite_field_mut().unwrap().dropped = true;
         args[0] = ScalarExpr::Column("volatile_result".into());
     }
     assert_eq!(

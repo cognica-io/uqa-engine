@@ -197,6 +197,40 @@ mod tests {
     use uqa_sql::ast::{FrameExclusion, FrameMode};
 
     #[test]
+    fn query_scope_restores_relation_authority_and_namespace_after_unwind() {
+        use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
+        let uqa_sql::plan::UnifiedPlan::Query(mut query) =
+            uqa_sql::plan::UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        query.relation_privilege_subject = Some("caller".into());
+        let mut scope = CteScope::<()>::new();
+        scope.privilege_subject = Some("action_owner".into());
+        scope.catalog_resolution = Some(RelationNameResolution {
+            search_path: vec!["public".into()],
+            temporary_schema: "pg_temp_1".into(),
+            temporary_namespace_allocated: false,
+            current_user: "caller".into(),
+            lookup_mode: RelationLookupMode::Bound,
+        });
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let current = scope.enter_query_plan_scope(&query).unwrap();
+            assert_eq!(current.privilege_subject().unwrap(), &"caller".into());
+            let resolution = current.relation_name_resolution().unwrap();
+            assert_eq!(resolution.lookup_mode, RelationLookupMode::Dynamic);
+            assert_eq!(resolution.current_user, "caller".into());
+            panic!("query failed while retaining caller authority");
+        }));
+        assert!(unwind.is_err());
+        assert_eq!(scope.privilege_subject().unwrap(), &"action_owner".into());
+        assert_eq!(
+            scope.relation_name_resolution().unwrap().lookup_mode,
+            RelationLookupMode::Bound
+        );
+    }
+
+    #[test]
     fn empty_row_lock_scopes_leave_non_locking_state_unallocated() {
         let mut ctes = CteScope::<()>::new();
         {

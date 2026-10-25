@@ -162,6 +162,7 @@ fn scalar_query(
         analyzed_output: None,
         analyzed_source: None,
         analyzed_grouping: None,
+        relation_privilege_subject: None,
         relations_bound: false,
         ctes: Vec::new(),
         root: uqa_sql::plan::RelationalPlan::QueryBlock(Box::new(uqa_sql::plan::QueryBlockPlan {

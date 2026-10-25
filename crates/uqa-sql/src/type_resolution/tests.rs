@@ -187,7 +187,7 @@ fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };

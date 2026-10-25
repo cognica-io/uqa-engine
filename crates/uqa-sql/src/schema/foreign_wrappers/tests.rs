@@ -95,7 +95,7 @@ fn validator_requests_exact_signature_and_ignores_return_type() {
                 builtin: false,
                 dispatch: None,
                 invocation: None,
-                composite_field: None,
+                value_binding: None,
                 resolution_error: None,
                 input_collation: None,
             },

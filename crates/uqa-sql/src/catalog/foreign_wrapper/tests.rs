@@ -107,7 +107,7 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
         builtin: false,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };

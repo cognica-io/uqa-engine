@@ -73,7 +73,7 @@ fn set_returning_built_ins_report_the_executor_diagnostic_in_scalar_evaluation()
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };

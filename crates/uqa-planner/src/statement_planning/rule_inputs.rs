@@ -27,6 +27,7 @@ pub struct RuleInputPlanningContext<'a> {
     pub rules: &'a dyn RuleCatalog,
     pub views: ViewRewriteContext<'a>,
     pub columns: &'a dyn RuleInputColumns,
+    pub volatility: &'a dyn uqa_sql::semantics::volatility::VolatilityCatalog,
 }
 pub fn rewrite_plan(
     context: &RuleInputPlanningContext<'_>,
@@ -129,6 +130,7 @@ fn prune_rule_inputs(
         _ => return Ok(()),
     };
     let table = context.rules.resolve_mutation_target(table, bound)?;
+    validate_rule_ctes(context, command, &table, event)?;
     if let CommandPlan::Update(plan) = command {
         uqa_sql::semantics::view_rewrite::validate_grouped_rule_inputs(
             context.views,
@@ -189,6 +191,7 @@ fn prune_rule_inputs(
                 plan.subqueries.clear();
             } else if let Some(source) = &mut plan.source {
                 crate::mutation_outputs::prune_unused_query_outputs(
+                    context.volatility,
                     source,
                     &positions,
                     columns.len(),
@@ -253,4 +256,27 @@ fn prune_update_assignments(
             }
         }
     }
+}
+
+fn validate_rule_ctes(
+    context: &RuleInputPlanningContext<'_>,
+    command: &CommandPlan,
+    table: &str,
+    event: RuleEvent,
+) -> Result<(), SQLError> {
+    if !command.ctes().is_empty() {
+        uqa_sql::semantics::rules::validate_rule_cte_contract(
+            context.rules,
+            table,
+            event,
+            |table, event| {
+                uqa_sql::semantics::view_rewrite::rule_inputs::original_rule_target(
+                    context.views,
+                    table,
+                    event,
+                )
+            },
+        )?;
+    }
+    Ok(())
 }

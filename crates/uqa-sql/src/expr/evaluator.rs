@@ -234,6 +234,21 @@ fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     _ => Value::Bool(false),
                 });
             }
+            if let Some(assignment) = binding.as_ref().and_then(|binding| binding.assignment()) {
+                let control = uqa_core::memory::ProductionControl::uncontrolled();
+                let catalog = ctx.engine.map(super::EngineValueCatalog);
+                return Ok(crate::assignment::path::evaluate(
+                    assignment,
+                    args.len(),
+                    catalog
+                        .as_ref()
+                        .map(|catalog| catalog as &dyn super::SQLValueCatalog),
+                    &control,
+                    |index| Ok(control.finish(eval(&args[index], ctx)?, None)?),
+                )?
+                .into_uncontrolled()
+                .expect("ordinary array assignment"));
+            }
             if let Some(access) = binding
                 .as_ref()
                 .and_then(|binding| binding.dispatch)

@@ -226,7 +226,7 @@ fn function_binding_builtin_identity_is_backward_compatible() {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };
@@ -323,7 +323,7 @@ fn polymorphic_builtin_syntax_binding_has_stable_serde_shape() {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };
@@ -352,7 +352,7 @@ fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     });
@@ -374,7 +374,7 @@ fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
         builtin: false,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };
@@ -406,7 +406,7 @@ fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() 
         serde_json::from_str(r#"{"name":"app.f","argument_types":["anyelement"]}"#).unwrap();
     assert!(legacy.object_id.is_none());
     assert!(legacy.invocation.is_none());
-    assert!(legacy.composite_field.is_none());
+    assert!(legacy.composite_field().is_none());
 
     let binding = FunctionBinding {
         object_id: Some([7; 16]),
@@ -422,7 +422,7 @@ fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() 
             return_type: Some("integer".into()),
             variadic_mode: RoutineVariadicMode::Explicit { parameter_index: 1 },
         })),
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };
@@ -431,6 +431,48 @@ fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() 
         encoded["invocation"]["variadic_mode"],
         serde_json::json!({ "Explicit": { "parameter_index": 1 } })
     );
+    assert_eq!(
+        serde_json::from_value::<FunctionBinding>(encoded).unwrap(),
+        binding
+    );
+}
+
+#[test]
+fn native_value_bindings_preserve_stored_field_encoding_and_assignment_paths() {
+    use super::{AssignmentBinding, AssignmentPathStep, CompositeFieldBinding};
+    let field = CompositeFieldBinding {
+        type_oid: 42_001,
+        number: 2,
+        result_type: ColumnType::Integer,
+        collation_oid: None,
+        dropped: false,
+        changed_type: None,
+    };
+    let mut binding = FunctionBinding::dispatched(FunctionDispatch::FieldSelect);
+    binding.set_composite_field(field.clone());
+    let encoded = serde_json::to_value(&binding).unwrap();
+    assert_eq!(
+        encoded["composite_field"],
+        serde_json::to_value(field).unwrap()
+    );
+    assert!(encoded.get("value_binding").is_none());
+    assert_eq!(
+        serde_json::from_value::<FunctionBinding>(encoded).unwrap(),
+        binding
+    );
+    let null: FunctionBinding =
+        serde_json::from_str(r#"{"name":"f","argument_types":[],"composite_field":null}"#).unwrap();
+    assert!(null.composite_field().is_none());
+    let mut binding = FunctionBinding::dispatched(FunctionDispatch::AssignmentStore);
+    binding.set_assignment(AssignmentBinding {
+        path: vec![AssignmentPathStep::Field {
+            type_oid: 42_001,
+            number: 2,
+        }],
+        value_argument: 1,
+    });
+    let encoded = serde_json::to_value(&binding).unwrap();
+    assert_eq!(encoded["assignment"]["value_argument"], 1);
     assert_eq!(
         serde_json::from_value::<FunctionBinding>(encoded).unwrap(),
         binding

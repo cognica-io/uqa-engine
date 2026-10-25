@@ -606,7 +606,7 @@ fn builtin_set_projection_binding_survives_same_named_user_routine_family() {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     });

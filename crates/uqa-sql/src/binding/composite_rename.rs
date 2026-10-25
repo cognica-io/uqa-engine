@@ -64,7 +64,7 @@ impl CompositeFieldRename<'_> {
 
     fn selected(&self, binding: Option<&FunctionBinding>) -> bool {
         binding
-            .and_then(|binding| binding.composite_field.as_ref())
+            .and_then(|binding| binding.composite_field())
             .is_some_and(|field| field.type_oid == self.target && field.number == self.number)
     }
 

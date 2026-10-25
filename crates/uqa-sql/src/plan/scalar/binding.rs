@@ -49,7 +49,7 @@ impl Lowering<'_> {
             builtin,
             dispatch,
             invocation,
-            composite_field,
+            value_binding,
             resolution_error,
             input_collation,
         } = binding;
@@ -64,19 +64,33 @@ impl Lowering<'_> {
                 .as_ref()
                 .map(|invocation| self.boxed(|this| this.invocation(invocation)))
                 .transpose()?,
-            composite_field: composite_field
+            value_binding: value_binding
                 .as_ref()
-                .map(|field| {
+                .map(|binding| {
                     self.boxed(|this| {
-                        Ok(crate::ast::CompositeFieldBinding {
-                            collation_oid: field.collation_oid,
-                            type_oid: field.type_oid,
-                            number: field.number,
-                            result_type: this
-                                .scalar_type_copy(Some(&field.result_type))?
-                                .expect("field result type"),
-                            dropped: field.dropped,
-                            changed_type: this.scalar_type_copy(field.changed_type.as_ref())?,
+                        use crate::ast::FunctionValueBinding;
+                        Ok(match binding.as_ref() {
+                            FunctionValueBinding::Assignment(assignment) => {
+                                FunctionValueBinding::Assignment(crate::ast::AssignmentBinding {
+                                    path: this.map(assignment.path.iter(), |_, step| Ok(*step))?,
+                                    value_argument: assignment.value_argument,
+                                })
+                            }
+                            FunctionValueBinding::CompositeField(field) => {
+                                FunctionValueBinding::CompositeField(
+                                    crate::ast::CompositeFieldBinding {
+                                        collation_oid: field.collation_oid,
+                                        type_oid: field.type_oid,
+                                        number: field.number,
+                                        result_type: this
+                                            .scalar_type_copy(Some(&field.result_type))?
+                                            .expect("field result type"),
+                                        dropped: field.dropped,
+                                        changed_type: this
+                                            .scalar_type_copy(field.changed_type.as_ref())?,
+                                    },
+                                )
+                            }
                         })
                     })
                 })

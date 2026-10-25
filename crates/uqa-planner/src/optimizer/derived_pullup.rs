@@ -198,6 +198,7 @@ fn candidate(
         return Ok(None);
     };
     if body.relations_bound != context.relations_bound
+        || body.relation_privilege_subject.is_some()
         || !body.ctes.is_empty()
         || !block.subqueries.is_empty()
         || !matches!(block.compute, ComputePlan::Project)

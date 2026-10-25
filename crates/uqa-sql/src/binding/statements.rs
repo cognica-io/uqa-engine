@@ -25,6 +25,23 @@ pub type StatementAnalysisOperation<'a> =
 pub trait StatementAnalysisScopes {
     fn with_scope(&self, analyze: StatementAnalysisOperation<'_>) -> Result<(), SQLError>;
 }
+
+/// A nested command retains its enclosing CTE bindings while the session supplies fresh statement metadata and admission.
+pub struct InheritedStatementAnalysisScopes<'a> {
+    pub current: &'a dyn StatementAnalysisScopes,
+    pub parent: &'a dyn StatementBindingScope,
+}
+
+impl StatementAnalysisScopes for InheritedStatementAnalysisScopes<'_> {
+    fn with_scope(&self, analyze: StatementAnalysisOperation<'_>) -> Result<(), SQLError> {
+        self.current.with_scope(&mut |scope| {
+            let mut binding = super::snapshot::BindingSnapshot::from(scope.binding_context()?);
+            let parent = super::snapshot::BindingSnapshot::from(self.parent.binding_context()?);
+            binding.inherit_cte_bindings(&parent);
+            analyze(&binding)
+        })
+    }
+}
 pub struct StatementAnalysisContext<'a> {
     pub scopes: &'a dyn StatementAnalysisScopes,
     pub routines: &'a dyn RoutineResolution,

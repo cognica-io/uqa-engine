@@ -154,7 +154,7 @@ fn operand_changes_catalog_before_retained_cast_validation_without_reexecution()
                 return_type: Some("pg_catalog.int8".into()),
                 variadic_mode: RoutineVariadicMode::default(),
             })),
-            composite_field: None,
+            value_binding: None,
             resolution_error: None,
             input_collation: None,
         }),

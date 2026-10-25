@@ -18,7 +18,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
     }
 
     /// Consumers share the ordinary statement validation, snapshot and completion boundary. RETURNING reaches a consumer before the next mutation row; ordinary result callers retain its bounded spool.
-    pub(super) fn execute_for_output_mode(
+    pub(crate) fn execute_for_output_mode(
         &mut self,
         plan: &UnifiedPlan,
         mode: super::QueryOutputMode<'_, S>,
@@ -46,9 +46,13 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 };
                 let schema = if consumer.is_some() {
                     let inputs = self.context.mutations.mutation_initialization_context();
+                    let mut analysis = self.context.mutations.returning_analysis_context();
+                    if let Some(parent) = &self.inherited_ctes {
+                        analysis.scope = parent;
+                    }
                     crate::mutation::entry::command_returning_schema(
                         &self.context.mutations.returning_execution_context(),
-                        self.context.mutations.returning_analysis_context(),
+                        analysis,
                         inputs.mutation.scopes,
                         command,
                         self.params,

@@ -17,14 +17,47 @@ use crate::{
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
-pub struct RuleReturningResult {
+mod consumer;
+pub(super) use consumer::RuleReturningConsumer;
+mod projection;
+pub use projection::{RuleOutputProjection, RuleReturningProjection};
+
+pub enum RuleReturningResult {
+    Images(RuleReturningImages),
+    Projected {
+        rows: ReturningRows,
+        affected_rows: u64,
+    },
+}
+
+impl RuleReturningResult {
+    pub fn empty() -> Self {
+        Self::Images(RuleReturningImages::empty())
+    }
+
+    pub fn project<S: Clone + 'static>(
+        self,
+        context: ReturningExecutionContext<'_, S>,
+        shape: DmlReturningShape<'_, S>,
+    ) -> Result<MutationOutput, SQLError> {
+        match self {
+            Self::Images(images) => images.project(&context, shape),
+            Self::Projected {
+                rows,
+                affected_rows,
+            } => dml_returning_result(context, shape, rows, affected_rows),
+        }
+    }
+}
+
+pub struct RuleReturningImages {
     images: ReturningRows,
     width: usize,
     source_rows: Option<RuleRows>,
     affected_rows: u64,
 }
 
-impl RuleReturningResult {
+impl RuleReturningImages {
     pub fn empty() -> Self {
         Self {
             images: ReturningRows::default(),
@@ -36,7 +69,7 @@ impl RuleReturningResult {
 
     pub fn project<S: Clone + 'static>(
         self,
-        context: ReturningExecutionContext<'_, S>,
+        context: &ReturningExecutionContext<'_, S>,
         shape: DmlReturningShape<'_, S>,
     ) -> Result<MutationOutput, SQLError> {
         let mut rows = ReturningRows::new(context.relational.runtime)?;
@@ -53,7 +86,7 @@ impl RuleReturningResult {
                 .transpose()?;
             rows.push_to(
                 build_returning_value_row(
-                    context,
+                    *context,
                     ReturningValueProjectionRow {
                         table: shape.table,
                         target_qualifier: shape.target_qualifier,
@@ -70,17 +103,18 @@ impl RuleReturningResult {
                 context.destination,
             )?;
         }
-        dml_returning_result(context, shape, rows, self.affected_rows)
+        dml_returning_result(*context, shape, rows, self.affected_rows)
     }
 }
 
-pub fn capture_rule_returning_result(
+#[cfg(test)]
+fn capture_rule_returning_result(
     mut images: ReturningRows,
     assignment: &dyn uqa_sql::assignment::AssignmentContext,
     result: MutationOutput,
     columns: &[uqa_sql::ast::ColumnDef],
     source_rows: Option<RuleRows>,
-) -> Result<RuleReturningResult, SQLError> {
+) -> Result<RuleReturningImages, SQLError> {
     let width = columns.len();
     let image_width = width.saturating_mul(3);
     let expected_width = image_width + usize::from(source_rows.is_some());
@@ -97,43 +131,58 @@ pub fn capture_rule_returning_result(
         let batch = batch?;
         for row in batch.rows {
             let row = OwnedPhysicalRow::new(batch.schema.clone(), row);
-            let row = row.view();
-            let mut values = Vec::with_capacity(expected_width);
-            for offset in [0, width, width * 2] {
-                for (position, column) in columns.iter().enumerate() {
-                    let value = row.value_at(offset + position).cloned().ok_or_else(|| {
-                        SQLError::Internal(
-                            "rewrite-rule RETURNING provider lost a positional value".into(),
-                        )
-                    })?;
-                    values.push(uqa_sql::assignment::conversion::coerce_assignment_value(
-                        assignment,
-                        value,
-                        &column.ty,
-                        batch.schema.column_type(offset + position),
-                    )?);
-                }
-            }
-            if source_rows.is_some() {
-                values.push(row.value_at(image_width).cloned().ok_or_else(|| {
-                    SQLError::Internal(
-                        "rewrite-rule RETURNING provider lost its source index".into(),
-                    )
-                })?);
-            }
-            source_index(&values, image_width, source_rows.as_ref())?;
-            images.push(OwnedPhysicalRow::new(
-                schema.clone(),
-                PhysicalRow::from_values(values),
-            ))?;
+            images.push(coerce_image(
+                assignment,
+                columns,
+                source_rows.as_ref(),
+                &schema,
+                &row,
+            )?)?;
         }
     }
-    Ok(RuleReturningResult {
+    Ok(RuleReturningImages {
         images,
         width,
         source_rows,
         affected_rows,
     })
+}
+
+fn coerce_image(
+    assignment: &dyn uqa_sql::assignment::AssignmentContext,
+    columns: &[uqa_sql::ast::ColumnDef],
+    source_rows: Option<&RuleRows>,
+    schema: &RowSchema,
+    input: &OwnedPhysicalRow,
+) -> Result<OwnedPhysicalRow, SQLError> {
+    let width = columns.len();
+    let image_width = width.saturating_mul(3);
+    let expected_width = image_width + usize::from(source_rows.is_some());
+    let row = input.view();
+    let mut values = Vec::with_capacity(expected_width);
+    for offset in [0, width, width * 2] {
+        for (position, column) in columns.iter().enumerate() {
+            let value = row.value_at(offset + position).cloned().ok_or_else(|| {
+                SQLError::Internal("rewrite-rule RETURNING provider lost a positional value".into())
+            })?;
+            values.push(uqa_sql::assignment::conversion::coerce_assignment_value(
+                assignment,
+                value,
+                &column.ty,
+                input.schema.column_type(offset + position),
+            )?);
+        }
+    }
+    if source_rows.is_some() {
+        values.push(row.value_at(image_width).cloned().ok_or_else(|| {
+            SQLError::Internal("rewrite-rule RETURNING provider lost its source index".into())
+        })?);
+    }
+    source_index(&values, image_width, source_rows)?;
+    Ok(OwnedPhysicalRow::new(
+        schema.clone(),
+        PhysicalRow::from_values(values),
+    ))
 }
 
 fn source_index(

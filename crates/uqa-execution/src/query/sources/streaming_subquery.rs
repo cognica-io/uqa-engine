@@ -35,7 +35,7 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
     ctes: &mut CteScope<S>,
     bindings: Option<&SourceBindings<'_>>,
 ) -> Result<Option<Box<dyn crate::PhysicalOperator + 'a>>, SQLError> {
-    let mut relation_lookup = ctes.enter_relation_lookup_mode(body.relations_bound)?;
+    let mut relation_lookup = ctes.enter_query_plan_scope(body)?;
     let ctes = &mut *relation_lookup;
     if !body.ctes.is_empty() {
         return Ok(None);

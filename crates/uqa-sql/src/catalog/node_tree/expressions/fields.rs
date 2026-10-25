@@ -20,7 +20,7 @@ impl ExpressionContext<'_> {
         let [base, Expr::Literal(Value::Str(field))] = arguments else {
             return Err(super::super::invalid("invalid field selection operands"));
         };
-        let (input, number, ty, collation) = if let Some(field) = &binding.composite_field {
+        let (input, number, ty, collation) = if let Some(field) = binding.composite_field() {
             let input = self.encode(base, None)?;
             let collation = field.collation_oid.unwrap_or_else(|| {
                 u32::try_from(pg_type_collation_oid(&field.result_type))

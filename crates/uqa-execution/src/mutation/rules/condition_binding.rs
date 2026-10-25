@@ -11,8 +11,8 @@ use super::{
 };
 use uqa_sql::{catalog::roles::RoleReference, ScalarExpr};
 
-pub(super) fn rule_condition_matches<F>(
-    context: RuleContext<'_>,
+pub(super) fn rule_condition_matches<S: Clone + 'static, F>(
+    context: &RuleContext<'_, S>,
     rule: &uqa_sql::catalog::events::StoredRule,
     privilege_subject: &RoleReference,
     row_index: usize,

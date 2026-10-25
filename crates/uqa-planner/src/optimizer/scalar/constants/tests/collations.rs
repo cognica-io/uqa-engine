@@ -58,14 +58,14 @@ fn selected_constant_fields_retain_postgresql_collations() {
         } = &mut expression
         {
             binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
-            binding.composite_field = Some(Box::new(uqa_sql::ast::CompositeFieldBinding {
+            binding.set_composite_field(uqa_sql::ast::CompositeFieldBinding {
                 collation_oid: Some(case.collation),
                 type_oid: 20_001,
                 number: if case.field == "c" { 1 } else { 2 },
                 result_type: ColumnType::Text,
                 dropped: false,
                 changed_type: None,
-            }));
+            });
         }
         let folded =
             fold_literal_expression(expression, |_| panic!("constant field already read")).unwrap();

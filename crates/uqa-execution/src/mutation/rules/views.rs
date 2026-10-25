@@ -24,7 +24,7 @@ use uqa_sql::{
 use uqa_storage::document_store::Document;
 #[derive(Clone)]
 pub struct ViewRuleContext<'a, S: Clone + 'static> {
-    pub rules: RuleContext<'a>,
+    pub rules: RuleContext<'a, S>,
     pub views: ViewRowContext<'a, S>,
 }
 impl<S: Clone + 'static> Copy for ViewRuleContext<'_, S> {}
@@ -118,10 +118,13 @@ impl PreparedViewRuleBatches {
         }
     }
 
-    pub fn execute_actions_with_affected(
+    pub fn execute_actions_with_affected<S: Clone + 'static>(
         &self,
-        context: RuleContext<'_>,
+        context: &RuleContext<'_, S>,
         returning: Option<&ViewRuleReturningPlan>,
+        execution: ReturningExecutionContext<'_, S>,
+        params: &[SQLParam],
+        ctes: &CteScope<S>,
     ) -> Result<ViewRuleExecutionOutcome, SQLError> {
         let mut captured = None;
         let mut affected_rows = 0_u64;
@@ -144,9 +147,34 @@ impl PreparedViewRuleBatches {
                         )
                     },
                 );
+            let mut scope = ctes.clone();
+            let projection = returning
+                .filter(|plan| plan.relation == layer.relation)
+                .map(|plan| {
+                    scope.scalar_subqueries = plan.subqueries.as_slice().into();
+                    super::RuleOutputProjection {
+                        context: execution,
+                        shape: DmlReturningShape {
+                            table: &plan.relation,
+                            target_qualifier: &plan.target_qualifier,
+                            aliases: &plan.aliases,
+                            returning: &plan.returning,
+                            params,
+                            ctes: &scope,
+                            supplemental_schema: None,
+                        },
+                    }
+                });
+            let context = projection.as_ref().map_or(
+                RuleContext {
+                    projection: None,
+                    ..*context
+                },
+                |projection| context.with_projection(projection),
+            );
             let outcome = layer
                 .batch
-                .execute_actions_with_affected(context, request)?;
+                .execute_actions_with_affected(&context, request)?;
             if outcome.sets_command_tag {
                 affected_rows = outcome.affected_rows;
                 sets_command_tag = true;
@@ -462,7 +490,7 @@ pub fn prepare_view_rule_batches<S: Clone + 'static, R: super::RuleEventSource +
         )?;
         let mut row_lookup = None;
         let mut batch = crate::mutation::rules::prepare_retained_rule_batch_with_projection(
-            context.rules,
+            &context.rules,
             relation,
             event,
             view_rows,

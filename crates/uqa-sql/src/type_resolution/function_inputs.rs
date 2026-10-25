@@ -46,7 +46,7 @@ pub(super) fn call_type_with_control(
             {
                 if let Some(field) = binding
                     .as_ref()
-                    .and_then(|binding| binding.composite_field.as_ref())
+                    .and_then(|binding| binding.composite_field())
                 {
                     return super::inference::copy_type(Some(&field.result_type), control);
                 }

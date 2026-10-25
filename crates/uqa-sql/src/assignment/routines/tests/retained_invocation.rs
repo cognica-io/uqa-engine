@@ -37,7 +37,7 @@ pub(super) fn bound_call() -> (Arc<SQLUserFunction>, FunctionBinding) {
             return_type: Some("pg_catalog.int4".into()),
             variadic_mode: RoutineVariadicMode::None,
         })),
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };

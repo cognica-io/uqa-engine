@@ -23,15 +23,50 @@ pub struct FunctionBinding {
     /// Concrete invocation contract selected during routine overload resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invocation: Option<Box<RoutineInvocationBinding>>,
-    /// Prepared field identity and its original result type; executable copies refresh its live descriptor without changing the result contract.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composite_field: Option<Box<CompositeFieldBinding>>,
+    /// Field selection and assignment carry mutually exclusive typed value metadata outside ordinary expression storage.
+    #[serde(flatten)]
+    pub value_binding: Option<Box<FunctionValueBinding>>,
     /// A typed overload-resolution failure retained until the expression reaches a fallible planning or execution boundary. This never reuses the SQL function-name namespace as an error channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution_error: Option<Box<FunctionResolutionError>>,
     /// The collation analysis selected for the call's collatable inputs, `PostgreSQL`'s `inputcollid`: the merged collation of its arguments, where an explicit `COLLATE` wins and conflicting implicit collations leave zero, an indeterminate selection that a collation-dependent function reports when it runs. A call without collatable inputs records nothing. Definitions stored before this selection was retained also record nothing; [`Self::selected_input_collation`] then supplies the database default collation, which is what `PostgreSQL` records when every collatable input carries the default collation, and recreating such a definition records its actual selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_collation: Option<crate::catalog::collations::CollationSelection>,
+}
+
+/// Typed native value operations share one optional allocation. The external keys preserve stored field-selection bindings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FunctionValueBinding {
+    CompositeField(CompositeFieldBinding),
+    Assignment(super::AssignmentBinding),
+}
+
+impl FunctionBinding {
+    pub fn composite_field(&self) -> Option<&CompositeFieldBinding> {
+        match self.value_binding.as_deref() {
+            Some(FunctionValueBinding::CompositeField(field)) => Some(field),
+            _ => None,
+        }
+    }
+    pub fn composite_field_mut(&mut self) -> Option<&mut CompositeFieldBinding> {
+        match self.value_binding.as_deref_mut() {
+            Some(FunctionValueBinding::CompositeField(field)) => Some(field),
+            _ => None,
+        }
+    }
+    pub fn set_composite_field(&mut self, field: CompositeFieldBinding) {
+        self.value_binding = Some(Box::new(FunctionValueBinding::CompositeField(field)));
+    }
+    pub fn assignment(&self) -> Option<&super::AssignmentBinding> {
+        match self.value_binding.as_deref() {
+            Some(FunctionValueBinding::Assignment(assignment)) => Some(assignment),
+            _ => None,
+        }
+    }
+    pub fn set_assignment(&mut self, assignment: super::AssignmentBinding) {
+        self.value_binding = Some(Box::new(FunctionValueBinding::Assignment(assignment)));
+    }
 }
 
 /// A field selected during preparation. Attribute numbers are never reused, even when a later attribute has the same name.
@@ -115,6 +150,8 @@ pub enum FunctionDispatch {
     Slice,
     /// `(expression).field`: the field of a composite value, or the key of a document map.
     FieldSelect,
+    /// Rebuild a typed assignment path using the binding's operand positions.
+    AssignmentStore,
     AnyOperator,
     AllOperator,
     IsDistinct,
@@ -275,6 +312,7 @@ impl FunctionDispatch {
             Self::ArraySubscripts | Self::Subscript => "subscript",
             Self::ArraySlices | Self::ArraySlicesWithBounds(_) | Self::Slice => "slice",
             Self::FieldSelect => "field selection",
+            Self::AssignmentStore => "assignment",
             Self::AnyOperator => "ANY operator",
             Self::AllOperator => "ALL operator",
             Self::IsDistinct | Self::ValueIsDistinct | Self::RowDistinct => "IS DISTINCT FROM",
@@ -570,7 +608,7 @@ impl FunctionBinding {
             builtin: true,
             dispatch: None,
             invocation: None,
-            composite_field: None,
+            value_binding: None,
             resolution_error: None,
             input_collation: None,
         }
@@ -601,7 +639,7 @@ impl FunctionBinding {
                 builtin: true,
                 dispatch: Some(dispatch),
                 invocation: None,
-                composite_field: None,
+                value_binding: None,
                 resolution_error: None,
                 input_collation: None,
             },
@@ -619,7 +657,7 @@ impl FunctionBinding {
             builtin: false,
             dispatch: None,
             invocation: None,
-            composite_field: None,
+            value_binding: None,
             resolution_error: Some(Box::new(FunctionResolutionError::UndefinedFunction {
                 signature: signature.into(),
             })),
@@ -683,7 +721,7 @@ impl FunctionBinding {
             builtin: true,
             dispatch: None,
             invocation: None,
-            composite_field: None,
+            value_binding: None,
             resolution_error: None,
             input_collation,
         }

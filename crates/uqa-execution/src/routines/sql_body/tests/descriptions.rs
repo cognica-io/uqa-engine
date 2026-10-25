@@ -90,7 +90,7 @@ fn repeated_sql_body_inputs_keep_all_parameter_positions_and_current_values() {
             return_type: Some("pg_catalog.text".into()),
             variadic_mode: RoutineVariadicMode::None,
         })),
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };

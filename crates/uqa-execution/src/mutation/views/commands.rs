@@ -35,7 +35,12 @@ use uqa_sql::{
 };
 use uqa_storage::document_store::Document;
 
-pub type SourceOutputPruning = fn(&mut QueryPlan, &BTreeSet<usize>, usize);
+pub type SourceOutputPruning = fn(
+    &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    &mut QueryPlan,
+    &BTreeSet<usize>,
+    usize,
+);
 mod checks;
 mod insert;
 mod update_delete;
@@ -59,7 +64,12 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
             .enumerate()
             .filter_map(|(position, column)| required_columns.contains(column).then_some(position))
             .collect::<BTreeSet<_>>();
-        prune_source_outputs(&mut query, &required_positions, target.columns.len());
+        prune_source_outputs(
+            context.source.volatility,
+            &mut query,
+            &required_positions,
+            target.columns.len(),
+        );
     }
     let privilege_subject = if target.definition.security_invoker() {
         scope.privilege_subject()?.clone()
@@ -237,7 +247,7 @@ fn evaluate_insert_rule_columns<S: Clone + Send + Sync + 'static>(
     reason = "preserves view qualifier and row identity"
 )]
 fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
-    rules: crate::mutation::rules::RuleContext<'_>,
+    rules: &crate::mutation::rules::RuleContext<'_, S>,
     returning_context: &crate::mutation::returning::ReturningExecutionContext<'_, S>,
     read_assignment: &MutationAssignmentContext<'_, S>,
     stmt: &InsertPlan,
@@ -338,7 +348,15 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
         },
     ))?;
     let outcome = rule_batch.execute_actions_with_affected(
-        rules,
+        &rules.with_projection(
+            &crate::mutation::rules::RuleOutputProjection::insert(
+                *returning_context,
+                stmt,
+                params,
+                ctes,
+            )
+            .with_table(&target.canonical_name),
+        ),
         crate::mutation::rules::RuleReturningRequest::from_plan(
             &stmt.returning,
             &stmt.returning_aliases,

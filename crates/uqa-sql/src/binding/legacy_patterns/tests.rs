@@ -133,7 +133,7 @@ fn retained_ordinary_calls_and_registered_callbacks_are_not_native_patterns() {
             object_id: (!builtin).then_some([7; 16]),
             dispatch: None,
             invocation: None,
-            composite_field: None,
+            value_binding: None,
             resolution_error: None,
             input_collation: None,
         });

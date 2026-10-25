@@ -14,6 +14,7 @@ pub struct RuleAnalysisContext<'a> {
     pub rules: &'a dyn RuleCatalog,
     pub sources: &'a dyn RuleSourceCatalog,
     pub returning: &'a dyn ReturningCatalog,
+    pub composites: Option<&'a dyn crate::expr::composites::CompositeTypeCatalog>,
 }
 pub fn rule_condition_plan_references_row(rule: &crate::catalog::events::StoredRule) -> bool {
     rule.bound_condition_plan().is_some_and(|(plan, binding)| {

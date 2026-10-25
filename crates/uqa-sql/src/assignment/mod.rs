@@ -30,4 +30,6 @@ mod tests;
 pub mod routines;
 
 pub mod columns;
+pub mod containers;
+pub mod path;
 pub mod targets;

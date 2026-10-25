@@ -330,13 +330,21 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                     None,
                 )?;
                 let rule_batch = crate::mutation::rules::prepare_rule_batch(
-                    context.mutation.rules.rules,
+                    &context.mutation.rules.rules,
                     &target.canonical_name,
                     uqa_sql::ast::RuleEvent::Update,
                     Vec::new(),
                 )?;
                 let outcome = rule_batch.execute_actions_with_affected(
-                    context.mutation.rules.rules,
+                    &context.mutation.rules.rules.with_projection(
+                        &crate::mutation::rules::RuleOutputProjection::update(
+                            context.mutation.preparation.returning,
+                            stmt,
+                            params,
+                            ctes,
+                        )
+                        .with_table(&target.canonical_name),
+                    ),
                     crate::mutation::rules::RuleReturningRequest::from_plan(
                         &stmt.returning,
                         &stmt.returning_aliases,
@@ -514,7 +522,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
             let pending = pending.finish();
             drop(candidates);
             let mut rule_batch = crate::mutation::rules::prepare_retained_rule_batch(
-                context.mutation.rules.rules,
+                &context.mutation.rules.rules,
                 &target.canonical_name,
                 uqa_sql::ast::RuleEvent::Update,
                 pending.clone(),
@@ -568,11 +576,22 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                     )?;
                 outer_rule_batches.configure_action_qualification(Some(update_qualification_count));
                 let outer_outcome = outer_rule_batches.execute_actions_with_affected(
-                    context.mutation.rules.rules,
+                    &context.mutation.rules.rules,
                     stmt.view_rule_returning.as_ref(),
+                    context.mutation.preparation.returning,
+                    params,
+                    ctes,
                 )?;
                 let outcome = rule_batch.execute_actions_with_affected(
-                    context.mutation.rules.rules,
+                    &context.mutation.rules.rules.with_projection(
+                        &crate::mutation::rules::RuleOutputProjection::update(
+                            context.mutation.preparation.returning,
+                            stmt,
+                            params,
+                            ctes,
+                        )
+                        .with_table(&target.canonical_name),
+                    ),
                     crate::mutation::rules::RuleReturningRequest::from_plan(
                         &stmt.returning,
                         &stmt.returning_aliases,
@@ -632,7 +651,15 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 );
             }
             let rule_returning = rule_batch.execute_actions(
-                context.mutation.rules.rules,
+                &context.mutation.rules.rules.with_projection(
+                    &crate::mutation::rules::RuleOutputProjection::update(
+                        context.mutation.preparation.returning,
+                        stmt,
+                        params,
+                        ctes,
+                    )
+                    .with_table(&target.canonical_name),
+                ),
                 crate::mutation::rules::RuleReturningRequest::from_plan(
                     &stmt.returning,
                     &stmt.returning_aliases,

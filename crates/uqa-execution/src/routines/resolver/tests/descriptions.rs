@@ -50,7 +50,7 @@ fn fixture() -> (Arc<SQLUserFunction>, FunctionBinding, PLpgSQLFunction) {
             return_type: Some("pg_catalog.int2".into()),
             variadic_mode: RoutineVariadicMode::None,
         })),
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };

@@ -406,6 +406,46 @@
         "rows": 1,
         "after": 1
       }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after(); CREATE TEMP VIEW serialization_event AS SELECT n FROM serialization_target; CREATE RULE serialization_route AS ON INSERT TO serialization_event DO INSTEAD INSERT INTO serialization_target VALUES (NEW.n) RETURNING n",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO serialization_event SELECT nextval('serialization_rows') FROM generate_series(1,8) RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after(); CREATE TEMP VIEW serialization_event AS SELECT n FROM serialization_target; CREATE RULE serialization_route AS ON INSERT TO serialization_event DO INSTEAD INSERT INTO serialization_target VALUES (NEW.n) RETURNING n",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO serialization_event SELECT n FROM generate_series(1,8) g(n) RETURNING n, nextval('serialization_rows'), NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after(); CREATE TEMP TABLE serialization_partial(n bigint[]); CREATE RULE serialization_route AS ON INSERT TO serialization_partial DO INSTEAD INSERT INTO serialization_target VALUES(NEW.n[1]) RETURNING ARRAY[n]",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO serialization_partial(n[nextval('serialization_rows')::integer]) SELECT 7 FROM generate_series(1,8) RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after(); CREATE TYPE serialization_pair AS (a bigint,b bigint); CREATE TEMP TABLE serialization_nested(n serialization_pair[]); CREATE RULE serialization_route AS ON INSERT TO serialization_nested DO INSTEAD INSERT INTO serialization_target VALUES((NEW.n[1]).a) RETURNING ARRAY[ROW(n,NULL)::serialization_pair]",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO serialization_nested(n[nextval('serialization_rows')::integer].a) SELECT 7 FROM generate_series(1,8) RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
     }
   ],
   "mutation_order": {

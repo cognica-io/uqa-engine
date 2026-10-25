@@ -73,6 +73,7 @@ pub struct PrivilegeScope<'a, Queries = Vec<QueryPlan>> {
     pub scalar_subqueries: Queries,
     local_ctes: BTreeMap<String, Cow<'a, CtePlan>>,
     pub(super) include_authorization_only_columns: bool,
+    pub(super) relation_privilege_subject: Option<RoleReference>,
 }
 impl<'a> PrivilegeScope<'a> {
     pub fn new(
@@ -88,6 +89,7 @@ impl<'a> PrivilegeScope<'a> {
             scalar_subqueries,
             local_ctes: BTreeMap::new(),
             include_authorization_only_columns: true,
+            relation_privilege_subject: None,
         }
     }
 }
@@ -107,6 +109,7 @@ impl<'a> PrivilegeScope<'a, &'a [QueryPlan]> {
             scalar_subqueries,
             local_ctes: BTreeMap::new(),
             include_authorization_only_columns: true,
+            relation_privilege_subject: None,
         }
     }
 }
@@ -133,6 +136,7 @@ impl<'a, Queries: AsRef<[QueryPlan]>> PrivilegeScope<'a, Queries> {
                 .map(|(name, plan)| (name.clone(), Cow::Borrowed(plan.as_ref())))
                 .collect(),
             include_authorization_only_columns: self.include_authorization_only_columns,
+            relation_privilege_subject: self.relation_privilege_subject.clone(),
         }
     }
     pub fn is_visible_cte(&self, name: &str) -> bool {
@@ -156,6 +160,8 @@ impl<'a, Queries: AsRef<[QueryPlan]>> PrivilegeScope<'a, Queries> {
     }
 
     pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
-        self.inherited.privilege_subject()
+        self.relation_privilege_subject
+            .as_ref()
+            .map_or_else(|| self.inherited.privilege_subject(), Ok)
     }
 }

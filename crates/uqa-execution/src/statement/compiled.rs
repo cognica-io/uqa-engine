@@ -89,16 +89,26 @@ pub fn execute_with_privilege_subject<S: Clone + Send + Sync + 'static>(
 /// Finish a stored rule action under its owner, keeping query and mutation output in bounded physical storage.
 pub fn execute_output_with_privilege_subject<S: Clone + Send + Sync + 'static>(
     context: &CompiledStatementContext<'_, S>,
-    statement: Statement,
+    action: uqa_sql::semantics::rules::binding::RuleAction,
     params: &[SQLParam],
+    inherited_ctes: Option<&crate::query::CteScope<S>>,
     privilege_subject: &RoleReference,
+    consumer: Option<std::rc::Rc<dyn crate::query::consumer::QueryRowConsumer + '_>>,
 ) -> Result<super::plan_executor::StatementOutput, SQLError> {
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.cancellation);
-    let plan = stored_plan(context, statement, params)?;
+    let plan = action.lower(context.aggregates)?;
+    let plan = context.planning.plan_for_execution(plan, params)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .with_privilege_subject(privilege_subject)
-        .execute_for_output(&plan)
+        .with_inherited_ctes(inherited_ctes)
+        .execute_for_output_mode(
+            &plan,
+            consumer.map_or(
+                crate::query::statement::consumer::QueryOutputMode::SharedSpill,
+                crate::query::statement::consumer::QueryOutputMode::physical_consumer,
+            ),
+        )
 }
 
 fn stored_plan<S: Clone + 'static>(

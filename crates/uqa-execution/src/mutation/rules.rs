@@ -36,12 +36,13 @@ use uqa_sql::SQLError;
 use uqa_core::RelationIdentity;
 mod context;
 mod inputs;
+mod query_inputs;
 pub use context::{RuleContext, RuleExpressions, RuleSecurity, RuleStatements};
 pub use inputs::RuleInputProjection;
+pub use query_inputs::run_insert_query_rules;
 
 pub use crate::mutation::row_images::RuleRowImage;
-use returning::capture_rule_returning_result;
-pub use returning::RuleReturningResult;
+pub use returning::{RuleOutputProjection, RuleReturningProjection, RuleReturningResult};
 use uqa_sql::semantics::rules::binding::bind_insert_values_action_from_rows_with_storage;
 pub use uqa_sql::semantics::rules::returning::RuleReturningRequest;
 pub use uqa_sql::semantics::rules::validate_rule_returning_contract;
@@ -138,9 +139,9 @@ impl PreparedRuleBatch {
         Ok(())
     }
 
-    pub fn execute_actions(
+    pub fn execute_actions<S: Clone + 'static>(
         &self,
-        context: RuleContext<'_>,
+        context: &RuleContext<'_, S>,
         request: RuleReturningRequest,
     ) -> Result<Option<RuleReturningResult>, SQLError> {
         Ok(self
@@ -152,9 +153,9 @@ impl PreparedRuleBatch {
         clippy::too_many_lines,
         reason = "preserves action and RETURNING order"
     )]
-    pub fn execute_actions_with_affected(
+    pub fn execute_actions_with_affected<S: Clone + 'static>(
         &self,
-        context: RuleContext<'_>,
+        context: &RuleContext<'_, S>,
         request: RuleReturningRequest,
     ) -> Result<RuleExecutionOutcome, SQLError> {
         if self.rules.is_empty() {
@@ -359,10 +360,38 @@ impl PreparedRuleBatch {
                 } else if action_returns {
                     clear_statement_returning(&mut bound);
                 }
+                let consumer = if captures_action {
+                    let definitions = returning_columns.as_deref().ok_or_else(|| {
+                        SQLError::Internal(
+                            "rewrite-rule RETURNING capture lost the event row type".into(),
+                        )
+                    })?;
+                    Some(std::rc::Rc::new(returning::RuleReturningConsumer::new(
+                        context.assignment,
+                        definitions,
+                        captures_source_context.then(|| self.rows.clone()),
+                        context.projection,
+                        super::returning::ReturningRows::with_budget(
+                            context.memory.work_mem_bytes()?,
+                            context.cancellation.clone(),
+                        ),
+                    )))
+                } else {
+                    None
+                };
                 // A rule action runs as it was stored; its set-returning calls are not placed again.
                 let result = {
                     let _stored = SetPlacementScope::stored_definition();
-                    context.statements.execute(bound, &privilege_subject)
+                    context.statements.execute(
+                        bound.into(),
+                        &[],
+                        None,
+                        &privilege_subject,
+                        consumer.as_ref().map(|consumer| {
+                            std::rc::Rc::clone(consumer)
+                                as std::rc::Rc<dyn crate::query::consumer::QueryRowConsumer>
+                        }),
+                    )
                 }?;
                 if prepared.rule.definition.instead
                     && prepared.rule.definition.condition.is_none()
@@ -391,22 +420,14 @@ impl PreparedRuleBatch {
                             "rewrite-rule RETURNING provider is not a mutation".into(),
                         ));
                     };
-                    let definitions = returning_columns.as_deref().ok_or_else(|| {
-                        SQLError::Internal(
-                            "rewrite-rule RETURNING capture lost the event row type".into(),
-                        )
-                    })?;
-                    let captured = capture_rule_returning_result(
-                        super::returning::ReturningRows::with_budget(
-                            context.memory.work_mem_bytes()?,
-                            context.cancellation.clone(),
-                        ),
-                        context.assignment,
-                        result,
-                        definitions,
-                        captures_source_context.then(|| self.rows.clone()),
-                    )?;
-                    returning = Some(captured);
+                    let consumer =
+                        std::rc::Rc::try_unwrap(consumer.expect("RETURNING action has a consumer"))
+                            .map_err(|_| {
+                                SQLError::Internal(
+                                    "completed rule action retained its row consumer".into(),
+                                )
+                            })?;
+                    returning = Some(consumer.finish(result.affected_rows));
                 }
             }
         }
@@ -418,8 +439,8 @@ impl PreparedRuleBatch {
     }
 }
 
-pub fn prepare_rule_batch(
-    context: RuleContext<'_>,
+pub fn prepare_rule_batch<S: Clone + 'static>(
+    context: &RuleContext<'_, S>,
     table: &str,
     event: RuleEvent,
     rows: Vec<RuleRowImage>,
@@ -429,8 +450,8 @@ pub fn prepare_rule_batch(
     })
 }
 
-pub fn prepare_rule_batch_with_projection<F>(
-    context: RuleContext<'_>,
+pub fn prepare_rule_batch_with_projection<S: Clone + 'static, F>(
+    context: &RuleContext<'_, S>,
     table: &str,
     event: RuleEvent,
     rows: Vec<RuleRowImage>,
@@ -448,8 +469,8 @@ where
     )
 }
 
-pub fn prepare_retained_rule_batch(
-    context: RuleContext<'_>,
+pub fn prepare_retained_rule_batch<S: Clone + 'static>(
+    context: &RuleContext<'_, S>,
     table: &str,
     event: RuleEvent,
     rows: RuleRows,
@@ -459,8 +480,8 @@ pub fn prepare_retained_rule_batch(
     })
 }
 
-pub fn prepare_retained_rule_batch_with_projection<F>(
-    context: RuleContext<'_>,
+pub fn prepare_retained_rule_batch_with_projection<S: Clone + 'static, F>(
+    context: &RuleContext<'_, S>,
     table: &str,
     event: RuleEvent,
     rows: RuleRows,
@@ -472,8 +493,8 @@ where
     prepare_rule_input(context, table, event, |_, _| Ok(rows), project)
 }
 
-fn prepare_rule_input<F>(
-    context: RuleContext<'_>,
+fn prepare_rule_input<S: Clone + 'static, F>(
+    context: &RuleContext<'_, S>,
     table: &str,
     event: RuleEvent,
     input: impl FnOnce(usize, uqa_core::CancellationToken) -> Result<RuleRows, SQLError>,
@@ -607,8 +628,8 @@ use condition_binding::rule_condition_matches;
 
 pub mod views;
 
-fn prepare_rule_actions(
-    context: RuleContext<'_>,
+fn prepare_rule_actions<S: Clone + 'static>(
+    context: &RuleContext<'_, S>,
     mut rule: uqa_sql::catalog::events::StoredRule,
     columns: &BTreeMap<String, RuleColumnMetadata>,
 ) -> Result<PreparedRule, SQLError> {

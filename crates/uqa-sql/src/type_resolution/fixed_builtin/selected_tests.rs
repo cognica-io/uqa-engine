@@ -28,7 +28,7 @@ fn binding(name: &str, types: &[&str]) -> FunctionBinding {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     }

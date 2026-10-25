@@ -285,7 +285,7 @@ impl StaticFunctionMatch {
             builtin: false,
             dispatch: None,
             invocation: Some(self.invocation.clone()),
-            composite_field: None,
+            value_binding: None,
             resolution_error: None,
             input_collation: None,
         }

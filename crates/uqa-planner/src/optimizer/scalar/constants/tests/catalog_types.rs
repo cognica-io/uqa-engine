@@ -137,14 +137,14 @@ fn physical_composite_constant_fields_fold_with_their_selected_type() {
             unreachable!()
         };
         binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
-        binding.composite_field = Some(Box::new(uqa_sql::ast::CompositeFieldBinding {
+        binding.set_composite_field(uqa_sql::ast::CompositeFieldBinding {
             type_oid: 20_001,
             number,
             result_type: result_type.clone(),
             collation_oid: None,
             dropped: false,
             changed_type: None,
-        }));
+        });
         let folded = fold_authorized_literal(
             call,
             |_| panic!("selected physical constant"),

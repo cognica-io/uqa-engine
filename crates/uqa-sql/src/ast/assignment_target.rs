@@ -17,6 +17,27 @@ pub enum AssignmentTargets<E = super::Expr> {
     Multiple(MultipleAssignmentTargets<E>),
 }
 
+/// Native assignment operands are evaluated once and addressed by position while rebuilding their containers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssignmentBinding {
+    pub path: Vec<AssignmentPathStep>,
+    pub value_argument: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssignmentPathStep {
+    Field {
+        type_oid: u32,
+        number: i16,
+    },
+    Subscripts {
+        first_argument: usize,
+        dimensions: usize,
+        slice: bool,
+        bounds: super::ArraySliceBounds,
+    },
+}
+
 /// Positional outputs remain stable when a stored MERGE loses one of its target columns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultipleAssignmentTargets<E> {

@@ -45,6 +45,7 @@ pub struct UnifiedPlanExecutor<'engine, 'params, S: Clone + 'static> {
     nested_statement: bool,
     privilege_subject: Option<RoleReference>,
     source_sql: Option<String>,
+    inherited_ctes: Option<crate::query::CteScope<S>>,
 }
 
 impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'engine, 'params, S> {
@@ -73,6 +74,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             nested_statement,
             privilege_subject: None,
             source_sql: None,
+            inherited_ctes: None,
         }
     }
 
@@ -89,6 +91,11 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
 
     pub fn with_privilege_subject(mut self, subject: &RoleReference) -> Self {
         self.privilege_subject = Some(subject.clone());
+        self
+    }
+
+    pub fn with_inherited_ctes(mut self, parent: Option<&crate::query::CteScope<S>>) -> Self {
+        self.inherited_ctes = parent.cloned();
         self
     }
 
@@ -113,6 +120,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             .context
             .queries
             .statement_scope(self.privilege_subject.as_ref());
+        if let Some(parent) = &self.inherited_ctes {
+            ctes.inherit_cte_bindings(parent);
+        }
         execute_query_plan_with_ctes(
             &self.context.queries.query_context(),
             query,
@@ -150,6 +160,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             .context
             .queries
             .statement_scope(self.privilege_subject.as_ref());
+        if let Some(parent) = &self.inherited_ctes {
+            ctes.inherit_cte_bindings(parent);
+        }
         execute_query_plan_output(
             &self.context.queries.query_context(),
             query,
@@ -173,7 +186,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             &self.context.mutations.mutation_context(),
             plan,
             self.params,
-            None,
+            self.inherited_ctes.as_ref(),
             destination,
         )
     }
@@ -192,7 +205,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             &self.context.mutations.mutation_context(),
             plan,
             self.params,
-            None,
+            self.inherited_ctes.as_ref(),
             destination,
         )
     }
@@ -211,7 +224,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             &self.context.mutations.mutation_context(),
             plan,
             self.params,
-            None,
+            self.inherited_ctes.as_ref(),
             destination,
         )
     }

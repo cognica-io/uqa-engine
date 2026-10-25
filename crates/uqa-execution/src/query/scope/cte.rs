@@ -108,6 +108,24 @@ impl<S: Clone> CteScope<S> {
         })
     }
 
+    /// Enter the namespace and relation authority retained by one query, including rewritten inputs nested under a different statement owner.
+    pub fn enter_query_plan_scope(
+        &mut self,
+        plan: &QueryPlan,
+    ) -> Result<QueryPlanScope<'_, S>, SQLError> {
+        let mut lookup = self.enter_relation_lookup_mode(plan.relations_bound)?;
+        let previous_subject = match &plan.relation_privilege_subject {
+            Some(subject) => {
+                QueryPrivilege::Restore(lookup.privilege_subject.replace(subject.clone()))
+            }
+            None => QueryPrivilege::Unchanged,
+        };
+        Ok(QueryPlanScope {
+            lookup,
+            previous_subject,
+        })
+    }
+
     pub fn insert_shared(&mut self, name: String, rows: crate::SharedSpill) {
         self.insert_rows(name, crate::query::cte::rows::CteRows::Complete(rows));
     }
@@ -317,6 +335,37 @@ impl<S: Clone> Drop for RelationLookupScope<'_, S> {
             .as_mut()
             .expect("relation lookup scope lost its statement resolution");
         resolution.set_lookup_mode(self.previous);
+    }
+}
+
+pub struct QueryPlanScope<'a, S: Clone> {
+    lookup: RelationLookupScope<'a, S>,
+    previous_subject: QueryPrivilege,
+}
+
+enum QueryPrivilege {
+    Unchanged,
+    Restore(Option<RoleReference>),
+}
+
+impl<S: Clone> std::ops::Deref for QueryPlanScope<'_, S> {
+    type Target = CteScope<S>;
+    fn deref(&self) -> &Self::Target {
+        &self.lookup
+    }
+}
+
+impl<S: Clone> std::ops::DerefMut for QueryPlanScope<'_, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.lookup
+    }
+}
+
+impl<S: Clone> Drop for QueryPlanScope<'_, S> {
+    fn drop(&mut self) {
+        if let QueryPrivilege::Restore(previous) = &mut self.previous_subject {
+            self.lookup.privilege_subject = previous.take();
+        }
     }
 }
 

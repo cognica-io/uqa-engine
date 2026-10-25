@@ -89,7 +89,7 @@ fn retain_field(
         return Ok(());
     };
     if binding.dispatch != Some(crate::ast::FunctionDispatch::FieldSelect)
-        || binding.composite_field.is_some()
+        || binding.composite_field().is_some()
     {
         return Ok(());
     }
@@ -109,14 +109,14 @@ fn retain_field(
     };
     let descriptor = crate::expr::composites::descriptor(types.composite_types(), reference.oid)?;
     if let Some((_, attribute)) = descriptor.attribute(name) {
-        binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+        binding.set_composite_field(crate::ast::CompositeFieldBinding {
             collation_oid: Some(attribute.collation_oid()),
             type_oid: reference.oid,
             number: attribute.number,
             result_type: attribute.ty.clone(),
             dropped: false,
             changed_type: None,
-        }));
+        });
     }
     Ok(())
 }

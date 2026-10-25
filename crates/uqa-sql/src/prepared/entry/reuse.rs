@@ -213,7 +213,7 @@ fn tracked_field(binding: &FunctionBinding, composites: &CompositeInputs) -> boo
         && binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect)
         && binding.invocation.is_none()
         && binding.resolution_error.is_none()
-        && binding.composite_field.as_ref().is_some_and(|field| {
+        && binding.composite_field().is_some_and(|field| {
             composites.tracks_oid(field.type_oid)
                 && (independent_type(&field.result_type)
                     || composites.tracks_type(&field.result_type))

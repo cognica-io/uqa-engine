@@ -13,18 +13,19 @@ use uqa_execution::{
     PhysicalRow, RowSchema,
 };
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::{
-    ast::Statement, plan::ExpressionPlan, semantics::rules::analysis::RuleAnalysisContext, SQLError,
-};
+use uqa_sql::{plan::ExpressionPlan, semantics::rules::analysis::RuleAnalysisContext, SQLError};
 impl Engine {
     pub(crate) fn rule_analysis_context(&self) -> RuleAnalysisContext<'_> {
         RuleAnalysisContext {
             rules: self,
             sources: self,
             returning: self,
+            composites: uqa_sql::expr::EngineHook::composite_types(self),
         }
     }
-    pub(crate) fn rule_execution_context(&self) -> RuleContext<'_> {
+    pub(crate) fn rule_execution_context(
+        &self,
+    ) -> RuleContext<'_, crate::session::StatementReadSnapshot> {
         let runtime = self.query_runtime_view();
         RuleContext {
             memory: runtime.settings,
@@ -36,6 +37,8 @@ impl Engine {
             expressions: self,
             returning: self.returning_analysis_context(),
             assignment: self,
+            projection: None,
+            volatility: self,
         }
     }
 }
@@ -44,17 +47,42 @@ impl RuleSecurity for Engine {
         self.event_lookup_context().rule_privilege_subject(table)
     }
 }
-impl RuleStatements for Engine {
+impl RuleStatements<crate::session::StatementReadSnapshot> for Engine {
     fn execute(
         &self,
-        statement: Statement,
+        action: uqa_sql::semantics::rules::binding::RuleAction,
+        params: &[uqa_sql::SQLParam],
+        inherited_ctes: Option<
+            &uqa_execution::query::CteScope<crate::session::StatementReadSnapshot>,
+        >,
         privilege_subject: &RoleReference,
+        consumer: Option<std::rc::Rc<dyn uqa_execution::query::consumer::QueryRowConsumer + '_>>,
     ) -> Result<StatementOutput, SQLError> {
+        let planning = self.statement_planning_context();
+        let scopes = inherited_ctes.map(|parent| {
+            uqa_sql::binding::statements::InheritedStatementAnalysisScopes {
+                current: planning.analysis.scopes,
+                parent,
+            }
+        });
+        let planning = uqa_planner::statement_planning::executable::StatementPlanningContext {
+            analysis: uqa_sql::binding::statements::StatementAnalysisContext {
+                scopes: scopes
+                    .as_ref()
+                    .map_or(planning.analysis.scopes, |scope| scope),
+                ..planning.analysis
+            },
+            ..planning
+        };
+        let mut compiled = self.compiled_statement_context();
+        compiled.planning = &planning;
         uqa_execution::statement::compiled::execute_output_with_privilege_subject(
-            &self.compiled_statement_context(),
-            statement,
-            &[],
+            &compiled,
+            action,
+            params,
+            inherited_ctes,
             privilege_subject,
+            consumer,
         )
     }
 }

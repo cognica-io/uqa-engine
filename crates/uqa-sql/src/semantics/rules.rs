@@ -22,6 +22,8 @@ pub trait RuleCatalog {
 }
 
 pub mod binding;
+mod ctes;
+pub use ctes::validate_rule_cte_contract;
 pub fn validate_rule_returning_contract(
     catalog: &dyn RuleCatalog,
     table: &str,

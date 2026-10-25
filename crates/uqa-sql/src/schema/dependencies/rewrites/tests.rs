@@ -46,7 +46,7 @@ fn sequence_reference_rewriting_respects_selected_routines() {
                 builtin,
                 dispatch: None,
                 invocation: None,
-                composite_field: None,
+                value_binding: None,
                 resolution_error: None,
                 input_collation: None,
             }),

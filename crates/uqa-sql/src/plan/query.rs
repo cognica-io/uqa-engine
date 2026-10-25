@@ -100,6 +100,7 @@ impl QueryPlan {
             analyzed_output: None,
             analyzed_source: None,
             analyzed_grouping: None,
+            relation_privilege_subject: None,
             relations_bound: false,
             ctes,
             root,
@@ -275,6 +276,7 @@ pub(super) fn lower_relational_root(
             analyzed_output: None,
             analyzed_source: None,
             analyzed_grouping: None,
+            relation_privilege_subject: None,
             relations_bound: false,
             ctes: Vec::new(),
             root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(

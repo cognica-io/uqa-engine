@@ -72,10 +72,10 @@ fn needs_preparation<S: Clone + Send + Sync + 'static>(
         })
     }
     let mut scope = scope.clone();
+    let mut lookup = scope.enter_query_plan_scope(query)?;
     for cte in &query.ctes {
-        scope.insert_deferred(cte.clone());
+        lookup.insert_deferred(cte.clone());
     }
-    let mut lookup = scope.enter_relation_lookup_mode(query.relations_bound)?;
     let scope = lookup.enter_visible_ctes(query.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &*scope;
     for cte in &query.ctes {
@@ -175,6 +175,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut scope = parent.clone();
+    let mut lookup = scope.enter_query_plan_scope(query)?;
     let scheduled = crate::query::cte::strategy::schedule_plan_ctes(context.volatility, query)?;
     let folded = scheduled
         .iter()
@@ -186,8 +187,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
         .filter(|cte| !cte.deferred)
         .map(|cte| cte.plan.name.clone())
         .collect::<BTreeSet<_>>();
-    declare_ctes(context, query, params, &mut scope, &folded, outer)?;
-    let mut lookup = scope.enter_relation_lookup_mode(query.relations_bound)?;
+    declare_ctes(context, query, params, &mut lookup, &folded, outer)?;
     let names = query
         .ctes
         .iter()

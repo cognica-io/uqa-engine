@@ -239,6 +239,7 @@ fn command_statement_query(
         analyzed_output: None,
         analyzed_source: None,
         analyzed_grouping: None,
+        relation_privilege_subject: None,
         relations_bound: true,
         ctes: inputs.ctes,
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
@@ -566,7 +567,7 @@ fn mark_cte_relations_bound(body: &mut crate::plan::CtePlanBody) {
     }
 }
 
-fn mark_query_relations_bound(query: &mut QueryPlan) {
+pub(crate) fn mark_query_relations_bound(query: &mut QueryPlan) {
     query.relations_bound = true;
     for cte in &mut query.ctes {
         mark_cte_relations_bound(&mut cte.body);

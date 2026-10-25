@@ -31,11 +31,7 @@ pub fn try_build_retained_query_operator<'a, S: Clone + Send + Sync + 'static>(
         return Ok(None);
     }
     let mut scope = scope.clone();
-    scope.set_relation_lookup_mode(if plan.relations_bound {
-        uqa_sql::catalog::resolution::RelationLookupMode::Bound
-    } else {
-        uqa_sql::catalog::resolution::RelationLookupMode::Dynamic
-    })?;
+    let mut scope = scope.enter_query_plan_scope(plan)?;
     let prepared =
         crate::query::sources::prepared_queries::prepare(&context.source, plan, params, &scope)?;
     let plan = prepared.as_ref();
