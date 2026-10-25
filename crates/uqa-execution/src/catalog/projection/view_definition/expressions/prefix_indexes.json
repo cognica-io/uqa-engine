@@ -42,6 +42,328 @@
         "((ROW(1, 2)).f1)",
         "((ROW(1, 2)).f1)"
       ]
+    },
+    {
+      "input": "~(i | 4)",
+      "output": [
+        "((~ (i | 4)))",
+        "(~ (i | 4))"
+      ]
+    },
+    {
+      "input": "~(i & 4)",
+      "output": [
+        "((~ (i & 4)))",
+        "(~ (i & 4))"
+      ]
+    },
+    {
+      "input": "~(i # 4)",
+      "output": [
+        "((~ (i # 4)))",
+        "(~ (i # 4))"
+      ]
+    },
+    {
+      "input": "~(i << 2)",
+      "output": [
+        "((~ (i << 2)))",
+        "(~ (i << 2))"
+      ]
+    },
+    {
+      "input": "~(i >> 2)",
+      "output": [
+        "((~ (i >> 2)))",
+        "(~ (i >> 2))"
+      ]
+    },
+    {
+      "input": "~(~i)",
+      "output": [
+        "((~ (~ i)))",
+        "(~ (~ i))"
+      ]
+    },
+    {
+      "input": "~(+i)",
+      "output": [
+        "((~ (+ i)))",
+        "(~ (+ i))"
+      ]
+    },
+    {
+      "input": "+(~i)",
+      "output": [
+        "((+ (~ i)))",
+        "(+ (~ i))"
+      ]
+    },
+    {
+      "input": "+(+i)",
+      "output": [
+        "((+ (+ i)))",
+        "(+ (+ i))"
+      ]
+    },
+    {
+      "input": "@(i | 4)",
+      "output": [
+        "((@ (i | 4)))",
+        "(@ (i | 4))"
+      ]
+    },
+    {
+      "input": "@(@i)",
+      "output": [
+        "((@ (@ i)))",
+        "(@ (@ i))"
+      ]
+    },
+    {
+      "input": "|/(|/x)",
+      "output": [
+        "((|/ (|/ x)))",
+        "(|/ (|/ x))"
+      ]
+    },
+    {
+      "input": "||/(||/x)",
+      "output": [
+        "((||/ (||/ x)))",
+        "(||/ (||/ x))"
+      ]
+    },
+    {
+      "input": "~(i + 4)",
+      "output": [
+        "((~ (i + 4)))",
+        "(~ (i + 4))"
+      ]
+    },
+    {
+      "input": "~i | 4",
+      "output": [
+        "(((~ i) | 4))",
+        "((~ i) | 4)"
+      ]
+    },
+    {
+      "input": "~(b | 4::bigint)",
+      "output": [
+        "((~ (b | (4)::bigint)))",
+        "(~ (b | 4::bigint))"
+      ]
+    },
+    {
+      "input": "~(s | 4::smallint)",
+      "output": [
+        "((~ (s | (4)::smallint)))",
+        "(~ (s | 4::smallint))"
+      ]
+    },
+    {
+      "input": "-(~i)",
+      "output": [
+        "((- (~ i)))",
+        "(- (~ i))"
+      ]
+    },
+    {
+      "input": "|/((i | 4)::double precision)",
+      "output": [
+        "((|/ ((i | 4))::double precision))",
+        "(|/ (i | 4)::double precision)"
+      ]
+    },
+    {
+      "input": "(i | 4) & 3",
+      "output": [
+        "(((i | 4) & 3))",
+        "((i | 4) & 3)"
+      ]
+    },
+    {
+      "input": "i & (i | 4)",
+      "output": [
+        "((i & (i | 4)))",
+        "(i & (i | 4))"
+      ]
+    },
+    {
+      "input": "(i + 4) & 3",
+      "output": [
+        "(((i + 4) & 3))",
+        "((i + 4) & 3)"
+      ]
+    },
+    {
+      "input": "i & (i + 4)",
+      "output": [
+        "((i & (i + 4)))",
+        "(i & (i + 4))"
+      ]
+    },
+    {
+      "input": "(~i) + 4",
+      "output": [
+        "(((~ i) + 4))",
+        "((~ i) + 4)"
+      ]
+    },
+    {
+      "input": "(+i) + 4",
+      "output": [
+        "(((+ i) + 4))",
+        "((+ i) + 4)"
+      ]
+    },
+    {
+      "input": "(-i) + 4",
+      "output": [
+        "(((- i) + 4))",
+        "((- i) + 4)"
+      ]
+    },
+    {
+      "input": "-(-i)",
+      "output": [
+        "((- (- i)))",
+        "(- (- i))"
+      ]
+    },
+    {
+      "input": "-(i + 4)",
+      "output": [
+        "((- (i + 4)))",
+        "(- (i + 4))"
+      ]
+    },
+    {
+      "input": "(i % 3) + 4",
+      "output": [
+        "(((i % 3) + 4))",
+        "(i % 3 + 4)"
+      ]
+    },
+    {
+      "input": "i % (i + 4)",
+      "output": [
+        "((i % (i + 4)))",
+        "(i % (i + 4))"
+      ]
+    },
+    {
+      "input": "(i + 4) % 3",
+      "output": [
+        "(((i + 4) % 3))",
+        "((i + 4) % 3)"
+      ]
+    },
+    {
+      "input": "i % (i % 3)",
+      "output": [
+        "((i % (i % 3)))",
+        "(i % (i % 3))"
+      ]
+    },
+    {
+      "input": "(i % 3) % 4",
+      "output": [
+        "(((i % 3) % 4))",
+        "(i % 3 % 4)"
+      ]
+    },
+    {
+      "input": "(x ^ 2::double precision) ^ 3::double precision",
+      "output": [
+        "(((x ^ (2)::double precision) ^ (3)::double precision))",
+        "((x ^ 2::double precision) ^ 3::double precision)"
+      ]
+    },
+    {
+      "input": "x ^ (x ^ 3::double precision)",
+      "output": [
+        "((x ^ (x ^ (3)::double precision)))",
+        "(x ^ (x ^ 3::double precision))"
+      ]
+    },
+    {
+      "input": "(x ^ 2::double precision) + 3::double precision",
+      "output": [
+        "(((x ^ (2)::double precision) + (3)::double precision))",
+        "((x ^ 2::double precision) + 3::double precision)"
+      ]
+    },
+    {
+      "input": "x + (x ^ 2::double precision)",
+      "output": [
+        "((x + (x ^ (2)::double precision)))",
+        "(x + (x ^ 2::double precision))"
+      ]
+    },
+    {
+      "input": "x ^ (x + 1::double precision)",
+      "output": [
+        "((x ^ (x + (1)::double precision)))",
+        "(x ^ (x + 1::double precision))"
+      ]
+    },
+    {
+      "input": "+(i * 2)",
+      "output": [
+        "((+ (i * 2)))",
+        "(+ (i * 2))"
+      ]
+    },
+    {
+      "input": "@(-i)",
+      "output": [
+        "((@ (- i)))",
+        "(@ (- i))"
+      ]
+    },
+    {
+      "input": "~abs(i)",
+      "output": [
+        "((~ abs(i)))",
+        "(~ abs(i))"
+      ]
+    },
+    {
+      "input": "~CASE WHEN i > 0 THEN i ELSE 0 END",
+      "output": [
+        "((~\nCASE\n    WHEN (i > 0) THEN i\n    ELSE 0\nEND))",
+        "(~\nCASE\n    WHEN i > 0 THEN i\n    ELSE 0\nEND)"
+      ]
+    },
+    {
+      "input": "~COALESCE(i, 0)",
+      "output": [
+        "((~ COALESCE(i, 0)))",
+        "(~ COALESCE(i, 0))"
+      ]
+    },
+    {
+      "input": "~(i::bigint)",
+      "output": [
+        "((~ (i)::bigint))",
+        "(~ i::bigint)"
+      ]
+    },
+    {
+      "input": "(i & 3)::bigint",
+      "output": [
+        "(((i & 3))::bigint)",
+        "((i & 3)::bigint)"
+      ]
+    },
+    {
+      "input": "~((i | 4)::bigint)",
+      "output": [
+        "((~ ((i | 4))::bigint))",
+        "(~ (i | 4)::bigint)"
+      ]
     }
   ]
 }

@@ -81,6 +81,9 @@ pub(super) fn prefix_by_oid(oid: i64) -> Option<UnaryOperatorCatalogEntry> {
 
 // PostgreSQL 18.4 pg_operator identities; prefix numeric operators return their operand type.
 const PREFIX_SIGNATURES: &[(&str, &str, i64, i64)] = &[
+    ("~", "int8", 1889, 1907),
+    ("~", "int2", 1877, 1895),
+    ("~", "int4", 1883, 1901),
     ("+", "float4", 1919, 1913),
     ("+", "float8", 1920, 1914),
     ("+", "int2", 1917, 1911),

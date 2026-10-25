@@ -892,19 +892,19 @@ fn precedence(expression: &ScalarExpr) -> u8 {
         ScalarExpr::Binary { op, .. } => operator_precedence(*op),
         ScalarExpr::IsNull { .. } => 35,
         ScalarExpr::InList { .. } => 40,
-        ScalarExpr::UnaryMinus(_) => 70,
+        ScalarExpr::UnaryMinus(_) => 0,
         ScalarExpr::Cast { .. } => 80,
         _ => 100,
     }
 }
 
 fn numeric_operator_precedence(operator: uqa_sql::ast::NumericOperator) -> u8 {
-    use uqa_sql::ast::NumericOperator;
-    match operator {
-        NumericOperator::Modulo => 60,
-        NumericOperator::Power => 65,
-        NumericOperator::Plus => 70,
-        NumericOperator::Absolute | NumericOperator::SquareRoot | NumericOperator::CubeRoot => 45,
+    // PostgreSQL only simplifies nested binary +, -, *, / and % operators.
+    // Prefix, power and bitwise operators retain parentheses as operands.
+    if operator == uqa_sql::ast::NumericOperator::Modulo {
+        60
+    } else {
+        0
     }
 }
 

@@ -138,6 +138,14 @@ fn stored_operators_keep_selected_inputs_without_result_type_or_carrier_casts() 
         ("domain_value + n", "domain_value::numeric + n"),
         ("-n", "-n"),
         ("dynamic_column + f", "dynamic_column + f"),
+        ("b # i", "b # i::bigint"),
+        ("i | b", "i::bigint | b"),
+        ("b & 1", "b & 1::bigint"),
+        ("b >> i", "b >> i"),
+        ("~i", "~i"),
+        ("b % i", "b % i::bigint"),
+        ("n ^ i", "n ^ i::numeric"),
+        ("|/i", "|/(i::double precision)"),
     ] {
         let mut stored = expression(input);
         store_operand_coercions(&mut stored, &schema(), &[], &Catalog).unwrap();
