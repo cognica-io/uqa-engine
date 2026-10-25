@@ -59,3 +59,81 @@ fn formats_retain_native_plan_data_and_sql_result_identity() {
         }
     }
 }
+
+#[test]
+fn controlled_formats_reject_large_borrowed_diagnostics_before_copying_the_payload() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let body = UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0));
+    let physical = ExplainPhysicalPlan {
+        nodes: vec![serde_json::json!({"Relation Name": "<&한글\\\"".repeat(512 * 1024)})],
+        ..ExplainPhysicalPlan::default()
+    };
+    for format in [
+        ExplainFormat::Text,
+        ExplainFormat::Json,
+        ExplainFormat::Xml,
+        ExplainFormat::Yaml,
+    ] {
+        let budget = MemoryBudget::new(64 * 1024);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let settings = ExplainSettings {
+            format,
+            ..ExplainSettings::default()
+        };
+        let allocation = allocation_counter::measure(|| {
+            let error =
+                run_explain_with_control(&body, &settings, None, &physical, &control).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("53200"));
+        });
+        assert!(
+            allocation.bytes_max < 256 * 1024,
+            "{format:?}: {allocation:?}"
+        );
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
+fn controlled_formats_observe_both_cancellation_owners_and_release_scratch() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let body = UnifiedPlan::lower(
+        uqa_sql::compile("SELECT '<&한글' AS value")
+            .unwrap()
+            .remove(0),
+    );
+    for format in [
+        ExplainFormat::Text,
+        ExplainFormat::Json,
+        ExplainFormat::Xml,
+        ExplainFormat::Yaml,
+    ] {
+        for cancel_original in [true, false] {
+            let budget = MemoryBudget::new(1024 * 1024);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            if cancel_original {
+                original.cancel();
+            } else {
+                invoking.cancel();
+            }
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            let settings = ExplainSettings {
+                format,
+                verbose: true,
+                ..ExplainSettings::default()
+            };
+            let error = run_explain_with_control(
+                &body,
+                &settings,
+                None,
+                &ExplainPhysicalPlan::default(),
+                &control,
+            )
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("57014"));
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}

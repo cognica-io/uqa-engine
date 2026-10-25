@@ -62,7 +62,7 @@ impl Engine {
             events: self.event_lifecycle_context(),
             foreign: self,
             table_privileges: self,
-            explain: uqa_planner::explain::run_explain_with_physical,
+            explain: uqa_planner::explain::run_explain_with_control,
             physical_explain: self,
         }
     }
@@ -187,6 +187,12 @@ impl Engine {
 }
 
 impl context::StatementDiagnostics for Engine {
+    fn diagnostics_control(
+        &self,
+    ) -> Result<uqa_storage::read_control::StorageReadControl, uqa_sql::SQLError> {
+        self.query_retention_control()
+    }
+
     fn diagnostics_scope(
         &self,
     ) -> Result<uqa_execution::query::diagnostics::DiagnosticsScope, uqa_sql::SQLError> {

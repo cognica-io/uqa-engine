@@ -23,6 +23,7 @@ pub type PhysicalExplainRenderer = fn(
     &uqa_sql::explain::ExplainSettings,
     Option<&ExplainAnalysis>,
     &ExplainPhysicalPlan,
+    &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<SQLResult, SQLError>;
 
 /// Capture physical facts before an optional execution without invoking the explained query.
@@ -37,6 +38,9 @@ pub trait PhysicalExplainPlanning: Sync {
 }
 
 pub trait StatementDiagnostics: Sync {
+    fn diagnostics_control(
+        &self,
+    ) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
     fn diagnostics_scope(&self) -> Result<crate::query::diagnostics::DiagnosticsScope, SQLError>;
 }
 

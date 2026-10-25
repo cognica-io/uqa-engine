@@ -110,6 +110,8 @@ impl ParameterFlags {
     pub const REPORT: Self = Self(1 << 5);
     /// A string value is truncated to the length of an identifier (`GUC_IS_NAME`).
     pub const IS_NAME: Self = Self(1 << 6);
+    /// A nondefault value is reported by `EXPLAIN (SETTINGS)` (`GUC_EXPLAIN`).
+    pub const EXPLAIN: Self = Self(1 << 7);
 
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)

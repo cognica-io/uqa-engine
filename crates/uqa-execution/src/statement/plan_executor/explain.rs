@@ -5,7 +5,10 @@
 //
 
 use super::{CommandPlan, SQLError, SQLResult, UnifiedPlan, UnifiedPlanExecutor};
+use crate::query::consumer::QueryRowConsumer;
 use uqa_sql::explain::ExplainSettings;
+
+mod consumer;
 
 impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
     pub(super) fn execute_explain(
@@ -112,6 +115,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         destination: Option<&CommandPlan>,
         settings: &ExplainSettings,
     ) -> Result<SQLResult, SQLError> {
+        let planning_started = std::time::Instant::now();
         let planned = self
             .context
             .physical_explain
@@ -149,10 +153,22 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 self.params,
             )?;
         }
-        let physical = self
+        let mut physical = self
             .context
             .physical_explain
             .physical_explain_plan(body, self.params)?;
+        if settings.settings {
+            physical.settings = self
+                .context
+                .validation
+                .session
+                .parameter_settings()
+                .iter()
+                .filter(|setting| setting.is_explain_setting())
+                .map(|setting| (setting.definition.name, setting.shown()))
+                .collect();
+        }
+        physical.planning_elapsed = Some(planning_started.elapsed());
         let analysis = if settings.analyze {
             let diagnostics = self.context.diagnostics.diagnostics_scope()?;
             let started = std::time::Instant::now();
@@ -160,7 +176,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             executor
                 .privilege_subject
                 .clone_from(&self.privilege_subject);
-            let (result, rows) = if let Some(destination) = destination {
+            let (affected_rows, rows) = if let Some(destination) = destination {
                 crate::statement::validation::validate_plan(
                     &self.context.validation,
                     self.context.runtime.cancellation,
@@ -168,36 +184,71 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 )?;
                 let result = executor.execute_explained_destination(destination, body)?;
                 let rows = result.affected_rows;
-                (result, rows)
+                (result.affected_rows, rows)
             } else {
-                let result = executor.execute(body)?;
-                let rows = u64::try_from(result.rows.len()).map_err(|_| {
-                    SQLError::Internal("EXPLAIN ANALYZE row count exceeds u64".into())
-                })?;
-                (result, rows)
+                executor.consume_explained_output(body)?
             };
             Some(uqa_sql::result::ExplainAnalysis {
                 vector_searches: diagnostics.finish()?,
                 elapsed: started.elapsed(),
                 rows,
-                affected_rows: result.affected_rows,
+                affected_rows,
             })
         } else {
             None
         };
-        (self.context.explain)(body, settings, analysis.as_ref(), &physical)
+        self.render_explanation(body, settings, analysis.as_ref(), &physical)
     }
+    fn consume_explained_output(&mut self, body: &UnifiedPlan) -> Result<(u64, u64), SQLError> {
+        let consumer = std::rc::Rc::new(consumer::ExplainConsumer::new(
+            self.context.runtime.cancellation,
+        ));
+        let output = self.execute_for_output_mode(
+            body,
+            super::QueryOutputMode::physical_consumer(consumer.clone()),
+        )?;
+        match output {
+            super::StatementOutput::Query(_) => Ok((0, consumer.rows())),
+            super::StatementOutput::Mutation(output) => {
+                let affected_rows = output.affected_rows;
+                for batch in output.into_batches() {
+                    consumer.consume_batch(batch?)?;
+                }
+                Ok((affected_rows, consumer.rows()))
+            }
+            super::StatementOutput::Command(_) => Err(SQLError::Internal(
+                "EXPLAIN query execution returned a utility result".into(),
+            )),
+        }
+    }
+
     fn explain_utility(
         &self,
         body: &UnifiedPlan,
         settings: &ExplainSettings,
     ) -> Result<SQLResult, SQLError> {
-        (self.context.explain)(
+        self.render_explanation(
             body,
             settings,
             None,
             &uqa_sql::result::ExplainPhysicalPlan::default(),
         )
+    }
+
+    fn render_explanation(
+        &self,
+        body: &UnifiedPlan,
+        settings: &ExplainSettings,
+        analysis: Option<&uqa_sql::result::ExplainAnalysis>,
+        physical: &uqa_sql::result::ExplainPhysicalPlan,
+    ) -> Result<SQLResult, SQLError> {
+        let retained = self.context.diagnostics.diagnostics_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.context.runtime.cancellation,
+        );
+        (self.context.explain)(body, settings, analysis, physical, &control)
     }
 
     fn execute_explained_destination(

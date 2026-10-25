@@ -7,7 +7,10 @@
 //! Explain result rendering and query-block limit placement.
 
 use std::fmt::Write as _;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
+    Value,
+};
 use uqa_sql::{
     plan::{QueryBlockPlan, QueryPlan, RelationalPlan, UnifiedPlan},
     ResultRow, SQLError, SQLResult, ScalarExpr,
@@ -18,8 +21,10 @@ use uqa_sql::result::ExplainPhysicalPlan;
 
 mod formats;
 mod physical;
+mod properties;
 #[cfg(test)]
 mod tests;
+mod text;
 mod vector;
 pub use physical::{physical_plan, PhysicalExplainContext};
 
@@ -68,58 +73,69 @@ pub fn run_explain_with_physical(
     analysis: Option<&ExplainAnalysis>,
     physical: &ExplainPhysicalPlan,
 ) -> Result<SQLResult, SQLError> {
+    run_explain_with_control(
+        body,
+        settings,
+        analysis,
+        physical,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+/// Formatting borrows captured diagnostics and retains every constructed text/container lease until the legacy SQL result handoff.
+pub fn run_explain_with_control(
+    body: &UnifiedPlan,
+    settings: &uqa_sql::explain::ExplainSettings,
+    analysis: Option<&ExplainAnalysis>,
+    physical: &ExplainPhysicalPlan,
+    control: &ProductionControl<'_>,
+) -> Result<SQLResult, SQLError> {
     use uqa_sql::explain::ExplainFormat;
+    control.check()?;
     let utility = utility_description(body);
-    let plan_text = utility.map_or_else(
-        || plan_text(body, settings, analysis, physical),
-        |(_, text)| Ok(text.to_string()),
-    )?;
-    let (ty, values) = if settings.format == ExplainFormat::Text {
-        (
-            uqa_sql::ColumnType::Text,
-            plan_text
-                .lines()
-                .map(|line| Value::Str(line.into()))
-                .collect(),
-        )
-    } else {
-        let payload = utility.map_or_else(
-            || structured_plan(body, &plan_text, settings, analysis, physical),
-            |(label, _)| serde_json::Value::String(label.into()),
-        );
-        let (ty, value) = match settings.format {
-            ExplainFormat::Json => (
-                uqa_sql::ColumnType::Json,
-                Value::Json(
-                    serde_json::to_string_pretty(&vec![&payload])
-                        .map_err(|error| SQLError::Internal(error.to_string()))?,
-                ),
-            ),
-            ExplainFormat::Xml => (
-                uqa_sql::ColumnType::Xml,
-                Value::Str(if let Some((label, _)) = utility {
-                    formats::xml_utility(label)
-                } else {
-                    formats::xml(&payload)?
-                }),
-            ),
-            ExplainFormat::Yaml => (
-                uqa_sql::ColumnType::Text,
-                Value::Str(formats::yaml(&payload)?),
-            ),
-            ExplainFormat::Text => unreachable!(),
-        };
-        (ty, vec![value])
+    let plan_text = match utility {
+        Some((_, text)) => control.copy_text(text)?,
+        None => plan_text(body, settings, analysis, physical, *control)?,
     };
-    let rows = values
+    let mut cells = ProductionVec::new(*control);
+    let ty = if settings.format == ExplainFormat::Text {
+        for line in plan_text.lines() {
+            cells.push_produced(control.copy_text(line)?)?;
+        }
+        uqa_sql::ColumnType::Text
+    } else {
+        let payload = match utility {
+            Some((label, _)) => properties::Property::Text(label),
+            None => structured_plan(body, &plan_text, settings, analysis, physical, *control)?,
+        };
+        cells.push_produced(formats::render(
+            &payload,
+            settings.format,
+            utility.map(|(label, _)| label),
+            *control,
+        )?)?;
+        match settings.format {
+            ExplainFormat::Json => uqa_sql::ColumnType::Json,
+            ExplainFormat::Xml => uqa_sql::ColumnType::Xml,
+            _ => uqa_sql::ColumnType::Text,
+        }
+    };
+    let cells = cells.finish()?;
+    drop(plan_text);
+    // SQLResult is the existing ordinary API boundary. Move completed cell payloads into it while their construction leases remain alive; the receiver owns subsequent result retention.
+    let (cells, memory) = cells.into_parts();
+    let rows = cells
         .into_iter()
-        .map(|value| {
-            let mut row = ResultRow::new();
-            row.insert("QUERY PLAN".into(), value);
-            row
+        .map(|text| {
+            let value = if settings.format == ExplainFormat::Json {
+                Value::Json(text)
+            } else {
+                Value::Str(text)
+            };
+            ResultRow::from([("QUERY PLAN".into(), value)])
         })
         .collect();
-    Ok(SQLResult {
+    let result = SQLResult {
         kind: uqa_sql::SQLResultKind::Rows,
         command_tag: None,
         row_schema: None,
@@ -128,7 +144,10 @@ pub fn run_explain_with_physical(
         rows,
         positional_rows: None,
         affected_rows: 0,
-    })
+    };
+    control.check()?;
+    drop(memory);
+    Ok(result)
 }
 
 fn utility_description(body: &UnifiedPlan) -> Option<(&'static str, &'static str)> {
@@ -156,27 +175,48 @@ fn plan_text(
     settings: &uqa_sql::explain::ExplainSettings,
     analysis: Option<&ExplainAnalysis>,
     physical: &ExplainPhysicalPlan,
-) -> Result<String, SQLError> {
-    let mut text = match body {
-        UnifiedPlan::Query(query) => format_query_plan(query),
-        UnifiedPlan::Command(command) => format!("{}\n  {command:#?}", command.name()),
+    control: ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    let base = match body {
+        UnifiedPlan::Query(query) => text::query(query, control)?,
+        UnifiedPlan::Command(command) => {
+            control.format(format_args!("{}\n  {command:#?}", command.name()))?
+        }
     };
+    let mut text = ProductionString::from_produced(base, control)?;
     if settings.verbose {
-        write!(text, "\n  verbose=true\n  physical_plan={body:#?}")
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        let _ = write!(text, "\n  verbose=true\n  physical_plan={body:#?}");
     }
     if settings.format != uqa_sql::explain::ExplainFormat::Text {
-        return Ok(text);
+        return Ok(text.finish()?);
     }
     for node in &physical.nodes {
-        let rendered = serde_json::to_string_pretty(node)
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        let rendered = formats::json(&properties::Property::Json(node), control)?;
         for line in rendered.lines() {
-            let _ = write!(text, "\n  {line}");
+            text.push_str("\n  ")?;
+            text.push_str(line)?;
         }
     }
+    if settings.settings && !physical.settings.is_empty() {
+        text.push_str("\nSettings: ")?;
+        for (index, (name, value)) in physical.settings.iter().enumerate() {
+            if index != 0 {
+                text.push_str(", ")?;
+            }
+            text.push_str(name)?;
+            text.push_str(" = ")?;
+            text.push_str(&uqa_sql::expr::quote_literal_with_control(value, &control)?)?;
+        }
+    }
+    if let Some(elapsed) = physical.planning_elapsed.filter(|_| settings.summary) {
+        let _ = write!(
+            text,
+            "\nPlanning Time: {:.3} ms",
+            elapsed.as_secs_f64() * 1_000.0
+        );
+    }
     if let Some(analysis) = analysis {
-        vector::append_text(&mut text, analysis)?;
+        vector::append_text(&mut text, analysis, control)?;
         let _ = write!(
             text,
             "\n  actual_rows={}\n  affected_rows={}",
@@ -190,16 +230,18 @@ fn plan_text(
             );
         }
     }
-    Ok(text)
+    Ok(text.finish()?)
 }
 
-fn structured_plan(
+fn structured_plan<'a>(
     body: &UnifiedPlan,
-    text: &str,
+    text: &'a str,
     settings: &uqa_sql::explain::ExplainSettings,
-    analysis: Option<&ExplainAnalysis>,
-    physical: &ExplainPhysicalPlan,
-) -> serde_json::Value {
+    analysis: Option<&'a ExplainAnalysis>,
+    physical: &'a ExplainPhysicalPlan,
+    control: ProductionControl<'_>,
+) -> Result<properties::Property<'a>, SQLError> {
+    use properties::{array, object, Object, Property as P};
     let node = match body {
         UnifiedPlan::Query(query) => match &query.root {
             RelationalPlan::QueryBlock(_) => "Select",
@@ -208,94 +250,69 @@ fn structured_plan(
         },
         UnifiedPlan::Command(command) => command.name(),
     };
-    let mut plan =
-        serde_json::json!({"Node Type": node, "UQA Plan": text.lines().collect::<Vec<_>>()});
+    let mut plan = Object::new(control);
+    plan.insert("Node Type", P::Text(node))?;
+    plan.insert("UQA Plan", P::Lines(text))?;
     if let Some(analysis) = analysis {
-        plan["Actual Rows"] = analysis.rows.into();
-        plan["Affected Rows"] = analysis.affected_rows.into();
+        plan.insert("Actual Rows", P::Unsigned(analysis.rows))?;
+        plan.insert("Affected Rows", P::Unsigned(analysis.affected_rows))?;
     }
-    let mut payload = serde_json::json!({"Plan": plan});
+    let mut payload = Object::new(control);
+    payload.insert("Plan", plan.finish()?)?;
+    if settings.settings {
+        payload.insert(
+            "Settings",
+            object(
+                control,
+                physical
+                    .settings
+                    .iter()
+                    .map(|(key, value)| (*key, P::Text(value))),
+            )?,
+        )?;
+    }
+    if let Some(elapsed) = physical.planning_elapsed.filter(|_| settings.summary) {
+        payload.insert("Planning Time", P::Float(elapsed.as_secs_f64() * 1_000.0))?;
+    }
     if let Some(analysis) = analysis {
-        payload["Vector Searches"] = serde_json::Value::Array(
-            analysis
-                .vector_searches
-                .iter()
-                .map(|search| vector::record(search))
-                .collect(),
-        );
+        payload.insert(
+            "Vector Searches",
+            array(
+                control,
+                analysis
+                    .vector_searches
+                    .iter()
+                    .map(|search| vector::record(search, control)),
+            )?,
+        )?;
         if settings.summary {
-            payload["Execution Time"] = (analysis.elapsed.as_secs_f64() * 1_000.0).into();
+            payload.insert(
+                "Execution Time",
+                P::Float(analysis.elapsed.as_secs_f64() * 1_000.0),
+            )?;
         }
     }
     if !physical.nodes.is_empty() {
-        payload["Physical Plans"] = serde_json::Value::Array(physical.nodes.clone());
+        payload.insert(
+            "Physical Plans",
+            array(control, physical.nodes.iter().map(|node| Ok(P::Json(node))))?,
+        )?;
     }
-    payload
+    payload.finish()
 }
 
 pub fn format_query_plan(plan: &QueryPlan) -> String {
-    match &plan.root {
-        RelationalPlan::QueryBlock(block) => format_select_plan(block),
-        RelationalPlan::SetOp {
-            kind,
-            all,
-            left,
-            right,
-            order_by,
-            limit,
-            offset,
-            ..
-        } => format!(
-            "SetOp\n  kind={kind:?}\n  all={all}\n  left=({})\n  right=({})\n  order_by={}\n  limit={}\n  offset={}",
-            format_query_plan(left).replace('\n', "\n    "),
-            format_query_plan(right).replace('\n', "\n    "),
-            order_by.len(),
-            limit
-                .as_deref()
-                .map_or_else(|| "none".into(), explain_int_expr),
-            offset
-                .as_deref()
-                .map_or_else(|| "none".into(), explain_int_expr),
-        ),
-        RelationalPlan::Values { rows, .. } => format!("Values\n  rows={}", rows.len()),
-    }
+    text::query(plan, ProductionControl::uncontrolled())
+        .expect("ordinary plan formatting")
+        .into_uncontrolled()
+        .expect("ordinary plan owner")
 }
 
-pub fn format_select_plan(stmt: &QueryBlockPlan) -> String {
-    use std::fmt::Write as _;
-    let mut s = String::new();
-    let _ = writeln!(s, "Select");
-    if !stmt.projections.is_empty() {
-        let _ = writeln!(s, "  projections={}", stmt.projections.len());
-    }
-    if let Some(from) = &stmt.from {
-        let _ = writeln!(s, "  from={from:?}");
-    }
-    if stmt.r#where.is_some() {
-        let _ = writeln!(s, "  where=<expr>");
-    }
-    if !stmt.group_by.is_empty() {
-        let _ = writeln!(s, "  group_by={}", stmt.group_by.len());
-    }
-    if !stmt.grouping_sets.is_empty() {
-        let _ = writeln!(s, "  grouping_sets={}", stmt.grouping_sets.len());
-    }
-    if !stmt.order_by.is_empty() {
-        let _ = writeln!(s, "  order_by={}", stmt.order_by.len());
-    }
-    if let Some(expr) = stmt.limit.as_ref() {
-        let _ = writeln!(s, "  limit={}", explain_int_expr(expr));
-    }
-    if let Some(expr) = stmt.offset.as_ref() {
-        let _ = writeln!(s, "  offset={}", explain_int_expr(expr));
-    }
-    if stmt.distinct {
-        let _ = writeln!(s, "  distinct=true");
-    }
-    if !stmt.locking.is_empty() {
-        let _ = writeln!(s, "  locking={}", stmt.locking.len());
-    }
-    s.trim_end().to_string()
+pub fn format_select_plan(plan: &QueryBlockPlan) -> String {
+    text::select(plan, ProductionControl::uncontrolled())
+        .expect("ordinary query block formatting")
+        .into_uncontrolled()
+        .expect("ordinary plan owner")
 }
 
 pub use uqa_sql::semantics::{select_execution_stmt, should_defer_distinct_limit};

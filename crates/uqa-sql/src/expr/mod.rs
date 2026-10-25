@@ -49,7 +49,8 @@ pub use array_transform::{
 };
 pub(crate) use json::{decode_jsonb_datum_with_control, encode_jsonb_datum};
 pub use json::{
-    validate_json_object_key_type, validate_json_object_key_type_with_catalog, value_to_json_text,
+    quote_json_string_with_control, validate_json_object_key_type,
+    validate_json_object_key_type_with_catalog, value_to_json_text,
     value_to_json_text_with_catalog,
 };
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
@@ -162,7 +163,7 @@ pub use in_range::{in_range, in_range_with_engine};
 use scalar_dispatch::eval_scalar_function;
 pub(crate) use scalar_helpers::{append_sql_literal, quote_ident_with_control};
 use scalar_helpers::{point_xy, typeof_value};
-pub use scalar_helpers::{quote_ident, CompiledLikePattern};
+pub use scalar_helpers::{quote_ident, quote_literal_with_control, CompiledLikePattern};
 pub use statement_cancellation::{
     check_statement_cancellation, statement_cancellation, StatementCancellationScope,
 };

@@ -122,6 +122,14 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
     }
 
     pub fn execute_query_to_spill(&self, plan: &UnifiedPlan) -> Result<QueryOutput, SQLError> {
+        self.execute_query_output(plan, QueryOutputMode::SharedSpill)
+    }
+
+    fn execute_query_output(
+        &self,
+        plan: &UnifiedPlan,
+        output: QueryOutputMode<'_, S>,
+    ) -> Result<QueryOutput, SQLError> {
         super::validation::validate_plan(
             &self.context.validation,
             self.context.runtime.cancellation,
@@ -147,7 +155,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             query,
             self.params,
             &mut ctes,
-            QueryOutputMode::SharedSpill,
+            output,
         )
     }
 

@@ -21,6 +21,13 @@ pub struct ParameterSetting {
 }
 
 impl ParameterSetting {
+    /// Whether EXPLAIN reports this effective value, independently of its session or transaction-local origin.
+    pub fn is_explain_setting(&self) -> bool {
+        self.definition
+            .has_flag(super::definition::ParameterFlags::EXPLAIN)
+            && self.setting != self.definition.boot_setting()
+    }
+
     /// The setting as `SHOW` reports it.
     pub fn shown(&self) -> String {
         super::value::show_setting(self.definition, &self.setting)

@@ -29,6 +29,14 @@ pub(crate) use production::{
 
 pub(super) use path::{jsonpath_candidate, jsonpath_match};
 
+/// Quote borrowed UTF-8 with the native JSON string escaper, charging output and bounded scratch to the invoking allowance.
+pub fn quote_json_string_with_control(
+    text: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<String>> {
+    production::quote_with_control(text, control)
+}
+
 pub(super) fn parse_json(s: &str) -> Result<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(s)
         .map_err(|_| super::json_strip::invalid_json_input(s))

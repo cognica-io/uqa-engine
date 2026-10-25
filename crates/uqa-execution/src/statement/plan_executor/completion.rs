@@ -14,8 +14,17 @@ use uqa_sql::{
 
 impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
     pub fn execute_for_output(&mut self, plan: &UnifiedPlan) -> Result<StatementOutput, SQLError> {
+        self.execute_for_output_mode(plan, super::QueryOutputMode::SharedSpill)
+    }
+
+    /// Query consumers share the ordinary statement validation, snapshot and completion boundary; mutation output remains bounded by its native RETURNING owner.
+    pub(super) fn execute_for_output_mode(
+        &mut self,
+        plan: &UnifiedPlan,
+        mode: super::QueryOutputMode<'_, S>,
+    ) -> Result<StatementOutput, SQLError> {
         let output = match plan {
-            UnifiedPlan::Query(_) => StatementOutput::Query(self.execute_query_to_spill(plan)?),
+            UnifiedPlan::Query(_) => StatementOutput::Query(self.execute_query_output(plan, mode)?),
             UnifiedPlan::Command(command)
                 if matches!(
                     command.as_ref(),

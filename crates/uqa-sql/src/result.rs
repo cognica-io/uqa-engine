@@ -256,4 +256,8 @@ pub struct ExplainAnalysis {
 #[derive(Debug, Clone, Default)]
 pub struct ExplainPhysicalPlan {
     pub nodes: Vec<serde_json::Value>,
+    /// Nondefault planning parameters captured from the invoking session before execution.
+    pub settings: Vec<(&'static str, String)>,
+    /// Time spent producing this invocation's optimized plan and physical metadata.
+    pub planning_elapsed: Option<std::time::Duration>,
 }

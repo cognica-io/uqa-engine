@@ -298,6 +298,38 @@ static void explained_results(uqa_engine engine, uqa_result result) {
     }
 }
 
+static void explained_stream_and_settings(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_value snapshot = NULL;
+    uqa_value_view view = NULL;
+    uqa_string_view text = {NULL, 0};
+    uint8_t is_null = 0;
+    CHECK(uqa_engine_execute(engine, "SET work_mem TO '64kB'", result));
+    CHECK(uqa_statement_prepare(engine,
+        "EXPLAIN (ANALYZE, SETTINGS, SUMMARY FALSE, TIMING FALSE, FORMAT JSON) "
+        "SELECT repeat('x', 4096) || n::text FROM generate_series(1, 1024) AS g(n)", &statement));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_result_get_value(result, 0, 0, &view));
+    CHECK(uqa_value_create_copy(view, &snapshot));
+    CHECK(uqa_statement_finalize(&statement));
+    view = snapshot;
+    CHECK(uqa_engine_execute_params(engine,
+        "SELECT ($1->0->'Plan'->>'Actual Rows')::bigint, "
+        "$1->0->'Settings'->>'work_mem', $1->0->>'Planning Time', $1->0->>'Execution Time'",
+        &view, 1, result));
+    CHECK(uqa_value_destroy(&snapshot));
+    assert(integer(result, 0) == 1024);
+    CHECK(uqa_result_get_value(result, 0, 1, &view));
+    CHECK(uqa_value_get_text(view, &text));
+    assert(equal(text, "64kB"));
+    for (uint32_t column = 2; column < 4; column++) {
+        CHECK(uqa_result_get_value(result, 0, column, &view));
+        CHECK(uqa_value_get_is_null(view, &is_null));
+        assert(is_null);
+    }
+    CHECK(uqa_engine_execute(engine, "RESET work_mem", result));
+}
+
 static void explained_read_only_destination(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_value_view value = NULL;
@@ -632,6 +664,7 @@ int main(void) {
     procedure_statements(engine, result);
     explained_inputs(engine, result);
     explained_results(engine, result);
+    explained_stream_and_settings(engine, result);
     explained_read_only_destination(engine, result);
     xml_values(engine, result);
     CHECK(uqa_result_destroy(&result));

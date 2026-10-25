@@ -4,119 +4,251 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! XML and YAML encodings of the same native structured explanation.
+//! Stream JSON, XML and YAML from the same borrowed properties into an admitted destination.
 
-use serde_json::Value;
-use std::fmt::Write as _;
-use uqa_sql::SQLError;
+use super::properties::{Kind, Property, View};
+use uqa_core::memory::{Produced, ProductionControl, ProductionString};
+use uqa_sql::{explain::ExplainFormat, SQLError};
 
-pub(super) fn xml_utility(label: &str) -> String {
-    format!(
-        "<explain xmlns=\"http://www.postgresql.org/2009/explain\">\n  <{} />\n</explain>",
-        label.replace(' ', "-")
-    )
+struct Writer<'a> {
+    output: ProductionString<'a>,
+    control: ProductionControl<'a>,
 }
 
-pub(super) fn xml(query: &Value) -> Result<String, SQLError> {
-    let mut output = String::from("<explain xmlns=\"http://www.postgresql.org/2009/explain\">\n");
-    xml_value(&mut output, "Query", query, 1)?;
-    output.push_str("</explain>");
-    Ok(output)
-}
-
-fn xml_value(output: &mut String, key: &str, value: &Value, depth: usize) -> Result<(), SQLError> {
-    let mut tag = String::new();
-    if !key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
-        tag.push_str("Property-");
+pub(super) fn render(
+    query: &Property<'_>,
+    format: ExplainFormat,
+    utility: Option<&str>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    let mut writer = Writer {
+        output: ProductionString::new(control),
+        control,
+    };
+    match format {
+        ExplainFormat::Json => {
+            writer.output.push_str("[\n  ")?;
+            writer.json(View::Native(query), 1)?;
+            writer.output.push_str("\n]")?;
+        }
+        ExplainFormat::Xml => {
+            writer
+                .output
+                .push_str("<explain xmlns=\"http://www.postgresql.org/2009/explain\">\n")?;
+            if let Some(label) = utility {
+                writer.output.push_str("  <")?;
+                writer.xml_tag(label)?;
+                writer.output.push_str(" />\n")?;
+            } else {
+                writer.xml("Query", View::Native(query), 1)?;
+            }
+            writer.output.push_str("</explain>")?;
+        }
+        ExplainFormat::Yaml => {
+            if matches!(View::Native(query).kind(), Kind::Text(_)) {
+                writer.output.push_str("- ")?;
+                writer.json(View::Native(query), 0)?;
+            } else {
+                writer.output.push_str("-\n")?;
+                writer.yaml(View::Native(query), 1)?;
+            }
+        }
+        ExplainFormat::Text => unreachable!("text plans use their native line renderer"),
     }
-    tag.extend(key.chars().map(|c| {
-        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-            c
+    Ok(writer.output.finish()?)
+}
+
+pub(super) fn json(
+    property: &Property<'_>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    let mut writer = Writer {
+        output: ProductionString::new(control),
+        control,
+    };
+    writer.json(View::Native(property), 0)?;
+    Ok(writer.output.finish()?)
+}
+
+impl Writer<'_> {
+    fn indent(&mut self, depth: usize) -> Result<(), SQLError> {
+        for _ in 0..depth {
+            self.output.push_str("  ")?;
+        }
+        Ok(())
+    }
+
+    fn quoted(&mut self, text: &str) -> Result<(), SQLError> {
+        let quoted = uqa_sql::expr::quote_json_string_with_control(text, &self.control)?;
+        self.output.push_str(&quoted)?;
+        Ok(())
+    }
+
+    fn json(&mut self, value: View<'_>, depth: usize) -> Result<(), SQLError> {
+        self.control.check()?;
+        match value.kind() {
+            Kind::Null => self.output.push_str("null")?,
+            Kind::Bool(value) => self.output.push_str(if value { "true" } else { "false" })?,
+            Kind::Text(text) => self.quoted(text)?,
+            Kind::Number(value) => self
+                .output
+                .push_str(&self.control.format(format_args!("{value}"))?)?,
+            Kind::Object(fields) => {
+                self.output.push('{')?;
+                let mut fields = fields.peekable();
+                let empty = fields.peek().is_none();
+                while let Some((key, value)) = fields.next() {
+                    self.output.push('\n')?;
+                    self.indent(depth + 1)?;
+                    self.quoted(key)?;
+                    self.output.push_str(": ")?;
+                    self.json(value, depth + 1)?;
+                    if fields.peek().is_some() {
+                        self.output.push(',')?;
+                    }
+                }
+                if !empty {
+                    self.output.push('\n')?;
+                    self.indent(depth)?;
+                }
+                self.output.push('}')?;
+            }
+            Kind::Array(values) => {
+                self.output.push('[')?;
+                let mut values = values.peekable();
+                let empty = values.peek().is_none();
+                while let Some(value) = values.next() {
+                    self.output.push('\n')?;
+                    self.indent(depth + 1)?;
+                    self.json(value, depth + 1)?;
+                    if values.peek().is_some() {
+                        self.output.push(',')?;
+                    }
+                }
+                if !empty {
+                    self.output.push('\n')?;
+                    self.indent(depth)?;
+                }
+                self.output.push(']')?;
+            }
+        }
+        Ok(())
+    }
+
+    fn xml_tag(&mut self, key: &str) -> Result<(), SQLError> {
+        if !key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            self.output.push_str("Property-")?;
+        }
+        for c in key.chars() {
+            self.output
+                .push(if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '-'
+                })?;
+        }
+        Ok(())
+    }
+
+    fn xml_text(&mut self, text: &str) -> Result<(), SQLError> {
+        for c in text.chars() {
+            match c {
+                '&' => self.output.push_str("&amp;")?,
+                '<' => self.output.push_str("&lt;")?,
+                '>' => self.output.push_str("&gt;")?,
+                '"' => self.output.push_str("&quot;")?,
+                '\'' => self.output.push_str("&apos;")?,
+                c => self.output.push(c)?,
+            }
+        }
+        Ok(())
+    }
+
+    fn xml(&mut self, key: &str, value: View<'_>, depth: usize) -> Result<(), SQLError> {
+        self.control.check()?;
+        self.indent(depth)?;
+        self.output.push('<')?;
+        self.xml_tag(key)?;
+        self.output.push('>')?;
+        match value.kind() {
+            Kind::Object(fields) => {
+                self.output.push('\n')?;
+                for (key, value) in fields {
+                    self.xml(key, value, depth + 1)?;
+                }
+                self.indent(depth)?;
+            }
+            Kind::Array(values) => {
+                self.output.push('\n')?;
+                for value in values {
+                    self.xml("Item", value, depth + 1)?;
+                }
+                self.indent(depth)?;
+            }
+            Kind::Text(text) => self.xml_text(text)?,
+            Kind::Null => {}
+            Kind::Bool(value) => self.output.push_str(if value { "true" } else { "false" })?,
+            Kind::Number(value) => self
+                .output
+                .push_str(&self.control.format(format_args!("{value}"))?)?,
+        }
+        self.output.push_str("</")?;
+        self.xml_tag(key)?;
+        self.output.push_str(">\n")?;
+        Ok(())
+    }
+
+    fn yaml(&mut self, value: View<'_>, depth: usize) -> Result<(), SQLError> {
+        self.control.check()?;
+        match value.kind() {
+            Kind::Object(fields) => {
+                let mut fields = fields.peekable();
+                if fields.peek().is_none() {
+                    self.indent(depth)?;
+                    self.output.push_str("{}\n")?;
+                }
+                for (key, value) in fields {
+                    self.indent(depth)?;
+                    self.quoted(key)?;
+                    self.output.push(':')?;
+                    self.yaml_child(value, depth)?;
+                }
+            }
+            Kind::Array(values) => {
+                let mut values = values.peekable();
+                if values.peek().is_none() {
+                    self.indent(depth)?;
+                    self.output.push_str("[]\n")?;
+                }
+                for value in values {
+                    self.indent(depth)?;
+                    self.output.push('-')?;
+                    self.yaml_child(value, depth)?;
+                }
+            }
+            _ => {
+                self.indent(depth)?;
+                self.json(value, depth)?;
+                self.output.push('\n')?;
+            }
+        }
+        Ok(())
+    }
+
+    fn yaml_child(&mut self, value: View<'_>, depth: usize) -> Result<(), SQLError> {
+        let nested = match value.kind() {
+            Kind::Object(mut fields) => fields.next().is_some(),
+            Kind::Array(mut values) => values.next().is_some(),
+            _ => false,
+        };
+        if nested {
+            self.output.push('\n')?;
+            self.yaml(value, depth + 1)
         } else {
-            '-'
-        }
-    }));
-    let indent = "  ".repeat(depth);
-    write!(output, "{indent}<{tag}>").map_err(format_error)?;
-    match value {
-        Value::Object(fields) => {
-            output.push('\n');
-            for (key, value) in fields {
-                xml_value(output, key, value, depth + 1)?;
-            }
-            output.push_str(&indent);
-        }
-        Value::Array(items) => {
-            output.push('\n');
-            for item in items {
-                xml_value(output, "Item", item, depth + 1)?;
-            }
-            output.push_str(&indent);
-        }
-        Value::Null => {}
-        Value::String(text) => escape_xml(output, text),
-        value => escape_xml(output, &value.to_string()),
-    }
-    writeln!(output, "</{tag}>").map_err(format_error)
-}
-
-fn escape_xml(output: &mut String, text: &str) {
-    for character in text.chars() {
-        match character {
-            '&' => output.push_str("&amp;"),
-            '<' => output.push_str("&lt;"),
-            '>' => output.push_str("&gt;"),
-            '"' => output.push_str("&quot;"),
-            '\'' => output.push_str("&apos;"),
-            character => output.push(character),
+            self.output.push(' ')?;
+            self.json(value, depth)?;
+            self.output.push('\n')?;
+            Ok(())
         }
     }
-}
-
-pub(super) fn yaml(query: &Value) -> Result<String, SQLError> {
-    if let Value::String(label) = query {
-        return Ok(format!("- {}", quoted(label)?));
-    }
-    let mut output = String::from("-\n");
-    yaml_value(&mut output, query, 1)?;
-    Ok(output)
-}
-
-fn yaml_value(output: &mut String, value: &Value, depth: usize) -> Result<(), SQLError> {
-    let indent = "  ".repeat(depth);
-    match value {
-        Value::Object(fields) if !fields.is_empty() => {
-            for (key, value) in fields {
-                write!(output, "{indent}{}:", quoted(key)?).map_err(format_error)?;
-                yaml_child(output, value, depth)?;
-            }
-        }
-        Value::Array(items) if !items.is_empty() => {
-            for item in items {
-                write!(output, "{indent}-").map_err(format_error)?;
-                yaml_child(output, item, depth)?;
-            }
-        }
-        value => writeln!(output, "{indent}{value}").map_err(format_error)?,
-    }
-    Ok(())
-}
-
-fn yaml_child(output: &mut String, value: &Value, depth: usize) -> Result<(), SQLError> {
-    if matches!(value, Value::Object(fields) if !fields.is_empty())
-        || matches!(value, Value::Array(items) if !items.is_empty())
-    {
-        output.push('\n');
-        yaml_value(output, value, depth + 1)
-    } else {
-        writeln!(output, " {value}").map_err(format_error)
-    }
-}
-
-fn quoted(text: &str) -> Result<String, SQLError> {
-    serde_json::to_string(text).map_err(|error| SQLError::Internal(error.to_string()))
-}
-
-fn format_error(error: std::fmt::Error) -> SQLError {
-    SQLError::Internal(format!("format native EXPLAIN: {error}"))
 }
