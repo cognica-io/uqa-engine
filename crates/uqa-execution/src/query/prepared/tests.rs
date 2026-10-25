@@ -19,7 +19,7 @@ use uqa_sql::{
     plan::{CommandPlan, ExpressionPlan, QueryPlan, UnifiedPlan},
     prepared::arguments::ArgumentValidationContext,
     semantics::volatility::VolatilityCatalog,
-    ColumnType, ResultRow, RowSchema, SQLError, SQLParam,
+    ColumnType, RowSchema, SQLError, SQLParam,
 };
 
 #[derive(Default)]
@@ -94,12 +94,12 @@ impl AssignmentContext for Scopes {
     fn evaluate_domain_check(
         &self,
         _: &Expr,
-        row: &ResultRow,
+        row: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         self.record("domain");
         Ok(Value::Bool(
-            matches!(row["value"], Value::Int(value) if value > 0),
+            matches!(row.column("value"), Some(Value::Int(value)) if *value > 0),
         ))
     }
 }

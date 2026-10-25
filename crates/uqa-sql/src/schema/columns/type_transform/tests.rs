@@ -101,7 +101,7 @@ impl crate::assignment::AssignmentContext for Catalog {
     fn evaluate_domain_check(
         &self,
         _: &Expr,
-        _: &crate::ResultRow,
+        _: &dyn crate::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         panic!("planning does not evaluate domain constraints")

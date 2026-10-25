@@ -35,7 +35,7 @@ impl uqa_sql::assignment::AssignmentContext for Types {
     fn evaluate_domain_check(
         &self,
         _: &uqa_sql::ast::Expr,
-        _: &uqa_sql::ResultRow,
+        _: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         panic!("unexpected domain check")

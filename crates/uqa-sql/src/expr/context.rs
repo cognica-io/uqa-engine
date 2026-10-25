@@ -160,6 +160,20 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Apply domain input with the invoking value's allowance and cancellation owners. Native catalogs override this method so base conversion and checks retain that control; the default admits results returned by an external legacy adapter.
+    fn cast_domain_with_control(
+        &self,
+        value: &Value,
+        source: Option<&str>,
+        target: &ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Value>>> {
+        control.check()?;
+        self.cast_domain(value, source, target)?
+            .map(|value| control.retain_external_value(value).map_err(SQLError::from))
+            .transpose()
+    }
+
     /// Resolve a regtype cast to its OID carrier when a complete type catalog is available.
     fn resolve_regtype_input(&self, _name: &str) -> Result<Option<i64>> {
         Ok(None)

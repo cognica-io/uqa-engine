@@ -65,8 +65,10 @@ impl NumericCast {
         control.check()?;
         let target = self.target_type();
         if let Some(engine) = engine {
-            if let Some(output) = engine.cast_domain(value, Some(source_name), &target)? {
-                return Ok(control.retain_external_value(output)?);
+            if let Some(output) =
+                engine.cast_domain_with_control(value, Some(source_name), &target, control)?
+            {
+                return Ok(output);
             }
         }
         self.evaluate(value, control)

@@ -92,6 +92,17 @@ impl uqa_sql::expr::EngineHook for Engine {
     ) -> Result<Option<Value>, SQLError> {
         uqa_sql::assignment::domain::cast_domain_value(self, value, source, target)
     }
+    fn cast_domain_with_control(
+        &self,
+        value: &Value,
+        source: Option<&str>,
+        target: &uqa_sql::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Value>>, SQLError> {
+        uqa_sql::assignment::domain::cast_domain_value_with_control(
+            self, value, source, target, control,
+        )
+    }
     fn resolve_type_name(
         &self,
         name: &str,

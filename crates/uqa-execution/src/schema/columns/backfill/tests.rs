@@ -20,7 +20,7 @@ use uqa_sql::{
     expr::EngineHook,
     plan::{ExpressionPlan, QueryPlan},
     semantics::partition::PartitionExpressions,
-    ResultRow, SQLParam,
+    SQLParam,
 };
 use uqa_storage::document_store::Document;
 
@@ -134,7 +134,7 @@ impl AssignmentContext for Fixture {
     fn evaluate_domain_check(
         &self,
         _: &Expr,
-        _: &ResultRow,
+        _: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         self.checks.fetch_add(1, Ordering::Relaxed);

@@ -31,17 +31,32 @@ pub fn validate_with_notices(
     option: XmlOption,
     notice: impl FnMut(crate::SQLNotice),
 ) -> Result<(), SQLError> {
+    validate_with_control(input, option, &ProductionControl::uncontrolled(), notice)
+}
+
+/// Validate while charging native parser allocations and checking both cancellation owners between bounded input reads and allocations.
+pub fn validate_with_control(
+    input: &str,
+    option: XmlOption,
+    control: &ProductionControl<'_>,
+    notice: impl FnMut(crate::SQLNotice),
+) -> Result<(), SQLError> {
+    control.check()?;
     let declaration = if option == XmlOption::Content {
-        declaration::parse(input).map_err(|detail| error(option, true, Some(detail.into())))?
+        declaration::parse(input, control).map_err(|failure| match failure {
+            declaration::Failure::Invalid(detail) => error(option, true, Some(detail.into())),
+            declaration::Failure::Control(error) => error.into(),
+        })?
     } else {
         declaration::Declaration::default()
     };
     let body = &input[declaration.length..];
-    let document = option == XmlOption::Document || declaration::has_doctype(body);
+    let document = option == XmlOption::Document || declaration::has_doctype(body, control)?;
     parser::validate(
         if document { input } else { body },
         document,
         declaration.version.unwrap_or("1.0"),
+        control,
         notice,
     )
     .map_err(|failure| match failure {
@@ -54,6 +69,7 @@ pub fn validate_with_notices(
             sqlstate: "54000".into(),
             message: "XML input is too large".into(),
         },
+        parser::Failure::Control(error) => error.into(),
     })
 }
 
@@ -77,8 +93,11 @@ pub fn output_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, SQLError> {
     control.check()?;
-    let declaration = declaration::parse(input).map_err(|detail| {
-        SQLError::Internal(format!("invalid stored XML declaration: {detail}"))
+    let declaration = declaration::parse(input, control).map_err(|failure| match failure {
+        declaration::Failure::Invalid(detail) => {
+            SQLError::Internal(format!("invalid stored XML declaration: {detail}"))
+        }
+        declaration::Failure::Control(error) => error.into(),
     })?;
     let mut output = ProductionString::new(*control);
     let version = declaration.version.unwrap_or("1.0");

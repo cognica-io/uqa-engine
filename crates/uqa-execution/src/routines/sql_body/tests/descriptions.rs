@@ -52,7 +52,7 @@ impl AssignmentContext for Inputs {
     fn evaluate_domain_check(
         &self,
         _: &uqa_sql::ast::Expr,
-        _: &uqa_sql::ResultRow,
+        _: &dyn uqa_sql::expr::RowLookup,
         _: &uqa_sql::RowSchema,
     ) -> Result<Value, SQLError> {
         unreachable!()

@@ -7,8 +7,11 @@
 //! Domain base conversion and inherited constraint evaluation.
 
 use super::AssignmentContext;
-use crate::{ColumnType, ResultRow, RowSchema, SQLError};
-use uqa_core::Value;
+use crate::{ColumnType, RowSchema, SQLError};
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    Value,
+};
 
 #[cfg(test)]
 mod tests;
@@ -20,6 +23,17 @@ pub fn cast_domain_value(
     ty: &ColumnType,
 ) -> Result<Option<Value>, SQLError> {
     convert_domain_value(context, value, source, ty, false)
+}
+
+/// Domain input retains the caller's resource owners through base conversion, tuple admission and every constraint callback.
+pub fn cast_domain_value_with_control(
+    context: &dyn AssignmentContext,
+    value: &Value,
+    source: Option<&str>,
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>, SQLError> {
+    convert_domain_value_with_control(context, value, source, ty, false, control)
 }
 
 pub fn assign_domain_value(
@@ -46,32 +60,64 @@ fn convert_domain_value(
     ty: &ColumnType,
     assignment: bool,
 ) -> Result<Option<Value>, SQLError> {
+    convert_domain_value_with_control(
+        context,
+        value,
+        source,
+        ty,
+        assignment,
+        &ProductionControl::uncontrolled(),
+    )?
+    .map(|value| {
+        value
+            .into_uncontrolled()
+            .map_err(|_| SQLError::Internal("ordinary domain value retention".into()))
+    })
+    .transpose()
+}
+
+fn convert_domain_value_with_control(
+    context: &dyn AssignmentContext,
+    value: &Value,
+    source: Option<&str>,
+    ty: &ColumnType,
+    assignment: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>, SQLError> {
+    control.check()?;
     let ColumnType::Domain { oid, .. } = ty else {
         return Ok(None);
     };
     let Some(domain) = context.domain_by_oid(*oid) else {
         return Ok(None);
     };
+    let domain = domain.retain_external_with_control(control)?;
     if source
         .and_then(|name| context.resolve_type_name(name).ok().flatten())
         .as_ref()
         == Some(ty)
     {
-        return super::conversion::normalize_existing(value.clone(), ty).map(Some);
+        return Ok(Some(
+            super::conversion::normalize_legacy_vector_carrier_with_control(value, ty, control)?
+                .map_or_else(|| control.copy_value(value), Ok)?,
+        ));
     }
-    let mut chain = vec![domain.clone()];
-    let mut base = domain.definition.base.clone();
+    let mut base = domain.definition.base.clone_with_control(control)?;
+    let mut chain = ProductionVec::new(*control);
+    chain.push_produced(domain)?;
     while let ColumnType::Domain {
         oid,
         base: underlying,
         ..
-    } = &base
+    } = &*base
     {
+        control.check()?;
         if let Some(parent) = context.domain_by_oid(*oid) {
-            base = parent.definition.base.clone();
-            chain.push(parent);
+            let parent = parent.retain_external_with_control(control)?;
+            base = parent.definition.base.clone_with_control(control)?;
+            chain.push_produced(parent)?;
         } else {
-            base = *underlying.clone();
+            base = underlying.clone_with_control(control)?;
         }
     }
     let value = if assignment {
@@ -83,16 +129,31 @@ fn convert_domain_value(
             })
             .transpose()?
             .flatten();
-        super::conversion::coerce_assignment_value(context, value.clone(), &base, source.as_ref())?
+        control.retain_external_value(super::conversion::coerce_assignment_value(
+            context,
+            value.clone(),
+            &base,
+            source.as_ref(),
+        )?)?
     } else {
-        crate::expr::cast_value_with_type_resolution(
+        crate::expr::cast_value_with_type_resolution_with_control(
             value,
             source,
-            &base.catalog_name(),
+            &base.catalog_name_with_control(control)?,
             Some(context),
+            control,
         )?
     };
-    if matches!(value, Value::Null)
+    check_value(context, value, &chain, control).map(Some)
+}
+
+fn check_value(
+    context: &dyn AssignmentContext,
+    value: Produced<Value>,
+    chain: &[crate::catalog::domain::StoredDomain],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    if matches!(*value, Value::Null)
         && chain
             .iter()
             .any(|domain| domain.definition.not_null.is_some())
@@ -101,42 +162,59 @@ fn convert_domain_value(
             "23502",
             format!(
                 "domain {} does not allow null values",
-                domain_display_name(context, domain.oid)?
+                domain_display_name(context, chain[0].oid)?
             ),
         ));
     }
     // Checks may change the catalog. Retain the admitted tuple before invoking them.
-    let control = uqa_core::memory::ProductionControl::uncontrolled();
     let value = crate::expr::composites::retain_value_with_control(
-        control.finish(value, control.empty_reservation())?,
+        value,
         context.composite_types(),
-        &control,
-    )?
-    .into_uncontrolled()
-    .map_err(|_| SQLError::Internal("ordinary domain value retention".into()))?;
-    let row = ResultRow::from([("value".into(), value.clone())]);
-    let schema = RowSchema::with_types(
-        vec!["value".into()],
-        vec![Some(domain.definition.base.clone())],
-    );
+        control,
+    )?;
+    let row = DomainValue(&value);
+    let (check_type, _type_memory) = chain[0]
+        .definition
+        .base
+        .clone_with_control(control)?
+        .into_parts();
+    let schema = RowSchema::with_types(vec!["value".into()], vec![Some(check_type)]);
     for check in chain
         .iter()
         .rev()
         .flat_map(|domain| &domain.definition.checks)
     {
+        control.check()?;
         let result = context.evaluate_domain_check(&check.expression, &row, &schema)?;
+        control.check()?;
         if result == Value::Bool(false) {
             return Err(domain_error(
                 "23514",
                 format!(
                     "value for domain {} violates check constraint \"{}\"",
-                    domain_display_name(context, domain.oid)?,
+                    domain_display_name(context, chain[0].oid)?,
                     check.name.as_deref().expect("bound domain constraint")
                 ),
             ));
         }
     }
-    Ok(Some(value))
+    Ok(value)
+}
+
+struct DomainValue<'a>(&'a Value);
+
+impl crate::expr::RowLookup for DomainValue<'_> {
+    fn column(&self, name: &str) -> Option<&Value> {
+        (name == "value").then_some(self.0)
+    }
+
+    fn qualified_column(&self, _: &str, _: &str) -> Option<&Value> {
+        None
+    }
+
+    fn positional_column(&self, index: usize) -> Option<&Value> {
+        (index == 0).then_some(self.0)
+    }
 }
 
 fn domain_display_name(context: &dyn AssignmentContext, oid: u32) -> Result<String, SQLError> {

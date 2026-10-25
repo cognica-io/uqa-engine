@@ -450,7 +450,7 @@ pub(super) fn cast_xml(
         return Err(undefined_cast(postgres_type_display_name(&source), "xml"));
     }
     let text = cast_text(value, Some(&source), control)?;
-    crate::xml::validate_with_notices(&text, option, notice)?;
+    crate::xml::validate_with_control(&text, option, control, notice)?;
     text_value(text, false, control)
 }
 

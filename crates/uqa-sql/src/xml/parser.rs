@@ -7,6 +7,12 @@
 //! The only Rust boundary to the private, statically linked XML parser.
 
 use std::ffi::{c_char, c_int, c_void, CStr};
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionString},
+    ValueRetentionError,
+};
+
+mod control;
 
 unsafe extern "C" {
     fn uqa_sql_xml_validate(
@@ -29,6 +35,7 @@ pub(super) enum Failure {
     Invalid(Option<String>),
     Memory,
     Limit,
+    Control(ValueRetentionError),
 }
 
 struct Detail(*mut c_char);
@@ -57,11 +64,16 @@ pub(super) fn validate(
     input: &str,
     document: bool,
     version: &str,
+    production: &ProductionControl<'_>,
     mut notice: impl FnMut(crate::SQLNotice),
 ) -> Result<(), Failure> {
+    production.check().map_err(Failure::Control)?;
     if input.len() > c_int::MAX as usize || version.len() > c_int::MAX as usize {
         return Err(Failure::Limit);
     }
+    let mut state = control::State::new(*production);
+    let mut native = state.native();
+    let _scope = control::Scope::enter(&mut native);
     let mut detail = Detail(std::ptr::null_mut());
     let mut notices = Notices(std::ptr::null_mut());
     // SAFETY: both byte slices remain live for the call; their explicit lengths bound every read. The bridge retains neither slice and initializes the detail pointer on every return.
@@ -76,6 +88,9 @@ pub(super) fn validate(
             &raw mut notices.0,
         )
     };
+    if let Some(error) = state.error.take() {
+        return Err(Failure::Control(error));
+    }
     let mut current = notices.0.cast_const();
     while !current.is_null() {
         let mut level = 0;
@@ -87,10 +102,9 @@ pub(super) fn validate(
         } else {
             crate::NoticeLevel::Warning
         };
-        notice(crate::SQLNotice::new(
-            level,
-            message.to_string_lossy().into_owned(),
-        ));
+        let message = diagnostic_text(message, production)?;
+        let (message, _memory) = message.into_parts();
+        notice(crate::SQLNotice::new(level, message));
         // SAFETY: the bridge returns the next live list entry or NULL; no callback runs inside C.
         current = unsafe { uqa_sql_xml_notice_next(current) };
     }
@@ -102,14 +116,36 @@ pub(super) fn validate(
                 None
             } else {
                 // SAFETY: a non-NULL detail is a bridge-owned, terminated string, alive until Detail is dropped.
-                Some(
-                    unsafe { CStr::from_ptr(detail.0) }
-                        .to_string_lossy()
-                        .trim_end_matches('\n')
-                        .to_owned(),
-                )
+                let text = diagnostic_text(unsafe { CStr::from_ptr(detail.0) }, production)?;
+                let (mut text, _memory) = text.into_parts();
+                text.truncate(text.trim_end_matches('\n').len());
+                Some(text)
             };
             Err(Failure::Invalid(text))
         }
     }
+}
+
+fn diagnostic_text(
+    input: &CStr,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, Failure> {
+    let mut input = input.to_bytes();
+    let mut output = ProductionString::new(*control);
+    while !input.is_empty() {
+        match std::str::from_utf8(input) {
+            Ok(text) => {
+                output.push_str(text).map_err(Failure::Control)?;
+                break;
+            }
+            Err(error) => {
+                let (prefix, rest) = input.split_at(error.valid_up_to());
+                let prefix = std::str::from_utf8(prefix).expect("validated UTF-8 prefix");
+                output.push_str(prefix).map_err(Failure::Control)?;
+                output.push_str("\u{fffd}").map_err(Failure::Control)?;
+                input = &rest[error.error_len().unwrap_or(rest.len())..];
+            }
+        }
+    }
+    output.finish().map_err(Failure::Control)
 }

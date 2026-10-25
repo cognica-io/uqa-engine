@@ -15,6 +15,8 @@ use crate::{
 };
 use std::{cell::Cell, cell::RefCell, sync::Arc};
 
+mod controlled;
+
 struct Context {
     descriptor: RefCell<Arc<CompositeTypeDescriptor>>,
     checks: Cell<usize>,
@@ -112,14 +114,14 @@ impl AssignmentContext for Context {
     fn evaluate_domain_check(
         &self,
         _: &Expr,
-        row: &ResultRow,
+        row: &dyn crate::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         self.checks.set(self.checks.get() + 1);
-        assert!(matches!(row.get("value"), Some(Value::Datum(_))));
+        assert!(matches!(row.column("value"), Some(Value::Datum(_))));
         Arc::make_mut(&mut self.descriptor.borrow_mut()).attributes[0].name = "renamed".into();
         assert_eq!(
-            crate::result::format_postgres_text(&row["value"], &base(), Some(self))?,
+            crate::result::format_postgres_text(row.column("value").unwrap(), &base(), Some(self))?,
             "(7,x)"
         );
         Ok(Value::Bool(true))

@@ -405,8 +405,10 @@ pub(crate) fn evaluate_selected_cast(
     let _date_order = datestyle::input_scope(value, Some(&target), engine, control)?;
     let _interval_style = intervalstyle::cast_scope(value, Some(&target), engine, control)?;
     if let Some(engine) = engine {
-        if let Some(output) = engine.cast_domain(value, Some(source_name), &target)? {
-            return Ok(control.retain_external_value(output)?);
+        if let Some(output) =
+            engine.cast_domain_with_control(value, Some(source_name), &target, control)?
+        {
+            return Ok(output);
         }
     }
     evaluate_selected_value(cast, value, Some(source_name), engine, control)
@@ -440,8 +442,8 @@ fn cast_defined_type(
     target: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>> {
-    if let Some(value) = engine.cast_domain(value, source_name, target)? {
-        return Ok(Some(control.retain_external_value(value)?));
+    if let Some(value) = engine.cast_domain_with_control(value, source_name, target, control)? {
+        return Ok(Some(value));
     }
     if matches!(target, ColumnType::Xml) {
         return xml::cast(value, source_name, source, engine, control).map(Some);

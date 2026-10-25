@@ -13,7 +13,7 @@ use crate::semantics::partition::{
     partition_tree, PartitionCatalog, PartitionContext, PartitionExpressions,
 };
 use crate::type_resolution::FunctionTypeResolver;
-use crate::{ResultRow, RowSchema, SQLError, SQLParam};
+use crate::{RowSchema, SQLError, SQLParam};
 use std::collections::BTreeMap;
 use uqa_core::Value;
 
@@ -133,7 +133,7 @@ impl crate::assignment::AssignmentContext for Unused {
     fn evaluate_domain_check(
         &self,
         _: &Expr,
-        _: &ResultRow,
+        _: &dyn crate::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         unreachable!("bound ordering checks no domain")

@@ -5,6 +5,7 @@
  */
 
 #include "native.h"
+#include "allocation.h"
 #include <libxml/parser.h>
 #include <libxml/chvalid.h>
 #include <libxml/tree.h>
@@ -28,6 +29,24 @@ struct xml_error {
     uqa_sql_xml_notice *notices;
     uqa_sql_xml_notice *last_notice;
 };
+
+struct xml_source {
+    const char *input;
+    size_t length;
+    size_t offset;
+};
+
+static int read_input(void *context, char *buffer, int size) {
+    struct xml_source *source = context;
+    if (uqa_sql_xml_check() != 0) return -1;
+    size_t length = source->length - source->offset;
+    if (size <= 0) return 0;
+    if (length > (size_t)size) length = (size_t)size;
+    if (length > 4096) length = 4096;
+    memcpy(buffer, source->input + source->offset, length);
+    source->offset += length;
+    return (int)length;
+}
 
 static void append_detail(struct xml_error *failure, const char *text, size_t length) {
     if (failure->out_of_memory) {
@@ -135,6 +154,7 @@ int uqa_sql_xml_validate(const char *input, size_t length, int document,
     struct xml_error failure = {NULL, 0, 0, context, NULL, NULL};
     xmlDoc *tree = NULL;
     xmlNode *nodes = NULL;
+    struct xml_source input_source = {input, length, 0};
     int result = 0;
     *detail = NULL;
     *notices = NULL;
@@ -148,8 +168,8 @@ int uqa_sql_xml_validate(const char *input, size_t length, int document,
         if (length > INT_MAX) {
             result = 2;
         } else {
-            tree = xmlCtxtReadMemory(context, input, (int)length, NULL, "UTF-8",
-                                    XML_PARSE_NOENT | XML_PARSE_DTDATTR);
+            tree = xmlCtxtReadIO(context, read_input, NULL, &input_source, NULL, "UTF-8",
+                                XML_PARSE_NOENT | XML_PARSE_DTDATTR);
             if (tree == NULL) {
                 result = 1;
             }
@@ -162,8 +182,7 @@ int uqa_sql_xml_validate(const char *input, size_t length, int document,
         if (tree == NULL) {
             result = 2;
         } else {
-            xmlParserInput *source = xmlNewInputFromMemory(NULL, input, length,
-                                                          XML_INPUT_BUF_STATIC);
+            xmlParserInput *source = xmlNewInputFromIO(NULL, read_input, NULL, &input_source, 0);
             if (source == NULL) {
                 result = 2;
             } else {
