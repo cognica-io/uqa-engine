@@ -7,7 +7,7 @@
 //! Borrow existing diagnostic payloads and admit only the containers and text this renderer constructs.
 
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
-use uqa_sql::SQLError;
+use uqa_sql::{result::explain::ExplainValue, SQLError};
 
 pub(super) enum Property<'a> {
     Text(&'a str),
@@ -16,7 +16,7 @@ pub(super) enum Property<'a> {
     Float(f64),
     Object(Produced<Vec<(&'a str, Self)>>),
     Array(Produced<Vec<Self>>),
-    Json(&'a serde_json::Value),
+    Captured(&'a ExplainValue),
     Lines(&'a str),
 }
 
@@ -72,7 +72,7 @@ pub(super) fn array<'a>(
 #[derive(Clone, Copy)]
 pub(super) enum View<'a> {
     Native(&'a Property<'a>),
-    Json(&'a serde_json::Value),
+    Captured(&'a ExplainValue),
     Text(&'a str),
 }
 
@@ -80,7 +80,7 @@ pub(super) enum Kind<'a> {
     Null,
     Bool(bool),
     Text(&'a str),
-    Number(serde_json::Number),
+    Number(Number),
     Object(Fields<'a>),
     Array(Elements<'a>),
 }
@@ -92,22 +92,33 @@ impl<'a> View<'a> {
             Self::Native(value) => match value {
                 Property::Text(text) => Kind::Text(text),
                 Property::OwnedText(text) => Kind::Text(text),
-                Property::Unsigned(value) => Kind::Number((*value).into()),
+                Property::Unsigned(value) => Kind::Number(Number::Unsigned(*value)),
                 Property::Float(value) => {
-                    serde_json::Number::from_f64(*value).map_or(Kind::Null, Kind::Number)
+                    if value.is_finite() {
+                        Kind::Number(Number::Float(*value))
+                    } else {
+                        Kind::Null
+                    }
                 }
                 Property::Object(fields) => Kind::Object(Fields::Native(fields.iter())),
                 Property::Array(values) => Kind::Array(Elements::Native(values.iter())),
-                Property::Json(value) => Self::Json(value).kind(),
+                Property::Captured(value) => Self::Captured(value).kind(),
                 Property::Lines(text) => Kind::Array(Elements::Lines(text.lines())),
             },
-            Self::Json(value) => match value {
-                serde_json::Value::Null => Kind::Null,
-                serde_json::Value::Bool(value) => Kind::Bool(*value),
-                serde_json::Value::Number(value) => Kind::Number(value.clone()),
-                serde_json::Value::String(value) => Kind::Text(value),
-                serde_json::Value::Object(fields) => Kind::Object(Fields::Json(fields.iter())),
-                serde_json::Value::Array(values) => Kind::Array(Elements::Json(values.iter())),
+            Self::Captured(value) => match value {
+                ExplainValue::Null => Kind::Null,
+                ExplainValue::Bool(value) => Kind::Bool(*value),
+                ExplainValue::Unsigned(value) => Kind::Number(Number::Unsigned(*value)),
+                ExplainValue::Float(value) => {
+                    if value.is_finite() {
+                        Kind::Number(Number::Float(*value))
+                    } else {
+                        Kind::Null
+                    }
+                }
+                ExplainValue::Label(value) => Kind::Text(value),
+                ExplainValue::Text(value) => Kind::Text(value),
+                ExplainValue::Object(fields) => Kind::Object(Fields::Captured(fields.iter())),
             },
         }
     }
@@ -115,7 +126,7 @@ impl<'a> View<'a> {
 
 pub(super) enum Fields<'a> {
     Native(std::slice::Iter<'a, (&'a str, Property<'a>)>),
-    Json(serde_json::map::Iter<'a>),
+    Captured(std::slice::Iter<'a, (&'static str, ExplainValue)>),
 }
 
 impl<'a> Iterator for Fields<'a> {
@@ -125,16 +136,15 @@ impl<'a> Iterator for Fields<'a> {
             Self::Native(fields) => fields
                 .next()
                 .map(|(key, value)| (*key, View::Native(value))),
-            Self::Json(fields) => fields
+            Self::Captured(fields) => fields
                 .next()
-                .map(|(key, value)| (key.as_str(), View::Json(value))),
+                .map(|(key, value)| (*key, View::Captured(value))),
         }
     }
 }
 
 pub(super) enum Elements<'a> {
     Native(std::slice::Iter<'a, Property<'a>>),
-    Json(std::slice::Iter<'a, serde_json::Value>),
     Lines(std::str::Lines<'a>),
 }
 
@@ -143,8 +153,22 @@ impl<'a> Iterator for Elements<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Native(values) => values.next().map(View::Native),
-            Self::Json(values) => values.next().map(View::Json),
             Self::Lines(values) => values.next().map(View::Text),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Number {
+    Unsigned(u64),
+    Float(f64),
+}
+
+impl std::fmt::Display for Number {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsigned(value) => write!(output, "{value}"),
+            Self::Float(value) => write!(output, "{value:?}"),
         }
     }
 }

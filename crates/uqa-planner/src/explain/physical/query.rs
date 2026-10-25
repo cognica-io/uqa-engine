@@ -6,7 +6,7 @@
 
 //! Follow reachable statement children and lexical CTE scopes without materializing them.
 
-use super::{visible_cte, Collector, DeferredCte, Rc, Scope};
+use super::{visible_cte, Collector, DeferredCte, Scope};
 use crate::filter_pushdown::{
     cte_output_filters, push_output_filter_into_query_plan, qualifier_filters_for_stmt,
 };
@@ -20,13 +20,14 @@ use uqa_sql::{
     SQLError, ScalarExpr,
 };
 
-impl Collector<'_> {
+impl Collector<'_, '_, '_> {
     pub(super) fn statement(
         &mut self,
         plan: &UnifiedPlan,
-        scope: &Scope,
+        scope: &Scope<'_>,
         path: &str,
     ) -> Result<(), SQLError> {
+        self.control.check()?;
         match plan {
             UnifiedPlan::Query(query) => self.query(query, scope, path),
             UnifiedPlan::Command(command) => self.command(command, scope, path),
@@ -36,25 +37,41 @@ impl Collector<'_> {
     fn command(
         &mut self,
         command: &CommandPlan,
-        outer: &Scope,
+        outer: &Scope<'_>,
         path: &str,
     ) -> Result<(), SQLError> {
         if let CommandPlan::CreateTableAs { query, .. }
         | CommandPlan::CreateMaterializedView { query, .. }
         | CommandPlan::DeclareCursor { query, .. } = command
         {
-            return self.query(query, outer, &format!("{path}/Input"));
+            return self.query(
+                query,
+                outer,
+                &self.control.format(format_args!("{path}/Input"))?,
+            );
         }
         let mut scope = outer.clone();
         for cte in ordered_cte_plans(command.ctes())? {
             if cte.recursive {
-                scope.insert(cte.name.clone(), None);
+                self.control.check()?;
+                scope.try_insert(cte.name.as_str(), None)?;
             }
-            self.cte_body(&cte.body, &scope, &format!("{path}/CTE {}", cte.name))?;
-            scope.insert(cte.name.clone(), None);
+            self.cte_body(
+                &cte.body,
+                &scope,
+                &self
+                    .control
+                    .format(format_args!("{path}/CTE {}", cte.name))?,
+            )?;
+            self.control.check()?;
+            scope.try_insert(cte.name.as_str(), None)?;
         }
         for (index, query) in command.query_inputs().iter().enumerate() {
-            self.query(query, &scope, &format!("{path}/Input {index}"))?;
+            self.query(
+                query,
+                &scope,
+                &self.control.format(format_args!("{path}/Input {index}"))?,
+            )?;
         }
         if let Some(source) = command.source_input() {
             self.source(source, None, &scope, path)?;
@@ -69,7 +86,7 @@ impl Collector<'_> {
     fn mutation(
         &mut self,
         command: &CommandPlan,
-        scope: &Scope,
+        scope: &Scope<'_>,
         path: &str,
     ) -> Result<(), SQLError> {
         let (table, qualifier, descendants, bound, predicate) = match command {
@@ -92,7 +109,7 @@ impl Collector<'_> {
         let Some(predicate) = predicate else {
             return Ok(());
         };
-        if scope.values().any(Option::is_none)
+        if scope.iter().any(|(_, value)| value.is_none())
             || uqa_sql::semantics::volatility::expr_contains_volatile_function(
                 self.context.filters.volatility,
                 predicate,
@@ -124,7 +141,12 @@ impl Collector<'_> {
         Ok(())
     }
 
-    fn cte_body(&mut self, body: &CtePlanBody, scope: &Scope, path: &str) -> Result<(), SQLError> {
+    fn cte_body(
+        &mut self,
+        body: &CtePlanBody,
+        scope: &Scope<'_>,
+        path: &str,
+    ) -> Result<(), SQLError> {
         match body {
             CtePlanBody::Query(query) => self.query(query, scope, path),
             CtePlanBody::Command(command) => self.command(command, scope, path),
@@ -134,9 +156,10 @@ impl Collector<'_> {
     pub(super) fn query(
         &mut self,
         plan: &QueryPlan,
-        outer: &Scope,
+        outer: &Scope<'_>,
         path: &str,
     ) -> Result<(), SQLError> {
+        self.control.check()?;
         let mut resolution = self.context.filters.correlation.resolution.clone();
         resolution.lookup_mode = if plan.relations_bound {
             RelationLookupMode::Bound
@@ -148,14 +171,21 @@ impl Collector<'_> {
         let mut nested = Collector {
             context,
             params: self.params,
-            output: uqa_sql::result::ExplainPhysicalPlan::default(),
+            control: self.control,
+            scope_memory: self.scope_memory,
+            costs: self.costs,
+            output: &mut *self.output,
         };
         nested.query_root(plan, outer, path)?;
-        self.output.nodes.extend(nested.output.nodes);
         Ok(())
     }
 
-    fn query_root(&mut self, plan: &QueryPlan, outer: &Scope, path: &str) -> Result<(), SQLError> {
+    fn query_root(
+        &mut self,
+        plan: &QueryPlan,
+        outer: &Scope<'_>,
+        path: &str,
+    ) -> Result<(), SQLError> {
         let mut scope = outer.clone();
         let output_filters = cte_output_filters(
             self.context.filters,
@@ -170,22 +200,27 @@ impl Collector<'_> {
             let cte = scheduled.plan;
             if scheduled.deferred {
                 let definition = DeferredCte {
-                    plan: cte.clone(),
-                    outer: Rc::new(scope.clone()),
+                    plan: cte,
+                    outer: scope.clone(),
                 };
-                scope.insert(cte.name.clone(), Some(definition));
+                self.control.check()?;
+                scope.try_insert(cte.name.as_str(), Some(definition))?;
             } else {
                 if cte.recursive {
-                    scope.insert(cte.name.clone(), None);
+                    self.control.check()?;
+                    scope.try_insert(cte.name.as_str(), None)?;
                 }
                 let specialized = self.recursive_query(cte, output_filters.get(&cte.name))?;
-                let path = format!("{path}/CTE {}", cte.name);
+                let path = self
+                    .control
+                    .format(format_args!("{path}/CTE {}", cte.name))?;
                 if let Some(query) = specialized {
                     self.query(&query, &scope, &path)?;
                 } else {
                     self.cte_body(&cte.body, &scope, &path)?;
                 }
-                scope.insert(cte.name.clone(), None);
+                self.control.check()?;
+                scope.try_insert(cte.name.as_str(), None)?;
             }
         }
         match &plan.root {
@@ -200,7 +235,13 @@ impl Collector<'_> {
                     self.source(from, filters.as_ref(), &scope, path)?;
                 }
                 for (index, subquery) in block.subqueries.iter().enumerate() {
-                    self.query(subquery, &scope, &format!("{path}/Subquery {index}"))?;
+                    self.query(
+                        subquery,
+                        &scope,
+                        &self
+                            .control
+                            .format(format_args!("{path}/Subquery {index}"))?,
+                    )?;
                 }
             }
             RelationalPlan::SetOp {
@@ -209,15 +250,35 @@ impl Collector<'_> {
                 subqueries,
                 ..
             } => {
-                self.query(left, &scope, &format!("{path}/Left"))?;
-                self.query(right, &scope, &format!("{path}/Right"))?;
+                self.query(
+                    left,
+                    &scope,
+                    &self.control.format(format_args!("{path}/Left"))?,
+                )?;
+                self.query(
+                    right,
+                    &scope,
+                    &self.control.format(format_args!("{path}/Right"))?,
+                )?;
                 for (index, subquery) in subqueries.iter().enumerate() {
-                    self.query(subquery, &scope, &format!("{path}/Subquery {index}"))?;
+                    self.query(
+                        subquery,
+                        &scope,
+                        &self
+                            .control
+                            .format(format_args!("{path}/Subquery {index}"))?,
+                    )?;
                 }
             }
             RelationalPlan::Values { subqueries, .. } => {
                 for (index, subquery) in subqueries.iter().enumerate() {
-                    self.query(subquery, &scope, &format!("{path}/Subquery {index}"))?;
+                    self.query(
+                        subquery,
+                        &scope,
+                        &self
+                            .control
+                            .format(format_args!("{path}/Subquery {index}"))?,
+                    )?;
                 }
             }
         }

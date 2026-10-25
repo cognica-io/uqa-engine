@@ -7,8 +7,9 @@
 //! Parameter values read and shown as `PostgreSQL`'s `parse_and_validate_value` and `ShowGUCOption` do. A setting is kept as the text `pg_settings.setting` reports: an integer in base units, `on` or `off`, the canonical name of an enumerated value, or the string itself.
 
 use super::definition::{EnumOption, ParameterDefinition, ParameterFlags, ParameterKind};
-use super::units::{parse_integer, show_integer};
+use super::units::{parse_integer, show_integer_with_control};
 use crate::SQLError;
+use uqa_core::memory::{Produced, ProductionControl};
 
 /// The longest identifier, `NAMEDATALEN - 1` bytes, to which a `GUC_IS_NAME` string is truncated.
 const MAX_IDENTIFIER_BYTES: usize = 63;
@@ -102,14 +103,23 @@ pub fn invalid_value_message(definition: &ParameterDefinition, raw: &str) -> Str
 
 /// Show `setting` as `SHOW` and `current_setting` report it: an integer in the greatest unit that divides it.
 pub fn show_setting(definition: &ParameterDefinition, setting: &str) -> String {
-    match definition.kind {
-        ParameterKind::Integer { unit, .. } => setting
-            .parse::<i64>()
-            .map_or_else(|_| setting.to_string(), |value| show_integer(value, unit)),
-        ParameterKind::Bool { .. } | ParameterKind::Enum { .. } | ParameterKind::String { .. } => {
-            setting.to_string()
+    show_setting_with_control(definition, setting, &ProductionControl::uncontrolled())
+        .expect("ordinary setting formatting")
+        .into_uncontrolled()
+        .expect("ordinary setting")
+}
+
+pub fn show_setting_with_control(
+    definition: &ParameterDefinition,
+    setting: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    if let ParameterKind::Integer { unit, .. } = definition.kind {
+        if let Ok(value) = setting.parse::<i64>() {
+            return show_integer_with_control(value, unit, control);
         }
     }
+    Ok(control.copy_text(setting)?)
 }
 
 /// The names of an enumerated parameter's values that `pg_settings.enumvals` lists.

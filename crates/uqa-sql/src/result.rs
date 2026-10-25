@@ -243,6 +243,7 @@ mod tests {
 }
 
 pub mod completion;
+pub mod explain;
 pub mod vector;
 
 /// Execution measurements supplied to EXPLAIN rendering.
@@ -254,9 +255,9 @@ pub struct ExplainAnalysis {
 }
 
 /// Structured physical-plan output captured before execution. Method-specific properties are rendered by the owning planner; execution only carries this diagnostic result to the renderer.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ExplainPhysicalPlan {
-    pub nodes: Vec<serde_json::Value>,
+    pub nodes: Vec<explain::ExplainValue>,
     /// Nondefault planning parameters captured from the invoking session before execution.
     pub settings: Vec<(&'static str, String)>,
     /// Time spent producing this invocation's optimized plan and physical metadata.

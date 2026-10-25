@@ -330,6 +330,49 @@ static void explained_stream_and_settings(uqa_engine engine, uqa_result result) 
     CHECK(uqa_engine_execute(engine, "RESET work_mem", result));
 }
 
+static void explained_physical_metadata(uqa_engine engine, uqa_result result) {
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TABLE c_explain_vectors (id integer, embedding tensor(2)); "
+        "INSERT INTO c_explain_vectors VALUES (1, ARRAY[ARRAY[1.0,0.0]]), (2, ARRAY[ARRAY[0.0,1.0]]); "
+        "CREATE INDEX c_explain_vector_index ON c_explain_vectors USING diskann(embedding) "
+        "WITH(max_degree=2,search_list_size=4,beam_width=1,pq_bytes=1)", result));
+    for (unsigned costs = 0; costs < 2; costs++) {
+        char sql[320];
+        uqa_statement statement = NULL;
+        uqa_value snapshot = NULL;
+        uqa_value_view view = NULL;
+        uqa_string_view text = {NULL, 0};
+        uint8_t is_null = 0;
+        (void)snprintf(sql, sizeof(sql),
+            "EXPLAIN (FORMAT JSON, COSTS %s) WITH picked AS NOT MATERIALIZED "
+            "(SELECT id FROM c_explain_vectors d WHERE knn_match(d.embedding,ARRAY[1.0,0.0],2)) "
+            "SELECT id FROM picked", costs ? "TRUE" : "FALSE");
+        CHECK(uqa_statement_prepare(engine, sql, &statement));
+        CHECK(uqa_statement_execute(statement, result));
+        CHECK(uqa_result_get_value(result, 0, 0, &view));
+        CHECK(uqa_value_create_copy(view, &snapshot));
+        CHECK(uqa_statement_finalize(&statement));
+        view = snapshot;
+        CHECK(uqa_engine_execute_params(engine,
+            "SELECT $1->0->'Physical Plans'->0->>'Field', "
+            "$1->0->'Physical Plans'->0->>'Route', "
+            "($1->0->'Physical Plans'->0->>'Candidate K')::bigint, "
+            "$1->0->'Physical Plans'->0->'Estimated Work'", &view, 1, result));
+        CHECK(uqa_value_destroy(&snapshot));
+        CHECK(uqa_result_get_value(result, 0, 0, &view));
+        CHECK(uqa_value_get_text(view, &text));
+        assert(equal(text, "embedding"));
+        CHECK(uqa_result_get_value(result, 0, 1, &view));
+        CHECK(uqa_value_get_text(view, &text));
+        assert(equal(text, "approximate"));
+        assert(integer(result, 2) == 2);
+        CHECK(uqa_result_get_value(result, 0, 3, &view));
+        CHECK(uqa_value_get_is_null(view, &is_null));
+        assert(is_null == (costs == 0));
+    }
+    CHECK(uqa_engine_execute(engine, "DROP TABLE c_explain_vectors", result));
+}
+
 static void explained_generic_parameters(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_value value = NULL;
@@ -709,6 +752,7 @@ int main(void) {
     explained_inputs(engine, result);
     explained_results(engine, result);
     explained_stream_and_settings(engine, result);
+    explained_physical_metadata(engine, result);
     explained_generic_parameters(engine, result);
     explained_read_only_destination(engine, result);
     xml_values(engine, result);

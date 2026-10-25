@@ -26,15 +26,7 @@ mod properties;
 mod tests;
 mod text;
 mod vector;
-pub use physical::{physical_plan, PhysicalExplainContext};
-
-fn render_generation(generation: uqa_core::VectorGeneration) -> serde_json::Value {
-    let mut database = String::with_capacity(32);
-    for byte in generation.database {
-        let _ = write!(database, "{byte:02x}");
-    }
-    serde_json::json!({"Database": database, "Table": generation.table, "Index": generation.index, "Generation": generation.generation})
-}
+pub use physical::{physical_plan, physical_plan_with_control, PhysicalExplainContext};
 
 pub fn run_explain(
     body: &UnifiedPlan,
@@ -190,7 +182,7 @@ fn plan_text(
         return Ok(text.finish()?);
     }
     for node in &physical.nodes {
-        let rendered = formats::json(&properties::Property::Json(node), control)?;
+        let rendered = formats::json(&properties::Property::Captured(node), control)?;
         for line in rendered.lines() {
             text.push_str("\n  ")?;
             text.push_str(line)?;
@@ -294,7 +286,10 @@ fn structured_plan<'a>(
     if !physical.nodes.is_empty() {
         payload.insert(
             "Physical Plans",
-            array(control, physical.nodes.iter().map(|node| Ok(P::Json(node))))?,
+            array(
+                control,
+                physical.nodes.iter().map(|node| Ok(P::Captured(node))),
+            )?,
         )?;
     }
     payload.finish()

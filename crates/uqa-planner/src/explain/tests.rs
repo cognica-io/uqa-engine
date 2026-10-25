@@ -64,8 +64,11 @@ fn formats_retain_native_plan_data_and_sql_result_identity() {
 fn controlled_formats_reject_large_borrowed_diagnostics_before_copying_the_payload() {
     use uqa_core::{memory::MemoryBudget, CancellationToken};
     let body = UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0));
+    let mut node = uqa_sql::result::explain::ExplainObject::new(ProductionControl::uncontrolled());
+    node.text("Relation Name", &"<&한글\\\"".repeat(512 * 1024))
+        .unwrap();
     let physical = ExplainPhysicalPlan {
-        nodes: vec![serde_json::json!({"Relation Name": "<&한글\\\"".repeat(512 * 1024)})],
+        nodes: vec![node.finish().unwrap()],
         ..ExplainPhysicalPlan::default()
     };
     for format in [

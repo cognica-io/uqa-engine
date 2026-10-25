@@ -34,7 +34,9 @@ pub trait PhysicalExplainPlanning: Sync {
         &self,
         body: &UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<ExplainPhysicalPlan, SQLError>;
+        costs: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<ExplainPhysicalPlan>, SQLError>;
 }
 
 pub trait StatementDiagnostics: Sync {

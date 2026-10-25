@@ -7,6 +7,7 @@
 use super::*;
 use serde_json::{json, Value as Json};
 
+mod capture;
 mod locking;
 mod metadata;
 

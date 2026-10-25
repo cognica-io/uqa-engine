@@ -6,14 +6,16 @@
 
 //! Project retained vector facts and explicitly separate estimates from observations.
 
-use super::Collector;
+use super::{
+    metadata::{index_node, work_node},
+    Collector,
+};
 use crate::cost_model::{estimate_diskann, DiskANNWorkEstimate};
 use crate::retrieval_planning::VectorStatisticsRead;
-use serde_json::{json, Value as Json};
 use uqa_core::{DiskANNIndexStats, VectorQueryRoute};
 use uqa_sql::{
     ast::FunctionVolatility,
-    retrieval::{describe_vector_call, RetrievalConstants, RetrievalExpr, VectorCallDescription},
+    retrieval::{describe_vector_call_with_control, ProducedVectorCallDescription, RetrievalExpr},
     semantics::volatility::{function_volatility_with_binding, VolatilityCatalog},
     SQLError, ScalarExpr,
 };
@@ -27,7 +29,7 @@ struct PhysicalVector {
     estimate: Option<DiskANNWorkEstimate>,
 }
 
-impl Collector<'_> {
+impl Collector<'_, '_, '_> {
     pub(super) fn vector_predicate(
         &mut self,
         table: &str,
@@ -35,18 +37,38 @@ impl Collector<'_> {
         predicate: &ScalarExpr,
         path: &str,
     ) -> Result<(), SQLError> {
-        let mut descriptions = Vec::new();
-        let constants = RetrievalConstants {
-            params: self.params,
-            evaluate: self.context.evaluate,
-            stores: &|_: &str| false,
-        };
+        let params = self.params;
+        let evaluate = self.context.evaluate;
+        let volatility = self.context.filters.volatility;
+        let parameters = self.params.len();
+        let mut retained = None;
         predicate.try_visit(&mut |expression| -> Result<bool, SQLError> {
-            if let Some(description) = describe_vector_call(expression, &constants, &|expr| {
-                can_evaluate(self.context.filters.volatility, expr, self.params.len())
-            })? {
-                if !description.invalid_arguments && description.field.is_some() {
-                    descriptions.push(description);
+            self.control.check()?;
+            if let Some(description) = describe_vector_call_with_control(
+                expression,
+                params,
+                evaluate,
+                &|expr| can_evaluate(volatility, expr, parameters),
+                &self.control,
+            )? {
+                if description.invalid_arguments || description.field.is_none() {
+                    return Ok(false);
+                }
+                if retained.is_none() {
+                    retained = Some(self.context.retrieval.try_query_table(table).map_err(
+                        |error| {
+                            SQLError::Internal(format!("read EXPLAIN table `{table}`: {error}"))
+                        },
+                    )?);
+                }
+                if let Some(table_metadata) = retained.as_ref().and_then(Option::as_ref) {
+                    self.capture_vector(
+                        &*table_metadata.vector_indexes(),
+                        table,
+                        qualifier,
+                        path,
+                        &description,
+                    )?;
                 }
                 return Ok(false);
             }
@@ -56,57 +78,73 @@ impl Collector<'_> {
                 _ => false,
             })
         })?;
-        if descriptions.is_empty() {
-            return Ok(());
-        }
-        let Some(retained) = self
-            .context
-            .retrieval
-            .try_query_table(table)
-            .map_err(|error| {
-                SQLError::Internal(format!("read EXPLAIN table `{table}`: {error}"))
-            })?
+        Ok(())
+    }
+
+    fn capture_vector(
+        &mut self,
+        reader: &dyn VectorStatisticsRead,
+        table: &str,
+        qualifier: &str,
+        path: &str,
+        description: &ProducedVectorCallDescription,
+    ) -> Result<(), SQLError> {
+        let field = description.field.as_deref().expect("selected vector field");
+        let bound = vector_arguments(description);
+        let Some(PhysicalVector {
+            index,
+            route,
+            estimate,
+        }) = physical_vector(reader, field, bound, self.costs, &|| {
+            self.context.retrieval.table_doc_count(table)
+        })?
         else {
             return Ok(());
         };
-        let reader = retained.vector_indexes();
-        for description in descriptions {
-            let Some(field) = description.field.as_deref() else {
-                continue;
-            };
-            let bound = vector_arguments(&description);
-            let Some(PhysicalVector {
-                index,
-                route,
-                estimate,
-            }) = physical_vector(&*reader, field, bound, &|| {
-                self.context.retrieval.table_doc_count(table)
-            })?
-            else {
-                continue;
-            };
-            let mut node = index_node(&index);
-            node["Node Type"] = json!("DiskANN Search");
-            node["Plan Path"] = json!(path);
-            node["Relation Name"] = json!(table);
-            node["Alias"] = json!(qualifier);
-            node["Field"] = json!(field);
-            node["Candidate K"] = json!(bound.map(|(_, k)| k));
-            node["Argument Status"] = json!(if route.is_some() { "bound" } else { "deferred" });
-            node["Route"] = json!(route.map(|route| match route {
-                VectorQueryRoute::Approximate => "approximate",
-                VectorQueryRoute::ExactZeroNorm => "exact zero norm",
-                VectorQueryRoute::ExactNonFiniteNorm => "exact non-finite norm",
-            }));
-            node["Score"] = json!(if description.calibrated {
+        self.control.check()?;
+        let mut node = index_node(&index, self.control)?;
+        node.label("Node Type", "DiskANN Search")?;
+        node.text("Plan Path", path)?;
+        node.text("Relation Name", table)?;
+        node.text("Alias", qualifier)?;
+        node.text("Field", field)?;
+        node.optional_number("Candidate K", bound.map(|(_, k)| k as u64))?;
+        node.label(
+            "Argument Status",
+            if route.is_some() { "bound" } else { "deferred" },
+        )?;
+        if let Some(route) = route {
+            node.label(
+                "Route",
+                match route {
+                    VectorQueryRoute::Approximate => "approximate",
+                    VectorQueryRoute::ExactZeroNorm => "exact zero norm",
+                    VectorQueryRoute::ExactNonFiniteNorm => "exact non-finite norm",
+                },
+            )?;
+        } else {
+            node.null("Route")?;
+        }
+        node.label(
+            "Score",
+            if description.calibrated {
                 "query-pool calibrated cosine"
             } else {
                 "raw cosine"
-            });
-            node["Candidate Refill After Residual Filter"] = json!(false);
-            node["Estimated Work"] = estimate.map_or(Json::Null, work_node);
-            self.output.nodes.push(node);
+            },
+        )?;
+        node.boolean("Candidate Refill After Residual Filter", false)?;
+        if self.costs {
+            if let Some(estimate) = estimate {
+                node.insert("Estimated Work", work_node(estimate, self.control)?)?;
+            } else {
+                node.null("Estimated Work")?;
+            }
         }
+        self.output.push_produced(
+            self.control
+                .finish(node.finish()?, self.control.empty_reservation())?,
+        )?;
         Ok(())
     }
 }
@@ -115,6 +153,7 @@ fn physical_vector(
     reader: &dyn VectorStatisticsRead,
     field: &str,
     query: Option<(&[f32], usize)>,
+    costs: bool,
     documents: &dyn Fn() -> Result<u64, SQLError>,
 ) -> Result<Option<PhysicalVector>, SQLError> {
     if let Some((query, k)) = query {
@@ -131,11 +170,13 @@ fn physical_vector(
         let Some(stats) = reader.diskann_query_statistics(field, query)? else {
             return Ok(None);
         };
-        let estimate = estimate_diskann(&stats, Some(k), documents()?);
+        let estimate = costs
+            .then(|| documents().map(|documents| estimate_diskann(&stats, Some(k), documents)))
+            .transpose()?;
         Ok(Some(PhysicalVector {
             index: stats.index,
             route: Some(stats.query_route),
-            estimate: Some(estimate),
+            estimate,
         }))
     } else {
         Ok(reader
@@ -148,8 +189,8 @@ fn physical_vector(
     }
 }
 
-fn vector_arguments(description: &VectorCallDescription) -> Option<(&[f32], usize)> {
-    match description.bound.as_ref()? {
+fn vector_arguments(description: &ProducedVectorCallDescription) -> Option<(&[f32], usize)> {
+    match &**description.bound.as_ref()? {
         RetrievalExpr::KNN {
             query_vector, k, ..
         }
@@ -192,65 +233,4 @@ fn can_evaluate(
         _ => {}
     });
     safe
-}
-
-fn index_node(stats: &DiskANNIndexStats) -> Json {
-    let population = stats.populations;
-    let reads = stats.reads;
-    json!({
-        "Generation": super::super::render_generation(stats.generation),
-        "Configuration": {
-            "Dimensions": stats.dimensions,
-            "Maximum Degree": stats.max_degree,
-            "Search List Size": stats.search_list_size,
-            "Logical Beam Width": stats.beam_width,
-            "PQ Bytes": stats.pq_bytes,
-            "PQ Centroids": stats.pq_centroids,
-        },
-        "Layout": {
-            "Node Slot Bytes": stats.node_slot_bytes,
-            "Fragments Per Node": stats.node_fragments,
-            "Graph Pages": stats.graph_pages,
-            "Graph Edges": stats.graph_edges,
-            "Page Bytes": stats.page_bytes,
-        },
-        "Population": {
-            "Base Documents": population.base_documents,
-            "Base Vectors": population.base_vectors,
-            "Graph Nodes": population.graph_nodes,
-            "Side Vectors": population.side_vectors,
-            "Current Vectors": population.current_vectors,
-            "Changed Vectors": population.changed_vectors,
-        },
-        "Read Limits": {
-            "Resident Bytes": reads.resident_bytes,
-            "Cache Bytes": reads.cache_bytes,
-            "Maximum Record Bytes": reads.max_record_bytes,
-            "Maximum In-Flight Page Bytes": reads.max_in_flight_page_bytes,
-            "Maximum Batch Pages": reads.max_batch_pages,
-            "Read Concurrency": reads.read_concurrency,
-        },
-    })
-}
-
-fn work_node(work: DiskANNWorkEstimate) -> Json {
-    json!({
-        "Units": "uncalibrated work; logical page requests, not measured physical I/O",
-        "Approximate Nodes": work.approximate_nodes,
-        "Completion Nodes": work.completion_nodes,
-        "PQ Lookup Coordinates": work.pq_lookup_coordinates,
-        "PQ Distance Evaluations": work.pq_distance_evaluations,
-        "Logical Page Requests": work.logical_page_requests,
-        "Logical Page Bytes": work.logical_page_bytes,
-        "Provider Dispatch Rounds": work.page_rounds,
-        "Side Vectors": work.side_vectors,
-        "Changed Vectors": work.changed_vectors,
-        "Rerank Vectors": work.rerank_vectors,
-        "Exact Vectors": work.exact_vectors,
-        "Resident PQ Payload Bytes": work.resident_pq_payload_bytes,
-        "Page Budget Sufficient": work.page_budget_sufficient,
-        "CPU": work.cpu,
-        "I/O": work.io,
-        "Total": work.total(),
-    })
 }

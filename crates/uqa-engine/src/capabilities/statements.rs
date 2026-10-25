@@ -80,10 +80,13 @@ impl context::PhysicalExplainPlanning for Engine {
         &self,
         body: &uqa_sql::plan::UnifiedPlan,
         params: &[uqa_sql::SQLParam],
-    ) -> Result<uqa_sql::result::ExplainPhysicalPlan, uqa_sql::SQLError> {
+        costs: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_sql::result::ExplainPhysicalPlan>, uqa_sql::SQLError>
+    {
         let catalog = self.catalog_read_view();
         let resolution = self.session_execution_view().relation_name_resolution();
-        uqa_planner::explain::physical_plan(
+        uqa_planner::explain::physical_plan_with_control(
             uqa_planner::explain::PhysicalExplainContext {
                 retrieval: self,
                 statistics: self,
@@ -104,15 +107,12 @@ impl context::PhysicalExplainPlanning for Engine {
                     },
                     optimizer: &|plan| super::statement_planning::optimize_engine_plan(self, plan),
                 },
-                evaluate: &|expression, params| {
-                    uqa_execution::eval_scalar(
-                        expression,
-                        &uqa_execution::ScalarEvalContext::new(None, params),
-                    )
-                },
+                evaluate: &uqa_execution::eval_constant_scalar_with_control,
             },
             body,
             params,
+            costs,
+            control,
         )
     }
 }

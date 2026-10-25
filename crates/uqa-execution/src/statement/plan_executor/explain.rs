@@ -163,22 +163,28 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 self.params,
             )?;
         }
-        let mut physical = self
-            .context
-            .physical_explain
-            .physical_explain_plan(body, self.params)?;
-        if settings.settings {
-            physical.settings = self
-                .context
-                .validation
-                .session
-                .parameter_settings()
-                .iter()
-                .filter(|setting| setting.is_explain_setting())
-                .map(|setting| (setting.definition.name, setting.shown()))
-                .collect();
-        }
+        let retained = self.context.diagnostics.diagnostics_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.context.runtime.cancellation,
+        );
+        let physical = self.context.physical_explain.physical_explain_plan(
+            body,
+            self.params,
+            settings.costs,
+            &control,
+        )?;
+        let shown = if settings.settings {
+            self.context.validation.session.explain_settings(&control)?
+        } else {
+            control.finish(Vec::new(), control.empty_reservation())?
+        };
+        let (shown, shown_memory) = shown.into_parts();
+        let (mut physical, physical_memory) = physical.into_parts();
+        physical.settings = shown;
         physical.planning_elapsed = Some(planning_started.elapsed());
+        let physical = control.finish(physical, control.combine(physical_memory, shown_memory))?;
         let analysis = if settings.analyze {
             let diagnostics = self.context.diagnostics.diagnostics_scope()?;
             let started = std::time::Instant::now();
