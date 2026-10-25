@@ -334,7 +334,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     .referential
                     .constraints
                     .reads
-                    .get_document(&storage_table, doc_id)?
+                    .raw_document(&storage_table, doc_id)?
                 else {
                     continue;
                 };
