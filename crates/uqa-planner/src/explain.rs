@@ -13,7 +13,7 @@ use uqa_core::{
 };
 use uqa_sql::{
     plan::{QueryBlockPlan, QueryPlan, RelationalPlan, UnifiedPlan},
-    ResultRow, SQLError, SQLResult, ScalarExpr,
+    SQLError, SQLResult, ScalarExpr,
 };
 
 pub use uqa_sql::result::ExplainAnalysis;
@@ -100,7 +100,7 @@ pub fn run_explain_with_control(
     let mut cells = ProductionVec::new(*control);
     let ty = if settings.format == ExplainFormat::Text {
         for line in plan_text.lines() {
-            cells.push_produced(control.copy_text(line)?)?;
+            cells.push_produced(result_cell(control.copy_text(line)?, false, control)?)?;
         }
         uqa_sql::ColumnType::Text
     } else {
@@ -108,11 +108,15 @@ pub fn run_explain_with_control(
             Some((label, _)) => properties::Property::Text(label),
             None => structured_plan(body, &plan_text, settings, analysis, physical, *control)?,
         };
-        cells.push_produced(formats::render(
-            &payload,
-            settings.format,
-            utility.map(|(label, _)| label),
-            *control,
+        cells.push_produced(result_cell(
+            formats::render(
+                &payload,
+                settings.format,
+                utility.map(|(label, _)| label),
+                *control,
+            )?,
+            settings.format == ExplainFormat::Json,
+            control,
         )?)?;
         match settings.format {
             ExplainFormat::Json => uqa_sql::ColumnType::Json,
@@ -122,32 +126,27 @@ pub fn run_explain_with_control(
     };
     let cells = cells.finish()?;
     drop(plan_text);
-    // SQLResult is the existing ordinary API boundary. Move completed cell payloads into it while their construction leases remain alive; the receiver owns subsequent result retention.
-    let (cells, memory) = cells.into_parts();
-    let rows = cells
-        .into_iter()
-        .map(|text| {
-            let value = if settings.format == ExplainFormat::Json {
-                Value::Json(text)
-            } else {
-                Value::Str(text)
-            };
-            ResultRow::from([("QUERY PLAN".into(), value)])
-        })
-        .collect();
-    let result = SQLResult {
-        kind: uqa_sql::SQLResultKind::Rows,
-        command_tag: None,
-        row_schema: None,
-        columns: vec!["QUERY PLAN".into()],
-        column_types: vec![Some(ty)],
-        rows,
-        positional_rows: None,
-        affected_rows: 0,
-    };
-    control.check()?;
+    let result = SQLResult::from_column_with_control("QUERY PLAN", &ty, cells, control)?;
+    // This is the existing ordinary SQL result handoff. All cell and metadata construction stays admitted through the move; the receiver owns subsequent result retention.
+    let (result, memory) = result.into_parts();
     drop(memory);
     Ok(result)
+}
+
+fn result_cell(
+    text: Produced<String>,
+    json: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let (text, memory) = text.into_parts();
+    Ok(control.finish(
+        if json {
+            Value::Json(text)
+        } else {
+            Value::Str(text)
+        },
+        memory,
+    )?)
 }
 
 fn utility_description(body: &UnifiedPlan) -> Option<(&'static str, &'static str)> {

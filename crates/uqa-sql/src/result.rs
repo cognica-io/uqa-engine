@@ -14,6 +14,7 @@ use crate::ast::ColumnType;
 use crate::RowSchema;
 
 mod labels;
+mod production;
 mod text;
 pub use labels::render_result_enum_labels;
 pub use text::format_postgres_text_with_catalog_and_control;
