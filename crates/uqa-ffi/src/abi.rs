@@ -165,6 +165,27 @@ impl From<&str> for UQAStringView {
     }
 }
 
+/// One borrowed live attribute; both pointers retain the parent descriptor's lifetime.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UQAFieldDescriptor {
+    pub name: UQAStringView,
+    pub ty: *const crate::types::UQAType,
+    pub number: i32,
+    pub collation_oid: u32,
+}
+
+impl Default for UQAFieldDescriptor {
+    fn default() -> Self {
+        Self {
+            name: UQAStringView::default(),
+            ty: std::ptr::null(),
+            number: 0,
+            collation_oid: 0,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct UQABytesView {

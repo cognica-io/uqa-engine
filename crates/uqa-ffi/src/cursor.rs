@@ -31,6 +31,7 @@ use crate::{
 
 pub struct UQACursor {
     columns: Option<CursorColumns>,
+    types: types::TypeViews,
     row_count: usize,
     completion: u32,
     failure: RetainedError,
@@ -184,6 +185,7 @@ unsafe fn open(
     let memory = session.memory.reserve(size_of::<UQACursor>())?;
     let mut cursor = boundary::boxed(UQACursor {
         columns: None,
+        types: types::TypeViews::new(&session.control()),
         row_count: 0,
         completion: UQA_COMPLETION_IN_TRANSACTION,
         failure: error::retained_slot(&session.memory)?,
@@ -270,8 +272,9 @@ ffi_fn!(uqa_cursor_get_column_name(cursor: *mut UQACursor, column: u32, out: *mu
 ffi_fn!(uqa_cursor_get_column_type(cursor: *mut UQACursor, column: u32, out: *mut *const UQAType) {
     let out = boundary::output(out)?;
     let cursor = boundary::input(cursor)?;
+    let _call = cursor.session.enter_value()?;
     match cursor.columns()[cursor.column(column)?].ty.as_deref() {
-        Some(ty) => { *out = types::view(ty); Ok(UQA_OK) },
+        Some(ty) => { *out = cursor.types.get(u64::from(column), ty, Some(&cursor.session))?; Ok(UQA_OK) },
         None => Ok(UQA_DONE),
     }
 });

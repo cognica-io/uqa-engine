@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Borrowed native SQL descriptors; ABI kind codes never use Rust enum discriminants.
+//! Retained native SQL descriptors; ABI kind codes never use Rust enum discriminants.
 
 use crate::{
     abi::{
@@ -26,11 +26,41 @@ use crate::{
 };
 use uqa_sql::{ast::ColumnType, catalog::type_metadata};
 
-#[repr(transparent)]
-pub struct UQAType(ColumnType);
+mod fields;
+mod views;
+use crate::session::Session;
+pub use fields::*;
+use std::sync::Arc;
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
+pub(crate) use views::TypeViews;
 
-pub(crate) fn view(ty: &ColumnType) -> *const UQAType {
-    std::ptr::from_ref(ty).cast()
+pub struct UQAType {
+    native: Produced<ColumnType>,
+    session: Option<Arc<Session>>,
+    children: TypeViews,
+    fields: fields::FieldViews,
+    _memory: Option<MemoryReservation>,
+}
+
+impl UQAType {
+    fn new(ty: &ColumnType, session: Option<&Arc<Session>>) -> boundary::Result<Box<Self>> {
+        let control =
+            session.map_or_else(ProductionControl::uncontrolled, |session| session.control());
+        let memory = control.reserve(size_of::<Self>())?;
+        boundary::boxed(Self {
+            native: ty.clone_with_control(&control)?,
+            session: session.cloned(),
+            children: TypeViews::new(&control),
+            fields: fields::FieldViews::new(&control),
+            _memory: memory,
+        })
+    }
+
+    fn control(&self) -> ProductionControl<'_> {
+        self.session
+            .as_ref()
+            .map_or_else(ProductionControl::uncontrolled, |session| session.control())
+    }
 }
 
 fn kind(ty: &ColumnType) -> u32 {
@@ -91,12 +121,12 @@ fn kind(ty: &ColumnType) -> u32 {
 
 ffi_fn!(uqa_type_get_kind(ty: *const UQAType, out: *mut u32) {
     let out = boundary::output(out)?;
-    *out = kind(&boundary::input(ty)?.0);
+    *out = kind(&boundary::input(ty)?.native);
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_type_get_oid(ty: *const UQAType, out: *mut u32) {
     let out = boundary::output(out)?;
-    let ty = &boundary::input(ty)?.0;
+    let ty = &*boundary::input(ty)?.native;
     if matches!(ty, ColumnType::Named(_)) { return Ok(UQA_DONE); }
     let oid = type_metadata::pg_type_oid(ty);
     if oid == 0 { return Ok(UQA_DONE); }
@@ -105,20 +135,20 @@ ffi_fn!(uqa_type_get_oid(ty: *const UQAType, out: *mut u32) {
 });
 ffi_fn!(uqa_type_get_modifier(ty: *const UQAType, out: *mut i32) {
     let out = boundary::output(out)?;
-    *out = i32::try_from(type_metadata::pg_type_modifier(&boundary::input(ty)?.0))
+    *out = i32::try_from(type_metadata::pg_type_modifier(&boundary::input(ty)?.native))
         .map_err(|_| UQAError::new(UQA_ERROR_RANGE, "native type modifier is outside its ABI range"))?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_type_get_numeric_precision(ty: *const UQAType, out: *mut u32) {
     let out = boundary::output(out)?;
-    match &boundary::input(ty)?.0 {
+    match &*boundary::input(ty)?.native {
         ColumnType::Numeric { precision: Some(precision), .. } => { *out = *precision; Ok(UQA_OK) },
         _ => Ok(UQA_DONE),
     }
 });
 ffi_fn!(uqa_type_get_dimensions(ty: *const UQAType, out: *mut u32) {
     let out = boundary::output(out)?;
-    match &boundary::input(ty)?.0 {
+    match &*boundary::input(ty)?.native {
         ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions) => {
             *out = *dimensions;
             Ok(UQA_OK)
@@ -128,19 +158,19 @@ ffi_fn!(uqa_type_get_dimensions(ty: *const UQAType, out: *mut u32) {
 });
 ffi_fn!(uqa_type_get_numeric_scale(ty: *const UQAType, out: *mut i32) {
     let out = boundary::output(out)?;
-    match &boundary::input(ty)?.0 {
+    match &*boundary::input(ty)?.native {
         ColumnType::Numeric { scale: Some(scale), .. } => { *out = *scale; Ok(UQA_OK) },
         _ => Ok(UQA_DONE),
     }
 });
 ffi_fn!(uqa_type_get_name(ty: *const UQAType, out: *mut UQAStringView) {
     let out = boundary::output(out)?;
-    *out = type_metadata::column_type_name(&boundary::input(ty)?.0).into();
+    *out = type_metadata::column_type_name(&boundary::input(ty)?.native).into();
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_type_get_schema(ty: *const UQAType, out: *mut UQAStringView) {
     let out = boundary::output(out)?;
-    let schema = match &boundary::input(ty)?.0 {
+    let schema = match &*boundary::input(ty)?.native {
         ColumnType::Domain { schema, .. } => schema,
         ColumnType::Enum(reference) => &reference.schema,
         ColumnType::Composite(reference) => &reference.schema,
@@ -152,17 +182,23 @@ ffi_fn!(uqa_type_get_schema(ty: *const UQAType, out: *mut UQAStringView) {
 });
 ffi_fn!(uqa_type_get_base_type(ty: *const UQAType, out: *mut *const UQAType) {
     let out = boundary::output(out)?;
-    match &boundary::input(ty)?.0 {
-        ColumnType::Domain { base, .. } => { *out = view(base); Ok(UQA_OK) },
+    let ty = boundary::input(ty)?;
+    let _call = ty.session.as_ref().map(|session| session.enter_value()).transpose()?;
+    match &*ty.native {
+        ColumnType::Domain { base, .. } => { *out = ty.children.get(0, base, ty.session.as_ref())?; Ok(UQA_OK) },
         _ => Ok(UQA_DONE),
     }
 });
 ffi_fn!(uqa_type_get_element_type(ty: *const UQAType, out: *mut *const UQAType) {
     let out = boundary::output(out)?;
-    match &boundary::input(ty)?.0 {
-        ty @ ColumnType::Array(_) => { *out = view(ty.array_element_type().expect("array element")); Ok(UQA_OK) },
-        ColumnType::Int2Vector => { *out = view(&ColumnType::SmallInteger); Ok(UQA_OK) },
-        ColumnType::OidVector => { *out = view(&ColumnType::Oid); Ok(UQA_OK) },
-        _ => Ok(UQA_DONE),
-    }
+    let ty = boundary::input(ty)?;
+    let _call = ty.session.as_ref().map(|session| session.enter_value()).transpose()?;
+    let element = match &*ty.native {
+        native @ ColumnType::Array(_) => native.array_element_type().expect("array element"),
+        ColumnType::Int2Vector => &ColumnType::SmallInteger,
+        ColumnType::OidVector => &ColumnType::Oid,
+        _ => return Ok(UQA_DONE),
+    };
+    *out = ty.children.get(1, element, ty.session.as_ref())?;
+    Ok(UQA_OK)
 });

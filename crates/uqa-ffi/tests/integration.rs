@@ -35,3 +35,6 @@ mod statements;
 
 #[path = "cases/values.rs"]
 mod values;
+
+#[path = "cases/record_values.rs"]
+mod record_values;

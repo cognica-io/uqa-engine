@@ -30,6 +30,7 @@ pub struct UQAStatement {
     native: Option<PreparedStatement>,
     parameter_types: BudgetedVec<Option<Produced<ColumnType>>>,
     result_schema: Option<RowSchema>,
+    types: types::TypeViews,
     bindings: Mutex<Bindings>,
     session: Arc<Session>,
     _memory: MemoryReservation,
@@ -117,6 +118,7 @@ unsafe fn prepare(
         native: None,
         parameter_types: BudgetedVec::new(&session.memory),
         result_schema: None,
+        types: types::TypeViews::new(&session.control()),
         bindings: Mutex::new(Bindings {
             values: BudgetedVec::new(&session.memory),
             owners: BudgetedVec::new(&session.memory),
@@ -180,7 +182,7 @@ ffi_fn!(uqa_statement_get_parameter_type(statement: *mut UQAStatement, index: u3
     let _call = statement.session.enter()?;
     statement.validate()?;
     match statement.parameter_types[statement.parameter_index(index)?].as_deref() {
-        Some(ty) => { *out = types::view(ty); Ok(UQA_OK) },
+        Some(ty) => { *out = statement.types.get(u64::from(index), ty, Some(&statement.session))?; Ok(UQA_OK) },
         None => Ok(UQA_DONE),
     }
 });
@@ -208,7 +210,7 @@ ffi_fn!(uqa_statement_get_column_type(statement: *mut UQAStatement, column: u32,
     statement.validate()?;
     let (schema, column) = statement.column(column)?;
     match schema.column_type(column) {
-        Some(ty) => { *out = types::view(ty); Ok(UQA_OK) },
+        Some(ty) => { *out = statement.types.get((1 << 32) | column as u64, ty, Some(&statement.session))?; Ok(UQA_OK) },
         None => Ok(UQA_DONE),
     }
 });

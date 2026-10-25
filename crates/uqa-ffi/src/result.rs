@@ -73,6 +73,7 @@ pub struct UQAResult {
 
 pub(crate) struct ResultData {
     pub(crate) native: NativeResult,
+    types: types::TypeViews,
     cells: RefCell<BudgetedMap<(u64, u32), Box<UQAValue>>>,
     pub(crate) session: Arc<Session>,
     _memory: MemoryReservation,
@@ -84,6 +85,7 @@ impl ResultData {
         let memory = session.memory.reserve(size_of::<Self>())?;
         boundary::boxed(Self {
             native: NativeResult::Materialized(SQLResult::empty()),
+            types: types::TypeViews::new(&session.control()),
             cells: RefCell::new(BudgetedMap::new(&session.memory)),
             session: Arc::clone(session),
             _memory: memory,
@@ -136,8 +138,9 @@ ffi_fn!(uqa_result_get_column_name(result: *mut UQAResult, column: u32, out: *mu
 ffi_fn!(uqa_result_get_column_type(result: *mut UQAResult, column: u32, out: *mut *const UQAType) {
     let out = boundary::output(out)?;
     let data = boundary::input(result)?.data()?;
+    let _call = data.session.enter_value()?;
     match data.native.column_type(data.check_column(column)?) {
-        Some(ty) => { *out = types::view(ty); Ok(UQA_OK) },
+        Some(ty) => { *out = data.types.get(u64::from(column), ty, Some(&data.session))?; Ok(UQA_OK) },
         None => Ok(UQA_DONE),
     }
 });

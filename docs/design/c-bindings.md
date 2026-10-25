@@ -498,6 +498,17 @@ UQA_API uqa_status UQA_CALL uqa_type_get_modifier(
     uqa_type type, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_dimensions(
     uqa_type type, uint32_t *out);
+
+typedef struct uqa_field_descriptor {
+    uqa_string_view name;
+    uqa_type type;
+    int32_t number;
+    uint32_t collation_oid;
+} uqa_field_descriptor;
+
+UQA_API uqa_status UQA_CALL uqa_type_get_field_count(uqa_type type, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_field(
+    uqa_type type, uint32_t index, uqa_field_descriptor *out);
 ```
 
 `uqa_result_create` allocates an unpopulated result wrapper without executing SQL. `uqa_engine_execute*`, `uqa_statement_execute`, `uqa_cursor_fetch`, and `uqa_batch_result_take` populate that wrapper without allocating a second public result handle. A successful refill releases the previous contents and its session lease after the replacement is ready. Retain both old and replacement reservations during that transition.
@@ -505,6 +516,10 @@ UQA_API uqa_status UQA_CALL uqa_type_get_dimensions(
 Read cells through `SQLResult::value_at` or native positional column batches. Do not reconstruct rows as name-keyed maps. Preserve both columns of `SELECT 1 AS x, 2 AS x`, descriptors on empty results, and the distinction between a zero-column rowset and a command. Command tags and affected-row counts come from native results. Do not invent rows-scanned counters.
 
 A `uqa_type` describes SQL identity separately from physical value representation. Additional accessors expose available OID, schema/name, modifier, nested element/field descriptors, domain base type, and collation. An optional metadata accessor returns `UQA_DONE` when the native field is absent, rather than inferring it from a first row or column name. A separate PostgreSQL client descriptor accessor may expose `postgres_result_type`, whose scalar-domain representation can use the base type.
+
+`uqa_type_get_field_count` and `uqa_type_get_field` observe the current catalog attributes of a named composite. Positions are zero-based and exclude dropped slots; `number` retains the attribute's one-based physical catalog number, and `collation_oid` is its selected collation. Names and field types are borrowed from the parent type and remain valid for its lifetime, including after later catalog changes or failed observations. A new observation sees the current descriptor; a removed type reports its native SQL diagnostic. Domains expose fields through `uqa_type_get_base_type`. Types without a named composite descriptor, including the anonymous `record` pseudotype, return `UQA_DONE`; an index beyond an existing composite's field count returns `UQA_ERROR_RANGE`. Failure clears the output.
+
+Type wrappers copy their native declaration and retain the original session and FFI allowance. Root, base, element and field wrappers are admitted lazily and published only after success; repeated requests reuse stable views. Catalog field reads do not execute input or domain checks. They share the source session's operation gate and cancellation scope; rejected admission preserves previous views and permits another attempt after other owners are released. Scalar identity getters read the retained declaration without querying the catalog.
 
 Type families include BOOL, INT16/32/64, FLOAT32/64, TEXT/CHAR/VARCHAR, BYTEA, NUMERIC, temporal types, JSON/JSONB, XML, UUID, BIT/VARBIT, ARRAY, ROW/RECORD, ENUM, DOMAIN, RANGE/MULTIRANGE, VECTOR/TENSOR, graph/agtype, and VOID. This is an ABI representation inventory, not an assertion that additional SQL types have been implemented.
 
@@ -596,6 +611,12 @@ UQA_API uqa_status UQA_CALL uqa_value_get_array_shape(
     uqa_value_view value, uqa_array_shape *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_element(
     uqa_value_view value, uint64_t index, uqa_value_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_record(
+    uqa_engine engine, const char *type_name,
+    const uqa_value_view *fields, uint32_t field_count, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_record_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const uqa_value_view *fields, uint32_t field_count, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_array(
     uqa_engine engine, const char *type_name,
     const uqa_array_dimension *dimensions, uint32_t rank,
@@ -623,6 +644,8 @@ Owned values and borrowed value views are immutable after construction. Scalar c
 `uqa_value_create_array` accepts an array type declaration, explicit dimensions and a flat row-major sequence of value views. Its `_n` variant accepts a length-delimited type name. Every supplied pointer identifies a value; SQL NULL uses `uqa_value_create_null` or a typed NULL constructor. Dimensions and children are copied, so callers may release their inputs after success. Rank zero or a zero-length dimension with zero elements creates a dimensionless empty array. The product of lengths must equal `element_count`; rank, signed bounds and cardinality obey native array limits. Invalid shapes return a native SQL diagnostic. An array-valued domain is one scalar element: its own shape and bounds do not add dimensions to the containing array.
 
 Array construction resolves all retained source identities before converting any element, uses native explicit scalar casts and validates outer domains inside the session's existing transaction boundary. Domain checks run during the relevant conversion, and reusing admitted values does not rerun them. FFI admits input copies and the return owner before native execution, publishes only after native completion and preserves SQL failure/savepoint semantics. Input spans, same-database catalog identity, cancellation, resource limits and callback reentry use the same rules as contextual text input.
+
+`uqa_value_create_record` and `_n` copy a positional field sequence into a named composite, a domain over one, or an anonymous `record`. A named type requires exactly its current live attributes, excluding dropped slots. Every source identity binds before any field conversion; native explicit casts apply each target modifier and field-domain constraint in order, followed by an enclosing domain's constraints. Anonymous records retain each supplied field's type, modifier, collation and NULL state without implicit field conversion. Zero fields and a NULL field-span pointer form an empty record. Each nonempty entry must identify a value; SQL NULL uses a NULL value constructor. The return owner and copied inputs are admitted before native execution, and successful publication performs no additional fallible allocation. The original child handles may be released after success. Input effects, errors, savepoint recovery and cross-database identities follow the contextual constructor contract.
 
 A dimensionless empty array has NULL dimensions, rank zero and count zero. An explicitly shaped empty catalog vector retains its one zero-length dimension. A NULL array returns `UQA_ERROR_NULL`; a position outside the array returns `UQA_ERROR_RANGE`. Failure clears the output. Shape metadata and requested child wrappers are admitted under the parent's FFI allowance, cached only after successful construction and remain stable until the parent or its containing result is released or refilled. Releasing other retained handles permits another attempt after an admission failure. `uqa_value_create_copy` creates an independent child owner. Array observation participates in the source session's operation gate and cancellation scope; concurrent admission can return `UQA_ERROR_BUSY` without publishing a partial view.
 

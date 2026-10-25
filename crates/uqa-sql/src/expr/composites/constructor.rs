@@ -108,6 +108,30 @@ pub fn construct_with_state(
             }
         }
     }
+    produce(descriptor, control, state, |_, attribute| {
+        match binding.attributes.binary_search(&attribute.number) {
+            Ok(index) => evaluate(index),
+            Err(_) => Ok(control.finish(Value::Null, control.empty_reservation())?),
+        }
+    })
+}
+
+/// Construct a newly admitted record from exactly the current live attributes. The caller binds and coerces each positional input; no stored-expression binding is required.
+pub fn construct_current_with_control(
+    descriptor: &super::CompositeTypeDescriptor,
+    control: &ProductionControl<'_>,
+    mut evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
+) -> Result<Produced<Value>, SQLError> {
+    produce(descriptor, control, None, |index, _| evaluate(index))
+}
+
+fn produce(
+    descriptor: &super::CompositeTypeDescriptor,
+    control: &ProductionControl<'_>,
+    state: Option<&CompositeConstructorState>,
+    mut evaluate: impl FnMut(usize, &super::CompositeAttribute) -> Result<Produced<Value>, SQLError>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
     let shared = state.and_then(|state| state.shared(descriptor));
     let mut names = ProductionVec::new(*control);
     let mut values = ProductionVec::new(*control);
@@ -115,11 +139,8 @@ pub fn construct_with_state(
     if shared.is_none() {
         names.reserve(descriptor.attributes.len())?;
     }
-    for attribute in &descriptor.attributes {
-        let value = match binding.attributes.binary_search(&attribute.number) {
-            Ok(index) => evaluate(index)?,
-            Err(_) => control.finish(Value::Null, control.empty_reservation())?,
-        };
+    for (index, attribute) in descriptor.attributes.iter().enumerate() {
+        let value = evaluate(index, attribute)?;
         if shared.is_none() {
             names.push_produced(control.copy_text(&attribute.name)?)?;
         }

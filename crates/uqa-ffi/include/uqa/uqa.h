@@ -44,6 +44,14 @@ typedef struct uqa_string_view {
     size_t size;
 } uqa_string_view;
 
+/* A current live attribute. Views remain valid for the parent type's lifetime. */
+typedef struct uqa_field_descriptor {
+    uqa_string_view name;
+    uqa_type type;
+    int32_t number;
+    uint32_t collation_oid;
+} uqa_field_descriptor;
+
 typedef struct uqa_bytes_view {
     const uint8_t *data;
     size_t size;
@@ -369,6 +377,12 @@ UQA_API uqa_status UQA_CALL uqa_type_get_name(uqa_type type, uqa_string_view *ou
 UQA_API uqa_status UQA_CALL uqa_type_get_schema(uqa_type type, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_base_type(uqa_type type, uqa_type *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_element_type(uqa_type type, uqa_type *out);
+/* Live zero-based fields of a named composite; other types return UQA_DONE.
+ * Domains expose fields through their base type. Dropped slots are excluded;
+ * number retains pg_attribute.attnum. Earlier views survive catalog changes. */
+UQA_API uqa_status UQA_CALL uqa_type_get_field_count(uqa_type type, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_field(
+    uqa_type type, uint32_t index, uqa_field_descriptor *out);
 
 /* Constructors copy inputs and preserve their SQL type, including integer and
  * floating widths. NULL from create_null has no declared type. */
@@ -438,6 +452,14 @@ UQA_API uqa_status UQA_CALL uqa_value_get_tensor_f32(
 UQA_API uqa_status UQA_CALL uqa_value_get_array_shape(
     uqa_value_view value, uqa_array_shape *out);
 /* type_name is an array declaration; elements are copied in row-major order. */
+/* Construct a named composite/domain or anonymous record from positional fields.
+ * Inputs are copied before native execution; SQL NULL uses a value handle. */
+UQA_API uqa_status UQA_CALL uqa_value_create_record(
+    uqa_engine engine, const char *type_name,
+    const uqa_value_view *fields, uint32_t field_count, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_record_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const uqa_value_view *fields, uint32_t field_count, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_array(
     uqa_engine engine, const char *type_name,
     const uqa_array_dimension *dimensions, uint32_t rank,

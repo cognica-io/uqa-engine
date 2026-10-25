@@ -1,0 +1,115 @@
+{
+  "reference": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "captured_utc": "2026-10-25T00:28:05.893088+00:00",
+  "setup": "DROP SCHEMA IF EXISTS c_record_ref CASCADE; CREATE SCHEMA c_record_ref; SET search_path=c_record_ref,public;\nCREATE TYPE leaf AS (n smallint, label varchar(2));\nCREATE TYPE pair AS (nested leaf, optional integer, numbers integer[], amount numeric(5,2));\nCREATE TYPE fields AS (a integer, b text COLLATE \"C\", c numeric(7,2));",
+  "cases": [
+    {
+      "id": "nested",
+      "sql": "SELECT ROW(ROW(32767::integer,'abcd'::text)::leaf,NULL::integer,'[0:1]={7,NULL}'::integer[],'12.3456'::text)::pair::text",
+      "rows": [
+        [
+          "(\"(32767,ab)\",,\"[0:1]={7,NULL}\",12.35)"
+        ]
+      ]
+    },
+    {
+      "id": "metadata",
+      "sql": "SELECT attname, attnum::text, atttypid::regtype::text, atttypmod::text, attcollation::text FROM pg_attribute WHERE attrelid=(SELECT typrelid FROM pg_type WHERE typname='fields' AND typnamespace='c_record_ref'::regnamespace) AND attnum>0 AND NOT attisdropped ORDER BY attnum",
+      "rows": [
+        [
+          "a",
+          "1",
+          "integer",
+          "-1",
+          "0"
+        ],
+        [
+          "b",
+          "2",
+          "text",
+          "-1",
+          "950"
+        ],
+        [
+          "c",
+          "3",
+          "numeric",
+          "458758",
+          "0"
+        ]
+      ]
+    },
+    {
+      "id": "changed_metadata",
+      "sql": "SELECT attname, attnum::text, atttypid::regtype::text, atttypmod::text, attcollation::text FROM pg_attribute WHERE attrelid=(SELECT typrelid FROM pg_type WHERE typname='fields' AND typnamespace='c_record_ref'::regnamespace) AND attnum>0 AND NOT attisdropped ORDER BY attnum",
+      "rows": [
+        [
+          "renamed",
+          "1",
+          "integer",
+          "-1",
+          "0"
+        ],
+        [
+          "c",
+          "3",
+          "numeric",
+          "458758",
+          "0"
+        ],
+        [
+          "tail",
+          "4",
+          "character varying",
+          "8",
+          "100"
+        ]
+      ]
+    }
+  ],
+  "domain_setup": "CREATE SEQUENCE record_calls; CREATE DOMAIN counted AS integer CHECK (nextval('record_calls') > 0 AND VALUE > 0); CREATE TYPE checked AS (a counted, b counted); CREATE DOMAIN whole AS checked CHECK (nextval('record_calls') > 0);",
+  "domain_and_anonymous_steps": [
+    {
+      "sql": "SELECT ROW(2,3)::checked::whole::text",
+      "exit_code": 0,
+      "stdout": "(2,3)\n",
+      "stderr": ""
+    },
+    {
+      "sql": "SELECT last_value FROM record_calls",
+      "exit_code": 0,
+      "stdout": "3\n",
+      "stderr": ""
+    },
+    {
+      "sql": "SELECT ROW(1)::checked",
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "ERROR:  42846: cannot cast type record to checked\nLINE 1: SET search_path=c_record_ref,public; SELECT ROW(1)::checked\n                                                          ^\nDETAIL:  Input has too few columns.\nLOCATION:  coerce_record_to_complex, parse_coerce.c:1084\n"
+    },
+    {
+      "sql": "SELECT last_value FROM record_calls",
+      "exit_code": 0,
+      "stdout": "3\n",
+      "stderr": ""
+    },
+    {
+      "sql": "SELECT ROW(2,-1)::checked::whole",
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "ERROR:  23514: value for domain counted violates check constraint \"counted_check\"\nSCHEMA NAME:  c_record_ref\nDATATYPE NAME:  counted\nCONSTRAINT NAME:  counted_check\nLOCATION:  ExecEvalConstraintCheck, execExprInterp.c:4497\n"
+    },
+    {
+      "sql": "SELECT last_value FROM record_calls",
+      "exit_code": 0,
+      "stdout": "5\n",
+      "stderr": ""
+    },
+    {
+      "sql": "SELECT ROW()::text, ROW(7::smallint,'abc'::text)::text",
+      "exit_code": 0,
+      "stdout": "()|(7,abc)\n",
+      "stderr": ""
+    }
+  ]
+}

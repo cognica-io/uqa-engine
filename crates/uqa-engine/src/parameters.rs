@@ -11,6 +11,24 @@ use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::{SQLError, SQLParam};
 
 impl Engine {
+    /// Construct a typed host record in the native statement scope. SQL owns attribute selection, source binding, scalar casts and domain checks.
+    pub fn create_record_parameter_with_control(
+        &self,
+        type_name: &str,
+        fields: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<SQLParam>, SQLError> {
+        self.with_direct_query_snapshot(
+            false,
+            |engine| {
+                uqa_sql::params::create_record_parameter_with_control(
+                    type_name, fields, engine, engine, control,
+                )
+            },
+            std::convert::identity,
+        )
+    }
+
     /// Construct a typed host array in the session's native statement/catalog scope. SQL owns parameter identities, scalar conversion, dimensions and domain constraints.
     pub fn create_array_parameter_with_control(
         &self,

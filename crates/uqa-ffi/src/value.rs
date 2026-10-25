@@ -34,6 +34,8 @@ mod packed;
 pub use packed::*;
 mod dense;
 pub use dense::*;
+mod record_input;
+pub use record_input::*;
 mod array_input;
 mod arrays;
 pub use array_input::*;
@@ -58,6 +60,7 @@ pub struct UQAValue {
     array_shape: OnceLock<Produced<Vec<crate::abi::UQAArrayDimension>>>,
     array_children: Mutex<arrays::Children>,
     parameter_type: Option<ColumnType>,
+    types: crate::types::TypeViews,
     pub(crate) session: Option<Arc<Session>>,
     _memory: Option<MemoryReservation>,
 }
@@ -93,6 +96,7 @@ impl UQAValue {
             tensor_data: OnceLock::new(),
             array_shape: OnceLock::new(),
             array_children: Mutex::new(arrays::Children::new(&control)),
+            types: crate::types::TypeViews::new(&control),
             parameter_type: None,
             session: session.cloned(),
             _memory: memory,
@@ -129,6 +133,11 @@ impl UQAValue {
                     .as_ref()
                     .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
             )),
+            types: crate::types::TypeViews::new(
+                &session
+                    .as_ref()
+                    .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
+            ),
             parameter_type,
             session,
             _memory: memory,
@@ -431,7 +440,7 @@ ffi_fn!(uqa_value_get_type(value: *const UQAValue, out: *mut *const UQAType) {
     let value = boundary::input(value)?;
     let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
     match value.ty() {
-        Some(ty) => { *out = crate::types::view(ty); Ok(UQA_OK) },
+        Some(ty) => { *out = value.types.get(0, ty, value.session.as_ref())?; Ok(UQA_OK) },
         None => Ok(UQA_DONE),
     }
 });
