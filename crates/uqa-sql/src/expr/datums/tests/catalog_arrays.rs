@@ -126,15 +126,20 @@ fn catalog_array_layouts_keep_identity_nulls_and_deferred_fields() {
                 &[Value::Int(1), Value::Null, Value::Int(7)]
             ),
             _ => {
-                let Value::Record(fields) = &array.elements()[0] else {
-                    panic!("record")
+                let Value::Datum(record) = &array.elements()[0] else {
+                    panic!("deferred physical record")
                 };
-                for ((name, value), (expected_name, expected)) in fields
-                    .iter()
-                    .zip([("n", Value::Int(1)), ("t", Value::Str("one".into()))])
-                {
-                    assert_eq!(name, expected_name);
-                    let Value::Datum(field) = value else {
+                for (name, expected) in [("n", Value::Int(1)), ("t", Value::Str("one".into()))] {
+                    let value = read_composite_field_with_control(
+                        record,
+                        name,
+                        Some(&crate::expr::value_catalog::ValueCompositeCatalog(Some(
+                            &Catalog,
+                        ))),
+                        &control,
+                    )
+                    .unwrap();
+                    let Value::Datum(field) = &*value else {
                         panic!("deferred field")
                     };
                     assert_eq!(read(field).unwrap(), expected);

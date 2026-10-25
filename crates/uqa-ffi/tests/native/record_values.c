@@ -286,6 +286,171 @@ static void invalid_and_empty(uqa_engine engine, uqa_result result) {
     CHECK(uqa_value_destroy(&row));
 }
 
+static void parameter_text(uqa_engine engine, uqa_result result, uqa_value_view parameter,
+                           const char *sql, const char *expected) {
+    uqa_value_view value = NULL;
+    CHECK(uqa_engine_execute_params(engine, sql, &parameter, 1, result));
+    CHECK(uqa_result_get_value(result, 0, 0, &value));
+    formatted(value, expected);
+}
+
+static void retained_inputs(uqa_engine engine, uqa_result result) {
+    uqa_value values[2] = {NULL, NULL};
+    uqa_value n = NULL, text = NULL, tail = NULL, copy = NULL;
+    uqa_statement statement = NULL;
+    uqa_cursor cursor = NULL;
+    uqa_value_view cell = NULL;
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TYPE c_retained_input AS (a integer, b text, tail integer)", result));
+    CHECK(uqa_value_create_from_text(engine, "c_retained_input", "(7,x,9)", &values[0]));
+    CHECK(uqa_value_create_int32(7, &n));
+    CHECK(uqa_value_create_text("x", &text));
+    CHECK(uqa_value_create_int32(9, &tail));
+    {
+        uqa_value_view fields[] = {n, text, tail};
+        CHECK(uqa_value_create_record(engine, "c_retained_input", fields, 3, &values[1]));
+    }
+    CHECK(uqa_value_destroy(&n)); CHECK(uqa_value_destroy(&text)); CHECK(uqa_value_destroy(&tail));
+    CHECK(uqa_statement_prepare(engine, "SELECT ($1::c_retained_input).a::text", &statement));
+    CHECK(uqa_statement_bind(statement, 1, values[1]));
+    formatted(values[0], "(7,x,9)"); formatted(values[1], "(7,x,9)");
+    CHECK(uqa_engine_execute(engine,
+        "ALTER TYPE c_retained_input RENAME ATTRIBUTE a TO renamed", result));
+    for (size_t i = 0; i < 2; ++i) {
+        parameter_text(engine, result, values[i], "SELECT ($1).renamed::text", "7");
+    }
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_result_get_value(result, 0, 0, &cell)); formatted(cell, "7");
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine,
+        "ALTER TYPE c_retained_input DROP ATTRIBUTE b; "
+        "ALTER TYPE c_retained_input ADD ATTRIBUTE added text", result));
+    for (size_t i = 0; i < 2; ++i) {
+        formatted(values[i], "(7,9,)");
+        parameter_text(engine, result, values[i], "SELECT ($1).tail::text", "9");
+    }
+    CHECK(uqa_value_create_copy(values[0], &copy));
+    CHECK(uqa_value_destroy(&values[0])); CHECK(uqa_value_destroy(&values[1]));
+    cell = copy;
+    CHECK(uqa_cursor_open_params(engine, "SELECT ($1).renamed::text", &cell, 1, &cursor));
+    CHECK(uqa_cursor_fetch(cursor, 1, result));
+    CHECK(uqa_result_get_value(result, 0, 0, &cell)); formatted(cell, "7");
+    CHECK(uqa_cursor_close(&cursor));
+    CHECK(uqa_engine_execute(engine, "CREATE TABLE c_retained_saved(v c_retained_input)", result));
+    cell = copy;
+    CHECK(uqa_engine_execute_params(engine, "INSERT INTO c_retained_saved VALUES ($1)", &cell, 1, result));
+    CHECK(uqa_value_destroy(&copy));
+}
+
+static void retained_width(uqa_engine engine, uqa_result result) {
+    uqa_value value = NULL, copy = NULL;
+    uqa_value_view parameter = NULL;
+    uint32_t state = UQA_TRANSACTION_IDLE;
+    CHECK(uqa_engine_execute(engine, "CREATE TYPE c_retained_bits AS (a integer, b integer, c integer)", result));
+    CHECK(uqa_value_create_from_text(engine, "c_retained_bits", "(16909060,84281096,287454020)", &value));
+    CHECK(uqa_engine_execute(engine,
+        "BEGIN; ALTER TYPE c_retained_bits ALTER ATTRIBUTE a TYPE bigint; SAVEPOINT before_read", result));
+    parameter_text(engine, result, value, "SELECT ($1).a::text", "361984551007945476");
+    parameter_text(engine, result, value, "SELECT ($1).b::text", "287454020");
+    parameter_text(engine, result, value, "SELECT (($1).c IS NULL)::text", "false");
+    CHECK(uqa_value_create_copy(value, &copy));
+    CHECK(uqa_value_destroy(&value));
+    parameter = copy;
+    sql_error(uqa_engine_execute_params(engine, "SELECT ($1).c::text", &parameter, 1, result), "XX001");
+    CHECK(uqa_transaction_get_state(engine, &state)); assert(state == UQA_TRANSACTION_FAILED);
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO before_read", result));
+    parameter_text(engine, result, copy, "SELECT ($1).a::text", "361984551007945476");
+    CHECK(uqa_transaction_rollback(engine));
+    formatted(copy, "(16909060,84281096,287454020)");
+    CHECK(uqa_value_destroy(&copy));
+}
+
+static void retained_nested(uqa_engine engine, uqa_result result) {
+    uqa_value child = NULL, second = NULL, array = NULL, named = NULL, anonymous = NULL;
+    uqa_array_dimension dimension = {1, 1};
+    uqa_value_view children[1], fields[2];
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TYPE c_retained_child AS (a integer, b text); "
+        "CREATE TYPE c_retained_parent AS (child c_retained_child, children c_retained_child[])", result));
+    CHECK(uqa_value_create_from_text(engine, "c_retained_child", "(7,x)", &child));
+    CHECK(uqa_value_create_from_text(engine, "c_retained_child", "(8,y)", &second));
+    children[0] = second;
+    CHECK(uqa_value_create_array(engine, "c_retained_child[]", &dimension, 1, children, 1, &array));
+    fields[0] = child; fields[1] = array;
+    CHECK(uqa_value_create_record(engine, "c_retained_parent", fields, 2, &named));
+    CHECK(uqa_value_create_record(engine, "record", fields, 2, &anonymous));
+    CHECK(uqa_value_destroy(&child)); CHECK(uqa_value_destroy(&second)); CHECK(uqa_value_destroy(&array));
+    CHECK(uqa_engine_execute(engine, "ALTER TYPE c_retained_child RENAME ATTRIBUTE a TO renamed", result));
+    parameter_text(engine, result, named, "SELECT (($1).child).renamed::text", "7");
+    parameter_text(engine, result, named, "SELECT ((($1).children)[1]).renamed::text", "8");
+    formatted(anonymous, "(\"(7,x)\",\"{\"\"(8,y)\"\"}\")");
+    parameter_text(engine, result, anonymous, "SELECT $1::text", "(\"(7,x)\",\"{\"\"(8,y)\"\"}\")");
+    {
+        uqa_value_view parameter = anonymous;
+        sql_error(uqa_engine_execute_params(engine, "SELECT (($1).f1).renamed::text", &parameter, 1, result), "42703");
+        sql_error(uqa_engine_execute_params(engine, "SELECT ((($1).f2)[1]).renamed::text", &parameter, 1, result), "42703");
+    }
+    CHECK(uqa_value_destroy(&named)); CHECK(uqa_value_destroy(&anonymous));
+}
+
+static void retained_input_checks(uqa_engine engine, uqa_result result, unsigned field_check) {
+    const char *type_name = field_check ? "c_retained_callback_pair" : "c_retained_callback_domain";
+    for (unsigned structured = 0; structured != 2; ++structured) {
+        uqa_value value = NULL;
+        uqa_value_view count = NULL;
+        if (field_check) {
+            CHECK(uqa_engine_execute(engine,
+                "CREATE SEQUENCE c_retained_callback_calls; "
+                "CREATE DOMAIN c_retained_field_int AS integer; "
+                "CREATE TYPE c_retained_callback_pair AS (a c_retained_field_int,b text); "
+                "CREATE FUNCTION c_retained_callback_rename(v integer) "
+                "RETURNS boolean LANGUAGE plpgsql AS $$BEGIN "
+                "PERFORM nextval('c_retained_callback_calls'); "
+                "ALTER TYPE c_retained_callback_pair RENAME ATTRIBUTE a TO renamed; RETURN true; END$$; "
+                "ALTER DOMAIN c_retained_field_int ADD CONSTRAINT mutate "
+                "CHECK(c_retained_callback_rename(VALUE))", result));
+        } else {
+            CHECK(uqa_engine_execute(engine,
+                "CREATE SEQUENCE c_retained_callback_calls; "
+                "CREATE TYPE c_retained_callback_pair AS (a integer,b text); "
+                "CREATE FUNCTION c_retained_callback_rename(v c_retained_callback_pair) "
+                "RETURNS boolean LANGUAGE plpgsql AS $$BEGIN "
+                "PERFORM nextval('c_retained_callback_calls'); "
+                "ALTER TYPE c_retained_callback_pair RENAME ATTRIBUTE a TO renamed; RETURN true; END$$; "
+                "CREATE DOMAIN c_retained_callback_domain AS c_retained_callback_pair "
+                "CHECK(c_retained_callback_rename(VALUE))", result));
+        }
+        if (structured) {
+            uqa_value number = NULL, text = NULL;
+            uqa_value_view fields[2];
+            CHECK(uqa_value_create_int32(7, &number));
+            CHECK(uqa_value_create_text("x", &text));
+            fields[0] = number; fields[1] = text;
+            CHECK(uqa_value_create_record(engine, type_name, fields, 2, &value));
+            CHECK(uqa_value_destroy(&number)); CHECK(uqa_value_destroy(&text));
+        } else {
+            CHECK(uqa_value_create_from_text(engine, type_name, "(7,x)", &value));
+        }
+        formatted(value, "(7,x)");
+        parameter_text(engine, result, value, "SELECT ($1).renamed::text", "7");
+        CHECK(uqa_engine_execute(engine, "SELECT currval('c_retained_callback_calls')::text", result));
+        CHECK(uqa_result_get_value(result, 0, 0, &count)); formatted(count, "1");
+        CHECK(uqa_value_destroy(&value));
+        if (field_check) {
+            CHECK(uqa_engine_execute(engine,
+                "ALTER DOMAIN c_retained_field_int DROP CONSTRAINT mutate; "
+                "DROP FUNCTION c_retained_callback_rename(integer); "
+                "DROP TYPE c_retained_callback_pair; DROP DOMAIN c_retained_field_int; "
+                "DROP SEQUENCE c_retained_callback_calls", result));
+        } else {
+            CHECK(uqa_engine_execute(engine,
+                "DROP DOMAIN c_retained_callback_domain; "
+                "DROP FUNCTION c_retained_callback_rename(c_retained_callback_pair); "
+                "DROP TYPE c_retained_callback_pair; DROP SEQUENCE c_retained_callback_calls", result));
+        }
+    }
+}
+
 int main(void) {
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -298,6 +463,11 @@ int main(void) {
     catalog_changes(engine, result);
     domains(engine, result);
     invalid_and_empty(engine, result);
+    retained_inputs(engine, result);
+    retained_width(engine, result);
+    retained_nested(engine, result);
+    retained_input_checks(engine, result, 0);
+    retained_input_checks(engine, result, 1);
     CHECK(uqa_result_destroy(&result));
     CHECK(uqa_engine_close(&engine));
     if (test_database_flags() != UQA_OPEN_MEMORY) {
@@ -310,6 +480,9 @@ int main(void) {
         pair_type(type);
         CHECK(uqa_result_get_value(result, 0, 0, &value));
         formatted(value, "(\"(32767,ab)\",,\"[0:1]={7,NULL}\",12.35)");
+        CHECK(uqa_engine_execute(engine, "SELECT v::text FROM c_retained_saved", result));
+        CHECK(uqa_result_get_value(result, 0, 0, &value));
+        formatted(value, "(7,9,)");
         CHECK(uqa_result_destroy(&result));
         CHECK(uqa_engine_close(&engine));
     }

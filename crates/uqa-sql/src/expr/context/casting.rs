@@ -189,59 +189,8 @@ pub fn cast_value_with_type_resolution(
     .map_err(|_| SQLError::Internal("ordinary catalog cast owner".into()))
 }
 
-/// The text a value's output function spells, and the type to cast it from, when a cast goes through output: an enum label, `record_out` of a composite record cast to a string type, and a container whose enum fields and elements spell their current labels.
-fn output_for_cast<'a>(
-    engine: &dyn EngineHook,
-    value: &Value,
-    source_ty: Option<&'a str>,
-    resolved_source_type: Option<&ColumnType>,
-    target: &ColumnType,
-) -> Result<Option<(Value, Option<&'a str>)>> {
-    if let Value::Enum(label) = value {
-        let output =
-            super::super::enums::enum_output_for_cast(engine.enum_labels(), label, target)?;
-        return Ok(Some((output, Some("text"))));
-    }
-    if let Value::Record(record) = value {
-        if let Some(oid) = record.type_oid().filter(|_| is_string_type(target)) {
-            let ty = engine
-                .resolve_type_oid(oid)
-                .map_err(SQLError::Internal)?
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "42704".into(),
-                    message: format!("type with OID {oid} does not exist"),
-                })?;
-            return Ok(Some((
-                Value::Str(crate::result::format_postgres_text(
-                    value,
-                    &ty,
-                    Some(engine),
-                )?),
-                Some("text"),
-            )));
-        }
-    }
-    // `record_out` spells each field through its attribute type's output function.
-    if let (Value::Record(_), Some(source @ ColumnType::Composite(_))) =
-        (value, resolved_source_type)
-    {
-        if is_string_type(target) {
-            let text = crate::result::format_postgres_text(value, source, Some(engine))?;
-            return Ok(Some((Value::Str(text), Some("text"))));
-        }
-    }
-    if matches!(value, Value::Record(_) | Value::Row(_))
-        && is_string_type(target)
-        && super::super::enums::contains_enum_carrier(value)
-    {
-        let rendered = super::super::enums::render_enum_labels(engine.enum_labels(), value)?;
-        return Ok(Some((rendered, source_ty)));
-    }
-    Ok(None)
-}
-
-/// Array-to-string coercion invokes array output, which observes each element through its SQL output function. Element casts are different operations (for example, XML-to-text is binary coercion).
-fn catalog_array_output(
+/// Container-to-string coercion observes each field or element through its SQL output function. It does not repeat input or domain checks.
+fn container_output_cast(
     value: &Value,
     source: Option<&ColumnType>,
     target_ty: &str,
@@ -249,17 +198,27 @@ fn catalog_array_output(
     engine: &dyn EngineHook,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>> {
-    if !matches!(value, Value::Array(_)) || !is_string_type(target) {
+    if !matches!(value, Value::Array(_) | Value::Row(_) | Value::Record(_))
+        || !is_string_type(target)
+    {
         return Ok(None);
     }
-    // Legacy untyped arrays still expose their retained element OID or enum carrier to the shared formatter.
-    let unspecified = ColumnType::Array(Box::new(ColumnType::Text));
-    let text = crate::result::format_postgres_text_with_control(
-        value,
-        source.unwrap_or(&unspecified),
-        Some(engine),
-        control,
-    )?;
+    let unspecified;
+    let source = if let Some(source) = source {
+        source
+    } else {
+        unspecified = if matches!(value, Value::Array(_)) {
+            ColumnType::array_with_control(
+                control.finish(ColumnType::Text, control.empty_reservation())?,
+                control,
+            )?
+        } else {
+            control.finish(ColumnType::Record, control.empty_reservation())?
+        };
+        &unspecified
+    };
+    let text =
+        crate::result::format_postgres_text_with_control(value, source, Some(engine), control)?;
     let (text, memory) = text.into_parts();
     let text = control.finish(Value::Str(text), memory)?;
     if matches!(target, ColumnType::Text) {
@@ -376,16 +335,16 @@ fn cast_with_resolved_types(
             return Ok(value);
         }
         if let Some(output) =
-            catalog_array_output(value, source_type, target_ty, target, engine, control)?
+            container_output_cast(value, source_type, target_ty, target, engine, control)?
         {
             return Ok(output);
         }
-        if let Some((output, output_source)) =
-            output_for_cast(engine, value, source_ty, source_type, target)?
-        {
+        if let Value::Enum(label) = value {
+            let output =
+                super::super::enums::enum_output_for_cast(engine.enum_labels(), label, target)?;
             return cast_value_with_type_resolution_with_control(
                 &output,
-                output_source,
+                Some("text"),
                 target_ty,
                 Some(engine),
                 control,

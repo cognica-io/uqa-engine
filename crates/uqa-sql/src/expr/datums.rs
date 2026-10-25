@@ -113,6 +113,19 @@ pub fn read_with_control(
     read_with_catalog_and_control(datum, None, control)
 }
 
+/// Select one field of a resolved composite. Unreached fields remain unread, including their variable-width headers; binding and planning need only the tuple descriptor catalog.
+pub fn read_composite_field_with_control(
+    datum: &DatumValue,
+    field: &str,
+    catalog: Option<&dyn super::composites::CompositeTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let payload = payload(datum, control)?;
+    records::read_with_lookup(payload.bytes(), Some(field), control, |oid| {
+        super::composites::descriptor(catalog, oid).map(Some)
+    })
+}
+
 pub(super) fn range_comparison(
     datum: &DatumValue,
     ty: &crate::ColumnType,
@@ -177,6 +190,24 @@ pub fn read_with_value_catalog_and_control(
     }
     let payload = payload(datum, control)?;
     read_payload(datum.type_oid(), payload.bytes(), catalog, control)
+}
+
+/// Inspect a named row's live field NULL flags without reading its field payloads. Non-composite datums retain scalar NULL semantics and are not decoded.
+pub fn record_null_test_with_control(
+    datum: &DatumValue,
+    negated: bool,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<bool>, SQLError> {
+    control.check()?;
+    let Some(catalog) = catalog else {
+        return Ok(None);
+    };
+    let Some(descriptor) = catalog.value_composite_type(datum.type_oid())? else {
+        return Ok(None);
+    };
+    let payload = payload(datum, control)?;
+    records::null_test(payload.bytes(), descriptor, catalog, negated, control).map(Some)
 }
 
 /// Read the fixed-width OID after the caller has selected an enum operation.

@@ -194,9 +194,17 @@ fn array_access(
         matches!(args[index], ScalarExpr::Literal(Value::Null))
     })?;
     Some(access.and_then(|access| {
-        uqa_sql::expr::eval_array_access_with_control(access, control, |index| {
-            eval_scalar_inner(&args[index], context, control)
-        })
+        let catalog = context
+            .function_hook()
+            .map(uqa_sql::expr::EngineValueCatalog);
+        uqa_sql::expr::eval_array_access_with_catalog_and_control(
+            access,
+            catalog
+                .as_ref()
+                .map(|catalog| catalog as &dyn uqa_sql::expr::SQLValueCatalog),
+            control,
+            |index| eval_scalar_inner(&args[index], context, control),
+        )
     }))
 }
 

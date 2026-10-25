@@ -49,13 +49,14 @@ pub(in crate::expr) fn select_with_control(
         super::validate_field_result(field)?;
         name
     };
-    let decoded;
-    let value = if let Value::Datum(datum) = value {
-        decoded = crate::expr::datums::read_with_catalog_and_control(datum, engine, control)?;
-        &*decoded
-    } else {
-        value
-    };
+    if let Value::Datum(datum) = value {
+        return crate::expr::datums::read_composite_field_with_control(
+            datum,
+            name,
+            engine.and_then(EngineHook::composite_types),
+            control,
+        );
+    }
     let Value::Record(record) = value else {
         return Err(SQLError::Internal(
             "bound composite field has no record value".into(),

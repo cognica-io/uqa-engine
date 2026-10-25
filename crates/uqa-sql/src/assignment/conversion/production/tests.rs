@@ -8,6 +8,91 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn physical_identity_assignment_keeps_unread_payloads_and_original_allowances() {
+    let budget = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for ty in [
+        ColumnType::Boolean,
+        ColumnType::Bytea,
+        ColumnType::Array(Box::new(ColumnType::Integer)),
+    ] {
+        let original = Value::Datum(uqa_core::DatumValue::new(
+            crate::catalog::type_metadata::pg_type_oid(&ty) as u32,
+            0,
+            vec![],
+        ));
+        let input = control.copy_value(&original).unwrap();
+        let bytes = input.reserved_bytes();
+        let output =
+            convert_value_to_column_type_from_with_control(input, &ty, Some(&ty), &control)
+                .unwrap();
+        assert!(output.has_same_representation(&original));
+        assert_eq!(output.reserved_bytes(), bytes);
+        assert_eq!(budget.used(), bytes);
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
+fn physical_builtin_conversion_reads_the_selected_value_under_its_allowance() {
+    let budget = MemoryBudget::new(16384);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let array = Value::Array(
+        ArrayValue::with_lower_bounds(vec![Value::Int(7), Value::Int(9)], vec![-2]).unwrap(),
+    );
+    for (value, source, target) in [
+        (Value::Bool(true), ColumnType::Boolean, ColumnType::Boolean),
+        (
+            Value::Bytes(vec![0, 1, 255]),
+            ColumnType::Bytea,
+            ColumnType::Bytea,
+        ),
+        (
+            array,
+            ColumnType::Array(Box::new(ColumnType::Integer)),
+            ColumnType::Array(Box::new(ColumnType::BigInteger)),
+        ),
+    ] {
+        let encoded =
+            crate::expr::datums::encoding::encode(&value, &source, None, &control).unwrap();
+        let mut bytes = Vec::new();
+        if crate::catalog::type_metadata::pg_type_len(&source) == -1 {
+            bytes.extend_from_slice(&(((encoded.len() as u32) + 4) * 4).to_le_bytes());
+        }
+        bytes.extend_from_slice(&encoded);
+        drop(encoded);
+        let physical = Value::Datum(uqa_core::DatumValue::new(
+            crate::catalog::type_metadata::pg_type_oid(&source) as u32,
+            0,
+            bytes,
+        ));
+        let input = control.copy_value(&physical).unwrap();
+        let input_bytes = input.reserved_bytes();
+        let output = convert_value_to_column_type_with_control(input, &target, &control).unwrap();
+        assert_eq!(*output, value);
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+        if matches!(value, Value::Bool(_)) {
+            continue;
+        }
+        let budget = MemoryBudget::new(input_bytes);
+        let rejected = ProductionControl::new(&budget, &token, &token);
+        let input = rejected.copy_value(&physical).unwrap();
+        assert_eq!(
+            convert_value_to_column_type_with_control(input, &target, &rejected)
+                .unwrap_err()
+                .sqlstate(),
+            Some("53200")
+        );
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn typed_node_tree_assignments_keep_the_admitted_value_and_lease() {
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();

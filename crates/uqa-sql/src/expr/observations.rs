@@ -8,6 +8,30 @@
 
 use uqa_core::Value;
 
+/// SQL row NULL tests inspect the current live fields while preserving deferred scalar reads.
+pub fn sql_null_test_with_control(
+    value: &Value,
+    negated: bool,
+    engine: Option<&dyn super::EngineHook>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, crate::SQLError> {
+    control.check()?;
+    if let Value::Datum(datum) = value {
+        let catalog = engine.map(super::EngineValueCatalog);
+        if let Some(result) = super::datums::record_null_test_with_control(
+            datum,
+            negated,
+            catalog
+                .as_ref()
+                .map(|catalog| catalog as &dyn super::SQLValueCatalog),
+            control,
+        )? {
+            return Ok(result);
+        }
+    }
+    Ok(uqa_core::sql_null_test(Some(value), negated))
+}
+
 #[derive(Clone, Copy, Default)]
 pub(crate) struct OutputCarriers {
     pub(crate) datum: bool,

@@ -30,7 +30,9 @@ pub fn convert_value_to_column_type_from_with_control(
     control.check()?;
     let (value, memory) = value.into_parts();
     let value = control.finish(value, memory)?;
-    if source.is_some_and(|source| super::same_catalog_value_type(source, ty)) {
+    if super::physical_identity(&value, source, ty)
+        || source.is_some_and(|source| super::same_catalog_value_type(source, ty))
+    {
         return super::normalize_legacy_vector_carrier_with_control(&value, ty, control)
             .map(|normalized| normalized.unwrap_or(value));
     }
@@ -55,6 +57,18 @@ pub fn convert_value_to_column_type_with_control(
     if matches!(&*value, Value::Null) {
         return Ok(value);
     }
+    let decoded = if let Value::Datum(datum) = &*value {
+        if crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()).is_some()
+            || crate::catalog::type_metadata::builtin_array_element(datum.type_oid()).is_some()
+        {
+            Some(crate::expr::datums::read_with_control(datum, control)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let value = decoded.unwrap_or(value);
     match ty {
         ColumnType::Named(name) => Err(SQLError::Routine {
             sqlstate: "42704".into(),

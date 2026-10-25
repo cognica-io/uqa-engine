@@ -6,7 +6,7 @@
 
 //! Composite type values through the statement's catalog: attribute metadata, `record_in` input and the coercion of rows and records to a composite type.
 //!
-//! A composite value is a [`Value::Record`] whose fields carry the type's current attribute names in attribute order. Anonymous row constructors are [`Value::Row`] until a coercion gives them a composite type.
+//! Logical composite fields use [`Value::Record`]; admitted input and retained tuples use [`Value::Datum`] so later catalog changes interpret their original physical layout. Anonymous row constructors are [`Value::Row`] until a coercion gives them a composite type.
 
 use std::sync::Arc;
 
@@ -25,9 +25,11 @@ pub(super) mod fields;
 mod input;
 pub mod literal;
 pub(crate) mod retained;
+mod retention;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};
 pub use input::parse_record_fields;
 pub use retained::CompositeConstantSource;
+pub use retention::retain_value_with_control;
 
 /// One live attribute of a composite type in attribute-number order.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -205,10 +207,15 @@ pub fn composite_from_text(engine: &dyn EngineHook, text: &str, type_oid: u32) -
         ));
         Ok(())
     })?;
-    Ok(Value::Record(uqa_core::RecordValue::from_parts(
-        fields,
-        Some(type_oid),
-    )))
+    let record = uqa_core::RecordValue::from_parts(fields, Some(type_oid));
+    retention::retain_record(
+        &record,
+        &descriptor,
+        engine.composite_types(),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary composite input retention".into()))
 }
 
 /// Coerce the fields of an anonymous row to a composite type position by position, as `coerce_record_to_complex` does. The field count must match the live attributes.

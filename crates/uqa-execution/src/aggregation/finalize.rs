@@ -7,22 +7,12 @@
 //! Built-in aggregate finalization and percentile/statistical helpers.
 
 use super::{
-    cast_value, core_value_to_json, value_as_f64, value_to_json_text, AggregateAccumulator,
-    AggregateValueBuffer, DecimalValue, SQLError, ScalarExpr, Value,
+    cast_value, core_value_to_json, value_as_f64, AggregateAccumulator, AggregateValueBuffer,
+    DecimalValue, SQLError, ScalarExpr, Value,
 };
 use uqa_core::ArrayValue;
 use uqa_sql::expr::enums::EnumLabelCatalog;
-
-fn render_enum_labels(
-    enums: Option<&dyn EnumLabelCatalog>,
-    value: &Value,
-) -> Result<Value, SQLError> {
-    if uqa_sql::expr::enums::contains_enum_carrier(value) {
-        uqa_sql::expr::enums::render_enum_labels(enums, value)
-    } else {
-        Ok(value.clone())
-    }
-}
+use uqa_sql::expr::value_to_json_text_with_catalog;
 
 pub fn aggregate_value(
     name: &str,
@@ -157,7 +147,7 @@ pub fn aggregate_value_with_args(
                 "[{}]",
                 ordered_values
                     .iter()
-                    .map(|value| value_to_json_text(&render_enum_labels(enums, value)?))
+                    .map(|value| value_to_json_text_with_catalog(value, enums))
                     .collect::<Result<Vec<_>, SQLError>>()?
                     .join(", ")
             );
@@ -184,14 +174,10 @@ pub fn aggregate_value_with_args(
                 if matches!(pair[0], Value::Null) {
                     return Err(super::rewrite::json_object_aggregate_null_key(&lname));
                 }
-                let key = serde_json::Value::String(aggregate_json_key(&render_enum_labels(
-                    enums, &pair[0],
-                )?)?)
-                .to_string();
-                fields.push((
-                    key,
-                    value_to_json_text(&render_enum_labels(enums, &pair[1])?)?,
-                ));
+                let key =
+                    serde_json::Value::String(aggregate_json_key_with_catalog(&pair[0], enums)?)
+                        .to_string();
+                fields.push((key, value_to_json_text_with_catalog(&pair[1], enums)?));
             }
             if fields.is_empty() {
                 Value::Null
@@ -305,9 +291,23 @@ pub fn percentile_fraction(args: &[ScalarExpr]) -> Result<f64, SQLError> {
 }
 
 pub fn aggregate_json_key(value: &Value) -> Result<String, SQLError> {
-    uqa_sql::expr::validate_json_object_key_type(value)?;
+    aggregate_json_key_with_catalog(value, None)
+}
+
+pub fn aggregate_json_key_with_catalog(
+    value: &Value,
+    catalog: Option<&dyn EnumLabelCatalog>,
+) -> Result<String, SQLError> {
+    uqa_sql::expr::validate_json_object_key_type_with_catalog(value, catalog)?;
     Ok(match value {
-        Value::Datum(datum) => return aggregate_json_key(&uqa_sql::expr::datums::read(datum)?),
+        Value::Datum(datum) => {
+            let value = uqa_sql::expr::datums::read_with_value_catalog_and_control(
+                datum,
+                catalog,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?;
+            return aggregate_json_key_with_catalog(&value, catalog);
+        }
         Value::Null | Value::Void => String::new(),
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
@@ -315,7 +315,7 @@ pub fn aggregate_json_key(value: &Value) -> Result<String, SQLError> {
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
-        Value::Enum(value) => return Err(uqa_sql::expr::catalog_output_required(value)),
+        Value::Enum(value) => uqa_sql::expr::enums::enum_label_text(catalog, value)?,
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Temporal(_) | Value::Array(_) | Value::LegacyVector(_) | Value::BitString(_) => {

@@ -19,6 +19,7 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 pub(in crate::expr) fn eval_postgres_subscript_with_control(
     dispatch: FunctionDispatch,
     args: &[Value],
+    catalog: Option<&dyn super::super::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
     if let Some(access) = crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
@@ -29,15 +30,18 @@ pub(in crate::expr) fn eval_postgres_subscript_with_control(
             super::super::array_access::eval_array_access_from_input(
                 access?,
                 &args[0],
+                catalog,
                 control,
                 |index| Ok(&args[index]),
             )
         })());
     }
+    if dispatch == FunctionDispatch::FieldSelect {
+        return Some(eval_field_select(args, catalog, control));
+    }
     let evaluate = match dispatch {
         FunctionDispatch::Subscript => eval_subscript,
         FunctionDispatch::Slice => eval_slice,
-        FunctionDispatch::FieldSelect => eval_field_select,
         _ => return None,
     };
     Some((|| {
@@ -152,12 +156,25 @@ fn eval_subscript(args: &[Value], control: &ProductionControl<'_>) -> Result<Pro
 }
 
 /// A composite value's field by its current attribute name, an anonymous row's field by its `fN` position, or a document map's key. Binding has already checked that the field exists.
-fn eval_field_select(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn eval_field_select(
+    args: &[Value],
+    catalog: Option<&dyn super::super::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let [value, Value::Str(field)] = args else {
         return Err(SQLError::Internal(
             "field selection takes a value and a field name".into(),
         ));
     };
+    if let Value::Datum(datum) = value {
+        return super::super::datums::read_composite_field_with_control(
+            datum,
+            field,
+            Some(&super::super::value_catalog::ValueCompositeCatalog(catalog)),
+            control,
+        );
+    }
     let selected = match value {
         Value::Null => None,
         Value::Record(fields) => fields

@@ -44,7 +44,7 @@ pub fn create_typed_parameter_with_control(
         Some(input),
         control,
     )?;
-    finish(value, ty, control)
+    finish(value, ty, input, control)
 }
 
 pub(super) fn bind_sources(
@@ -110,8 +110,14 @@ pub(super) fn resolve_type(
 pub(super) fn finish(
     value: Produced<Value>,
     ty: Produced<ColumnType>,
+    input: &dyn EngineHook,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<SQLParam>, SQLError> {
+    let value = crate::expr::composites::retain_value_with_control(
+        value,
+        input.composite_types(),
+        control,
+    )?;
     let (value, value_memory) = value.into_parts();
     let (ty, type_memory) = ty.into_parts();
     Ok(control.finish(

@@ -245,6 +245,8 @@ fn independent_value(value: &Value) -> bool {
         | Value::Decimal(_)
         | Value::Json(_)
         | Value::JsonB(_) => true,
+        Value::Datum(datum) => crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid())
+            .is_some_and(independent_type),
         Value::Array(array) => array.elements().iter().all(independent_value),
         _ => false,
     }

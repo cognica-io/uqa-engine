@@ -119,10 +119,15 @@ pub fn construct_with_state(
 /// Construct a newly admitted record from exactly the current live attributes. The caller binds and coerces each positional input; no stored-expression binding is required.
 pub fn construct_current_with_control(
     descriptor: &super::CompositeTypeDescriptor,
+    catalog: Option<&dyn super::CompositeTypeCatalog>,
     control: &ProductionControl<'_>,
     mut evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
 ) -> Result<Produced<Value>, SQLError> {
-    produce(descriptor, control, None, |index, _| evaluate(index))
+    let value = produce(descriptor, control, None, |index, _| evaluate(index))?;
+    let Value::Record(record) = &*value else {
+        unreachable!("named composite producer")
+    };
+    super::retention::retain_record(record, descriptor, catalog, control)
 }
 
 fn produce(

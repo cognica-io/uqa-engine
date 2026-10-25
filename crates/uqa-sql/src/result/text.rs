@@ -16,6 +16,8 @@ use uqa_core::{
     Value,
 };
 
+mod records;
+
 /// Format a result with its live session output style and declared type.
 pub fn format_postgres_text(
     value: &Value,
@@ -116,13 +118,17 @@ pub fn format_postgres_text_with_catalog_and_control(
     if let ColumnType::Array(element) = ty {
         return format_array(value, element, catalog, control);
     }
-    if let (ColumnType::Composite(reference), Value::Record(fields)) = (ty, value) {
-        return format_record(
-            fields,
-            fields.type_oid().unwrap_or(reference.oid),
-            catalog,
-            control,
-        );
+    if let Value::Row(row) = value {
+        return records::format_row(row, catalog, control);
+    }
+    if let Value::Record(fields) = value {
+        let oid = fields.type_oid().or(match ty {
+            ColumnType::Composite(reference) => Some(reference.oid),
+            _ => None,
+        });
+        if let Some(oid) = oid {
+            return format_record(fields, oid, catalog, control);
+        }
     }
     Ok(match value {
         Value::Bool(value) => control.copy_text(if *value { "t" } else { "f" })?,
@@ -405,5 +411,86 @@ mod tests {
         let error = format_postgres_text(&value, &changed, None).unwrap_err();
         assert_eq!(error.sqlstate(), Some("XX000"));
         assert_eq!(error.to_string(), "cache lookup failed for type 16500");
+    }
+
+    fn typed_row(fields: Vec<(Value, u32)>) -> Value {
+        use uqa_core::{RecordFieldType, RowValue};
+        let (values, types) = fields
+            .into_iter()
+            .map(|(value, oid)| {
+                (
+                    value,
+                    RecordFieldType {
+                        oid,
+                        type_modifier: -1,
+                        collation_oid: None,
+                    },
+                )
+            })
+            .unzip();
+        Value::Row(RowValue::typed(values, types).unwrap())
+    }
+
+    #[test]
+    fn anonymous_record_output_keeps_field_types_and_skips_null_type_lookup() {
+        let catalog = Catalog {
+            lookups: Cell::new(0),
+        };
+        let value = typed_row(vec![
+            (Value::Float(f64::from(0.1_f32)), 700),
+            (Value::Float(f64::from(0.1_f32)), 16_500),
+            (Value::Null, 65_000),
+        ]);
+        // PostgreSQL 18.4: ROW(0.1::real, 0.1::domain_over_real, NULL::integer)::text.
+        assert_eq!(
+            format_postgres_text(&value, &ColumnType::Record, Some(&catalog)).unwrap(),
+            "(0.1,0.1,)"
+        );
+        assert_eq!(catalog.lookups.get(), 1);
+        let error = format_postgres_text(&value, &ColumnType::Record, None).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX000"));
+        assert_eq!(error.to_string(), "cache lookup failed for type 16500");
+
+        // PostgreSQL also outputs a retained NULL field after its enum type is dropped.
+        let null = typed_row(vec![(Value::Null, 65_000)]);
+        assert_eq!(
+            format_postgres_text(&null, &ColumnType::Record, None).unwrap(),
+            "()"
+        );
+    }
+
+    #[test]
+    fn anonymous_record_output_bounds_temporary_memory_and_observes_both_cancellations() {
+        use uqa_core::{memory::MemoryBudget, CancellationToken};
+        let payload = "a".repeat(8192);
+        let value = typed_row(vec![
+            (Value::Float(f64::from(0.1_f32)), 700),
+            (Value::Str(payload.clone()), 25),
+        ]);
+        for limit in [0, 64, 1024, 65_536] {
+            let memory = MemoryBudget::new(limit);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&memory, &original, &invoking);
+            let output =
+                format_postgres_text_with_control(&value, &ColumnType::Record, None, &control);
+            if limit == 65_536 {
+                let text = output.unwrap();
+                assert_eq!(&**text, format!("(0.1,{payload})"));
+                assert!(memory.used() >= text.len());
+            } else {
+                assert_eq!(output.unwrap_err().sqlstate(), Some("53200"));
+            }
+            assert_eq!(memory.used(), 0);
+            for token in [&original, &invoking] {
+                token.cancel();
+                let error =
+                    format_postgres_text_with_control(&value, &ColumnType::Record, None, &control)
+                        .unwrap_err();
+                assert_eq!(error.sqlstate(), Some("57014"));
+                token.reset();
+                assert_eq!(memory.used(), 0);
+            }
+        }
     }
 }

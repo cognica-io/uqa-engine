@@ -13,7 +13,7 @@ use uqa_storage::temporary_file::TemporaryFile as File;
 
 use crate::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, SpillBuffer};
 use uqa_core::{DecimalValue, Value};
-use uqa_sql::expr::{cast_value, value_to_json_text};
+use uqa_sql::expr::cast_value;
 use uqa_sql::plan::QueryBlockPlan;
 use uqa_sql::{SQLError, SQLParam};
 

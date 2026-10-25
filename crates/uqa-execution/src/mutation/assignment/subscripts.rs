@@ -6,6 +6,9 @@
 
 //! Compose partial writes while every bound and RHS sees the unchanged input row.
 
+#[cfg(test)]
+mod physical_tests;
+
 use super::{MutationAssignmentContext, MutationAssignmentTarget, TypedAssignmentTarget};
 use crate::{mutation::expressions::eval_mutation_expr, query::CteScope, OwnedPhysicalRow};
 use uqa_core::{
@@ -160,6 +163,7 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
         &value,
         &bounds,
         slice,
+        Some(services.assignment),
         &ProductionControl::uncontrolled(),
     )?
     .into_uncontrolled()
@@ -227,7 +231,7 @@ fn assign_field_value(
         level_bounds.push(bounds);
     }
     let value = conversion::coerce_assignment_value(assignment, value()?, required, source)?;
-    let result = assign_levels(current, &types, &levels, &level_bounds, value, composites)?;
+    let result = assign_levels(current, &types, &levels, &level_bounds, value, assignment)?;
     if !final_column_write {
         return Ok(result);
     }
@@ -245,11 +249,19 @@ fn assign_levels(
     levels: &[targets::AssignmentLevel<'_, ScalarExpr>],
     bounds: &[Vec<(Option<i32>, Option<i32>)>],
     value: Value,
-    composites: Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog>,
+    engine: &dyn uqa_sql::expr::EngineHook,
 ) -> Result<Value, SQLError> {
     let Some((level, rest)) = levels.split_first() else {
         return Ok(value);
     };
+    let decoded = match current {
+        Value::Datum(datum) => Some(uqa_sql::expr::datums::read_with_catalog(
+            datum,
+            Some(engine),
+        )?),
+        _ => None,
+    };
+    let current = decoded.as_ref().unwrap_or(current);
     match level {
         targets::AssignmentLevel::Field(field) => {
             let mut composite = &types[0];
@@ -261,7 +273,8 @@ fn assign_levels(
                     "field assignment level lost its composite type".into(),
                 ));
             };
-            let descriptor = uqa_sql::expr::composites::descriptor(composites, reference.oid)?;
+            let descriptor =
+                uqa_sql::expr::composites::descriptor(engine.composite_types(), reference.oid)?;
             let mut fields = match current {
                 Value::Record(fields) => fields.clone(),
                 Value::Null => descriptor
@@ -281,7 +294,7 @@ fn assign_levels(
                 .ok_or_else(|| {
                     SQLError::Internal(format!("composite value has no field `{field}`"))
                 })?;
-            *slot.1 = assign_levels(slot.1, &types[1..], rest, &bounds[1..], value, composites)?;
+            *slot.1 = assign_levels(slot.1, &types[1..], rest, &bounds[1..], value, engine)?;
             Ok(Value::Record(fields.with_type_oid(Some(reference.oid))))
         }
         targets::AssignmentLevel::Subscripts(_) => {
@@ -299,13 +312,14 @@ fn assign_levels(
                         .unwrap_or(Value::Null),
                     _ => Value::Null,
                 };
-                assign_levels(&element, &types[1..], rest, &bounds[1..], value, composites)?
+                assign_levels(&element, &types[1..], rest, &bounds[1..], value, engine)?
             };
             Ok(assign_array_with_control(
                 current,
                 &value,
                 level_bounds,
                 slice,
+                Some(engine),
                 &ProductionControl::uncontrolled(),
             )?
             .into_uncontrolled()
@@ -320,9 +334,17 @@ fn assign_array_with_control(
     value: &Value,
     bounds: &[(Option<i32>, Option<i32>)],
     slice: bool,
+    engine: Option<&dyn uqa_sql::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
+    let decoded = match current {
+        Value::Datum(datum) => Some(uqa_sql::expr::datums::read_with_catalog_and_control(
+            datum, engine, control,
+        )?),
+        _ => None,
+    };
+    let current = decoded.as_deref().unwrap_or(current);
     let empty = if *current == Value::Null {
         Some(
             ArrayValue::try_new_with_control(
@@ -351,6 +373,13 @@ fn assign_array_with_control(
             Ok(control.copy_value(current)?)
         };
     }
+    let source = match value {
+        Value::Datum(datum) if slice => Some(uqa_sql::expr::datums::read_with_catalog_and_control(
+            datum, engine, control,
+        )?),
+        _ => None,
+    };
+    let value = source.as_deref().unwrap_or(value);
     let result = if slice {
         let Value::Array(source) = value else {
             return Err(SQLError::Internal(
@@ -412,6 +441,7 @@ mod tests {
                 &Value::Null,
                 &[(Some(1), Some(2))],
                 true,
+                None,
                 &control,
             )
             .unwrap();
@@ -438,6 +468,7 @@ mod tests {
                     &Value::Null,
                     &[(Some(1), Some(2))],
                     true,
+                    None,
                     &control
                 )
                 .unwrap_err()
@@ -460,6 +491,7 @@ mod tests {
             &Value::Null,
             &[(Some(1), Some(2))],
             true,
+            None,
             &control,
         )
         .unwrap_err();

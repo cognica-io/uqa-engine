@@ -187,12 +187,12 @@ fn cancellation_during_chunked_payload_copy_and_after_its_last_step_discards_the
         let mut checks = 0;
         let mut at_check = |fail_at| {
             let cancellation = CancellationToken::new();
-            copy(&source, &budget, &mut || {
+            source.clone_budgeted_with_check(&budget, || {
                 checks += 1;
                 if checks == fail_at {
                     cancellation.cancel();
                 }
-                cancellation.check().map_err(Into::into)
+                cancellation.check()
             })
         };
         let copied = at_check(usize::MAX).unwrap();
@@ -202,12 +202,12 @@ fn cancellation_during_chunked_payload_copy_and_after_its_last_step_discards_the
             let cancellation = CancellationToken::new();
             let mut checks = 0;
             assert!(matches!(
-                copy(&source, &budget, &mut || {
+                source.clone_budgeted_with_check(&budget, || {
                     checks += 1;
                     if checks == fail_at {
                         cancellation.cancel();
                     }
-                    cancellation.check().map_err(Into::into)
+                    cancellation.check()
                 }),
                 Err(ValueRetentionError::Cancelled(_))
             ));
@@ -248,6 +248,125 @@ fn nested_value_copy_uses_a_charged_traversal_stack_and_preserves_record_order()
     );
     drop(copied);
     assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn transformed_values_share_the_iterative_copy_owner_and_keep_descriptors() {
+    use crate::RecordFieldType;
+    let source = Value::Row(
+        RowValue::typed(
+            vec![Value::Array(
+                ArrayValue::with_lower_bounds(vec![Value::Int(7), Value::Null], vec![-3])
+                    .unwrap()
+                    .with_element_type_oid(Some(23)),
+            )],
+            vec![RecordFieldType {
+                oid: 1007,
+                type_modifier: -1,
+                collation_oid: Some(0),
+            }],
+        )
+        .unwrap(),
+    );
+    for controlled in [false, true] {
+        let budget = MemoryBudget::new(16384);
+        let token = CancellationToken::new();
+        let control = if controlled {
+            ProductionControl::new(&budget, &token, &token)
+        } else {
+            ProductionControl::uncontrolled()
+        };
+        let copied = source
+            .transform_with_control(&control, |value| -> Result<_, ValueRetentionError> {
+                if matches!(value, Value::Int(7)) {
+                    return Ok(Some(control.copy_value(&Value::Int(9))?));
+                }
+                Ok(None)
+            })
+            .unwrap();
+        let Value::Row(row) = &*copied else {
+            panic!("row")
+        };
+        assert_eq!(row.field_types().unwrap()[0].oid, 1007);
+        let Value::Array(array) = &row[0] else {
+            panic!("array")
+        };
+        assert_eq!(array.elements(), &[Value::Int(9), Value::Null]);
+        assert_eq!(array.element_type_oid(), Some(23));
+        assert_eq!(array.lower_bounds(), [-3]);
+        drop(copied);
+        assert_eq!(budget.used(), 0);
+    }
+    let budget = MemoryBudget::new(1 << 22);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut nested = Value::Int(7);
+    for _ in 0..256 {
+        nested = Value::List(vec![nested]);
+    }
+    let copied = nested
+        .transform_with_control(&control, |value| -> Result<_, ValueRetentionError> {
+            matches!(value, Value::Int(7))
+                .then(|| control.copy_value(&Value::Int(9)))
+                .transpose()
+        })
+        .unwrap();
+    assert!(budget.peak() > copied.reserved_bytes());
+    let mut leaf = &*copied;
+    for _ in 0..256 {
+        let Value::List(values) = leaf else {
+            panic!("list")
+        };
+        leaf = &values[0];
+    }
+    assert_eq!(leaf, &Value::Int(9));
+    drop(copied);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn transformed_subtrees_stop_at_replacements_and_release_all_failed_owners() {
+    let source = Value::List(vec![
+        Value::Str("first".into()),
+        Value::List(vec![Value::Str("unread".into())]),
+    ]);
+    for limit in [0, 128, 16384] {
+        let budget = MemoryBudget::new(limit);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let result =
+            source.transform_with_control(&control, |value| -> Result<_, ValueRetentionError> {
+                if matches!(value, Value::List(values) if values.len() == 1) {
+                    return Ok(Some(control.copy_value(&Value::Int(9))?));
+                }
+                assert!(!matches!(value, Value::Str(text) if text == "unread"));
+                Ok(None)
+            });
+        if limit == 16384 {
+            assert_eq!(
+                *result.unwrap(),
+                Value::List(vec![Value::Str("first".into()), Value::Int(9)])
+            );
+        } else {
+            drop(result);
+        }
+        assert_eq!(budget.used(), 0);
+        for token in [&original, &invoking] {
+            let result = source.transform_with_control(
+                &control,
+                |value| -> Result<_, ValueRetentionError> {
+                    if matches!(value, Value::Str(_)) {
+                        token.cancel();
+                    }
+                    Ok(None)
+                },
+            );
+            assert!(result.is_err());
+            token.reset();
+            assert_eq!(budget.used(), 0);
+        }
+    }
 }
 
 #[test]

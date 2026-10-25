@@ -19,7 +19,9 @@ use crate::result::ResultRow;
 
 mod array_access;
 pub(crate) mod array_construction;
-pub use array_access::eval_array_access_with_control;
+pub use array_access::{
+    eval_array_access_with_catalog_and_control, eval_array_access_with_control,
+};
 pub use array_construction::construct_array_with_control;
 mod array_transform;
 pub mod bit_string;
@@ -31,6 +33,7 @@ pub(crate) mod integer_input;
 mod json;
 mod json_strip;
 pub(crate) mod observations;
+pub use observations::sql_null_test_with_control;
 mod random;
 mod range;
 pub(crate) use range::datum as range_datum;
@@ -45,7 +48,10 @@ pub use array_transform::{
     argument_positions_with_control as array_transform_argument_positions_with_control,
 };
 pub(crate) use json::{decode_jsonb_datum_with_control, encode_jsonb_datum};
-pub use json::{validate_json_object_key_type, value_to_json_text};
+pub use json::{
+    validate_json_object_key_type, validate_json_object_key_type_with_catalog, value_to_json_text,
+    value_to_json_text_with_catalog,
+};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     declared_multirange_datum_with_control, declared_range_datum_with_control,

@@ -10,7 +10,8 @@ use super::{to_i64, value_to_string, EvalContext, Result, SQLError, Value};
 
 use uqa_core::memory::{Produced, ProductionControl};
 
-type ScalarFunctionDispatcher = fn(&str, &[Value]) -> Option<Result<Value>>;
+type ScalarFunctionDispatcher =
+    fn(&str, &[Value], Option<&dyn super::SQLValueCatalog>) -> Option<Result<Value>>;
 type RetainedScalarDispatcher =
     fn(&str, &[Value], &ProductionControl<'_>) -> Option<Result<Produced<Value>>>;
 struct ScalarFamily {
@@ -19,15 +20,15 @@ struct ScalarFamily {
 }
 const FAMILIES: &[ScalarFamily] = &[
     ScalarFamily {
-        ordinary: super::scalar_core::eval_core_functions,
+        ordinary: |name, args, _| super::scalar_core::eval_core_functions(name, args),
         retained: super::scalar_core::eval_core_functions_with_control,
     },
     ScalarFamily {
-        ordinary: super::scalar_math::eval_math_functions,
+        ordinary: |name, args, _| super::scalar_math::eval_math_functions(name, args),
         retained: super::scalar_math::eval_math_functions_with_control,
     },
     ScalarFamily {
-        ordinary: super::scalar_temporal::eval_temporal_functions,
+        ordinary: |name, args, _| super::scalar_temporal::eval_temporal_functions(name, args),
         retained: super::scalar_temporal::eval_temporal_functions_with_control,
     },
     ScalarFamily {
@@ -35,19 +36,19 @@ const FAMILIES: &[ScalarFamily] = &[
         retained: super::scalar_json::eval_json_functions_with_control,
     },
     ScalarFamily {
-        ordinary: super::scalar_array::eval_array_functions,
+        ordinary: |name, args, _| super::scalar_array::eval_array_functions(name, args),
         retained: super::scalar_array::eval_array_functions_with_control,
     },
     ScalarFamily {
-        ordinary: super::scalar_postgres::eval_postgres_functions,
+        ordinary: |name, args, _| super::scalar_postgres::eval_postgres_functions(name, args),
         retained: super::scalar_postgres::eval_postgres_functions_with_control,
     },
     ScalarFamily {
-        ordinary: super::scalar_range::eval_range_functions,
+        ordinary: |name, args, _| super::scalar_range::eval_range_functions(name, args),
         retained: super::scalar_range::eval_range_functions_with_control,
     },
     ScalarFamily {
-        ordinary: super::scalar_geospatial::eval_geospatial_functions,
+        ordinary: |name, args, _| super::scalar_geospatial::eval_geospatial_functions(name, args),
         retained: super::scalar_geospatial::eval_geospatial_functions_with_control,
     },
 ];
@@ -112,7 +113,17 @@ pub(super) fn eval_sequence_function(
 }
 
 /// `collation` is the call's input collation (`PostgreSQL`'s `inputcollid`), which collation-dependent built-ins consume.
+#[cfg(test)]
 pub(super) fn eval_scalar_function(name: &str, args: &[Value], collation: u32) -> Result<Value> {
+    eval_scalar_function_with_catalog(name, args, collation, None)
+}
+
+fn eval_scalar_function_with_catalog(
+    name: &str,
+    args: &[Value],
+    collation: u32,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<Value> {
     let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
     if super::builtin_scalar_function_strictness(name, args.len()) == Some(true)
         && args.iter().any(|argument| matches!(argument, Value::Null))
@@ -128,7 +139,7 @@ pub(super) fn eval_scalar_function(name: &str, args: &[Value], collation: u32) -
         return result.map(|value| value.into_uncontrolled().expect("ordinary collated result"));
     }
     for family in FAMILIES {
-        if let Some(result) = (family.ordinary)(name, args) {
+        if let Some(result) = (family.ordinary)(name, args, catalog) {
             return result;
         }
     }
@@ -156,7 +167,15 @@ pub(super) fn eval_scalar_function_with_context(
     ) {
         return result.map(|value| value.into_uncontrolled().expect("ordinary array result"));
     }
-    eval_scalar_function(name, args, collation)
+    let catalog = context.engine.map(super::EngineValueCatalog);
+    eval_scalar_function_with_catalog(
+        name,
+        args,
+        collation,
+        catalog
+            .as_ref()
+            .map(|catalog| catalog as &dyn super::SQLValueCatalog),
+    )
 }
 
 fn eval_array_comparison_with_context(

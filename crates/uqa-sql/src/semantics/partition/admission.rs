@@ -43,9 +43,9 @@ pub fn validate_new_partition_bound(
             }
             None
         }
-        PartitionBound::List(values) => list_overlap(values, &siblings)?,
+        PartitionBound::List(values) => list_overlap(context, values, &siblings)?,
         PartitionBound::Range { lower, upper } => {
-            if compare_range_points(lower, upper)? != Ordering::Less {
+            if compare_range_points(context, lower, upper)? != Ordering::Less {
                 let types = keys.iter().map(|key| key.ty.clone()).collect::<Vec<_>>();
                 let engine: &dyn EngineHook = context.assignment;
                 return Err(SQLError::Diagnostic {
@@ -59,7 +59,7 @@ pub fn validate_new_partition_bound(
                     hint: None,
                 });
             }
-            range_overlap(lower, upper, &siblings)?
+            range_overlap(context, lower, upper, &siblings)?
         }
         PartitionBound::Hash { modulus, remainder } => {
             hash_overlap(*modulus, *remainder, &siblings)?
@@ -92,6 +92,7 @@ fn sibling_bounds(context: &PartitionContext<'_>, parent: &str) -> Result<Vec<Si
 
 /// The first value of the new list, in declared order, that an existing partition accepts names that partition; NULL overlaps the partition that accepts NULL.
 fn list_overlap(
+    context: &PartitionContext<'_>,
     values: &[crate::ast::Expr],
     siblings: &[Sibling],
 ) -> Result<Option<String>, SQLError> {
@@ -102,7 +103,7 @@ fn list_overlap(
                 continue;
             };
             for candidate in existing {
-                if stored_datum(candidate)?.cmp(value) == Ordering::Equal {
+                if super::compare_values(context, stored_datum(candidate)?, value)?.is_eq() {
                     return Ok(Some(sibling.name.clone()));
                 }
             }
@@ -113,6 +114,7 @@ fn list_overlap(
 
 /// The partition containing the new lower bound, or else the next partition when the new range does not fit in the gap before it: the first overlapping partition in bound order.
 fn range_overlap(
+    context: &PartitionContext<'_>,
     lower: &[PartitionRangeDatum],
     upper: &[PartitionRangeDatum],
     siblings: &[Sibling],
@@ -127,19 +129,14 @@ fn range_overlap(
             ranges.push((existing_lower, existing_upper, &sibling.name));
         }
     }
-    let mut ordering_error = None;
-    ranges.sort_by(|left, right| {
-        compare_range_points(left.0, right.0).unwrap_or_else(|error| {
-            ordering_error.get_or_insert(error);
-            Ordering::Equal
-        })
-    });
-    if let Some(error) = ordering_error {
-        return Err(error);
-    }
+    uqa_core::ordering::sort_by_with_control(
+        &mut ranges,
+        &mut || Ok::<_, SQLError>(()),
+        |left, right, _| compare_range_points(context, left.0, right.0),
+    )?;
     for (existing_lower, existing_upper, name) in ranges {
-        if compare_range_points(lower, existing_upper)? == Ordering::Less
-            && compare_range_points(existing_lower, upper)? == Ordering::Less
+        if compare_range_points(context, lower, existing_upper)? == Ordering::Less
+            && compare_range_points(context, existing_lower, upper)? == Ordering::Less
         {
             return Ok(Some(name.clone()));
         }
@@ -149,6 +146,7 @@ fn range_overlap(
 
 /// Compare two range bound points datum by datum, where `MINVALUE` precedes and `MAXVALUE` follows every value.
 pub(super) fn compare_range_points(
+    context: &PartitionContext<'_>,
     left: &[PartitionRangeDatum],
     right: &[PartitionRangeDatum],
 ) -> Result<Ordering, SQLError> {
@@ -168,7 +166,7 @@ pub(super) fn compare_range_points(
                 Ordering::Greater
             }
             (PartitionRangeDatum::Value(left), PartitionRangeDatum::Value(right)) => {
-                stored_datum(left)?.cmp(stored_datum(right)?)
+                super::compare_values(context, stored_datum(left)?, stored_datum(right)?)?
             }
         };
         if ordering != Ordering::Equal {

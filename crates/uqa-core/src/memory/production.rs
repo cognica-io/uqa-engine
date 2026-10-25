@@ -25,6 +25,15 @@ pub struct ProductionControl<'a> {
 }
 
 impl<'a> ProductionControl<'a> {
+    /// Bridge the existing copy API's allowance; its caller-owned cancellation callback remains active in the copier.
+    pub(crate) fn with_budget(budget: &'a MemoryBudget) -> Self {
+        Self {
+            budget: Some(budget),
+            original: None,
+            invoking: None,
+        }
+    }
+
     pub const fn uncontrolled() -> Self {
         Self {
             budget: None,

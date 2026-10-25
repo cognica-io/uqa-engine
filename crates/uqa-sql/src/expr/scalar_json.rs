@@ -9,7 +9,11 @@
 use super::{json, Result, SQLError, Value};
 use uqa_core::memory::{Produced, ProductionControl};
 
-pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
+pub(super) fn eval_json_functions(
+    name: &str,
+    args: &[Value],
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Option<Result<Value>> {
     if let Some(value) =
         eval_json_functions_with_control(name, args, &ProductionControl::uncontrolled())
     {
@@ -22,12 +26,12 @@ pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<V
     // Polymorphic builders and set-returning key enumeration retain their existing ordinary paths. The generation validator rejects these functions.
     Some(match name {
         "json_build_object" | "jsonb_build_object" => {
-            json::json_build_object_value(args, name.starts_with("jsonb"))
+            json::json_build_object_value(args, name.starts_with("jsonb"), catalog)
         }
         "json_build_array" | "jsonb_build_array" => {
-            json::json_build_array_value(args, name.starts_with("jsonb"))
+            json::json_build_array_value(args, name.starts_with("jsonb"), catalog)
         }
-        "to_json" | "to_jsonb" | "row_to_json" => to_json(name, args),
+        "to_json" | "to_jsonb" | "row_to_json" => to_json(name, args, catalog),
         "json_object_keys" | "jsonb_object_keys" => object_keys(args),
         _ => return None,
     })
@@ -41,11 +45,15 @@ pub(super) fn eval_json_functions_with_control(
     json::evaluate(name, args, control)
 }
 
-fn to_json(name: &str, args: &[Value]) -> Result<Value> {
+fn to_json(
+    name: &str,
+    args: &[Value],
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<Value> {
     if args.len() != 1 {
         return Err(SQLError::TypeMismatch("to_json takes 1 arg".into()));
     }
-    let text = json::value_to_json_text(&args[0])?;
+    let text = json::value_to_json_text_with_catalog(&args[0], catalog)?;
     if name == "to_jsonb" {
         json::typed_json_value(&json::parse_json(&text)?, true)
     } else {

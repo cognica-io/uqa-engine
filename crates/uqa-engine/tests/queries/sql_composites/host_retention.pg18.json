@@ -1,0 +1,107 @@
+{
+  "reference": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "capture_sql": "BEGIN;\nCREATE TYPE retained_input AS (a integer, b text, tail integer);\nCREATE FUNCTION retained_input_probe() RETURNS text[] LANGUAGE plpgsql AS $$\nDECLARE r retained_input := ROW(7,'x',9); result text[]; item text;\nBEGIN\n result := ARRAY[r::text];\n ALTER TYPE retained_input RENAME ATTRIBUTE a TO renamed;\n EXECUTE 'SELECT ($1).renamed::text' INTO item USING r;\n result := result || item;\n ALTER TYPE retained_input DROP ATTRIBUTE b;\n ALTER TYPE retained_input ADD ATTRIBUTE added text;\n result := result || r::text;\n EXECUTE 'SELECT ($1).tail::text' INTO item USING r;\n RETURN result || item;\nEND $$;\nSELECT json_build_object('case','rename_drop_add','values',retained_input_probe());\nCREATE TYPE retained_bits AS (a integer, b integer, c integer);\nCREATE FUNCTION retained_bits_probe() RETURNS text[] LANGUAGE plpgsql AS $$\nDECLARE r retained_bits := ROW(16909060,84281096,287454020); result text[]; item text;\nBEGIN\n ALTER TYPE retained_bits ALTER ATTRIBUTE a TYPE bigint;\n EXECUTE 'SELECT ($1).a::text' INTO item USING r;\n result := ARRAY[item];\n EXECUTE 'SELECT ($1).b::text' INTO item USING r;\n result := result || item;\n EXECUTE 'SELECT (($1).c IS NULL)::text' INTO item USING r;\n RETURN result || item;\nEND $$;\nSELECT json_build_object('case','widen_in_bounds_and_null','values',retained_bits_probe());\nCREATE TYPE retained_child AS (a integer, b text);\nCREATE TYPE retained_parent AS (child retained_child, children retained_child[]);\nCREATE FUNCTION retained_nested_probe() RETURNS text[] LANGUAGE plpgsql AS $$\nDECLARE r retained_parent := ROW(ROW(7,'x')::retained_child,ARRAY[ROW(8,'y')::retained_child]); result text[]; item text;\nBEGIN\n ALTER TYPE retained_child RENAME ATTRIBUTE a TO renamed;\n EXECUTE 'SELECT (($1).child).renamed::text' INTO item USING r;\n result := ARRAY[item];\n EXECUTE 'SELECT ((($1).children)[1]).renamed::text' INTO item USING r;\n RETURN result || item;\nEND $$;\nSELECT json_build_object('case','nested_composite_and_array','values',retained_nested_probe());\nCREATE TYPE retained_anonymous_child AS (a integer, b text);\nCREATE FUNCTION retained_anonymous_probe() RETURNS text[] LANGUAGE plpgsql AS $$\nDECLARE r record := ROW(ROW(7,'x')::retained_anonymous_child,ARRAY[ROW(8,'y')::retained_anonymous_child]); result text[]; item text;\nBEGIN\n ALTER TYPE retained_anonymous_child RENAME ATTRIBUTE a TO renamed;\n EXECUTE 'SELECT $1::text' INTO item USING r;\n result := ARRAY[item];\n BEGIN\n   EXECUTE 'SELECT (($1).f1).renamed::text' INTO item USING r;\n EXCEPTION WHEN OTHERS THEN\n   result := result || SQLSTATE || SQLERRM;\n END;\n BEGIN\n   EXECUTE 'SELECT ((($1).f2)[1]).renamed::text' INTO item USING r;\n EXCEPTION WHEN OTHERS THEN\n   result := result || SQLSTATE || SQLERRM;\n END;\n RETURN result;\nEND $$;\nSELECT json_build_object('case','anonymous_composite_and_array','values',retained_anonymous_probe());\nCREATE SEQUENCE retained_callback_calls;\nCREATE TYPE retained_callback_pair AS (a integer,b text);\nCREATE FUNCTION retained_callback_rename(v retained_callback_pair) RETURNS boolean LANGUAGE plpgsql AS $$BEGIN PERFORM nextval('retained_callback_calls'); ALTER TYPE retained_callback_pair RENAME ATTRIBUTE a TO renamed; RETURN true; END$$;\nCREATE DOMAIN retained_callback_domain AS retained_callback_pair CHECK(retained_callback_rename(VALUE));\nSELECT json_build_object('case','domain_input_catalog_change','values',ARRAY[('(7,x)'::retained_callback_domain)::text,currval('retained_callback_calls')::text]);\nCREATE SEQUENCE retained_field_calls;\nCREATE DOMAIN retained_field_int AS integer;\nCREATE TYPE retained_field_pair AS (a retained_field_int,b text);\nCREATE FUNCTION retained_field_rename(v integer) RETURNS boolean LANGUAGE plpgsql AS $$BEGIN PERFORM nextval('retained_field_calls'); ALTER TYPE retained_field_pair RENAME ATTRIBUTE a TO renamed; RETURN true; END$$;\nALTER DOMAIN retained_field_int ADD CONSTRAINT mutate CHECK(retained_field_rename(VALUE));\nSELECT json_build_object('case','field_input_catalog_change','values',ARRAY[('(7,x)'::retained_field_pair)::text,currval('retained_field_calls')::text]);\nCREATE TYPE native_json_row AS (a integer,b text);\nSELECT json_build_object('case','native_json_output','values',ARRAY[\n to_json('(7,x)'::native_json_row)::text,\n json_build_array('(7,x)'::native_json_row)::text,\n json_build_object('row','(7,x)'::native_json_row)::text,\n (SELECT json_agg(v)::text FROM (VALUES ('(7,x)'::native_json_row)) AS t(v)),\n (SELECT json_object_agg('row',v)::text FROM (VALUES ('(7,x)'::native_json_row)) AS t(v))]);\nCREATE FUNCTION native_json_key_errors() RETURNS text[] LANGUAGE plpgsql AS $$\nDECLARE result text[] := ARRAY[]::text[];\nBEGIN\n BEGIN\n  PERFORM json_build_object('(7,x)'::native_json_row,1);\n EXCEPTION WHEN OTHERS THEN result := result || SQLSTATE || SQLERRM;\n END;\n BEGIN\n  PERFORM json_object_agg(v,1) FROM (VALUES ('(7,x)'::native_json_row)) AS t(v);\n EXCEPTION WHEN OTHERS THEN result := result || SQLSTATE || SQLERRM;\n END;\n RETURN result;\nEND $$;\nSELECT json_build_object('case','native_json_key_errors','values',native_json_key_errors());\nCREATE TYPE unread_fields AS (a integer,tail integer);\nCREATE VIEW unread_fields_value AS SELECT '(7,287454020)'::unread_fields AS v;\nALTER TYPE unread_fields ALTER ATTRIBUTE tail TYPE text;\nSELECT json_build_object('case','unread_field_headers','values',ARRAY[(v).a::text]) FROM unread_fields_value;\nCREATE TYPE assignment_leaf AS (a integer,b text);\nCREATE TYPE assignment_container AS (leaf assignment_leaf,leaves assignment_leaf[],nums integer[]);\nCREATE TABLE physical_writes(v assignment_container,a integer[]);\nINSERT INTO physical_writes(v) VALUES ((ROW('(7,x)'::assignment_leaf,ARRAY['(8,y)'::assignment_leaf],ARRAY[1,2])::assignment_container)::text::assignment_container);\nUPDATE physical_writes SET a=(v).nums;\nUPDATE physical_writes SET v.leaf.b='changed',v.leaves[1].a=80,v.nums[2]=20;\nSELECT json_build_object('case','physical_partial_writes','values',ARRAY[v::text,a::text]) FROM physical_writes;\nUPDATE physical_writes SET a[2]=99;\nSELECT json_build_object('case','physical_array_element_write','values',ARRAY[a::text]) FROM physical_writes;\nUPDATE physical_writes SET a[1:2]=(v).nums;\nALTER TYPE assignment_leaf RENAME ATTRIBUTE a TO renamed CASCADE;\nUPDATE physical_writes SET v.leaf.renamed=70;\nSELECT json_build_object('case','physical_array_slice_and_renamed_field','values',ARRAY[v::text,a::text]) FROM physical_writes;\nCREATE DOMAIN native_json_real AS real;\nCREATE TYPE native_json_float_row AS (single real,domain_single native_json_real,wide double precision);\nSELECT json_build_object('case','native_json_float_width','values',ARRAY[\n to_json('(0.1,0.1,0.1)'::native_json_float_row)::text,\n to_json(ROW(0.1::real,0.1::native_json_real,0.1::double precision))::text,\n to_json(ARRAY[0.1::native_json_real])::text]);\nROLLBACK;\n",
+  "cases": [
+    {
+      "case": "rename_drop_add",
+      "values": [
+        "(7,x,9)",
+        "7",
+        "(7,9,)",
+        "9"
+      ]
+    },
+    {
+      "case": "widen_in_bounds_and_null",
+      "values": [
+        "361984551007945476",
+        "287454020",
+        "false"
+      ]
+    },
+    {
+      "case": "nested_composite_and_array",
+      "values": [
+        "7",
+        "8"
+      ]
+    },
+    {
+      "case": "anonymous_composite_and_array",
+      "values": [
+        "(\"(7,x)\",\"{\"\"(8,y)\"\"}\")",
+        "42703",
+        "could not identify column \"f1\" in record data type",
+        "42703",
+        "could not identify column \"f2\" in record data type"
+      ]
+    },
+    {
+      "case": "domain_input_catalog_change",
+      "values": [
+        "(7,x)",
+        "1"
+      ]
+    },
+    {
+      "case": "field_input_catalog_change",
+      "values": [
+        "(7,x)",
+        "1"
+      ]
+    },
+    {
+      "case": "native_json_output",
+      "values": [
+        "{\"a\":7,\"b\":\"x\"}",
+        "[{\"a\":7,\"b\":\"x\"}]",
+        "{\"row\" : {\"a\":7,\"b\":\"x\"}}",
+        "[{\"a\":7,\"b\":\"x\"}]",
+        "{ \"row\" : {\"a\":7,\"b\":\"x\"} }"
+      ]
+    },
+    {
+      "case": "native_json_key_errors",
+      "values": [
+        "22023",
+        "key value must be scalar, not array, composite, or json",
+        "22023",
+        "key value must be scalar, not array, composite, or json"
+      ]
+    },
+    {
+      "case": "unread_field_headers",
+      "values": [
+        "7"
+      ]
+    },
+    {
+      "case": "physical_partial_writes",
+      "values": [
+        "(\"(7,changed)\",\"{\"\"(80,y)\"\"}\",\"{1,20}\")",
+        "{1,2}"
+      ]
+    },
+    {
+      "case": "physical_array_element_write",
+      "values": [
+        "{1,99}"
+      ]
+    },
+    {
+      "case": "physical_array_slice_and_renamed_field",
+      "values": [
+        "(\"(70,changed)\",\"{\"\"(80,y)\"\"}\",\"{1,20}\")",
+        "{1,20}"
+      ]
+    },
+    {
+      "case": "native_json_float_width",
+      "values": [
+        "{\"single\":0.1,\"domain_single\":0.1,\"wide\":0.1}",
+        "{\"f1\":0.1,\"f2\":0.1,\"f3\":0.1}",
+        "[0.1]"
+      ]
+    }
+  ]
+}

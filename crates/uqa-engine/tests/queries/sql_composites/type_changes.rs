@@ -410,20 +410,67 @@ fn composite_enum_layouts_match_postgresql(#[case] provider: usize) {
     crate::pg18_oracle::verify(&engine, &durable.to_string());
 }
 
+/// Build predecessor logical carriers explicitly; current composite input already contains physical label OIDs.
+fn legacy_enum_input_carriers(engine: &uqa_engine::Engine) -> Vec<(u32, uqa_core::Value)> {
+    use uqa_core::{RecordValue, Value};
+    [
+        ("enum_value", "SELECT 'low'::physical_mood", 17),
+        (
+            "enum_array_value",
+            "SELECT ARRAY['low'::physical_mood,NULL,'high'::physical_mood]",
+            23,
+        ),
+    ]
+    .into_iter()
+    .map(|(view, field_sql, tail)| {
+        let tuple = engine.sql(&format!("SELECT v FROM {view}"), &[]).unwrap();
+        let Some(Value::Datum(datum)) = tuple.value_at(0, 0) else {
+            panic!("current input is physical")
+        };
+        let oid = datum.type_oid();
+        let field = engine
+            .sql(field_sql, &[])
+            .unwrap()
+            .value_at(0, 0)
+            .unwrap()
+            .clone();
+        (
+            oid,
+            Value::Record(RecordValue::from_parts(
+                vec![("a".into(), field), ("b".into(), Value::Int(tail))],
+                Some(oid),
+            )),
+        )
+    })
+    .collect()
+}
+
 #[rstest::rstest]
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn legacy_enum_constants_fill_physical_oids_before_type_changes(#[case] provider: usize) {
-    fn remove_oids(value: &mut serde_json::Value) -> usize {
+    fn remove_oids(value: &mut serde_json::Value, legacy: &[(u32, uqa_core::Value)]) -> usize {
+        if value.get("$uqa_type").is_some_and(|kind| kind == "datum") {
+            if let Some((_, record)) = legacy.iter().find(|(oid, _)| value["type_oid"] == *oid) {
+                *value = serde_json::to_value(record).unwrap();
+            }
+        }
         match value {
-            serde_json::Value::Array(values) => values.iter_mut().map(remove_oids).sum(),
+            serde_json::Value::Array(values) => values
+                .iter_mut()
+                .map(|value| remove_oids(value, legacy))
+                .sum(),
             serde_json::Value::Object(fields) => {
                 let removed = usize::from(
                     fields.get("$uqa_type").is_some_and(|kind| kind == "enum")
                         && fields.remove("label_oid").is_some(),
                 );
-                removed + fields.values_mut().map(remove_oids).sum::<usize>()
+                removed
+                    + fields
+                        .values_mut()
+                        .map(|value| remove_oids(value, legacy))
+                        .sum::<usize>()
             }
             _ => 0,
         }
@@ -446,6 +493,7 @@ fn legacy_enum_constants_fill_physical_oids_before_type_changes(#[case] provider
     };
     let engine = super::addition::open(provider, &path);
     engine.sql(statement("setup"), &[]).unwrap();
+    let legacy = legacy_enum_input_carriers(&engine);
     // Exercise both an already retained source and a constant captured by its first TYPE change.
     engine
         .sql("ALTER TYPE enum_slots ADD ATTRIBUTE extra integer", &[])
@@ -455,7 +503,7 @@ fn legacy_enum_constants_fill_physical_oids_before_type_changes(#[case] provider
         let mut count = 0;
         for mut view in catalog.load_views().unwrap() {
             let mut value = serde_json::from_str(&view.definition_json).unwrap();
-            count += remove_oids(&mut value);
+            count += remove_oids(&mut value, &legacy);
             view.definition_json = serde_json::to_string(&value).unwrap();
             catalog.save_view(&view).unwrap();
         }

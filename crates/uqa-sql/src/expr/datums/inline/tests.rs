@@ -301,6 +301,27 @@ const FAMILIES: [&str; 5] = [
 ];
 
 #[test]
+fn copied_inline_composites_keep_physical_tuples_for_later_catalog_observation() {
+    let mut reference = Reference::new();
+    let bytes = reference.bytes("record_window");
+    let ty = reference.endpoint("record_window");
+    let control = ProductionControl::uncontrolled();
+    let value = read(&bytes, &mut 8, 0, &ty, Some(&reference), &control).unwrap();
+    let Value::Datum(datum) = &*value else {
+        panic!("retained physical composite")
+    };
+    Arc::make_mut(&mut reference.record).attributes[0].name = "renamed".into();
+    reference.observing.set(true);
+    let decoded =
+        super::super::read_with_value_catalog_and_control(datum, Some(&reference), &control)
+            .unwrap();
+    let Value::Record(record) = &*decoded else {
+        panic!("observed composite")
+    };
+    assert_eq!(record.get(0).unwrap().0, "renamed");
+}
+
+#[test]
 fn physical_range_endpoints_preserve_postgresql_typed_values_without_repeating_input() {
     let mut reference = Reference::new();
     let memory = MemoryBudget::new(1 << 20);

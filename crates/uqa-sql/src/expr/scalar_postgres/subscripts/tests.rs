@@ -54,7 +54,7 @@ fn subscripts_preserve_multidimensional_bounds_and_selected_owned_values() {
             Value::Str("seven".into()),
         ),
     ] {
-        let output = eval_postgres_subscript_with_control(dispatch, &args, &control)
+        let output = eval_postgres_subscript_with_control(dispatch, &args, None, &control)
             .unwrap()
             .unwrap();
         assert_eq!(*output, expected);
@@ -115,7 +115,7 @@ fn slices_clamp_each_dimension_and_normalize_result_bounds() {
             Value::Array(ArrayValue::try_new(Vec::new()).unwrap()),
         ),
     ] {
-        let output = eval_postgres_subscript_with_control(dispatch, &args, &control)
+        let output = eval_postgres_subscript_with_control(dispatch, &args, None, &control)
             .unwrap()
             .unwrap();
         assert_eq!(*output, expected);
@@ -142,7 +142,7 @@ fn failed_subscript_copies_and_cancelled_slice_readers_release_their_allowance()
     ] {
         let mut args = vec![source.clone()];
         args.extend(indices);
-        let error = eval_postgres_subscript_with_control(dispatch, &args, &control)
+        let error = eval_postgres_subscript_with_control(dispatch, &args, None, &control)
             .unwrap()
             .unwrap_err();
         assert_eq!(error.sqlstate(), Some("53200"));
@@ -156,7 +156,7 @@ fn failed_subscript_copies_and_cancelled_slice_readers_release_their_allowance()
                 invoking.cancel();
             }
             let control = ProductionControl::new(&budget, &original, &invoking);
-            let error = eval_postgres_subscript_with_control(dispatch, &args, &control)
+            let error = eval_postgres_subscript_with_control(dispatch, &args, None, &control)
                 .unwrap()
                 .unwrap_err();
             assert_eq!(error.sqlstate(), Some("57014"));

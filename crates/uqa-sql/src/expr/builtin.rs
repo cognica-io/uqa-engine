@@ -396,8 +396,12 @@ pub(super) fn eval_dispatched_builtin_with_control(
         }
     }
     let collation = FunctionBinding::selected_input_collation(Some(binding));
+    let catalog = context.engine.map(super::EngineValueCatalog);
+    let catalog = catalog
+        .as_ref()
+        .map(|catalog| catalog as &dyn super::SQLValueCatalog);
     if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(
-        dispatch, evaluated, collation, control,
+        dispatch, evaluated, collation, catalog, control,
     ) {
         return result;
     }
@@ -442,14 +446,7 @@ pub(super) fn eval_dispatched_builtin_with_control(
             super::json::json_extract_operator_with_control(evaluated, as_text, path, control)
         }
         FunctionDispatch::ArraySortJson => {
-            let catalog = context.engine.map(super::EngineValueCatalog);
-            scalar_array::eval_dispatched_json_array_sort_with_control(
-                evaluated,
-                control,
-                catalog
-                    .as_ref()
-                    .map(|catalog| catalog as &dyn super::SQLValueCatalog),
-            )
+            scalar_array::eval_dispatched_json_array_sort_with_control(evaluated, control, catalog)
         }
         FunctionDispatch::ArrayConcat
         | FunctionDispatch::ArrayAppend

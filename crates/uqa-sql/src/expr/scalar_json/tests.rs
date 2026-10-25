@@ -34,7 +34,10 @@ fn assert_value(name: &str, args: &[Value], expected: Value) {
     if let Value::Str(value) | Value::Json(value) | Value::JsonB(value) = &*result {
         assert_eq!(memory.used(), value.capacity());
     }
-    assert_eq!(eval_json_functions(name, args).unwrap().unwrap(), expected);
+    assert_eq!(
+        eval_json_functions(name, args, None).unwrap().unwrap(),
+        expected
+    );
     drop(result);
     assert_eq!(memory.used(), 0, "result release for {name}");
 }

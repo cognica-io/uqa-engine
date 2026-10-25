@@ -20,7 +20,9 @@ pub fn coerce_assignment_value(
     target: &ColumnType,
     source: Option<&ColumnType>,
 ) -> Result<Value, SQLError> {
-    if source.is_some_and(|source| same_catalog_value_type(source, target)) {
+    if physical_identity(&value, source, target)
+        || source.is_some_and(|source| same_catalog_value_type(source, target))
+    {
         return normalize_existing(value, target);
     }
     if matches!(target, ColumnType::Domain { .. }) {
@@ -42,6 +44,22 @@ pub fn coerce_assignment_value(
         value
     };
     convert_value_to_column_type_with_context_from(context, value, target, source)
+}
+
+/// An admitted physical value needs no payload read for a binary identity assignment. A domain source can be relabeled to its base without repeating its checks; target modifiers must still match exactly.
+fn physical_identity(value: &Value, source: Option<&ColumnType>, target: &ColumnType) -> bool {
+    if !matches!(value, Value::Datum(_)) {
+        return false;
+    }
+    source.is_some_and(|mut source| {
+        while source != target {
+            let ColumnType::Domain { base, .. } = source else {
+                return false;
+            };
+            source = base;
+        }
+        true
+    })
 }
 
 fn same_catalog_value_type(source: &ColumnType, target: &ColumnType) -> bool {
@@ -71,9 +89,15 @@ pub fn convert_declared_value_to_column_type(
     source_ty: &ColumnType,
     target_ty: &ColumnType,
 ) -> Result<Value, SQLError> {
-    if same_catalog_value_type(source_ty, target_ty) {
+    if physical_identity(&value, Some(source_ty), target_ty)
+        || same_catalog_value_type(source_ty, target_ty)
+    {
         return normalize_existing(value, target_ty);
     }
+    let value = match value {
+        Value::Datum(datum) => crate::expr::datums::read_with_catalog(&datum, Some(context))?,
+        value => value,
+    };
     match (source_ty, target_ty) {
         (ColumnType::Domain { base, .. }, target) => {
             convert_declared_value_to_column_type(context, value, base, target)
@@ -216,6 +240,10 @@ fn convert_value_to_column_type_with_context_from(
     if matches!(value, Value::Null) {
         return Ok(Value::Null);
     }
+    let value = match value {
+        Value::Datum(datum) => crate::expr::datums::read_with_catalog(&datum, Some(context))?,
+        value => value,
+    };
     if let ColumnType::Array(element) = ty {
         if type_requires_catalog_resolution(element) {
             return convert_catalog_array(context, value, element);

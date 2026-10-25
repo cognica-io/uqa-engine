@@ -10,6 +10,9 @@ use super::AssignmentContext;
 use crate::{ColumnType, ResultRow, RowSchema, SQLError};
 use uqa_core::Value;
 
+#[cfg(test)]
+mod tests;
+
 pub fn cast_domain_value(
     context: &dyn AssignmentContext,
     value: &Value,
@@ -102,6 +105,15 @@ fn convert_domain_value(
             ),
         ));
     }
+    // Checks may change the catalog. Retain the admitted tuple before invoking them.
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let value = crate::expr::composites::retain_value_with_control(
+        control.finish(value, control.empty_reservation())?,
+        context.composite_types(),
+        &control,
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary domain value retention".into()))?;
     let row = ResultRow::from([("value".into(), value.clone())]);
     let schema = RowSchema::with_types(
         vec!["value".into()],

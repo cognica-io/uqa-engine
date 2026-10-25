@@ -50,6 +50,23 @@ fn domain() -> ColumnType {
 }
 
 #[test]
+fn frozen_builtin_datums_have_no_catalog_dependencies_or_eager_reads() {
+    use uqa_core::DatumValue;
+    for (oid, independent) in [
+        (23, true),
+        (25, true),
+        (16, true),
+        (1700, true),
+        (2206, false),
+        (20_001, false),
+    ] {
+        // Dependency classification must also leave invalid, unreached bytes alone.
+        let value = Value::Datum(DatumValue::new(oid, 0, Vec::new()));
+        assert_eq!(independent_value(&value), independent, "OID {oid}");
+    }
+}
+
+#[test]
 fn folded_builtin_constants_are_independent_but_unbound_calls_are_not() {
     // PostgreSQL 18.4's revoke_cached reference retains this already-folded result after REVOKE; generic calls with live parameters still need initialization.
     let constant = entry("SELECT lower('HELLO') AS value", "SELECT 'hello' AS value");

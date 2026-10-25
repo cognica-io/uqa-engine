@@ -218,13 +218,17 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 })
             {
                 let control = uqa_core::memory::ProductionControl::uncontrolled();
-                return Ok(
-                    super::eval_array_access_with_control(access?, &control, |index| {
-                        Ok(control.finish(eval(&args[index], ctx)?, None)?)
-                    })?
-                    .into_uncontrolled()
-                    .expect("ordinary array access"),
-                );
+                let catalog = ctx.engine.map(super::EngineValueCatalog);
+                return Ok(super::eval_array_access_with_catalog_and_control(
+                    access?,
+                    catalog
+                        .as_ref()
+                        .map(|catalog| catalog as &dyn super::SQLValueCatalog),
+                    &control,
+                    |index| Ok(control.finish(eval(&args[index], ctx)?, None)?),
+                )?
+                .into_uncontrolled()
+                .expect("ordinary array access"));
             }
             // A set-returning built-in cannot produce the one value this expression needs; `PostgreSQL` rejects it before evaluating its arguments.
             if let Some(binding) = binding.as_ref().filter(|binding| binding.builtin) {
@@ -346,7 +350,12 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         }
         Expr::IsNull { expr, negated } => {
             let v = eval(expr, ctx)?;
-            Ok(Value::Bool(uqa_core::sql_null_test(Some(&v), *negated)))
+            Ok(Value::Bool(super::sql_null_test_with_control(
+                &v,
+                *negated,
+                ctx.engine,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?))
         }
         Expr::Between { expr, low, high } => eval_between(expr, low, high, ctx, 0),
         Expr::InList {

@@ -70,5 +70,5 @@ pub fn create_array_parameter_with_control(
     } else {
         value
     };
-    input::finish(value, ty, control)
+    input::finish(value, ty, input, control)
 }

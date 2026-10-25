@@ -28,7 +28,7 @@ pub fn create_record_parameter_with_control(
     }
     if matches!(base, ColumnType::Record) {
         let sources = input::bind_sources(fields, types, control)?;
-        return input::finish(anonymous(fields, &sources, control)?, ty, control);
+        return input::finish(anonymous(fields, &sources, control)?, ty, input, control);
     }
     let ColumnType::Composite(reference) = base else {
         return Err(SQLError::TypeMismatch(
@@ -54,6 +54,7 @@ pub fn create_record_parameter_with_control(
     }
     let value = crate::expr::composites::constructor::construct_current_with_control(
         &descriptor,
+        input.composite_types(),
         control,
         |index| {
             input::cast_parameter(
@@ -78,7 +79,7 @@ pub fn create_record_parameter_with_control(
     } else {
         value
     };
-    input::finish(value, ty, control)
+    input::finish(value, ty, input, control)
 }
 
 fn anonymous(

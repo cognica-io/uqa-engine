@@ -225,7 +225,12 @@ pub(super) fn is_null(
 ) -> Result<Produced<Value>, SQLError> {
     let value = eval_scalar_inner(expr, context, control)?;
     plain(
-        Value::Bool(uqa_core::sql_null_test(Some(&value), negated)),
+        Value::Bool(uqa_sql::expr::sql_null_test_with_control(
+            &value,
+            negated,
+            context.function_hook(),
+            control,
+        )?),
         control,
     )
 }

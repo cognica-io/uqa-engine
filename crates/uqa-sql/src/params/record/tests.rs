@@ -44,7 +44,12 @@ impl CompositeTypeCatalog for Catalog {
     fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
         assert_eq!(oid, 20_001);
         Ok(Some(Arc::new(CompositeTypeDescriptor {
-            dropped: Vec::new(),
+            dropped: vec![
+                crate::expr::composites::DroppedCompositeAttribute::from_type(
+                    2,
+                    &ColumnType::Integer,
+                ),
+            ],
             type_oid: oid,
             relation_oid: 20_003,
             attributes: [
@@ -84,6 +89,9 @@ impl EngineHook for Catalog {
     fn composite_types(&self) -> Option<&dyn CompositeTypeCatalog> {
         Some(self)
     }
+    fn resolve_type_oid(&self, oid: u32) -> Result<Option<ColumnType>, String> {
+        Ok((oid == 20_001).then(ty))
+    }
 }
 
 fn input(number: i64) -> [SQLParam; 3] {
@@ -103,7 +111,13 @@ fn live_positions_and_explicit_casts_keep_the_original_allowance() {
         create_record_parameter_with_control("pair", &input(32767), &Catalog, &Catalog, &control)
             .unwrap();
     assert_eq!(value.declared_scalar_type(), Some(&ty()));
-    let Value::Record(record) = value.scalar_value().unwrap() else {
+    let Value::Datum(datum) = value.scalar_value().unwrap() else {
+        panic!("retained tuple")
+    };
+    let decoded =
+        crate::expr::datums::read_with_catalog_and_control(datum, Some(&Catalog), &control)
+            .unwrap();
+    let Value::Record(record) = &*decoded else {
         panic!("record")
     };
     assert_eq!(record.type_oid(), Some(20_001));
@@ -117,6 +131,7 @@ fn live_positions_and_explicit_casts_keep_the_original_allowance() {
         "(32767,ab,12.35)"
     );
     assert!(budget.used() > 0);
+    drop(decoded);
     drop(value);
     assert_eq!(budget.used(), 0);
 }

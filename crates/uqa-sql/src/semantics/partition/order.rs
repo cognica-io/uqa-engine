@@ -16,7 +16,6 @@ use uqa_core::Value;
 #[cfg(test)]
 mod tests;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum RangePoint {
     MinValue,
     Value(Value),
@@ -24,7 +23,6 @@ enum RangePoint {
 }
 
 /// A partition's place among its siblings, which share a partitioning strategy apart from the default partition.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum Position {
     /// A range partition by its lower bound.
     Range(Vec<RangePoint>),
@@ -35,6 +33,50 @@ enum Position {
     /// A list partition that holds only NULL follows every list partition that holds a value.
     NullList,
     Default,
+}
+
+impl Position {
+    fn rank(&self) -> u8 {
+        match self {
+            Self::Range(_) => 0,
+            Self::List(_) => 1,
+            Self::Hash(..) => 2,
+            Self::NullList => 3,
+            Self::Default => 4,
+        }
+    }
+
+    fn compare(
+        &self,
+        other: &Self,
+        context: &PartitionContext<'_>,
+    ) -> Result<std::cmp::Ordering, SQLError> {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Self::List(left), Self::List(right)) => super::compare_values(context, left, right),
+            (Self::Hash(left_mod, left_rem), Self::Hash(right_mod, right_rem)) => {
+                Ok((left_mod, left_rem).cmp(&(right_mod, right_rem)))
+            }
+            (Self::Range(left), Self::Range(right)) => {
+                for (left, right) in left.iter().zip(right) {
+                    let order = match (left, right) {
+                        (RangePoint::MinValue, RangePoint::MinValue)
+                        | (RangePoint::MaxValue, RangePoint::MaxValue) => Ordering::Equal,
+                        (RangePoint::MinValue, _) | (_, RangePoint::MaxValue) => Ordering::Less,
+                        (RangePoint::MaxValue, _) | (_, RangePoint::MinValue) => Ordering::Greater,
+                        (RangePoint::Value(left), RangePoint::Value(right)) => {
+                            super::compare_values(context, left, right)?
+                        }
+                    };
+                    if !order.is_eq() {
+                        return Ok(order);
+                    }
+                }
+                Ok(left.len().cmp(&right.len()))
+            }
+            _ => Ok(self.rank().cmp(&other.rank())),
+        }
+    }
 }
 
 fn position(context: &PartitionContext<'_>, bound: &PartitionBound) -> Result<Position, SQLError> {
@@ -59,7 +101,11 @@ fn position(context: &PartitionContext<'_>, bound: &PartitionBound) -> Result<Po
             let mut smallest = None;
             for value in values {
                 let value = evaluate(value)?;
-                if value != Value::Null && smallest.as_ref().is_none_or(|current| value < *current)
+                if value != Value::Null
+                    && match smallest.as_ref() {
+                        None => true,
+                        Some(current) => super::compare_values(context, &value, current)?.is_lt(),
+                    }
                 {
                     smallest = Some(value);
                 }
@@ -79,6 +125,10 @@ pub fn partition_bound_order(
         .into_iter()
         .map(|(name, bound)| Ok((position(context, &bound)?, name)))
         .collect::<Result<Vec<_>, SQLError>>()?;
-    positioned.sort_by(|left, right| left.0.cmp(&right.0));
+    uqa_core::ordering::sort_by_with_control(
+        &mut positioned,
+        &mut || Ok::<_, SQLError>(()),
+        |left, right, _| left.0.compare(&right.0, context),
+    )?;
     Ok(positioned.into_iter().map(|(_, name)| name).collect())
 }
