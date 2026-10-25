@@ -20,7 +20,7 @@ struct data {
     int entered, released;
 };
 
-static uqa_status UQA_CALL scalar(uqa_udf_context context, uqa_value_view const *arguments,
+static uqa_status UQA_CALL scalar(uqa_udf_context context, const uqa_value_view *arguments,
                                   uint32_t count, void *user_data) {
     struct data *data = (struct data *)user_data;
     uqa_value_view result = NULL;

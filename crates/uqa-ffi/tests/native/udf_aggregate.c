@@ -26,7 +26,7 @@ static uqa_status UQA_CALL create_state(void *user_data, void **out_state) {
     return UQA_OK;
 }
 
-static uqa_status UQA_CALL observe(void *pointer, uqa_value_view const *arguments,
+static uqa_status UQA_CALL observe(void *pointer, const uqa_value_view *arguments,
                                   uint32_t count, void *user_data) {
     struct data *data = (struct data *)user_data;
     struct state *state = (struct state *)pointer;

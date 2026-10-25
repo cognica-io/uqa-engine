@@ -15,7 +15,7 @@ struct data {
 };
 struct scan { int64_t current, count; };
 
-static uqa_status UQA_CALL create_scan(uqa_value_view const *arguments, uint32_t count,
+static uqa_status UQA_CALL create_scan(const uqa_value_view *arguments, uint32_t count,
     void *user_data, void **out_scan) {
     struct data *data = (struct data *)user_data;
     assert(count == 1);

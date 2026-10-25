@@ -236,10 +236,15 @@ fn sqlite_connection(
             ))
         }
         (Some(anchor), Some(key), None, true) => {
-            ManagedConnection::open_auto_with_anchor(path, key, anchor)
+            ManagedConnection::open_auto_with_anchor(path, key, anchor.into())
         }
         (Some(anchor), Some(key), Some(compression), false) => {
-            ManagedConnection::open_compressed_encrypted_with_anchor(path, key, compression, anchor)
+            ManagedConnection::open_compressed_encrypted_with_anchor(
+                path,
+                key,
+                compression,
+                anchor.into(),
+            )
         }
         (Some(_), _, _, _) => {
             return Err(UQAError::invalid(
@@ -288,7 +293,7 @@ fn open(
                 || config.trusted_anchor.is_some()
             {
                 return Err(UQAError::invalid(
-                    "redb databases do not accept SQLite encryption, compression or anchors",
+                    "selected storage backend does not support encryption, compression or trusted anchors",
                 ));
             }
             let provider = uqa_storage_redb::RedbStorage::open(path)

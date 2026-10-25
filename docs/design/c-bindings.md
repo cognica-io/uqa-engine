@@ -223,7 +223,9 @@ UQA_API uqa_status UQA_CALL uqa_library_get_capabilities(uint64_t *out);
 
 Opaque typedefs name pointer handles: pass `uqa_engine engine`, return a handle through `uqa_engine *out`, and clear it through `uqa_engine *engine`. Do not add another pointer to an ordinary handle parameter. Public PODs such as `uqa_sql_request`, `uqa_string_view`, and `uqa_subscription_options` remain structs; their pointer parameters retain their usual meaning.
 
-`uqa_type` points to a const descriptor. `uqa_value_view` points to a const value and accepts an owned `uqa_value` through the normal pointer qualification conversion. Borrowed result cells and callback arguments use this view type so they cannot be passed to `uqa_value_destroy` without an invalid conversion. `const uqa_value` would make only the pointer variable const; it is not a read-only value view. Parameter arrays are declared as arrays of `uqa_value_view`, with `uqa_value_view const *` preventing changes to their entries.
+`uqa_type` points to a const descriptor. `uqa_value_view` points to a const value and accepts an owned `uqa_value` through the normal pointer qualification conversion. Borrowed result cells and callback arguments use this view type so they cannot be passed to `uqa_value_destroy` without an invalid conversion. `const uqa_value` would make only the pointer variable const; it is not a read-only value view. Parameter arrays are declared as arrays of `uqa_value_view`, with `const uqa_value_view *` preventing changes to their entries.
+
+Place type qualifiers before the type name consistently in headers, callback declarations, examples and documentation: `const char *` and `const uqa_value_view *`. Keep pointer qualifiers after the corresponding `*`, as in `const char *const *`; moving a qualifier across `*` changes which object is const. A pointer typedef remains a pointer type when qualified: `const uqa_value_view *` expands to `const struct uqa_value_t *const *`.
 
 All exported operations return `uqa_status`, including metadata accessors and destructors. Returned scalars, handles, and views use required output slots. `uqa_library_get_version` and `uqa_library_get_source_revision` return borrowed string views valid while the library remains loaded. Application callbacks defined by this API also return `uqa_status`; outputs and state use callback context or output parameters. The externally specified Arrow release callbacks retain Arrow's mandated signatures.
 
@@ -381,9 +383,9 @@ A non-NULL path with `UQA_OPEN_MEMORY` is rejected rather than ignored. Both SQL
 
 `UQA_OPEN_SQLITE_AUTO` detects the selected SQLite file's encryption/compression without changing its native or Key/Value layout. Existing containers retain their stored codec; new files use plain SQLite or SQLCipher according to the configured key. AUTO rejects explicit compression settings because it reads them from the file. `ManagedConnection::open_auto` owns format-directed opening, and `Engine::open_auto` delegates to it. A key on an unencrypted file is rejected; encrypted or unrecognized files require a key. Open failures preserve native diagnostics. Storage types, encodings and their combinations do not add C open functions.
 
-`uqa_config_set_trusted_anchor` copies a `uqa_sqlite_container_anchor`; NULL clears it. The matching getter copies the stored fields, returning `UQA_DONE` with zero fields when unset. The structure carries sixteen database-identity octets, a uint64 generation and thirty-two authentication-tag octets. It owns no resources and is not a portable serialized format. An anchor requires a nonempty encryption key and either explicit compression or `UQA_OPEN_SQLITE_AUTO` on an existing encrypted compressed container. Both SQLite layouts use the same open call. Memory, redb and incompatible SQLite options reject the setting before creating storage.
+`uqa_config_set_trusted_anchor` copies a `uqa_container_anchor`; NULL clears it. The matching getter copies the stored fields, returning `UQA_DONE` with zero fields when unset. The structure carries sixteen database-identity octets, a uint64 generation and thirty-two authentication-tag octets. It owns no resources and is not a portable serialized format. An anchor requires a nonempty encryption key and either explicit compression or `UQA_OPEN_SQLITE_AUTO` on an existing encrypted compressed container. Both SQLite layouts use the same open call. Memory, redb and incompatible SQLite options reject the setting before creating storage.
 
-After all writers close, `uqa_sqlite_get_container_anchor(path, key, out)` authenticates and reads the current anchor without opening an Engine or modifying the file; `_n` accepts explicit UTF-8 lengths. A read error leaves zero fields. The application keeps this anchor in independently trusted storage and refreshes it after successful changes. Opening with a stale or mismatched anchor fails; an anchored AUTO open never creates a missing file or accepts an unencrypted file. Native SQLite owns format detection, authentication and rollback validation. Encryption alone must not be documented as full-file rollback protection.
+After all writers close, `uqa_container_get_anchor(path, key, out)` authenticates and reads the current anchor without opening an Engine or modifying the file; `_n` accepts explicit UTF-8 lengths. A read error leaves zero fields. The application keeps this anchor in independently trusted storage and refreshes it after successful changes. Opening with a stale or mismatched anchor fails; an anchored AUTO open never creates a missing file or accepts an unencrypted file. Native SQLite owns format detection, authentication and rollback validation. Encryption alone must not be documented as full-file rollback protection.
 
 `uqa_engine_open_session` does not inherit private transaction state, prepared statements, cancellation, or mutable session variables. It shares database data and runtime registries. A memory source returns `UQA_ERROR_UNSUPPORTED` with NULL output; constructing another empty memory Engine would not create a session over the same database. Future memory multi-session support must begin in the Storage state and transaction-affine session contracts.
 
@@ -396,14 +398,14 @@ Build capabilities report compiled components; instance capabilities report oper
 ```c
 typedef struct uqa_sql_request {
     const char *sql;
-    uqa_value_view const *params;
+    const uqa_value_view *params;
     uint32_t param_count;
 } uqa_sql_request;
 
 typedef struct uqa_sql_request_n {
     const char *sql;
     size_t sql_size;
-    uqa_value_view const *params;
+    const uqa_value_view *params;
     uint32_t param_count;
 } uqa_sql_request_n;
 
@@ -415,11 +417,11 @@ UQA_API uqa_status UQA_CALL uqa_engine_execute_n(
     uqa_result result);
 UQA_API uqa_status UQA_CALL uqa_engine_execute_params(
     uqa_engine engine, const char *sql,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_result result);
 UQA_API uqa_status UQA_CALL uqa_engine_execute_params_n(
     uqa_engine engine, const char *sql, size_t sql_size,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_result result);
 UQA_API uqa_status UQA_CALL uqa_batch_result_create(uqa_batch_result *out);
 
@@ -806,11 +808,11 @@ UQA_API uqa_status UQA_CALL uqa_cursor_open_n(
     uqa_cursor *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_open_params(
     uqa_engine engine, const char *sql,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_cursor *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_open_params_n(
     uqa_engine engine, const char *sql, size_t sql_size,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_cursor *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_fetch(
     uqa_cursor cursor, uint32_t max_rows,
@@ -1041,13 +1043,13 @@ UQA_API uqa_status UQA_CALL uqa_udf_options_destroy(uqa_udf_options *options);
 
 typedef uqa_status (UQA_CALL *uqa_udf_scalar_fn)(
     uqa_udf_context context,
-    uqa_value_view const *arguments, uint32_t count,
+    const uqa_value_view *arguments, uint32_t count,
     void *user_data);
 
 /* A successful create transfers scan ownership even when *out_scan is NULL.
  * A failed create remains responsible for its own partial allocations. */
 typedef uqa_status (UQA_CALL *uqa_udf_create_scan_fn)(
-    uqa_value_view const *arguments, uint32_t count, void *user_data,
+    const uqa_value_view *arguments, uint32_t count, void *user_data,
     void **out_scan);
 typedef uqa_status (UQA_CALL *uqa_udf_next_fn)(
     uqa_udf_row_sink sink, void *scan, void *user_data);
@@ -1057,7 +1059,7 @@ typedef uqa_status (UQA_CALL *uqa_udf_destroy_scan_fn)(
 typedef uqa_status (UQA_CALL *uqa_udf_create_state_fn)(
     void *user_data, void **out_state);
 typedef uqa_status (UQA_CALL *uqa_udf_observe_fn)(
-    void *state, uqa_value_view const *arguments, uint32_t count, void *user_data);
+    void *state, const uqa_value_view *arguments, uint32_t count, void *user_data);
 typedef uqa_status (UQA_CALL *uqa_udf_finish_fn)(
     uqa_udf_context context, void *state, void *user_data);
 typedef uqa_status (UQA_CALL *uqa_udf_destroy_state_fn)(
@@ -1100,7 +1102,7 @@ UQA_API uqa_status UQA_CALL uqa_udf_context_fail(
  * failure. finish reads aggregate state without consuming it. Destruction
  * consumes ownership even when it fails; it is never retried. */
 UQA_API uqa_status UQA_CALL uqa_udf_row_sink_emit(
-    uqa_udf_row_sink sink, uqa_value_view const *values, uint32_t count);
+    uqa_udf_row_sink sink, const uqa_value_view *values, uint32_t count);
 
 /* Register copies options and table column names (UTF-8 C strings, at least
  * one column). Names and order are fixed for the registration, including

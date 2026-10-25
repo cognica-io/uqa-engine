@@ -15,7 +15,7 @@ static uqa_status assign_result(uqa_udf_context context, uqa_value value) {
 }
 
 static uqa_status UQA_CALL normalize_label(uqa_udf_context context,
-    uqa_value_view const *arguments, uint32_t count, void *user_data) {
+    const uqa_value_view *arguments, uint32_t count, void *user_data) {
     (void)user_data;
     if (count != 1) return uqa_udf_context_fail(context, "normalize_label expects one text argument");
     uqa_string_view text = {NULL, 0};
@@ -43,7 +43,7 @@ typedef struct repeat_scan {
     int64_t count;
 } repeat_scan;
 
-static uqa_status UQA_CALL repeat_create(uqa_value_view const *arguments,
+static uqa_status UQA_CALL repeat_create(const uqa_value_view *arguments,
     uint32_t count, void *user_data, void **out_scan) {
     (void)user_data;
     if (count != 2) return uqa_callback_fail(UQA_ERROR_TYPE,
@@ -94,7 +94,7 @@ static uqa_status UQA_CALL sum_create(void *user_data, void **out_state) {
     return *out_state == NULL ? UQA_ERROR_OUT_OF_MEMORY : UQA_OK;
 }
 
-static uqa_status UQA_CALL sum_observe(void *state, uqa_value_view const *arguments,
+static uqa_status UQA_CALL sum_observe(void *state, const uqa_value_view *arguments,
     uint32_t count, void *user_data) {
     (void)user_data;
     if (count != 1) return uqa_callback_fail(UQA_ERROR_TYPE,

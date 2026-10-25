@@ -38,13 +38,13 @@ UQA_API uqa_status UQA_CALL uqa_udf_options_destroy(uqa_udf_options *options);
 
 typedef uqa_status (UQA_CALL *uqa_udf_scalar_fn)(
     uqa_udf_context context,
-    uqa_value_view const *arguments, uint32_t count,
+    const uqa_value_view *arguments, uint32_t count,
     void *user_data);
 
 /* A successful create transfers scan ownership even when *out_scan is NULL.
  * A failed create remains responsible for its own partial allocations. */
 typedef uqa_status (UQA_CALL *uqa_udf_create_scan_fn)(
-    uqa_value_view const *arguments, uint32_t count, void *user_data,
+    const uqa_value_view *arguments, uint32_t count, void *user_data,
     void **out_scan);
 typedef uqa_status (UQA_CALL *uqa_udf_next_fn)(
     uqa_udf_row_sink sink, void *scan, void *user_data);
@@ -54,7 +54,7 @@ typedef uqa_status (UQA_CALL *uqa_udf_destroy_scan_fn)(
 typedef uqa_status (UQA_CALL *uqa_udf_create_state_fn)(
     void *user_data, void **out_state);
 typedef uqa_status (UQA_CALL *uqa_udf_observe_fn)(
-    void *state, uqa_value_view const *arguments, uint32_t count, void *user_data);
+    void *state, const uqa_value_view *arguments, uint32_t count, void *user_data);
 typedef uqa_status (UQA_CALL *uqa_udf_finish_fn)(
     uqa_udf_context context, void *state, void *user_data);
 typedef uqa_status (UQA_CALL *uqa_udf_destroy_state_fn)(
@@ -97,7 +97,7 @@ UQA_API uqa_status UQA_CALL uqa_udf_context_fail(
  * failure. finish reads aggregate state without consuming it. Destruction
  * consumes ownership even when it fails; it is never retried. */
 UQA_API uqa_status UQA_CALL uqa_udf_row_sink_emit(
-    uqa_udf_row_sink sink, uqa_value_view const *values, uint32_t count);
+    uqa_udf_row_sink sink, const uqa_value_view *values, uint32_t count);
 
 /* Register copies options and table column names (UTF-8 C strings, at least
  * one column). Names and order are fixed for the registration, including

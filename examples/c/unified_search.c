@@ -9,7 +9,7 @@
 #include <math.h>
 
 static uqa_status UQA_CALL recency_boost(uqa_udf_context context,
-    uqa_value_view const *arguments, uint32_t count, void *user_data) {
+    const uqa_value_view *arguments, uint32_t count, void *user_data) {
     (void)user_data;
     if (count != 1) return uqa_udf_context_fail(context, "recency_boost expects one year");
     uint8_t is_null = 0;

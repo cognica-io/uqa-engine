@@ -98,14 +98,14 @@ typedef struct uqa_range_bounds {
 #define UQA_RANGE_LOWER_UNBOUNDED UINT32_C(8)
 #define UQA_RANGE_UPPER_UNBOUNDED UINT32_C(16)
 
-/* Native encrypted compressed SQLite container identity and exact state.
+/* Encrypted compressed storage container identity and exact state.
  * Persist the fields in an external trusted store; this struct is not a wire
  * format. A copied anchor owns no allocation and needs no destruction. */
-typedef struct uqa_sqlite_container_anchor {
+typedef struct uqa_container_anchor {
     uint8_t database_id[16];
     uint64_t generation;
     uint8_t state_tag[32];
-} uqa_sqlite_container_anchor;
+} uqa_container_anchor;
 
 #define UQA_OK                       INT32_C(0)
 #define UQA_DONE                     INT32_C(1)
@@ -274,17 +274,17 @@ UQA_API uqa_status UQA_CALL uqa_config_set_compression(
  * An anchor requires a key and compressed SQLite, explicitly selected or
  * detected by SQLITE_AUTO. It cannot create a new container. */
 UQA_API uqa_status UQA_CALL uqa_config_get_trusted_anchor(
-    uqa_config config, uqa_sqlite_container_anchor *out);
+    uqa_config config, uqa_container_anchor *out);
 UQA_API uqa_status UQA_CALL uqa_config_set_trusted_anchor(
-    uqa_config config, const uqa_sqlite_container_anchor *anchor);
+    uqa_config config, const uqa_container_anchor *anchor);
 /* Authenticate the on-disk committed state without opening an Engine. Read
  * after closing writers, then retain the result externally before reopening.
  * Wrong keys, unencrypted containers and other file formats fail. */
-UQA_API uqa_status UQA_CALL uqa_sqlite_get_container_anchor(
-    const char *path, const char *key, uqa_sqlite_container_anchor *out);
-UQA_API uqa_status UQA_CALL uqa_sqlite_get_container_anchor_n(
+UQA_API uqa_status UQA_CALL uqa_container_get_anchor(
+    const char *path, const char *key, uqa_container_anchor *out);
+UQA_API uqa_status UQA_CALL uqa_container_get_anchor_n(
     const char *path, size_t path_size, const char *key, size_t key_size,
-    uqa_sqlite_container_anchor *out);
+    uqa_container_anchor *out);
 UQA_API uqa_status UQA_CALL uqa_config_get_ffi_memory_limit(
     uqa_config config, uint64_t *bytes);
 UQA_API uqa_status UQA_CALL uqa_config_set_ffi_memory_limit(
@@ -303,14 +303,14 @@ UQA_API uqa_status UQA_CALL uqa_engine_get_capabilities(
 
 typedef struct uqa_sql_request {
     const char *sql;
-    uqa_value_view const *params;
+    const uqa_value_view *params;
     uint32_t param_count;
 } uqa_sql_request;
 
 typedef struct uqa_sql_request_n {
     const char *sql;
     size_t sql_size;
-    uqa_value_view const *params;
+    const uqa_value_view *params;
     uint32_t param_count;
 } uqa_sql_request_n;
 
@@ -322,11 +322,11 @@ UQA_API uqa_status UQA_CALL uqa_engine_execute_n(
     uqa_result result);
 UQA_API uqa_status UQA_CALL uqa_engine_execute_params(
     uqa_engine engine, const char *sql,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_result result);
 UQA_API uqa_status UQA_CALL uqa_engine_execute_params_n(
     uqa_engine engine, const char *sql, size_t sql_size,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_result result);
 UQA_API uqa_status UQA_CALL uqa_batch_result_create(uqa_batch_result *out);
 
@@ -597,11 +597,11 @@ UQA_API uqa_status UQA_CALL uqa_cursor_open_n(
     uqa_cursor *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_open_params(
     uqa_engine engine, const char *sql,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_cursor *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_open_params_n(
     uqa_engine engine, const char *sql, size_t sql_size,
-    uqa_value_view const *params, uint32_t param_count,
+    const uqa_value_view *params, uint32_t param_count,
     uqa_cursor *out);
 UQA_API uqa_status UQA_CALL uqa_cursor_fetch(
     uqa_cursor cursor, uint32_t max_rows,

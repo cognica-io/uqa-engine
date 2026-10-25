@@ -175,7 +175,7 @@ static void copy_file(const char *source, const char *target) {
 static void trusted_anchors(void) {
     const char *key = "C trusted anchor credential";
     const uint32_t codecs[] = {UQA_COMPRESSION_LZ4, UQA_COMPRESSION_ZSTD};
-    uqa_sqlite_container_anchor empty = {{0}, 0, {0}}, first, current, copied;
+    uqa_container_anchor empty = {{0}, 0, {0}}, first, current, copied;
     uqa_config config = NULL;
     uqa_engine engine = NULL;
     uqa_result result = NULL;
@@ -210,7 +210,7 @@ static void trusted_anchors(void) {
             "CREATE TABLE anchor_values (n integer); INSERT INTO anchor_values VALUES (7)", result));
         CHECK(uqa_result_destroy(&result));
         CHECK(uqa_engine_close(&engine));
-        CHECK(uqa_sqlite_get_container_anchor(path, key, &first));
+        CHECK(uqa_container_get_anchor(path, key, &first));
         copy_file(path, old_file);
         CHECK(uqa_config_set_trusted_anchor(config, &first));
         CHECK(uqa_config_get_trusted_anchor(config, &copied));
@@ -223,7 +223,7 @@ static void trusted_anchors(void) {
         CHECK(uqa_engine_execute(engine, "INSERT INTO anchor_values VALUES (8)", result));
         CHECK(uqa_result_destroy(&result));
         CHECK(uqa_engine_close(&engine));
-        CHECK(uqa_sqlite_get_container_anchor_n(path, strlen(path), key, strlen(key), &current));
+        CHECK(uqa_container_get_anchor_n(path, strlen(path), key, strlen(key), &current));
         assert(current.generation > first.generation);
         assert(memcmp(current.database_id, first.database_id, 16) == 0);
         assert(memcmp(current.state_tag, first.state_tag, 32) != 0);
@@ -237,7 +237,7 @@ static void trusted_anchors(void) {
         assert(number(result) == 2);
         CHECK(uqa_result_destroy(&result));
         CHECK(uqa_engine_close(&engine));
-        CHECK(uqa_sqlite_get_container_anchor(path, key, &current));
+        CHECK(uqa_container_get_anchor(path, key, &current));
         CHECK(uqa_config_set_trusted_anchor(config, &current));
         copy_file(path, current_file);
         copy_file(old_file, path);
@@ -247,9 +247,9 @@ static void trusted_anchors(void) {
         copy_file(current_file, path);
         CHECK(uqa_engine_open(path, test_database_flags() | UQA_OPEN_SQLITE_AUTO, config, &engine));
         CHECK(uqa_engine_close(&engine));
-        assert(uqa_sqlite_get_container_anchor(path, "incorrect-key", &copied) == UQA_ERROR_IO);
+        assert(uqa_container_get_anchor(path, "incorrect-key", &copied) == UQA_ERROR_IO);
         assert(memcmp(&copied, &empty, sizeof(empty)) == 0);
-        assert(uqa_sqlite_get_container_anchor(NULL, key, &copied) == UQA_ERROR_INVALID_ARGUMENT);
+        assert(uqa_container_get_anchor(NULL, key, &copied) == UQA_ERROR_INVALID_ARGUMENT);
     }
     CHECK(uqa_config_set_trusted_anchor(config, NULL));
     CHECK(uqa_config_destroy(&config));

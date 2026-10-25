@@ -7,9 +7,7 @@
 //! Owned configuration; setters validate and copy before replacing existing storage.
 
 use std::ffi::c_char;
-use uqa_storage_sqlite::{
-    SQLiteCompressedContainerAnchor, SQLiteCompressionCodec, SQLiteCompressionOptions,
-};
+use uqa_storage_sqlite::{SQLiteCompressionCodec, SQLiteCompressionOptions};
 use zeroize::Zeroizing;
 
 mod anchor;
@@ -27,7 +25,7 @@ use crate::{
 pub struct UQAConfig {
     pub(crate) key: Option<Zeroizing<String>>,
     pub(crate) compression: Option<SQLiteCompressionOptions>,
-    pub(crate) trusted_anchor: Option<SQLiteCompressedContainerAnchor>,
+    pub(crate) trusted_anchor: Option<UQAContainerAnchor>,
     pub(crate) memory_limit: usize,
 }
 
