@@ -8,6 +8,7 @@ use super::*;
 
 mod expression_metadata;
 mod output_cache;
+mod temporary_types;
 
 #[test]
 fn routine_pseudo_types_have_catalog_backed_names_and_reserved_identities() {

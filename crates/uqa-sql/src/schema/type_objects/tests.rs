@@ -17,6 +17,7 @@ use std::{cell::RefCell, collections::BTreeMap};
 struct Catalog {
     types: BTreeMap<Vec<String>, i64>,
     looked_up: RefCell<Vec<Vec<String>>>,
+    temporary: Option<&'static str>,
 }
 
 impl DomainCatalog for Catalog {
@@ -26,8 +27,13 @@ impl DomainCatalog for Catalog {
 }
 
 impl TypeObjectCatalog for Catalog {
+    fn temporary_schema(&self) -> Option<String> {
+        self.temporary.map(str::to_owned)
+    }
+
     fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
-        (name != "absent").then(|| BoundSchemaSecurity::owner(RoleIdentity::BOOTSTRAP))
+        (!matches!(name, "absent" | "pg_temp"))
+            .then(|| BoundSchemaSecurity::owner(RoleIdentity::BOOTSTRAP))
     }
 
     fn resolve_drop_type_oid(&self, name: &str) -> Result<Option<i64>, SQLError> {
@@ -85,6 +91,36 @@ fn context(catalog: &Catalog) -> TypeObjectBinding<'_> {
         authority: catalog,
         session: catalog,
     }
+}
+
+#[test]
+fn temporary_type_namespaces_resolve_before_schema_authority_checks() {
+    let mut catalog = Catalog {
+        types: BTreeMap::from([(vec!["pg_temp".into(), "object".into()], 23)]),
+        ..Catalog::default()
+    };
+    assert_eq!(
+        resolve_type_object(&context(&catalog), "pg_temp.object")
+            .unwrap_err()
+            .sqlstate(),
+        Some("3F000")
+    );
+    assert!(catalog.looked_up.borrow().is_empty());
+    catalog.temporary = Some("pg_temp_42");
+    assert_eq!(
+        resolve_type_object(&context(&catalog), "pg_temp.object")
+            .unwrap()
+            .oid(),
+        23
+    );
+    catalog.temporary = Some("private");
+    assert_eq!(
+        resolve_type_object(&context(&catalog), "pg_temp.object")
+            .unwrap_err()
+            .sqlstate(),
+        Some("42501")
+    );
+    assert_eq!(catalog.looked_up.borrow().len(), 1);
 }
 
 #[test]

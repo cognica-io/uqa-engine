@@ -1,0 +1,181 @@
+{
+  "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "declaration": "DOMAIN object AS integer",
+      "explicit": true,
+      "sql": "BEGIN; CREATE DOMAIN pg_temp.object AS integer; SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    },
+    {
+      "declaration": "DOMAIN object AS integer",
+      "explicit": false,
+      "sql": "BEGIN; SET LOCAL search_path=pg_temp,public; CREATE DOMAIN object AS integer; SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    },
+    {
+      "declaration": "TYPE object AS ENUM ('ready')",
+      "explicit": true,
+      "sql": "BEGIN; CREATE TYPE pg_temp.object AS ENUM ('ready'); SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    },
+    {
+      "declaration": "TYPE object AS ENUM ('ready')",
+      "explicit": false,
+      "sql": "BEGIN; SET LOCAL search_path=pg_temp,public; CREATE TYPE object AS ENUM ('ready'); SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    },
+    {
+      "declaration": "TYPE object AS (n integer)",
+      "explicit": true,
+      "sql": "BEGIN; CREATE TYPE pg_temp.object AS (n integer); SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    },
+    {
+      "declaration": "TYPE object AS (n integer)",
+      "explicit": false,
+      "sql": "BEGIN; SET LOCAL search_path=pg_temp,public; CREATE TYPE object AS (n integer); SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    },
+    {
+      "declaration": "TYPE object",
+      "explicit": true,
+      "sql": "BEGIN; CREATE TYPE pg_temp.object; SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TYPE pg_temp.object AS ENUM ('completed'); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    },
+    {
+      "declaration": "TYPE object",
+      "explicit": false,
+      "sql": "BEGIN; SET LOCAL search_path=pg_temp,public; CREATE TYPE object; SELECT json_build_object('allocated',pg_my_temp_schema()<>0,'objects',(SELECT count(*) FROM pg_type WHERE typname='object' AND typnamespace=pg_my_temp_schema())); CREATE TYPE pg_temp.object AS ENUM ('completed'); CREATE TEMP TABLE typed_object(v pg_temp.object,a pg_temp.object[]); SELECT json_build_object('columns',(SELECT count(*) FROM pg_attribute WHERE attrelid='typed_object'::regclass AND attnum>0 AND atttypid IN ('pg_temp.object'::regtype,'pg_temp.object[]'::regtype)),'scalar',pg_typeof(NULL::pg_temp.object)::oid='pg_temp.object'::regtype::oid,'array',pg_typeof(NULL::pg_temp.object[])::oid='pg_temp.object[]'::regtype::oid); DROP TABLE typed_object; ALTER TYPE pg_temp.object RENAME TO renamed; DROP TYPE pg_temp.renamed; SELECT json_build_object('objects',(SELECT count(*) FROM pg_type WHERE typname IN ('object','renamed') AND typnamespace=pg_my_temp_schema())); ROLLBACK; SELECT json_build_object('allocated',pg_my_temp_schema()<>0);",
+      "observations": [
+        {
+          "allocated": true,
+          "objects": 1
+        },
+        {
+          "columns": 2,
+          "scalar": true,
+          "array": true
+        },
+        {
+          "objects": 0
+        },
+        {
+          "allocated": false
+        }
+      ]
+    }
+  ]
+}

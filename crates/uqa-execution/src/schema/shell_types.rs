@@ -100,7 +100,7 @@ pub fn create_shell(context: &ShellTypeContext<'_>, name: &str) -> Result<(), SQ
         });
     }
     context.writer.prepare_writer()?;
-    let name = context.creation.persistent_name(name)?;
+    let name = context.creation.object_name(name)?;
     let requested =
         uqa_core::RelationIdentity::from_legacy_name(&name).map_err(SQLError::Internal)?;
     super::types::arrays::displace_array_type(&context.creation, context.registries, &requested)?;

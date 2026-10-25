@@ -13,6 +13,8 @@ use crate::{
 };
 
 pub trait TypeObjectCatalog: DomainCatalog {
+    /// The session's allocated temporary namespace; merely looking up a type never creates it.
+    fn temporary_schema(&self) -> Option<String>;
     fn shell_by_type_oid(&self, _oid: u32) -> Option<crate::catalog::shell_type::StoredShellType> {
         None
     }
@@ -61,6 +63,17 @@ pub struct TypeObjectBinding<'a> {
     pub authority: &'a dyn TypeObjectAuthority,
     pub session: &'a dyn RoleReferenceNames,
 }
+
+impl TypeObjectBinding<'_> {
+    pub(crate) fn namespace<'a>(&self, name: &'a str) -> std::borrow::Cow<'a, str> {
+        if name == "pg_temp" {
+            if let Some(schema) = self.catalog.temporary_schema() {
+                return std::borrow::Cow::Owned(schema);
+            }
+        }
+        std::borrow::Cow::Borrowed(name)
+    }
+}
 pub enum BoundTypeDrop {
     Target(u32),
     Skipped(String),
@@ -97,7 +110,8 @@ fn resolve_type_drop(
         "[]".repeat(parsed.array_dimensions)
     );
     if let [schema, _] = parsed.names.as_slice() {
-        if context.catalog.schema_security(schema).is_none() {
+        let schema = context.namespace(schema);
+        if context.catalog.schema_security(&schema).is_none() {
             if if_exists {
                 return Ok(BoundTypeDrop::Skipped(format!(
                     "schema \"{schema}\" does not exist, skipping"
@@ -110,7 +124,7 @@ fn resolve_type_drop(
         }
         if !context
             .authority
-            .schema_usage(schema, &context.session.current_role())
+            .schema_usage(&schema, &context.session.current_role())
         {
             return Err(SQLError::Routine {
                 sqlstate: "42501".into(),

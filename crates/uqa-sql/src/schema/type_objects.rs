@@ -123,7 +123,8 @@ pub fn resolve_type_object(
         "[]".repeat(parsed.array_dimensions)
     );
     if let [schema, _] = parsed.names.as_slice() {
-        if context.catalog.schema_security(schema).is_none() {
+        let schema = context.namespace(schema);
+        if context.catalog.schema_security(&schema).is_none() {
             return Err(SQLError::Routine {
                 sqlstate: "3F000".into(),
                 message: format!("schema \"{schema}\" does not exist"),
@@ -131,7 +132,7 @@ pub fn resolve_type_object(
         }
         if !context
             .authority
-            .schema_usage(schema, &context.session.current_role())
+            .schema_usage(&schema, &context.session.current_role())
         {
             return Err(SQLError::Routine {
                 sqlstate: "42501".into(),
