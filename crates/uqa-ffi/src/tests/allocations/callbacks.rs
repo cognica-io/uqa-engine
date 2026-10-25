@@ -14,8 +14,11 @@ use crate::*;
 use std::{
     ffi::{c_void, CStr},
     ptr,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+
+#[path = "callbacks/combined.rs"]
+mod combined;
 
 #[derive(Default)]
 struct Host {
@@ -24,6 +27,7 @@ struct Host {
     created: AtomicUsize,
     closed: AtomicUsize,
     calls: AtomicUsize,
+    cleanup_failure: AtomicBool,
 }
 
 impl Host {
@@ -83,8 +87,13 @@ unsafe extern "C" fn close(state: *mut c_void, data: *mut c_void) -> UQAStatus {
     if state != data {
         return UQA_ERROR_STATE;
     }
-    (*data.cast::<Host>()).closed.fetch_add(1, Ordering::SeqCst);
-    UQA_OK
+    let host = &*data.cast::<Host>();
+    host.closed.fetch_add(1, Ordering::SeqCst);
+    if host.cleanup_failure.load(Ordering::SeqCst) {
+        uqa_callback_fail(UQA_ERROR_IO, c"combined cleanup failure".as_ptr())
+    } else {
+        UQA_OK
+    }
 }
 
 unsafe extern "C" fn next(
