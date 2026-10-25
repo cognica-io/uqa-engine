@@ -126,35 +126,38 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         settings: &ExplainSettings,
     ) -> Result<SQLResult, SQLError> {
         let planning_started = std::time::Instant::now();
-        let planned = self
+        let mut planned = self
             .context
             .physical_explain
             .plan_explained_statement(query)?;
-        let body = &planned;
         if self.context.validation.transactions.transaction_depth() != 0 {
             crate::query::locking::lock_explained_relations(
                 self.context.queries.row_lock_context(),
-                body,
+                &planned,
             )?;
         }
-        if let UnifiedPlan::Query(query) = body {
+        if let UnifiedPlan::Query(query) = &mut planned {
             let ctes = self
                 .context
                 .queries
                 .statement_scope(self.privilege_subject.as_ref());
+            let prepared = crate::query::sources::prepared_queries::prepare(
+                &self.context.queries.query_context().source,
+                query,
+                self.params,
+                &ctes,
+            )?;
+            if let std::borrow::Cow::Owned(prepared) = prepared {
+                **query = prepared;
+            }
             crate::query::privileges::routine_calls::query(
                 &self.context.queries.query_context().source,
-                crate::query::sources::prepared_queries::prepare(
-                    &self.context.queries.query_context().source,
-                    query,
-                    self.params,
-                    &ctes,
-                )?
-                .as_ref(),
+                query,
                 self.params,
                 &ctes,
             )?;
         }
+        let body = &planned;
         if let UnifiedPlan::Command(command) = body {
             crate::mutation::routine_calls::explain(
                 &self.context.mutations.mutation_initialization_context(),

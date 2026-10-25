@@ -368,6 +368,39 @@ static void explained_costs(uqa_engine engine, uqa_result result) {
     CHECK(uqa_result_destroy(&inspected));
 }
 
+static void explained_named_inputs(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_value document = NULL;
+    uqa_value_view view = NULL;
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP SEQUENCE c_named_effect; "
+        "CREATE TEMP VIEW c_named_input AS SELECT n, nextval('c_named_effect') AS effect "
+        "FROM (VALUES (1),(2),(3)) input(n)", result));
+    for (int analyze = 0; analyze < 2; ++analyze) {
+        CHECK(uqa_engine_execute(engine, "ALTER SEQUENCE c_named_effect RESTART WITH 1", result));
+        CHECK(uqa_statement_prepare(engine, analyze
+            ? "EXPLAIN (ANALYZE, TIMING FALSE, FORMAT JSON) SELECT n FROM c_named_input"
+            : "EXPLAIN (FORMAT JSON) SELECT n FROM c_named_input", &statement));
+        CHECK(uqa_statement_execute(statement, result));
+        CHECK(uqa_statement_finalize(&statement));
+        CHECK(uqa_result_get_value(result, 0, 0, &view));
+        CHECK(uqa_value_create_copy(view, &document));
+        const uqa_value_view params[] = {document};
+        CHECK(uqa_engine_execute_params(engine,
+            "SELECT ($1::json->0->'Plan'->>'Plan Rows')::numeric::integer, "
+            "($1::json->0->'Plan'->>'Plan Width')::integer, "
+            "COALESCE(($1::json->0->'Plan'->>'Actual Rows')::numeric::integer,-1)",
+            params, 1, result));
+        assert(integer(result, 0) == 3 && integer(result, 1) == 4);
+        assert(integer(result, 2) == (analyze ? 3 : -1));
+        CHECK(uqa_value_destroy(&document));
+        CHECK(uqa_engine_execute(engine, "SELECT nextval('c_named_effect')", result));
+        assert(integer(result, 0) == (analyze ? 4 : 1));
+    }
+    CHECK(uqa_engine_execute(engine,
+        "DROP VIEW c_named_input; DROP SEQUENCE c_named_effect", result));
+}
+
 static void explained_serialization(uqa_engine engine, uqa_result result) {
     for (int binary = 0; binary < 2; ++binary) {
         uqa_statement statement = NULL;
@@ -1083,6 +1116,7 @@ int main(void) {
     explained_stream_and_settings(engine, result);
     explained_physical_metadata(engine, result);
     explained_costs(engine, result);
+    explained_named_inputs(engine, result);
     explained_serialization(engine, result);
     explained_rule_delivery(engine, result);
     explained_mutation_rule_delivery(engine, result);

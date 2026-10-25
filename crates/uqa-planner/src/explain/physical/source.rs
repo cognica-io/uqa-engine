@@ -118,7 +118,7 @@ impl Collector<'_, '_, '_> {
         path: &str,
     ) -> Result<(), SQLError> {
         let SourcePlan::Table {
-            executable_query: _,
+            executable_query,
             name,
             qualifier,
             alias,
@@ -129,10 +129,11 @@ impl Collector<'_, '_, '_> {
         else {
             unreachable!()
         };
+        let executable_query = executable_query.as_deref();
         let qualifier = alias.as_deref().unwrap_or(qualifier);
         if let Some(cte) = cte_reference_name(name).and_then(|name| scope.get(name.as_str())) {
             if let Some(cte) = cte {
-                if let Some(query) = cte.plan.body.query() {
+                if let Some(query) = executable_query.or_else(|| cte.plan.body.query()) {
                     let aliases = output_aliases(&cte.plan.columns, column_aliases, self.control)?;
                     self.derived_query(
                         query,
@@ -161,7 +162,7 @@ impl Collector<'_, '_, '_> {
                     self.control,
                 )?;
                 self.derived_query(
-                    &view.query,
+                    executable_query.unwrap_or(&view.query),
                     &Scope::new(self.scope_memory),
                     &self.control.format(format_args!("{path}/View {name}"))?,
                     qualifier,

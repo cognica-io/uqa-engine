@@ -22,6 +22,33 @@ fn estimate(sql: &str) -> PlanCost {
 }
 
 #[test]
+fn named_sources_cost_the_retained_executable_instead_of_a_fallback_table() {
+    let mut explained = plan("SELECT n FROM named_input");
+    let UnifiedPlan::Query(query) = &mut explained else {
+        unreachable!();
+    };
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        unreachable!();
+    };
+    let SourcePlan::Table {
+        executable_query, ..
+    } = block.from.as_mut().unwrap()
+    else {
+        unreachable!();
+    };
+    let UnifiedPlan::Query(input) = plan("VALUES (1),(2),(3)") else {
+        unreachable!();
+    };
+    *executable_query = Some(input);
+    let statistics = |name: &str| -> Option<RelationStats> {
+        panic!("a prepared query must not read fallback table statistics for {name}")
+    };
+    let cost = PlanCostEstimator::new(&statistics).estimate(&explained);
+    assert_eq!(cost.rows, 3.0);
+    assert_eq!(cost.relations, 0);
+}
+
+#[test]
 fn blocking_work_and_limit_use_the_shared_native_model() {
     let scan = estimate("SELECT id FROM items");
     let limit = estimate("SELECT id FROM items LIMIT 10 OFFSET 20");

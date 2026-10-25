@@ -11,6 +11,7 @@ mod calls;
 mod explain_costs;
 mod explain_generic;
 mod explain_inputs;
+mod explain_named;
 mod explain_options;
 mod explain_serialization;
 

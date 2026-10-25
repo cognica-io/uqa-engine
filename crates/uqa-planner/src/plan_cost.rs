@@ -267,12 +267,21 @@ impl PlanCostEstimator<'_, '_> {
         scope: &Scope<'p>,
     ) -> Result<PlanCost, SQLError> {
         self.control.check()?;
-        if let SourcePlan::Table { name, .. } = source {
+        if let SourcePlan::Table {
+            name,
+            executable_query: None,
+            ..
+        } = source
+        {
             if scope.get(name.as_str()).is_none() {
                 return self.table(name, predicate);
             }
         }
         let mut cost = match source {
+            SourcePlan::Table {
+                executable_query: Some(query),
+                ..
+            } => self.query(query, scope)?,
             SourcePlan::Table { name, .. } => {
                 let mut cost = *scope.get(name.as_str()).expect("visible CTE cost");
                 cost.execution += self.unary(OperatorKind::Project, cost.rows);
