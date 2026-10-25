@@ -1,0 +1,2405 @@
+{
+  "version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "routines": [
+    {
+      "oid": 31,
+      "proname": "byteaout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        17
+      ],
+      "prosrc": "byteaout"
+    },
+    {
+      "oid": 34,
+      "proname": "namein",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 19,
+      "args": [
+        2275
+      ],
+      "prosrc": "namein"
+    },
+    {
+      "oid": 35,
+      "proname": "nameout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        19
+      ],
+      "prosrc": "nameout"
+    },
+    {
+      "oid": 38,
+      "proname": "int2in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 21,
+      "args": [
+        2275
+      ],
+      "prosrc": "int2in"
+    },
+    {
+      "oid": 39,
+      "proname": "int2out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        21
+      ],
+      "prosrc": "int2out"
+    },
+    {
+      "oid": 40,
+      "proname": "int2vectorin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 22,
+      "args": [
+        2275
+      ],
+      "prosrc": "int2vectorin"
+    },
+    {
+      "oid": 41,
+      "proname": "int2vectorout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        22
+      ],
+      "prosrc": "int2vectorout"
+    },
+    {
+      "oid": 42,
+      "proname": "int4in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        2275
+      ],
+      "prosrc": "int4in"
+    },
+    {
+      "oid": 43,
+      "proname": "int4out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "int4out"
+    },
+    {
+      "oid": 44,
+      "proname": "regprocin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 24,
+      "args": [
+        2275
+      ],
+      "prosrc": "regprocin"
+    },
+    {
+      "oid": 45,
+      "proname": "regprocout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        24
+      ],
+      "prosrc": "regprocout"
+    },
+    {
+      "oid": 46,
+      "proname": "textin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 25,
+      "args": [
+        2275
+      ],
+      "prosrc": "textin"
+    },
+    {
+      "oid": 47,
+      "proname": "textout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        25
+      ],
+      "prosrc": "textout"
+    },
+    {
+      "oid": 54,
+      "proname": "oidvectorin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 30,
+      "args": [
+        2275
+      ],
+      "prosrc": "oidvectorin"
+    },
+    {
+      "oid": 55,
+      "proname": "oidvectorout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        30
+      ],
+      "prosrc": "oidvectorout"
+    },
+    {
+      "oid": 200,
+      "proname": "float4in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 700,
+      "args": [
+        2275
+      ],
+      "prosrc": "float4in"
+    },
+    {
+      "oid": 201,
+      "proname": "float4out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        700
+      ],
+      "prosrc": "float4out"
+    },
+    {
+      "oid": 214,
+      "proname": "float8in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 701,
+      "args": [
+        2275
+      ],
+      "prosrc": "float8in"
+    },
+    {
+      "oid": 215,
+      "proname": "float8out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        701
+      ],
+      "prosrc": "float8out"
+    },
+    {
+      "oid": 321,
+      "proname": "json_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 114,
+      "args": [
+        2275
+      ],
+      "prosrc": "json_in"
+    },
+    {
+      "oid": 322,
+      "proname": "json_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        114
+      ],
+      "prosrc": "json_out"
+    },
+    {
+      "oid": 323,
+      "proname": "json_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 114,
+      "args": [
+        2281
+      ],
+      "prosrc": "json_recv"
+    },
+    {
+      "oid": 324,
+      "proname": "json_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        114
+      ],
+      "prosrc": "json_send"
+    },
+    {
+      "oid": 460,
+      "proname": "int8in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 20,
+      "args": [
+        2275
+      ],
+      "prosrc": "int8in"
+    },
+    {
+      "oid": 461,
+      "proname": "int8out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        20
+      ],
+      "prosrc": "int8out"
+    },
+    {
+      "oid": 1031,
+      "proname": "aclitemin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1033,
+      "args": [
+        2275
+      ],
+      "prosrc": "aclitemin"
+    },
+    {
+      "oid": 1032,
+      "proname": "aclitemout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1033
+      ],
+      "prosrc": "aclitemout"
+    },
+    {
+      "oid": 1044,
+      "proname": "bpcharin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1042,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "bpcharin"
+    },
+    {
+      "oid": 1045,
+      "proname": "bpcharout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1042
+      ],
+      "prosrc": "bpcharout"
+    },
+    {
+      "oid": 1046,
+      "proname": "varcharin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1043,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "varcharin"
+    },
+    {
+      "oid": 1047,
+      "proname": "varcharout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1043
+      ],
+      "prosrc": "varcharout"
+    },
+    {
+      "oid": 1084,
+      "proname": "date_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1082,
+      "args": [
+        2275
+      ],
+      "prosrc": "date_in"
+    },
+    {
+      "oid": 1085,
+      "proname": "date_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1082
+      ],
+      "prosrc": "date_out"
+    },
+    {
+      "oid": 1143,
+      "proname": "time_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1083,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "time_in"
+    },
+    {
+      "oid": 1144,
+      "proname": "time_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1083
+      ],
+      "prosrc": "time_out"
+    },
+    {
+      "oid": 1150,
+      "proname": "timestamptz_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1184,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "timestamptz_in"
+    },
+    {
+      "oid": 1151,
+      "proname": "timestamptz_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1184
+      ],
+      "prosrc": "timestamptz_out"
+    },
+    {
+      "oid": 1160,
+      "proname": "interval_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1186,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "interval_in"
+    },
+    {
+      "oid": 1161,
+      "proname": "interval_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1186
+      ],
+      "prosrc": "interval_out"
+    },
+    {
+      "oid": 1242,
+      "proname": "boolin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 16,
+      "args": [
+        2275
+      ],
+      "prosrc": "boolin"
+    },
+    {
+      "oid": 1243,
+      "proname": "boolout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        16
+      ],
+      "prosrc": "boolout"
+    },
+    {
+      "oid": 1244,
+      "proname": "byteain",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2275
+      ],
+      "prosrc": "byteain"
+    },
+    {
+      "oid": 1312,
+      "proname": "timestamp_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1114,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "timestamp_in"
+    },
+    {
+      "oid": 1313,
+      "proname": "timestamp_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1114
+      ],
+      "prosrc": "timestamp_out"
+    },
+    {
+      "oid": 1350,
+      "proname": "timetz_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1266,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "timetz_in"
+    },
+    {
+      "oid": 1351,
+      "proname": "timetz_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1266
+      ],
+      "prosrc": "timetz_out"
+    },
+    {
+      "oid": 1564,
+      "proname": "bit_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1560,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "bit_in"
+    },
+    {
+      "oid": 1565,
+      "proname": "bit_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1560
+      ],
+      "prosrc": "bit_out"
+    },
+    {
+      "oid": 1579,
+      "proname": "varbit_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1562,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "varbit_in"
+    },
+    {
+      "oid": 1580,
+      "proname": "varbit_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1562
+      ],
+      "prosrc": "varbit_out"
+    },
+    {
+      "oid": 1701,
+      "proname": "numeric_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1700,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "numeric_in"
+    },
+    {
+      "oid": 1702,
+      "proname": "numeric_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        1700
+      ],
+      "prosrc": "numeric_out"
+    },
+    {
+      "oid": 1798,
+      "proname": "oidin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 26,
+      "args": [
+        2275
+      ],
+      "prosrc": "oidin"
+    },
+    {
+      "oid": 1799,
+      "proname": "oidout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        26
+      ],
+      "prosrc": "oidout"
+    },
+    {
+      "oid": 2212,
+      "proname": "regprocedurein",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2202,
+      "args": [
+        2275
+      ],
+      "prosrc": "regprocedurein"
+    },
+    {
+      "oid": 2213,
+      "proname": "regprocedureout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2202
+      ],
+      "prosrc": "regprocedureout"
+    },
+    {
+      "oid": 2218,
+      "proname": "regclassin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2205,
+      "args": [
+        2275
+      ],
+      "prosrc": "regclassin"
+    },
+    {
+      "oid": 2219,
+      "proname": "regclassout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2205
+      ],
+      "prosrc": "regclassout"
+    },
+    {
+      "oid": 2220,
+      "proname": "regtypein",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2206,
+      "args": [
+        2275
+      ],
+      "prosrc": "regtypein"
+    },
+    {
+      "oid": 2221,
+      "proname": "regtypeout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2206
+      ],
+      "prosrc": "regtypeout"
+    },
+    {
+      "oid": 2290,
+      "proname": "record_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2249,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "record_in"
+    },
+    {
+      "oid": 2291,
+      "proname": "record_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2249
+      ],
+      "prosrc": "record_out"
+    },
+    {
+      "oid": 2292,
+      "proname": "cstring_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2275
+      ],
+      "prosrc": "cstring_in"
+    },
+    {
+      "oid": 2293,
+      "proname": "cstring_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2275
+      ],
+      "prosrc": "cstring_out"
+    },
+    {
+      "oid": 2296,
+      "proname": "anyarray_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2277,
+      "args": [
+        2275
+      ],
+      "prosrc": "anyarray_in"
+    },
+    {
+      "oid": 2297,
+      "proname": "anyarray_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2277
+      ],
+      "prosrc": "anyarray_out"
+    },
+    {
+      "oid": 2402,
+      "proname": "record_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2249,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "record_recv"
+    },
+    {
+      "oid": 2403,
+      "proname": "record_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2249
+      ],
+      "prosrc": "record_send"
+    },
+    {
+      "oid": 2404,
+      "proname": "int2recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 21,
+      "args": [
+        2281
+      ],
+      "prosrc": "int2recv"
+    },
+    {
+      "oid": 2405,
+      "proname": "int2send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        21
+      ],
+      "prosrc": "int2send"
+    },
+    {
+      "oid": 2406,
+      "proname": "int4recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        2281
+      ],
+      "prosrc": "int4recv"
+    },
+    {
+      "oid": 2407,
+      "proname": "int4send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        23
+      ],
+      "prosrc": "int4send"
+    },
+    {
+      "oid": 2408,
+      "proname": "int8recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 20,
+      "args": [
+        2281
+      ],
+      "prosrc": "int8recv"
+    },
+    {
+      "oid": 2409,
+      "proname": "int8send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        20
+      ],
+      "prosrc": "int8send"
+    },
+    {
+      "oid": 2410,
+      "proname": "int2vectorrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 22,
+      "args": [
+        2281
+      ],
+      "prosrc": "int2vectorrecv"
+    },
+    {
+      "oid": 2411,
+      "proname": "int2vectorsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        22
+      ],
+      "prosrc": "int2vectorsend"
+    },
+    {
+      "oid": 2412,
+      "proname": "bytearecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2281
+      ],
+      "prosrc": "bytearecv"
+    },
+    {
+      "oid": 2413,
+      "proname": "byteasend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        17
+      ],
+      "prosrc": "byteasend"
+    },
+    {
+      "oid": 2414,
+      "proname": "textrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 25,
+      "args": [
+        2281
+      ],
+      "prosrc": "textrecv"
+    },
+    {
+      "oid": 2415,
+      "proname": "textsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        25
+      ],
+      "prosrc": "textsend"
+    },
+    {
+      "oid": 2418,
+      "proname": "oidrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 26,
+      "args": [
+        2281
+      ],
+      "prosrc": "oidrecv"
+    },
+    {
+      "oid": 2419,
+      "proname": "oidsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        26
+      ],
+      "prosrc": "oidsend"
+    },
+    {
+      "oid": 2420,
+      "proname": "oidvectorrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 30,
+      "args": [
+        2281
+      ],
+      "prosrc": "oidvectorrecv"
+    },
+    {
+      "oid": 2421,
+      "proname": "oidvectorsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        30
+      ],
+      "prosrc": "oidvectorsend"
+    },
+    {
+      "oid": 2422,
+      "proname": "namerecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 19,
+      "args": [
+        2281
+      ],
+      "prosrc": "namerecv"
+    },
+    {
+      "oid": 2423,
+      "proname": "namesend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        19
+      ],
+      "prosrc": "namesend"
+    },
+    {
+      "oid": 2424,
+      "proname": "float4recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 700,
+      "args": [
+        2281
+      ],
+      "prosrc": "float4recv"
+    },
+    {
+      "oid": 2425,
+      "proname": "float4send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        700
+      ],
+      "prosrc": "float4send"
+    },
+    {
+      "oid": 2426,
+      "proname": "float8recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 701,
+      "args": [
+        2281
+      ],
+      "prosrc": "float8recv"
+    },
+    {
+      "oid": 2427,
+      "proname": "float8send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        701
+      ],
+      "prosrc": "float8send"
+    },
+    {
+      "oid": 2430,
+      "proname": "bpcharrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1042,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "bpcharrecv"
+    },
+    {
+      "oid": 2431,
+      "proname": "bpcharsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1042
+      ],
+      "prosrc": "bpcharsend"
+    },
+    {
+      "oid": 2432,
+      "proname": "varcharrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1043,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "varcharrecv"
+    },
+    {
+      "oid": 2433,
+      "proname": "varcharsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1043
+      ],
+      "prosrc": "varcharsend"
+    },
+    {
+      "oid": 2436,
+      "proname": "boolrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 16,
+      "args": [
+        2281
+      ],
+      "prosrc": "boolrecv"
+    },
+    {
+      "oid": 2437,
+      "proname": "boolsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        16
+      ],
+      "prosrc": "boolsend"
+    },
+    {
+      "oid": 2444,
+      "proname": "regprocrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 24,
+      "args": [
+        2281
+      ],
+      "prosrc": "regprocrecv"
+    },
+    {
+      "oid": 2445,
+      "proname": "regprocsend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        24
+      ],
+      "prosrc": "regprocsend"
+    },
+    {
+      "oid": 2446,
+      "proname": "regprocedurerecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2202,
+      "args": [
+        2281
+      ],
+      "prosrc": "regprocedurerecv"
+    },
+    {
+      "oid": 2447,
+      "proname": "regproceduresend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2202
+      ],
+      "prosrc": "regproceduresend"
+    },
+    {
+      "oid": 2452,
+      "proname": "regclassrecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2205,
+      "args": [
+        2281
+      ],
+      "prosrc": "regclassrecv"
+    },
+    {
+      "oid": 2453,
+      "proname": "regclasssend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2205
+      ],
+      "prosrc": "regclasssend"
+    },
+    {
+      "oid": 2454,
+      "proname": "regtyperecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2206,
+      "args": [
+        2281
+      ],
+      "prosrc": "regtyperecv"
+    },
+    {
+      "oid": 2455,
+      "proname": "regtypesend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2206
+      ],
+      "prosrc": "regtypesend"
+    },
+    {
+      "oid": 2456,
+      "proname": "bit_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1560,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "bit_recv"
+    },
+    {
+      "oid": 2457,
+      "proname": "bit_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1560
+      ],
+      "prosrc": "bit_send"
+    },
+    {
+      "oid": 2458,
+      "proname": "varbit_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1562,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "varbit_recv"
+    },
+    {
+      "oid": 2459,
+      "proname": "varbit_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1562
+      ],
+      "prosrc": "varbit_send"
+    },
+    {
+      "oid": 2460,
+      "proname": "numeric_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1700,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "numeric_recv"
+    },
+    {
+      "oid": 2461,
+      "proname": "numeric_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1700
+      ],
+      "prosrc": "numeric_send"
+    },
+    {
+      "oid": 2468,
+      "proname": "date_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1082,
+      "args": [
+        2281
+      ],
+      "prosrc": "date_recv"
+    },
+    {
+      "oid": 2469,
+      "proname": "date_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1082
+      ],
+      "prosrc": "date_send"
+    },
+    {
+      "oid": 2470,
+      "proname": "time_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1083,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "time_recv"
+    },
+    {
+      "oid": 2471,
+      "proname": "time_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1083
+      ],
+      "prosrc": "time_send"
+    },
+    {
+      "oid": 2472,
+      "proname": "timetz_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1266,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "timetz_recv"
+    },
+    {
+      "oid": 2473,
+      "proname": "timetz_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1266
+      ],
+      "prosrc": "timetz_send"
+    },
+    {
+      "oid": 2474,
+      "proname": "timestamp_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1114,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "timestamp_recv"
+    },
+    {
+      "oid": 2475,
+      "proname": "timestamp_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1114
+      ],
+      "prosrc": "timestamp_send"
+    },
+    {
+      "oid": 2476,
+      "proname": "timestamptz_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1184,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "timestamptz_recv"
+    },
+    {
+      "oid": 2477,
+      "proname": "timestamptz_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1184
+      ],
+      "prosrc": "timestamptz_send"
+    },
+    {
+      "oid": 2478,
+      "proname": "interval_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 1186,
+      "args": [
+        2281,
+        26,
+        23
+      ],
+      "prosrc": "interval_recv"
+    },
+    {
+      "oid": 2479,
+      "proname": "interval_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        1186
+      ],
+      "prosrc": "interval_send"
+    },
+    {
+      "oid": 2500,
+      "proname": "cstring_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2281
+      ],
+      "prosrc": "cstring_recv"
+    },
+    {
+      "oid": 2501,
+      "proname": "cstring_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2275
+      ],
+      "prosrc": "cstring_send"
+    },
+    {
+      "oid": 2502,
+      "proname": "anyarray_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2277,
+      "args": [
+        2281
+      ],
+      "prosrc": "anyarray_recv"
+    },
+    {
+      "oid": 2503,
+      "proname": "anyarray_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2277
+      ],
+      "prosrc": "anyarray_send"
+    },
+    {
+      "oid": 2893,
+      "proname": "xml_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 142,
+      "args": [
+        2275
+      ],
+      "prosrc": "xml_in"
+    },
+    {
+      "oid": 2894,
+      "proname": "xml_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        142
+      ],
+      "prosrc": "xml_out"
+    },
+    {
+      "oid": 2898,
+      "proname": "xml_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 142,
+      "args": [
+        2281
+      ],
+      "prosrc": "xml_recv"
+    },
+    {
+      "oid": 2899,
+      "proname": "xml_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        142
+      ],
+      "prosrc": "xml_send"
+    },
+    {
+      "oid": 2902,
+      "proname": "varbittypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "varbittypmodin"
+    },
+    {
+      "oid": 2903,
+      "proname": "intervaltypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "intervaltypmodin"
+    },
+    {
+      "oid": 2904,
+      "proname": "intervaltypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "intervaltypmodout"
+    },
+    {
+      "oid": 2905,
+      "proname": "timestamptypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "timestamptypmodin"
+    },
+    {
+      "oid": 2906,
+      "proname": "timestamptypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "timestamptypmodout"
+    },
+    {
+      "oid": 2907,
+      "proname": "timestamptztypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "timestamptztypmodin"
+    },
+    {
+      "oid": 2908,
+      "proname": "timestamptztypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "timestamptztypmodout"
+    },
+    {
+      "oid": 2909,
+      "proname": "timetypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "timetypmodin"
+    },
+    {
+      "oid": 2910,
+      "proname": "timetypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "timetypmodout"
+    },
+    {
+      "oid": 2911,
+      "proname": "timetztypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "timetztypmodin"
+    },
+    {
+      "oid": 2912,
+      "proname": "timetztypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "timetztypmodout"
+    },
+    {
+      "oid": 2913,
+      "proname": "bpchartypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "bpchartypmodin"
+    },
+    {
+      "oid": 2914,
+      "proname": "bpchartypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "bpchartypmodout"
+    },
+    {
+      "oid": 2915,
+      "proname": "varchartypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "varchartypmodin"
+    },
+    {
+      "oid": 2916,
+      "proname": "varchartypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "varchartypmodout"
+    },
+    {
+      "oid": 2917,
+      "proname": "numerictypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "numerictypmodin"
+    },
+    {
+      "oid": 2918,
+      "proname": "numerictypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "numerictypmodout"
+    },
+    {
+      "oid": 2919,
+      "proname": "bittypmodin",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 23,
+      "args": [
+        1263
+      ],
+      "prosrc": "bittypmodin"
+    },
+    {
+      "oid": 2920,
+      "proname": "bittypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "bittypmodout"
+    },
+    {
+      "oid": 2921,
+      "proname": "varbittypmodout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        23
+      ],
+      "prosrc": "varbittypmodout"
+    },
+    {
+      "oid": 2952,
+      "proname": "uuid_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2950,
+      "args": [
+        2275
+      ],
+      "prosrc": "uuid_in"
+    },
+    {
+      "oid": 2953,
+      "proname": "uuid_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        2950
+      ],
+      "prosrc": "uuid_out"
+    },
+    {
+      "oid": 2961,
+      "proname": "uuid_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2950,
+      "args": [
+        2281
+      ],
+      "prosrc": "uuid_recv"
+    },
+    {
+      "oid": 2962,
+      "proname": "uuid_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        2950
+      ],
+      "prosrc": "uuid_send"
+    },
+    {
+      "oid": 3504,
+      "proname": "anyenum_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 3500,
+      "args": [
+        2275
+      ],
+      "prosrc": "anyenum_in"
+    },
+    {
+      "oid": 3505,
+      "proname": "anyenum_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        3500
+      ],
+      "prosrc": "anyenum_out"
+    },
+    {
+      "oid": 3803,
+      "proname": "jsonb_send",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        3802
+      ],
+      "prosrc": "jsonb_send"
+    },
+    {
+      "oid": 3804,
+      "proname": "jsonb_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        3802
+      ],
+      "prosrc": "jsonb_out"
+    },
+    {
+      "oid": 3805,
+      "proname": "jsonb_recv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 3802,
+      "args": [
+        2281
+      ],
+      "prosrc": "jsonb_recv"
+    },
+    {
+      "oid": 3806,
+      "proname": "jsonb_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 3802,
+      "args": [
+        2275
+      ],
+      "prosrc": "jsonb_in"
+    },
+    {
+      "oid": 3832,
+      "proname": "anyrange_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 3831,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "anyrange_in"
+    },
+    {
+      "oid": 3833,
+      "proname": "anyrange_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        3831
+      ],
+      "prosrc": "anyrange_out"
+    },
+    {
+      "oid": 4084,
+      "proname": "regnamespacein",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 4089,
+      "args": [
+        2275
+      ],
+      "prosrc": "regnamespacein"
+    },
+    {
+      "oid": 4085,
+      "proname": "regnamespaceout",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        4089
+      ],
+      "prosrc": "regnamespaceout"
+    },
+    {
+      "oid": 4087,
+      "proname": "regnamespacerecv",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 4089,
+      "args": [
+        2281
+      ],
+      "prosrc": "regnamespacerecv"
+    },
+    {
+      "oid": 4088,
+      "proname": "regnamespacesend",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "i",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 17,
+      "args": [
+        4089
+      ],
+      "prosrc": "regnamespacesend"
+    },
+    {
+      "oid": 4229,
+      "proname": "anymultirange_in",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 4537,
+      "args": [
+        2275,
+        26,
+        23
+      ],
+      "prosrc": "anymultirange_in"
+    },
+    {
+      "oid": 4230,
+      "proname": "anymultirange_out",
+      "prokind": "f",
+      "proisstrict": true,
+      "provolatile": "s",
+      "proparallel": "s",
+      "proleakproof": false,
+      "prorettype": 2275,
+      "args": [
+        4537
+      ],
+      "prosrc": "anymultirange_out"
+    }
+  ]
+}

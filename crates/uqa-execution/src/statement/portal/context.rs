@@ -8,27 +8,21 @@
 
 use crate::{
     catalog::services::CatalogSession,
-    mutation::{command_scope::CommandScopeSource, returning::ReturningExecutionContext},
+    mutation::{command_scope::CommandScopeSource, returning::ReturningInputs},
     statement::context::{queries::StatementQueryContexts, session::StatementPortals},
 };
 use uqa_sql::{
     routines::{
         declaration::RoutineTypeCatalog, resolution::RoutineOverloadCatalog, RoutineResolution,
     },
-    semantics::returning::ReturningAnalysisContext,
     SQLParam,
 };
-
-pub trait PortalReturningInputs<S: Clone + 'static> {
-    fn returning_execution_context(&self) -> ReturningExecutionContext<'_, S>;
-    fn returning_analysis_context(&self) -> ReturningAnalysisContext<'_>;
-}
 
 #[derive(Clone)]
 pub struct PortalExecutionContext<'a, S: Clone + 'static> {
     pub state: &'a dyn StatementPortals,
     pub queries: &'a dyn StatementQueryContexts<S>,
-    pub returning: &'a dyn PortalReturningInputs<S>,
+    pub returning: &'a dyn ReturningInputs<S>,
     pub command_scopes: &'a dyn CommandScopeSource<S>,
     pub routines: &'a dyn RoutineResolution,
     pub overloads: &'a dyn RoutineOverloadCatalog,

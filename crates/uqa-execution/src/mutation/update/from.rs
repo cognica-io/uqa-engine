@@ -353,7 +353,10 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             Some(&source_context),
         )? {
             if let Some(returning) = prepared.returning {
-                returning_rows.push(returning)?;
+                returning_rows.push_to(
+                    returning,
+                    context.mutation.preparation.returning.destination,
+                )?;
             }
             affected += u64::from(prepared.affected);
             events.append_after_rows(
@@ -480,7 +483,10 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             candidate.context.as_ref(),
         )? {
             if let Some(returning) = prepared.returning {
-                returning_rows.push(returning)?;
+                returning_rows.push_to(
+                    returning,
+                    context.mutation.preparation.returning.destination,
+                )?;
             }
             affected += u64::from(prepared.affected);
             events.append_after_rows(

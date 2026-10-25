@@ -162,6 +162,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
     fn execute_insert(
         &self,
         plan: &InsertPlan,
+        destination: Option<crate::mutation::returning::ReturningDestination<'_>>,
     ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
@@ -173,12 +174,14 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             plan,
             self.params,
             None,
+            destination,
         )
     }
 
     fn execute_update(
         &self,
         plan: &UpdatePlan,
+        destination: Option<crate::mutation::returning::ReturningDestination<'_>>,
     ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
@@ -190,12 +193,14 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             plan,
             self.params,
             None,
+            destination,
         )
     }
 
     fn execute_delete(
         &self,
         plan: &DeletePlan,
+        destination: Option<crate::mutation::returning::ReturningDestination<'_>>,
     ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
@@ -207,6 +212,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             plan,
             self.params,
             None,
+            destination,
         )
     }
 
@@ -275,6 +281,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
     fn execute_merge(
         &self,
         plan: &MergePlan,
+        destination: Option<crate::mutation::returning::ReturningDestination<'_>>,
     ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
         let mut plan = plan.clone();
         self.apply_statement_privilege_subject(
@@ -286,6 +293,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             plan,
             self.params,
             None,
+            destination,
         )
     }
 
@@ -382,9 +390,9 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     statement,
                 )
             }
-            CommandPlan::Insert(plan) => self.execute_insert(plan)?.into_sql_result(),
-            CommandPlan::Update(plan) => self.execute_update(plan)?.into_sql_result(),
-            CommandPlan::Delete(plan) => self.execute_delete(plan)?.into_sql_result(),
+            CommandPlan::Insert(plan) => self.execute_insert(plan, None)?.into_sql_result(),
+            CommandPlan::Update(plan) => self.execute_update(plan, None)?.into_sql_result(),
+            CommandPlan::Delete(plan) => self.execute_delete(plan, None)?.into_sql_result(),
             CommandPlan::Drop(statement) => crate::schema::removal::entry::run_drop_statement(
                 self.context.schemas.removal,
                 statement.clone(),
@@ -831,7 +839,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )
                 .map(|()| SQLResult::empty())
             }
-            CommandPlan::Merge(plan) => self.execute_merge(plan)?.into_sql_result(),
+            CommandPlan::Merge(plan) => self.execute_merge(plan, None)?.into_sql_result(),
             CommandPlan::CreateFunction(definition) => {
                 crate::routines::registration::register_sql_function(
                     &self.context.routines.inputs.registration_context(),

@@ -21,6 +21,13 @@ pub struct ExplainPlanEstimate {
     pub width: u64,
 }
 
+/// Actual `DataRow` payload construction, excluding transport headers and network I/O.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExplainSerializationMetrics {
+    pub bytes: u64,
+    pub elapsed: std::time::Duration,
+}
+
 /// Physical diagnostic values keep numeric primitives inline and retain only admitted containers and copied text. Field names and fixed labels borrow static definitions.
 #[derive(Debug)]
 pub enum ExplainValue {

@@ -17,29 +17,8 @@ use crate::{Batch, RowSchema};
 
 #[cfg(test)]
 mod ownership_tests;
-
-/// Resolve repeated public labels to their distinct logical positions in order.
-pub(crate) fn result_column_positions(
-    schema: &RowSchema,
-    columns: &[String],
-) -> Vec<Option<usize>> {
-    let mut occurrences = BTreeMap::<&str, usize>::new();
-    columns
-        .iter()
-        .map(|name| {
-            let occurrence = occurrences.entry(name.as_str()).or_default();
-            let position = schema
-                .columns()
-                .iter()
-                .enumerate()
-                .filter(|(_, input)| input == &name)
-                .nth(*occurrence)
-                .map(|(position, _)| position);
-            *occurrence += 1;
-            position
-        })
-        .collect()
-}
+mod positions;
+pub(crate) use positions::{result_column_positions, result_column_positions_with_control};
 
 /// A column vector preserves its position in the declared output schema.
 ///

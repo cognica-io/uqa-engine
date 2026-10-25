@@ -10,8 +10,7 @@ use crate::{session::StatementReadSnapshot, Engine};
 use uqa_execution::statement::{
     context::session::StatementPortals,
     portal::{
-        context::{PortalExecutionContext, PortalReturningInputs},
-        SessionPortalCommandDeclaration, SessionPortalDeclaration,
+        context::PortalExecutionContext, SessionPortalCommandDeclaration, SessionPortalDeclaration,
     },
 };
 use uqa_sql::{ast::FetchCursorStmt, SQLError, SQLResult};
@@ -32,20 +31,6 @@ impl Engine {
             source_sql: None,
             created_at_micros: self.statement_timestamp_micros(),
         }
-    }
-}
-
-impl PortalReturningInputs<StatementReadSnapshot> for Engine {
-    fn returning_execution_context(
-        &self,
-    ) -> uqa_execution::mutation::returning::ReturningExecutionContext<'_, StatementReadSnapshot>
-    {
-        Engine::returning_execution_context(self)
-    }
-    fn returning_analysis_context(
-        &self,
-    ) -> uqa_sql::semantics::returning::ReturningAnalysisContext<'_> {
-        Engine::returning_analysis_context(self)
     }
 }
 

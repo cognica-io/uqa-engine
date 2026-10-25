@@ -20,13 +20,14 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
     mut statement: InsertPlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
+    destination: Option<super::returning::ReturningDestination<'_>>,
 ) -> Result<MutationOutput, SQLError> {
     statement.table = context
         .targets
         .resolve_target(&statement.table, statement.target_relation_bound)?;
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_insert(
-            &context.statement,
+            &context.statement.with_destination(destination),
             InsertPlanning {
                 inference: context.inference,
                 returning: context.returning,
@@ -44,13 +45,14 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     mut statement: UpdatePlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
+    destination: Option<super::returning::ReturningDestination<'_>>,
 ) -> Result<MutationOutput, SQLError> {
     statement.table = context
         .targets
         .resolve_target(&statement.table, statement.target_relation_bound)?;
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_update(
-            &context.statement,
+            &context.statement.with_destination(destination),
             context.prune_source_outputs,
             &statement,
             params,
@@ -64,6 +66,7 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     mut statement: DeletePlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
+    destination: Option<super::returning::ReturningDestination<'_>>,
 ) -> Result<MutationOutput, SQLError> {
     statement.table = context
         .targets
@@ -77,7 +80,7 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     }
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_delete(
-            &context.statement,
+            &context.statement.with_destination(destination),
             context.prune_source_outputs,
             &statement,
             params,
@@ -91,11 +94,12 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
     mut statement: MergePlan,
     params: &[SQLParam],
     ctes: Option<&CteScope<S>>,
+    destination: Option<super::returning::ReturningDestination<'_>>,
 ) -> Result<MutationOutput, SQLError> {
     statement.target = context.targets.resolve_target(&statement.target, false)?;
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_merge(
-            &context.statement,
+            &context.statement.with_destination(destination),
             context.prune_source_outputs,
             &statement,
             params,
@@ -125,17 +129,17 @@ pub fn execute_cte_command<S: Clone + Send + Sync + 'static>(
         subject,
     )?;
     match command {
-        CommandPlan::Insert(plan) => run_insert(context, *plan, params, Some(ctes)),
-        CommandPlan::Update(plan) => run_update(context, *plan, params, Some(ctes)),
-        CommandPlan::Delete(plan) => run_delete(context, *plan, params, Some(ctes)),
-        CommandPlan::Merge(plan) => run_merge(context, *plan, params, Some(ctes)),
+        CommandPlan::Insert(plan) => run_insert(context, *plan, params, Some(ctes), None),
+        CommandPlan::Update(plan) => run_update(context, *plan, params, Some(ctes), None),
+        CommandPlan::Delete(plan) => run_delete(context, *plan, params, Some(ctes), None),
+        CommandPlan::Merge(plan) => run_merge(context, *plan, params, Some(ctes), None),
         _ => Err(SQLError::Internal(
             "non-DML command in a WITH definition".into(),
         )),
     }
 }
 
-pub fn cursor_command_returning_schema<S: Clone + 'static>(
+pub fn command_returning_schema<S: Clone + 'static>(
     execution: &super::returning::ReturningExecutionContext<'_, S>,
     analysis: uqa_sql::semantics::returning::ReturningAnalysisContext<'_>,
     scopes: &dyn super::command_scope::CommandScopeSource<S>,

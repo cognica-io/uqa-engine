@@ -133,7 +133,9 @@ pub(super) fn statement_thread_scope<S: Clone + 'static>(
     .enter()
 }
 
-pub trait StatementMutationInputs<S: Clone + 'static> {
+pub trait StatementMutationInputs<S: Clone + 'static>:
+    crate::mutation::returning::ReturningInputs<S>
+{
     fn mutation_context(&self) -> crate::mutation::entry::MutationEntryContext<'_, S>;
     /// Borrow read services for expression initialization without entering a writable command.
     fn mutation_initialization_context(

@@ -233,7 +233,7 @@ fn cursor_command_returning_schema<S: Clone + 'static>(
     command: &CommandPlan,
     params: &[SQLParam],
 ) -> Result<Option<crate::RowSchema>, SQLError> {
-    crate::mutation::entry::cursor_command_returning_schema(
+    crate::mutation::entry::command_returning_schema(
         &inputs.returning.returning_execution_context(),
         inputs.returning.returning_analysis_context(),
         inputs.command_scopes,

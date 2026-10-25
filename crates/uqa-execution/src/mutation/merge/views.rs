@@ -580,7 +580,7 @@ fn execute_view_merge_pairs<S: Clone + 'static>(
         let result = execute_selected_action(context, &pair, action)?;
         affected += u64::from(result.affected);
         if let Some(row) = result.returning {
-            returning.push(row)?;
+            returning.push_to(row, context.returning.destination)?;
         }
     }
     Ok((affected, returning))

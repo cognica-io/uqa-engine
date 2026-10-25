@@ -365,21 +365,24 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 }
                 affected += 1;
                 if !stmt.returning.is_empty() {
-                    returning_rows.push(build_returning_value_row(
-                        context.mutation.preparation.returning,
-                        ReturningValueProjectionRow {
-                            table: &target.canonical_name,
-                            target_qualifier: &stmt.target_qualifier,
-                            current: &old,
-                            old: Some(&old),
-                            new: None,
-                            aliases: &stmt.returning_aliases,
-                            context: source_context.as_ref(),
-                        },
-                        &stmt.returning,
-                        params,
-                        ctes,
-                    )?)?;
+                    returning_rows.push_to(
+                        build_returning_value_row(
+                            context.mutation.preparation.returning,
+                            ReturningValueProjectionRow {
+                                table: &target.canonical_name,
+                                target_qualifier: &stmt.target_qualifier,
+                                current: &old,
+                                old: Some(&old),
+                                new: None,
+                                aliases: &stmt.returning_aliases,
+                                context: source_context.as_ref(),
+                            },
+                            &stmt.returning,
+                            params,
+                            ctes,
+                        )?,
+                        context.mutation.preparation.returning.destination,
+                    )?;
                 }
             }
             if original_query_survives {

@@ -251,6 +251,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         &self,
         services: InsertSourceContext<'_, S>,
         source_row: crate::OwnedPhysicalRow,
+        destination: Option<crate::mutation::returning::ReturningDestination<'_>>,
     ) -> Result<crate::query::consumer::QueryConsumerControl, SQLError> {
         services.runtime.check_cancelled()?;
         let mut state = self.state.borrow_mut();
@@ -455,7 +456,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             &mut prepared_conflict,
         )?;
         if let Some(row) = returning {
-            returning_rows.push(row)?;
+            returning_rows.push_to(row, destination)?;
         }
         events.append_after_rows(row_after_events, &services.rows.referential.triggers)?;
         supplied_identities.note(&target_table, &prepared_conflict);

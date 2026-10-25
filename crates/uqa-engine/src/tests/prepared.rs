@@ -12,6 +12,7 @@ mod explain_costs;
 mod explain_generic;
 mod explain_inputs;
 mod explain_options;
+mod explain_serialization;
 
 #[test]
 fn prepared_temporal_constants_keep_the_preparation_clock() {

@@ -612,7 +612,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     None,
                 )? {
                     if let Some(returning) = prepared.returning {
-                        returning_rows.push(returning)?;
+                        returning_rows.push_to(
+                            returning,
+                            context.mutation.preparation.returning.destination,
+                        )?;
                     }
                     affected += u64::from(prepared.affected);
                     push_prepared_mutation_action(
@@ -740,7 +743,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         None,
                     )? {
                         if let Some(returning) = prepared.returning {
-                            returning_rows.push(returning)?;
+                            returning_rows.push_to(
+                                returning,
+                                context.mutation.preparation.returning.destination,
+                            )?;
                         }
                         affected += u64::from(prepared.affected);
                         push_prepared_mutation_action(

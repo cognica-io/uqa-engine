@@ -194,7 +194,7 @@ impl<'a, S: Clone + 'static> ViewInsertRows<'a, S> {
             returning
                 .as_mut()
                 .expect("initialized returning owner")
-                .push(row)?;
+                .push_to(row, self.live.returning.destination)?;
         }
         Ok(())
     }

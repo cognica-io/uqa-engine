@@ -14,6 +14,7 @@ use uqa_sql::SQLError;
 pub(super) struct ExplainConsumer<'a> {
     cancellation: &'a CancellationToken,
     rows: Cell<u64>,
+    serialization: Option<super::serialization::RowSerialization<'a>>,
 }
 
 impl<'a> ExplainConsumer<'a> {
@@ -21,11 +22,27 @@ impl<'a> ExplainConsumer<'a> {
         Self {
             cancellation,
             rows: Cell::new(0),
+            serialization: None,
         }
     }
 
     pub(super) fn rows(&self) -> u64 {
         self.rows.get()
+    }
+
+    pub(super) fn with_serialization(
+        mut self,
+        serialization: Option<super::serialization::RowSerialization<'a>>,
+    ) -> Self {
+        self.serialization = serialization;
+        self
+    }
+
+    pub(super) fn serialization(&self) -> uqa_sql::result::explain::ExplainSerializationMetrics {
+        self.serialization
+            .as_ref()
+            .map(super::serialization::RowSerialization::metrics)
+            .unwrap_or_default()
     }
 
     fn add_rows(&self, count: usize) -> Result<QueryConsumerControl, SQLError> {
@@ -40,20 +57,34 @@ impl<'a> ExplainConsumer<'a> {
 }
 
 impl QueryRowConsumer for ExplainConsumer<'_> {
-    fn begin(&self, _: &[String], _: &crate::RowSchema) -> Result<(), SQLError> {
-        Ok(self.cancellation.check()?)
+    fn begin(&self, columns: &[String], schema: &crate::RowSchema) -> Result<(), SQLError> {
+        self.cancellation.check()?;
+        if let Some(serialization) = &self.serialization {
+            serialization.begin(columns, schema)?;
+        }
+        Ok(())
     }
 
-    fn consume(&self, _: crate::OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {
+    fn consume(&self, row: crate::OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {
+        if let Some(serialization) = &self.serialization {
+            serialization.consume(&row.schema, &row.row)?;
+        }
         self.add_rows(1)
     }
 
     fn consume_batch(&self, batch: crate::Batch) -> Result<QueryConsumerControl, SQLError> {
+        if let Some(serialization) = &self.serialization {
+            for row in &batch.rows {
+                serialization.consume(&batch.schema, row)?;
+            }
+        }
         self.add_rows(batch.rows.len())
     }
 
     fn input_demand(&self) -> Option<std::num::NonZeroUsize> {
-        None
+        self.serialization
+            .as_ref()
+            .map(|_| crate::physical::demand::ONE)
     }
 }
 

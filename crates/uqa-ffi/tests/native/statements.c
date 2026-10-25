@@ -368,6 +368,61 @@ static void explained_costs(uqa_engine engine, uqa_result result) {
     CHECK(uqa_result_destroy(&inspected));
 }
 
+static void explained_serialization(uqa_engine engine, uqa_result result) {
+    for (int binary = 0; binary < 2; ++binary) {
+        uqa_statement statement = NULL;
+        uqa_value document = NULL;
+        uqa_value_view view = NULL;
+        CHECK(uqa_engine_execute(engine, "CREATE TEMP SEQUENCE c_serialized_effect", result));
+        CHECK(uqa_statement_prepare(engine, binary
+            ? "EXPLAIN (ANALYZE, SERIALIZE BINARY, TIMING FALSE, FORMAT JSON) SELECT nextval('c_serialized_effect') FROM generate_series(1,257)"
+            : "EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, FORMAT JSON) SELECT nextval('c_serialized_effect') FROM generate_series(1,257)", &statement));
+        CHECK(uqa_statement_execute(statement, result));
+        CHECK(uqa_statement_finalize(&statement));
+        CHECK(uqa_result_get_value(result, 0, 0, &view));
+        CHECK(uqa_value_create_copy(view, &document));
+        view = document;
+        CHECK(uqa_engine_execute_params(engine,
+            "SELECT ($1->0->'Serialization'->>'Output Volume')::bigint, "
+            "CASE WHEN $1->0->'Serialization'->>'Time' IS NULL THEN 1 ELSE 0 END, "
+            "($1->0->'Plan'->>'Actual Rows')::bigint", &view, 1, result));
+        CHECK(uqa_value_destroy(&document));
+        assert(integer(result, 0) == (binary ? 4 : 3));
+        assert(integer(result, 1) == 1 && integer(result, 2) == 257);
+        CHECK(uqa_engine_execute(engine, "SELECT nextval('c_serialized_effect')", result));
+        assert(integer(result, 0) == 258);
+        CHECK(uqa_engine_execute(engine, "DROP SEQUENCE c_serialized_effect", result));
+    }
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP SEQUENCE c_serialized_rows; CREATE TEMP TABLE c_serialized_target(n bigint)",
+        result));
+    CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT before_serialized_output", result));
+    assert(uqa_engine_execute(engine,
+        "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO c_serialized_target "
+        "SELECT nextval('c_serialized_rows') FROM generate_series(1,8) RETURNING n, NULL::aclitem",
+        result) == UQA_ERROR_SQL);
+    sqlstate("42883");
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO before_serialized_output", result));
+    CHECK(uqa_engine_execute(engine,
+        "SELECT currval('c_serialized_rows'), count(*) FROM c_serialized_target", result));
+    assert(integer(result, 0) == 1 && integer(result, 1) == 0);
+    CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+    CHECK(uqa_engine_execute(engine,
+        "INSERT INTO c_serialized_target SELECT generate_series(1,8); "
+        "BEGIN; SAVEPOINT before_serialized_delete", result));
+    assert(uqa_engine_execute(engine,
+        "EXPLAIN (ANALYZE, SERIALIZE BINARY) DELETE FROM c_serialized_target "
+        "WHERE nextval('c_serialized_rows')>0 RETURNING NULL::aclitem",
+        result) == UQA_ERROR_SQL);
+    sqlstate("42883");
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO before_serialized_delete", result));
+    CHECK(uqa_engine_execute(engine,
+        "SELECT currval('c_serialized_rows'), count(*) FROM c_serialized_target", result));
+    assert(integer(result, 0) == 2 && integer(result, 1) == 8);
+    CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+    CHECK(uqa_engine_execute(engine, "DROP TABLE c_serialized_target; DROP SEQUENCE c_serialized_rows", result));
+}
+
 static void explained_physical_metadata(uqa_engine engine, uqa_result result) {
     CHECK(uqa_engine_execute(engine,
         "CREATE TABLE c_explain_vectors (id integer, embedding tensor(2)); "
@@ -792,6 +847,7 @@ int main(void) {
     explained_stream_and_settings(engine, result);
     explained_physical_metadata(engine, result);
     explained_costs(engine, result);
+    explained_serialization(engine, result);
     explained_generic_parameters(engine, result);
     explained_read_only_destination(engine, result);
     xml_values(engine, result);

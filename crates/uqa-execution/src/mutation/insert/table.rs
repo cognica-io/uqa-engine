@@ -325,6 +325,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         QueryOutputMode::RowConsumer(Rc::new(
                             super::source::binding::InsertSelectOutput {
                                 binding: mutation.insert_consumers,
+                                destination: preparation.returning.destination,
                                 consumer: Rc::clone(&consumer),
                             },
                         )),
@@ -633,7 +634,10 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     &mut conflict_locks,
                 )? {
                     if let Some(returning) = staged.returning {
-                        returning_rows.push(returning)?;
+                        returning_rows.push_to(
+                            returning,
+                            context.mutation.preparation.returning.destination,
+                        )?;
                     }
                     events.append_after_rows(staged.after_row_events, &triggers)?;
                     if staged.prepared_effect {
@@ -798,7 +802,10 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         continue;
                     };
                     if let Some(returning) = staged.returning {
-                        returning_rows.push(returning)?;
+                        returning_rows.push_to(
+                            returning,
+                            context.mutation.preparation.returning.destination,
+                        )?;
                     }
                     events.append_after_rows(staged.after_row_events, &triggers)?;
                     if staged.prepared_effect {

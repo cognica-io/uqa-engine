@@ -5,10 +5,10 @@
 //
 
 use super::{CommandPlan, SQLError, SQLResult, UnifiedPlan, UnifiedPlanExecutor};
-use crate::query::consumer::QueryRowConsumer;
 use uqa_sql::explain::ExplainSettings;
 
 mod consumer;
+mod serialization;
 
 impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
     pub(super) fn execute_explain(
@@ -196,51 +196,92 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         physical.planning_elapsed = Some(planning_started.elapsed());
         let physical = control.finish(physical, control.combine(physical_memory, shown_memory))?;
         let analysis = if settings.analyze {
-            let diagnostics = self.context.diagnostics.diagnostics_scope()?;
-            let started = std::time::Instant::now();
-            let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
-            executor
-                .privilege_subject
-                .clone_from(&self.privilege_subject);
-            let (affected_rows, rows) = if let Some(destination) = destination {
-                crate::statement::validation::validate_plan(
-                    &self.context.validation,
-                    self.context.runtime.cancellation,
-                    body,
-                )?;
-                let result = executor.execute_explained_destination(destination, body)?;
-                let rows = result.affected_rows;
-                (result.affected_rows, rows)
-            } else {
-                executor.consume_explained_output(body)?
-            };
-            Some(uqa_sql::result::ExplainAnalysis {
-                vector_searches: diagnostics.finish()?,
-                elapsed: started.elapsed(),
-                rows,
-                affected_rows,
-            })
+            Some(self.analyze_explained(body, destination, settings, control)?)
         } else {
             None
         };
         self.render_explanation(body, settings, analysis.as_ref(), &physical)
     }
-    fn consume_explained_output(&mut self, body: &UnifiedPlan) -> Result<(u64, u64), SQLError> {
-        let consumer = std::rc::Rc::new(consumer::ExplainConsumer::new(
-            self.context.runtime.cancellation,
-        ));
+
+    fn analyze_explained(
+        &self,
+        body: &UnifiedPlan,
+        destination: Option<&CommandPlan>,
+        settings: &ExplainSettings,
+        control: uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::result::ExplainAnalysis, SQLError> {
+        let diagnostics = self.context.diagnostics.diagnostics_scope()?;
+        let started = std::time::Instant::now();
+        let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
+        executor
+            .privilege_subject
+            .clone_from(&self.privilege_subject);
+        let (affected_rows, rows, serialization) = if let Some(destination) = destination {
+            crate::statement::validation::validate_plan(
+                &self.context.validation,
+                self.context.runtime.cancellation,
+                body,
+            )?;
+            let result = executor.execute_explained_destination(destination, body)?;
+            (
+                result.affected_rows,
+                result.affected_rows,
+                uqa_sql::result::explain::ExplainSerializationMetrics::default(),
+            )
+        } else {
+            executor.consume_explained_output(body, settings, control)?
+        };
+        Ok(uqa_sql::result::ExplainAnalysis {
+            vector_searches: diagnostics.finish()?,
+            elapsed: started.elapsed(),
+            rows,
+            affected_rows,
+            serialization,
+        })
+    }
+
+    fn consume_explained_output(
+        &mut self,
+        body: &UnifiedPlan,
+        settings: &ExplainSettings,
+        control: uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        (
+            u64,
+            u64,
+            uqa_sql::result::explain::ExplainSerializationMetrics,
+        ),
+        SQLError,
+    > {
+        let serialization = if settings.serialize == uqa_sql::explain::ExplainSerialization::None {
+            None
+        } else {
+            let scope = self
+                .context
+                .queries
+                .statement_scope(self.privilege_subject.as_ref());
+            let hook = self
+                .context
+                .queries
+                .query_context()
+                .source
+                .relational
+                .expression_scope(scope);
+            serialization::RowSerialization::new(settings.serialize, settings.timing, hook, control)
+        };
+        let consumer = std::rc::Rc::new(
+            consumer::ExplainConsumer::new(self.context.runtime.cancellation)
+                .with_serialization(serialization),
+        );
         let output = self.execute_for_output_mode(
             body,
             super::QueryOutputMode::physical_consumer(consumer.clone()),
         )?;
         match output {
-            super::StatementOutput::Query(_) => Ok((0, consumer.rows())),
+            super::StatementOutput::Query(_) => Ok((0, consumer.rows(), consumer.serialization())),
             super::StatementOutput::Mutation(output) => {
                 let affected_rows = output.affected_rows;
-                for batch in output.into_batches() {
-                    consumer.consume_batch(batch?)?;
-                }
-                Ok((affected_rows, consumer.rows()))
+                Ok((affected_rows, consumer.rows(), consumer.serialization()))
             }
             super::StatementOutput::Command(_) => Err(SQLError::Internal(
                 "EXPLAIN query execution returned a utility result".into(),

@@ -679,21 +679,24 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 checks.validate(&final_new)?;
                 affected += 1;
                 if !stmt.returning.is_empty() {
-                    returning_rows.push(build_returning_value_row(
-                        context.mutation.preparation.returning,
-                        ReturningValueProjectionRow {
-                            table: &target.canonical_name,
-                            target_qualifier: &stmt.target_qualifier,
-                            current: &final_new,
-                            old: Some(&old),
-                            new: Some(&final_new),
-                            aliases: &stmt.returning_aliases,
-                            context: row.context.as_ref(),
-                        },
-                        &stmt.returning,
-                        params,
-                        ctes,
-                    )?)?;
+                    returning_rows.push_to(
+                        build_returning_value_row(
+                            context.mutation.preparation.returning,
+                            ReturningValueProjectionRow {
+                                table: &target.canonical_name,
+                                target_qualifier: &stmt.target_qualifier,
+                                current: &final_new,
+                                old: Some(&old),
+                                new: Some(&final_new),
+                                aliases: &stmt.returning_aliases,
+                                context: row.context.as_ref(),
+                            },
+                            &stmt.returning,
+                            params,
+                            ctes,
+                        )?,
+                        context.mutation.preparation.returning.destination,
+                    )?;
                 }
             }
             crate::mutation::statement_end::end_command(

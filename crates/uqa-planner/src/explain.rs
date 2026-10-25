@@ -24,6 +24,7 @@ mod formats;
 pub use costs::estimate_plan;
 mod physical;
 mod properties;
+mod serialization;
 #[cfg(test)]
 mod tests;
 mod text;
@@ -217,6 +218,7 @@ fn plan_text(
     }
     if let Some(analysis) = analysis {
         vector::append_text(&mut text, analysis, control)?;
+        serialization::append_text(&mut text, settings, analysis)?;
         let _ = write!(
             text,
             "\n  actual_rows={}\n  affected_rows={}",
@@ -281,6 +283,9 @@ fn structured_plan<'a>(
         payload.insert("Planning Time", P::Float(elapsed.as_secs_f64() * 1_000.0))?;
     }
     if let Some(analysis) = analysis {
+        if let Some(serialization) = serialization::properties(settings, analysis, control)? {
+            payload.insert("Serialization", serialization)?;
+        }
         payload.insert(
             "Vector Searches",
             array(

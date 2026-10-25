@@ -38,6 +38,7 @@ impl SourceSession<'_> {
 }
 struct BoundInsertConsumer<'a> {
     session: SourceSession<'a>,
+    destination: Option<uqa_execution::mutation::returning::ReturningDestination<'a>>,
     consumer: Rc<InsertSelectConsumer<StatementReadSnapshot>>,
 }
 impl QueryRowConsumer for BoundInsertConsumer<'_> {
@@ -46,7 +47,8 @@ impl QueryRowConsumer for BoundInsertConsumer<'_> {
             .begin(self.session.source_context(), columns, schema)
     }
     fn consume(&self, row: OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {
-        self.consumer.consume(self.session.source_context(), row)
+        self.consumer
+            .consume(self.session.source_context(), row, self.destination)
     }
 }
 impl InsertSelectBinding<StatementReadSnapshot> for Engine {
@@ -54,6 +56,7 @@ impl InsertSelectBinding<StatementReadSnapshot> for Engine {
         &'a self,
         snapshot: Option<&StatementReadSnapshot>,
         consumer: Rc<InsertSelectConsumer<StatementReadSnapshot>>,
+        destination: Option<uqa_execution::mutation::returning::ReturningDestination<'a>>,
     ) -> Result<Rc<dyn QueryRowConsumer + 'a>, SQLError> {
         let session = match snapshot {
             Some(snapshot) => {
@@ -61,6 +64,10 @@ impl InsertSelectBinding<StatementReadSnapshot> for Engine {
             }
             None => SourceSession::Live(self),
         };
-        Ok(Rc::new(BoundInsertConsumer { session, consumer }))
+        Ok(Rc::new(BoundInsertConsumer {
+            session,
+            destination,
+            consumer,
+        }))
     }
 }

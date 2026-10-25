@@ -51,21 +51,24 @@ impl RuleReturningResult {
                         .get(index)
                 })
                 .transpose()?;
-            rows.push(build_returning_value_row(
-                context,
-                ReturningValueProjectionRow {
-                    table: shape.table,
-                    target_qualifier: shape.target_qualifier,
-                    current: &values[..self.width],
-                    old: Some(&values[self.width..self.width * 2]),
-                    new: Some(&values[self.width * 2..self.width * 3]),
-                    aliases: shape.aliases,
-                    context: source.as_ref().and_then(|source| source.context.as_ref()),
-                },
-                shape.returning,
-                shape.params,
-                shape.ctes,
-            )?)?;
+            rows.push_to(
+                build_returning_value_row(
+                    context,
+                    ReturningValueProjectionRow {
+                        table: shape.table,
+                        target_qualifier: shape.target_qualifier,
+                        current: &values[..self.width],
+                        old: Some(&values[self.width..self.width * 2]),
+                        new: Some(&values[self.width * 2..self.width * 3]),
+                        aliases: shape.aliases,
+                        context: source.as_ref().and_then(|source| source.context.as_ref()),
+                    },
+                    shape.returning,
+                    shape.params,
+                    shape.ctes,
+                )?,
+                context.destination,
+            )?;
         }
         dml_returning_result(context, shape, rows, self.affected_rows)
     }

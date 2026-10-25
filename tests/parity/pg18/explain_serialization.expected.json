@@ -1,0 +1,465 @@
+{
+  "version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "cases": [
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT FROM generate_series(1, 1025)",
+      "serialization": {
+        "Output Volume": 3,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT n, n::bigint, n::smallint, true, '한글'::text FROM generate_series(1, 257) AS g(n)",
+      "serialization": {
+        "Output Volume": 10,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT n::numeric / 10, 1.25::real, -0.5::double precision, '2000-01-01'::date, '02:03:04+02'::timetz FROM generate_series(1, 257) AS g(n)",
+      "serialization": {
+        "Output Volume": 18,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT ARRAY[n,NULL,n+1], ROW(n,'한글'::text), '[1.25,9.5)'::numrange FROM generate_series(1, 257) AS g(n)",
+      "serialization": {
+        "Output Volume": 13,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT NULL::int, NULL::text, ''::text, 'x'::char(4), '10101010101'::bit(11) FROM generate_series(1, 257)",
+      "serialization": {
+        "Output Volume": 10,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT repeat('x', n) AS same, repeat('y', n+1) AS same FROM generate_series(1, 100) AS g(n) ORDER BY n DESC",
+      "serialization": {
+        "Output Volume": 11,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT '한글'::text AS value WHERE false",
+      "serialization": {
+        "Output Volume": 0,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) VALUES (1,'a'), (2,'b')",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT 3::int AS value UNION ALL SELECT 4::int",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT n::bigint FROM generate_series(1,257) AS g(n)",
+      "serialization": {
+        "Output Volume": 3,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT ROW(n,'한글')::serialization_record, 'ready'::serialization_state, ARRAY[1,NULL,3]::serialization_array_domain FROM generate_series(1,257) AS g(n)",
+      "serialization": {
+        "Output Volume": 11,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT s.* FROM serialization_values s, generate_series(1,257)",
+      "serialization": {
+        "Output Volume": 13,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT '42'::regclass, '42'::regtype, '42'::regproc FROM generate_series(1,257)",
+      "serialization": {
+        "Output Volume": 7,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) INSERT INTO serialization_items SELECT generate_series(1, 257) RETURNING n, n::bigint",
+      "serialization": {
+        "Output Volume": 4,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) UPDATE serialization_items SET n = 1",
+      "serialization": {
+        "Output Volume": 0,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) CREATE TEMP TABLE serialization_destination AS SELECT generate_series(1, 257) AS n",
+      "serialization": {
+        "Output Volume": 0,
+        "Format": "text"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT FROM generate_series(1, 1025)",
+      "serialization": {
+        "Output Volume": 3,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT n, n::bigint, n::smallint, true, '한글'::text FROM generate_series(1, 257) AS g(n)",
+      "serialization": {
+        "Output Volume": 11,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT n::numeric / 10, 1.25::real, -0.5::double precision, '2000-01-01'::date, '02:03:04+02'::timetz FROM generate_series(1, 257) AS g(n)",
+      "serialization": {
+        "Output Volume": 16,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT ARRAY[n,NULL,n+1], ROW(n,'한글'::text), '[1.25,9.5)'::numrange FROM generate_series(1, 257) AS g(n)",
+      "serialization": {
+        "Output Volume": 30,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT NULL::int, NULL::text, ''::text, 'x'::char(4), '10101010101'::bit(11) FROM generate_series(1, 257)",
+      "serialization": {
+        "Output Volume": 9,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT repeat('x', n) AS same, repeat('y', n+1) AS same FROM generate_series(1, 100) AS g(n) ORDER BY n DESC",
+      "serialization": {
+        "Output Volume": 11,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT '한글'::text AS value WHERE false",
+      "serialization": {
+        "Output Volume": 0,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) VALUES (1,'a'), (2,'b')",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT 3::int AS value UNION ALL SELECT 4::int",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT n::bigint FROM generate_series(1,257) AS g(n)",
+      "serialization": {
+        "Output Volume": 4,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT ROW(n,'한글')::serialization_record, 'ready'::serialization_state, ARRAY[1,NULL,3]::serialization_array_domain FROM generate_series(1,257) AS g(n)",
+      "serialization": {
+        "Output Volume": 23,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT s.* FROM serialization_values s, generate_series(1,257)",
+      "serialization": {
+        "Output Volume": 28,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) SELECT '42'::regclass, '42'::regtype, '42'::regproc FROM generate_series(1,257)",
+      "serialization": {
+        "Output Volume": 7,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) INSERT INTO serialization_items SELECT generate_series(1, 257) RETURNING n, n::bigint",
+      "serialization": {
+        "Output Volume": 6,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) UPDATE serialization_items SET n = 1",
+      "serialization": {
+        "Output Volume": 0,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE TEMP TABLE serialization_items (n integer); CREATE TYPE serialization_record AS (id integer, label text); CREATE TYPE serialization_state AS ENUM ('ready','done'); CREATE DOMAIN serialization_array_domain AS integer[]; CREATE TEMP TABLE serialization_values (r serialization_record, e serialization_state, a serialization_array_domain, bounds int4range); INSERT INTO serialization_values VALUES (ROW(7,'한글'), 'ready', ARRAY[1,NULL,3], '[1,4)')",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF, SUMMARY OFF) CREATE TEMP TABLE serialization_destination AS SELECT generate_series(1, 257) AS n",
+      "serialization": {
+        "Output Volume": 0,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE, FORMAT JSON, BUFFERS OFF, SUMMARY OFF) SELECT 1",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "text",
+        "timing": true
+      }
+    },
+    {
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE NONE, FORMAT JSON, BUFFERS OFF, SUMMARY OFF) SELECT 1",
+      "serialization": null
+    },
+    {
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, FORMAT JSON, BUFFERS OFF, SUMMARY OFF) SELECT 1",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "text",
+        "timing": false
+      }
+    },
+    {
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, TIMING FALSE, FORMAT JSON, BUFFERS OFF, SUMMARY OFF) SELECT 1",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "binary",
+        "timing": false
+      }
+    },
+    {
+      "setup": "CREATE DOMAIN serialization_no_send AS aclitem",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF) SELECT NULL::serialization_no_send",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type serialization_no_send"
+    },
+    {
+      "setup": "CREATE DOMAIN serialization_no_send AS aclitem",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF) SELECT ARRAY[]::aclitem[]",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem"
+    },
+    {
+      "setup": "CREATE DOMAIN serialization_no_send AS aclitem",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF) SELECT ROW(NULL::serialization_no_send)",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE DOMAIN serialization_no_send AS aclitem",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF) SELECT NULL::aclitem[]",
+      "serialization": {
+        "Output Volume": 1,
+        "Format": "binary"
+      }
+    },
+    {
+      "setup": "CREATE DOMAIN serialization_no_send AS aclitem",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY, FORMAT JSON, TIMING OFF, BUFFERS OFF) SELECT NULL::serialization_no_send WHERE false",
+      "serialization": {
+        "Output Volume": 0,
+        "Format": "binary"
+      }
+    }
+  ],
+  "mutation_failures": [
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO serialization_target SELECT nextval('serialization_rows') FROM generate_series(1,8) RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) INSERT INTO serialization_target VALUES (nextval('serialization_rows')), (nextval('serialization_rows')) RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) UPDATE serialization_target SET n=nextval('serialization_rows') RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) DELETE FROM serialization_target RETURNING nextval('serialization_rows'), NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) UPDATE serialization_target SET n=n WHERE nextval('serialization_rows')>0 RETURNING NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) DELETE FROM serialization_target WHERE nextval('serialization_rows')>0 RETURNING NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) MERGE INTO serialization_target t USING generate_series(1,8) g(n) ON t.n=g.n WHEN MATCHED AND nextval('serialization_rows')>0 THEN UPDATE SET n=t.n RETURNING NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) MERGE INTO serialization_target t USING generate_series(1,8) g(n) ON t.n=g.n WHEN MATCHED THEN UPDATE SET n=t.n RETURNING nextval('serialization_rows'), NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    }
+  ],
+  "mutation_order": {
+    "setup": "CREATE TEMP SEQUENCE delivery_qualification; CREATE TEMP SEQUENCE delivery_before; CREATE TEMP SEQUENCE delivery_output; CREATE TEMP TABLE delivery_rows(n bigint); INSERT INTO delivery_rows SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.delivery_before() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('delivery_before'); RETURN OLD; END $$; CREATE TRIGGER delivery_before BEFORE DELETE ON delivery_rows FOR EACH ROW EXECUTE FUNCTION pg_temp.delivery_before()",
+    "sql": "DELETE FROM delivery_rows WHERE nextval('delivery_qualification')>0 RETURNING n, currval('delivery_qualification') AS qualified, currval('delivery_before') AS before_row, nextval('delivery_output') AS output_row",
+    "rows": [
+      {
+        "n": 1,
+        "qualified": 1,
+        "before_row": 1,
+        "output_row": 1
+      },
+      {
+        "n": 2,
+        "qualified": 2,
+        "before_row": 2,
+        "output_row": 2
+      },
+      {
+        "n": 3,
+        "qualified": 3,
+        "before_row": 3,
+        "output_row": 3
+      },
+      {
+        "n": 4,
+        "qualified": 4,
+        "before_row": 4,
+        "output_row": 4
+      },
+      {
+        "n": 5,
+        "qualified": 5,
+        "before_row": 5,
+        "output_row": 5
+      },
+      {
+        "n": 6,
+        "qualified": 6,
+        "before_row": 6,
+        "output_row": 6
+      },
+      {
+        "n": 7,
+        "qualified": 7,
+        "before_row": 7,
+        "output_row": 7
+      },
+      {
+        "n": 8,
+        "qualified": 8,
+        "before_row": 8,
+        "output_row": 8
+      }
+    ]
+  }
+}

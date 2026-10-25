@@ -13,10 +13,14 @@ use uqa_core::Value;
 use crate::ast::ColumnType;
 use crate::RowSchema;
 
+mod binary;
 mod labels;
 mod production;
+mod serialization;
 mod text;
+pub use binary::format_postgres_binary_with_catalog_and_control;
 pub use labels::render_result_enum_labels;
+pub use serialization::{encode_postgres_row_with_control, ResultFormat};
 pub use text::format_postgres_text_with_catalog_and_control;
 pub use text::{
     format_postgres_text, format_postgres_text_with_catalog, format_postgres_text_with_control,
@@ -252,6 +256,7 @@ pub struct ExplainAnalysis {
     pub elapsed: std::time::Duration,
     pub rows: u64,
     pub affected_rows: u64,
+    pub serialization: explain::ExplainSerializationMetrics,
 }
 
 /// Structured physical-plan output captured before execution. Method-specific properties are rendered by the owning planner; execution only carries this diagnostic result to the renderer.
