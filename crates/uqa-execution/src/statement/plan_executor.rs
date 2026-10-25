@@ -662,7 +662,11 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 self.context.settings.load_library(library)?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Explain { body, options } => self.execute_explain(body, options),
+            CommandPlan::Explain {
+                body,
+                options,
+                unbound_parameters,
+            } => self.execute_explain(body, options, unbound_parameters.as_deref()),
             CommandPlan::Analyze { table } => {
                 let context = self.context.schemas.inputs.vacuum_execution_context();
                 let targets = if let Some(requested) = table.as_deref() {

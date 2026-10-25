@@ -122,6 +122,17 @@ impl Default for ExplainSettings {
 }
 
 impl ExplainOptions {
+    /// Ordinary analysis without an external parameter hook reads only `GENERIC_PLAN` before the body. All other option diagnostics retain their execution order.
+    pub fn infers_unbound_parameters(&self) -> Result<bool, SQLError> {
+        let mut generic = false;
+        for option in &self.options {
+            if option.name == "generic_plan" {
+                generic = option.boolean()?;
+            }
+        }
+        Ok(generic)
+    }
+
     pub fn result_schema(&self) -> Result<RowSchema, SQLError> {
         let mut ty = ColumnType::Text;
         for option in &self.options {

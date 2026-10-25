@@ -16,7 +16,7 @@ import json
 import os
 
 
-def capture(connection_string):
+def capture(connection_string, probes=None):
     pq = c.CDLL(ctypes.util.find_library("pq"))
 
     def function(name, result, *arguments):
@@ -94,6 +94,10 @@ def capture(connection_string):
                     raise RuntimeError("EXPLAIN returned no output")
                 observation["rows"] = []
             cases.append({"action": action, **arguments, "plan_output": bool(plan_output), "result": observation})
+
+        if probes is not None:
+            probes(record, cases)
+            return {"postgresql_version": version, "cases": cases}
 
         record("sql", sql="CREATE TEMP SEQUENCE explain_effect")
         record("sql", sql="CREATE TEMP TABLE explain_items (id integer)")

@@ -90,7 +90,7 @@ fn open_plpgsql_command_portal<S: Clone + Send + Sync + 'static>(
         CommandPlan::ShowVariable { name } => {
             Some(crate::statement::show::show_schema(inputs.session, name)?)
         }
-        CommandPlan::Explain { body, options } => {
+        CommandPlan::Explain { body, options, .. } => {
             validate_explain_cursor_body(inputs, params, body)?;
             Some(options.result_schema()?)
         }

@@ -13,6 +13,7 @@ use uqa_core::Value;
 
 mod call_collations;
 mod collations;
+mod completion;
 mod grouping;
 mod results;
 pub(super) use call_collations::CallCollations;
@@ -914,24 +915,6 @@ impl<'a> ParameterTypes<'a> {
                 })
                 .collect(),
         )
-    }
-
-    pub(super) fn finish(self) -> Result<Vec<Option<ColumnType>>, SQLError> {
-        for (index, observed) in self.occurrences {
-            if observed != self.types[index] {
-                return Err(error(
-                    "42P08",
-                    format!("could not determine data type of parameter ${}", index + 1),
-                ));
-            }
-        }
-        if let Some(index) = self.types.iter().position(Option::is_none) {
-            return Err(error(
-                "42P18",
-                format!("could not determine data type of parameter ${}", index + 1),
-            ));
-        }
-        Ok(self.types)
     }
 }
 

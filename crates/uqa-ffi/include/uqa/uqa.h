@@ -660,6 +660,8 @@ UQA_API uqa_status UQA_CALL uqa_statement_prepare_typed_n(
     uint32_t parameter_count, uqa_statement *out);
 UQA_API uqa_status UQA_CALL uqa_statement_get_parameter_count(
     uqa_statement statement, uint32_t *out);
+/* Unresolved input types return UQA_DONE with a NULL descriptor. Empty input
+ * can retain an unused "unknown" declaration; its parameter still needs binding. */
 UQA_API uqa_status UQA_CALL uqa_statement_get_parameter_type(
     uqa_statement statement, uint32_t index, uqa_type *out);
 UQA_API uqa_status UQA_CALL uqa_statement_get_column_count(

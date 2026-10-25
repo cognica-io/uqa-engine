@@ -1,0 +1,2393 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "action": "sql",
+      "sql": "CREATE TEMP TABLE generic_items (n integer)",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE TABLE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $2::integer",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P08",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT $2::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $2",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $2",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $2",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT $1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT $2::integer",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P08",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN TRUE, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT $2::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $2",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $2",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN TRUE, GENERIC_PLAN FALSE, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $2",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT $2::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN bogus, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT $2::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN 2, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "generic_plan requires a Boolean value",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT $2::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P08",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, ANALYZE, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "22023",
+        "message": "EXPLAIN options ANALYZE and GENERIC_PLAN cannot be used together",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT $1::integer + 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT $2::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT missing_column",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT $1 IS NULL, $1::integer",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P08",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT $1::integer, $1 IS NULL",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) SELECT n FROM generic_items WHERE n = $1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) INSERT INTO generic_items VALUES ($2) RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) UPDATE generic_items SET n = $2 WHERE n = $1 RETURNING n",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN, unknown_option, FORMAT JSON) WITH source AS (SELECT $2::integer AS n) SELECT n FROM source",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "unrecognized EXPLAIN option \"unknown_option\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT count(*) FROM generic_items",
+      "plan_output": false,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "count",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "0"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_0",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_0",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [
+          25
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_0",
+      "parameters": [
+        "7"
+      ],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_1",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1 IS NULL",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_2",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $2::integer",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_3",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT 1",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_3",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_3",
+      "parameters": [],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_4",
+      "sql": "",
+      "types": [],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_4",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_4",
+      "parameters": [],
+      "plan_output": false,
+      "result": {
+        "status": 0,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_5",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1",
+      "types": [
+        "integer"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_5",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_5",
+      "parameters": [
+        "7"
+      ],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_6",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1 IS NULL",
+      "types": [
+        "integer"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_6",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_6",
+      "parameters": [
+        "7"
+      ],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_7",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $2::integer",
+      "types": [
+        "integer"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_7",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [
+          23,
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_7",
+      "parameters": [
+        "7",
+        "7"
+      ],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_8",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT 1",
+      "types": [
+        "integer"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_8",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_8",
+      "parameters": [
+        "7"
+      ],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_9",
+      "sql": "",
+      "types": [
+        "integer"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_9",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_9",
+      "parameters": [
+        "7"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 0,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_10",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1",
+      "types": [
+        "unknown"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_10",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [
+          25
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_10",
+      "parameters": [
+        "7"
+      ],
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            114
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_11",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1 IS NULL",
+      "types": [
+        "unknown"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_12",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $2::integer",
+      "types": [
+        "unknown"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_13",
+      "sql": "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT 1",
+      "types": [
+        "unknown"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "generic_14",
+      "sql": "",
+      "types": [
+        "unknown"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "generic_14",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [
+          705
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "generic_14",
+      "parameters": [
+        "7"
+      ],
+      "plan_output": false,
+      "result": {
+        "status": 0,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT generic_retry",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN) SELECT $2::integer",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN) SELECT $1 + $2",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT 1",
+      "plan_output": false,
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK TO generic_retry",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "EXPLAIN (GENERIC_PLAN) SELECT $1 IS NULL",
+      "plan_output": true,
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "EXPLAIN",
+        "columns": [
+          [
+            "QUERY PLAN",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "COMMIT",
+      "plan_output": false,
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "COMMIT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    }
+  ]
+}

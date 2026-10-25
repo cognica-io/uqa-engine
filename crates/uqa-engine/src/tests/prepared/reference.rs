@@ -118,7 +118,8 @@ fn observe(
                 .parameter_types
                 .iter()
                 .map(|ty| {
-                    json!(ty.as_ref().map_or(0, |ty| {
+                    // Native None is SQL unknown, whose PostgreSQL identity is 705. Zero denotes an unspecified protocol input, not the described unknown type.
+                    json!(ty.as_ref().map_or(705, |ty| {
                         uqa_sql::catalog::result_type::postgres_result_type(ty).type_oid
                     }))
                 })

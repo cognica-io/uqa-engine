@@ -513,3 +513,108 @@ fn unused_windows_participate_in_name_input_and_grouping_validation() {
 }
 
 mod procedural;
+
+#[test]
+fn generic_explain_infers_placeholders_without_prepared_bind_requirements() {
+    for (body, count) in [
+        ("SELECT $1", 1),
+        ("SELECT $2::integer", 2),
+        ("SELECT $1 IS NULL", 1),
+        ("INSERT INTO items VALUES ($2) RETURNING id", 2),
+    ] {
+        let scopes = Scopes::default();
+        let sql = format!("EXPLAIN (GENERIC_PLAN) {body}");
+        let mut plan = UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+        analyze_executable_plan(
+            &StatementAnalysisContext {
+                scopes: &scopes,
+                routines: &NoRoutines,
+                aliases: &NoRoutines,
+            },
+            &mut plan,
+            &[],
+        )
+        .unwrap();
+        let UnifiedPlan::Command(command) = &plan else {
+            panic!("expected EXPLAIN")
+        };
+        let CommandPlan::Explain {
+            unbound_parameters, ..
+        } = command.as_ref()
+        else {
+            panic!("expected EXPLAIN")
+        };
+        assert_eq!(unbound_parameters.as_ref().unwrap().len(), count);
+        assert!(!serde_json::to_string(&plan)
+            .unwrap()
+            .contains("unbound_parameters"));
+        assert_eq!(
+            *scopes.events.borrow(),
+            ["scope", "scope", "binding", "release", "release"]
+        );
+    }
+}
+
+#[test]
+fn generic_explain_parameter_option_order_precedes_only_its_body() {
+    for (sql, state) in [
+        ("EXPLAIN (GENERIC_PLAN bogus) SELECT missing", "42601"),
+        ("EXPLAIN (FORMAT bogus) SELECT missing", "42703"),
+        ("EXPLAIN (GENERIC_PLAN FALSE) SELECT $1", "42P02"),
+        (
+            "EXPLAIN (GENERIC_PLAN, GENERIC_PLAN FALSE) SELECT $1",
+            "42P02",
+        ),
+        (
+            "EXPLAIN (GENERIC_PLAN) SELECT $1 IS NULL, $1::integer",
+            "42P08",
+        ),
+    ] {
+        assert_eq!(
+            analyze(&Scopes::default(), sql).unwrap_err().sqlstate(),
+            Some(state),
+            "{sql}"
+        );
+    }
+    analyze(
+        &Scopes::default(),
+        "EXPLAIN (GENERIC_PLAN FALSE, GENERIC_PLAN) SELECT $2::integer",
+    )
+    .unwrap();
+}
+
+#[test]
+fn supplied_explain_parameters_keep_their_host_analysis_hook() {
+    for (sql, expected) in [
+        ("EXPLAIN (GENERIC_PLAN bogus) SELECT missing", Some("42703")),
+        ("EXPLAIN (GENERIC_PLAN) SELECT $2::integer", Some("42P02")),
+        ("EXPLAIN (GENERIC_PLAN) SELECT $1 IS NULL", None),
+    ] {
+        let scopes = Scopes::default();
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let observed = analyze_executable_plan(
+            &StatementAnalysisContext {
+                scopes: &scopes,
+                routines: &NoRoutines,
+                aliases: &NoRoutines,
+            },
+            &mut plan,
+            &[SQLParam::typed_scalar(Value::Int(7), ColumnType::Integer)],
+        );
+        if let Some(state) = expected {
+            assert_eq!(observed.unwrap_err().sqlstate(), Some(state), "{sql}");
+        } else {
+            observed.unwrap();
+            let UnifiedPlan::Command(command) = plan else {
+                panic!("expected EXPLAIN")
+            };
+            let CommandPlan::Explain {
+                unbound_parameters, ..
+            } = *command
+            else {
+                panic!("expected EXPLAIN")
+            };
+            assert!(unbound_parameters.is_none());
+        }
+    }
+}

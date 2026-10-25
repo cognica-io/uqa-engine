@@ -664,6 +664,9 @@ pub enum CommandPlan {
         #[serde(flatten)]
         options: crate::explain::ExplainOptions,
         body: Box<UnifiedPlan>,
+        /// Inferred placeholders for an ordinary `GENERIC_PLAN` without host bindings.
+        #[serde(skip)]
+        unbound_parameters: Option<Vec<crate::SQLParam>>,
     },
     Analyze {
         table: Option<String>,

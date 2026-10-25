@@ -330,6 +330,50 @@ static void explained_stream_and_settings(uqa_engine engine, uqa_result result) 
     CHECK(uqa_engine_execute(engine, "RESET work_mem", result));
 }
 
+static void explained_generic_parameters(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    uqa_value value = NULL;
+    uqa_type type = NULL;
+    uint32_t count = 0;
+    uint32_t kind = 0;
+    const char *integer_type[] = {"integer"};
+    const char *unknown_type[] = {"unknown"};
+    CHECK(uqa_engine_execute(engine, "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $2::integer", result));
+    CHECK(uqa_engine_execute(engine, "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $1 IS NULL", result));
+    assert(uqa_statement_prepare(engine, "EXPLAIN (GENERIC_PLAN) SELECT $2::integer", &statement) == UQA_ERROR_SQL);
+    assert(statement == NULL);
+    sqlstate("42P18");
+    CHECK(uqa_statement_prepare_typed(engine, "EXPLAIN (GENERIC_PLAN, FORMAT JSON) SELECT $2::integer", integer_type, 1, &statement));
+    CHECK(uqa_statement_get_parameter_count(statement, &count));
+    assert(count == 2);
+    CHECK(uqa_statement_get_parameter_type(statement, 2, &type));
+    CHECK(uqa_type_get_kind(type, &kind));
+    assert(kind == UQA_TYPE_INT32);
+    CHECK(uqa_value_create_int64(7, &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_statement_bind(statement, 2, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_statement_prepare_typed(engine, "", unknown_type, 1, &statement));
+    CHECK(uqa_statement_get_parameter_count(statement, &count));
+    assert(count == 1);
+    assert(uqa_statement_get_parameter_type(statement, 1, &type) == UQA_DONE);
+    assert(type == NULL);
+    CHECK(uqa_value_create_text("unused", &value));
+    CHECK(uqa_statement_bind(statement, 1, value));
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_statement_execute(statement, result));
+    empty_result(result);
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT generic_retry", result));
+    assert(uqa_engine_execute(engine, "EXPLAIN (GENERIC_PLAN) SELECT $1 + $2", result) == UQA_ERROR_SQL);
+    sqlstate("42725");
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO generic_retry", result));
+    CHECK(uqa_engine_execute(engine, "EXPLAIN (GENERIC_PLAN) SELECT $1 IS NULL", result));
+    CHECK(uqa_engine_execute(engine, "COMMIT", result));
+}
+
 static void explained_read_only_destination(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_value_view value = NULL;
@@ -665,6 +709,7 @@ int main(void) {
     explained_inputs(engine, result);
     explained_results(engine, result);
     explained_stream_and_settings(engine, result);
+    explained_generic_parameters(engine, result);
     explained_read_only_destination(engine, result);
     xml_values(engine, result);
     CHECK(uqa_result_destroy(&result));

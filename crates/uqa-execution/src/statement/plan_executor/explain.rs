@@ -15,8 +15,18 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         &self,
         body: &UnifiedPlan,
         options: &uqa_sql::explain::ExplainOptions,
+        unbound_parameters: Option<&[uqa_sql::SQLParam]>,
     ) -> Result<SQLResult, SQLError> {
-        self.explain_statement(body, &options.interpret()?)
+        let settings = options.interpret()?;
+        if let Some(parameters) = unbound_parameters {
+            let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), parameters);
+            executor
+                .privilege_subject
+                .clone_from(&self.privilege_subject);
+            executor.explain_statement(body, &settings)
+        } else {
+            self.explain_statement(body, &settings)
+        }
     }
 
     /// EXPLAIN plans a query and optionally runs it with a relation destination; utility statements themselves are not ordinary nested execution.

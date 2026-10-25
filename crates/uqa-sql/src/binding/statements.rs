@@ -98,10 +98,22 @@ fn analyze_reusable_inputs(
         result = Some(match plan {
             UnifiedPlan::Command(command) => match command.as_mut() {
                 // The explained statement retains a scope of its own.
-                CommandPlan::Explain { body, options } => {
-                    let (_, body_reusable) = analyze_reusable_inputs(context, body, params)?;
-                    reusable &= body_reusable;
-                    AnalyzedResult::Schema(options.result_schema()?)
+                CommandPlan::Explain { .. } => {
+                    let mut explained = None;
+                    context.scopes.with_scope(&mut |scope| {
+                        explained = Some(analyze_plan_result_inner(
+                            context.routines,
+                            context.aliases,
+                            plan,
+                            params,
+                            scope,
+                            &mut reusable,
+                        )?);
+                        Ok(())
+                    })?;
+                    explained.ok_or_else(|| {
+                        SQLError::Internal("EXPLAIN analysis scope did not run".into())
+                    })?
                 }
                 _ => analyze_plan_result_inner(
                     context.routines,
@@ -148,16 +160,33 @@ fn analyze_plan_result_inner(
     scope: &dyn StatementBindingScope,
     reusable: &mut bool,
 ) -> Result<AnalyzedResult, SQLError> {
+    if let UnifiedPlan::Command(command) = plan {
+        if let CommandPlan::Explain {
+            body,
+            options,
+            unbound_parameters,
+        } = command.as_mut()
+        {
+            if params.is_empty() && options.infers_unbound_parameters()? {
+                let (parameters, body_reusable) = super::preparation::read_generic_explain_inputs(
+                    routines,
+                    body,
+                    &scope.binding_context()?,
+                    aliases,
+                )?;
+                *unbound_parameters = Some(parameters);
+                *reusable &= body_reusable;
+            } else {
+                *unbound_parameters = None;
+                analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
+            }
+            return options.result_schema().map(AnalyzedResult::Schema);
+        }
+    }
     let binding = scope.binding_context()?;
     let analysis =
         super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
     *reusable &= analysis.reusable;
-    if let UnifiedPlan::Command(command) = plan {
-        if let CommandPlan::Explain { body, options } = command.as_mut() {
-            analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
-            return options.result_schema().map(AnalyzedResult::Schema);
-        }
-    }
     Ok(analysis.result)
 }
 

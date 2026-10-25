@@ -328,6 +328,7 @@ impl UnifiedPlan {
             Statement::Explain { options, body } => Self::Command(Box::new(CommandPlan::Explain {
                 options,
                 body: Box::new(Self::lower_with(*body, aggregates)),
+                unbound_parameters: None,
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
             Statement::Vacuum(vacuum) => Self::Command(Box::new(CommandPlan::Vacuum(vacuum))),
