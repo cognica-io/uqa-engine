@@ -447,6 +447,7 @@ pub(super) fn execute_resolved_table_function(
         );
     }
     shape_declared_table_outcome(
+        context.runtime.expressions,
         outcome,
         function.def.returns_set(),
         !out_params.is_empty(),
@@ -456,6 +457,7 @@ pub(super) fn execute_resolved_table_function(
 }
 
 fn shape_declared_table_outcome(
+    expressions: &dyn uqa_sql::expr::EngineHook,
     outcome: crate::routines::RoutineOutcome,
     returns_set: bool,
     has_output_params: bool,
@@ -473,7 +475,11 @@ fn shape_declared_table_outcome(
         rows = rows
             .into_iter()
             .map(|mut row| {
-                super::super::sql_body::row_fields(row.pop().unwrap_or(Value::Null), column_count)
+                super::super::sql_body::row_fields(
+                    row.pop().unwrap_or(Value::Null),
+                    column_count,
+                    Some(expressions),
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
     }
@@ -509,6 +515,11 @@ fn shape_anonymous_record_outcome(
             rows.push(vec![Value::Null; columns.len()]);
             continue;
         }
+        let physical_fields = if let [value] = row.as_slice() {
+            read_physical_record_fields(context.runtime.expressions, value, validate_types)?
+        } else {
+            None
+        };
         let runtime_descriptor = match row.as_slice() {
             [Value::Row(row)] if sql_kind == Some(SQLFunctionResultKind::Value) => {
                 row.field_types()
@@ -524,17 +535,21 @@ fn shape_anonymous_record_outcome(
                     .map(|column| column.ty.clone())
                     .collect::<Vec<_>>(),
             )?;
-        } else if !tuple {
+        } else if !tuple && physical_fields.is_none() {
             if let Some(source_types) = outcome.anonymous_record_column_types.as_deref() {
                 validate_types(source_types)?;
             }
         }
-        let has_runtime_descriptor = runtime_descriptor.is_some();
-        let mut values = match row.as_slice() {
-            [Value::Record(fields)] => fields.iter().map(|(_, value)| value.clone()).collect(),
-            [Value::Row(values)] => values.values().to_vec(),
-            [Value::Null] => vec![Value::Null; columns.len()],
-            _ => row,
+        let has_runtime_descriptor = runtime_descriptor.is_some() || physical_fields.is_some();
+        let mut values = if let Some(values) = physical_fields {
+            values
+        } else {
+            match row.as_slice() {
+                [Value::Record(fields)] => fields.iter().map(|(_, value)| value.clone()).collect(),
+                [Value::Row(values)] => values.values().to_vec(),
+                [Value::Null] => vec![Value::Null; columns.len()],
+                _ => row,
+            }
         };
         if values.len() != columns.len() {
             validate_types(&vec![None; values.len()])?;
@@ -577,4 +592,39 @@ fn anonymous_record_target(
             })
         })
         .collect()
+}
+
+fn read_physical_record_fields(
+    engine: &dyn uqa_sql::expr::EngineHook,
+    value: &Value,
+    validate: impl FnOnce(&[Option<uqa_sql::ColumnType>]) -> Result<(), SQLError>,
+) -> Result<Option<Vec<Value>>, SQLError> {
+    let Value::Datum(datum) = value else {
+        return Ok(None);
+    };
+    if !uqa_sql::expr::composites::datum_is_composite(datum, engine)? {
+        return Ok(None);
+    }
+    let catalog = uqa_sql::expr::EngineValueCatalog(engine);
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let view = uqa_sql::expr::SQLRecordView::new(value, None, Some(&catalog), &control)?;
+    let descriptor = view.descriptor().expect("physical record descriptor");
+    validate(
+        &descriptor
+            .attributes
+            .iter()
+            .map(|attribute| Some(attribute.ty.clone()))
+            .collect::<Vec<_>>(),
+    )?;
+    (0..view.len())
+        .map(|index| {
+            let field = view
+                .field_with_control(index, Some(&catalog), &control)?
+                .expect("record field index")
+                .into_uncontrolled()
+                .expect("routine field");
+            Ok(field.scalar_value().expect("record scalar field").clone())
+        })
+        .collect::<Result<Vec<_>, SQLError>>()
+        .map(Some)
 }

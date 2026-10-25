@@ -54,32 +54,18 @@ impl Interpreter<'_> {
                 Ok(())
             }
             PLpgSQLDatum::Rec { .. } => {
-                if let Some(schema) = record_schema {
-                    self.record_schemas.insert(idx, schema);
+                let (value, descriptor) = super::records::RecordVariableDescriptor::bind(
+                    value,
+                    record_schema,
+                    self.services.expressions,
+                )?;
+                self.values[idx] = value;
+                if let Some(descriptor) = descriptor {
+                    self.record_descriptors.insert(idx, descriptor);
                 } else {
-                    self.record_schemas.remove(&idx);
+                    self.record_descriptors.remove(&idx);
                 }
-                match value {
-                    Value::Record(_) | Value::Null => {
-                        self.values[idx] = value;
-                        Ok(())
-                    }
-                    Value::Row(values) => {
-                        self.values[idx] = Value::Record(
-                            values
-                                .into_iter()
-                                .enumerate()
-                                .map(|(index, value)| (format!("f{}", index + 1), value))
-                                .collect::<Vec<_>>()
-                                .into(),
-                        );
-                        Ok(())
-                    }
-                    _ => Err(SQLError::Routine {
-                        sqlstate: "42804".into(),
-                        message: "cannot assign non-composite value to a record variable".into(),
-                    }),
-                }
+                Ok(())
             }
             PLpgSQLDatum::RecField { field, parent } => {
                 let target_type = self.datum_type(idx)?;
@@ -93,6 +79,24 @@ impl Interpreter<'_> {
                     None => value,
                 };
                 let parent_name = self.datum_name(*parent)?;
+                if matches!(self.values[*parent], Value::Datum(_)) {
+                    let descriptor = self.record_descriptors.get(parent).ok_or_else(|| {
+                        SQLError::Internal("physical record has no assignment descriptor".into())
+                    })?;
+                    if descriptor.field_index(field).is_none() {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42703".into(),
+                            message: format!("record \"{parent_name}\" has no field \"{field}\""),
+                        });
+                    }
+                    self.values[*parent] = descriptor.replace_field(
+                        &self.values[*parent],
+                        field,
+                        &value,
+                        self.services.expressions,
+                    )?;
+                    return Ok(());
+                }
                 match &mut self.values[*parent] {
                     Value::Record(fields) => {
                         let field_value = fields
@@ -130,6 +134,17 @@ impl Interpreter<'_> {
         })?;
         let PLpgSQLDatum::Row { fields } = datum else {
             return self.assign_datum(idx, value);
+        };
+        let value = match value {
+            Value::Datum(ref datum)
+                if uqa_sql::expr::composites::datum_is_composite(
+                    datum,
+                    self.services.expressions,
+                )? =>
+            {
+                uqa_sql::expr::datums::read_with_catalog(datum, Some(self.services.expressions))?
+            }
+            value => value,
         };
         let values = match value {
             Value::Record(fields) => fields.into_values(),
@@ -178,7 +193,7 @@ impl Interpreter<'_> {
                         .into(),
                 );
                 self.values[*dno] = value;
-                self.record_schemas.insert(*dno, schema.clone());
+                self.record_descriptors.insert(*dno, schema.clone().into());
                 Ok(())
             }
             IntoTarget::Row(fields) => {

@@ -5,8 +5,7 @@
 //
 
 use super::{
-    parse_multirange_with_control, parse_range_with_control, CanonicalMultirange, CanonicalRange,
-    Produced, ProductionControl, RangeSubtype, Result,
+    CanonicalMultirange, CanonicalRange, Produced, ProductionControl, RangeSubtype, Result,
 };
 
 // Borrow member slices directly from their admitted parser owners; accessors and comparisons do not clone containers or numeric bounds.
@@ -16,25 +15,68 @@ pub(super) enum RangeSet {
 }
 
 impl RangeSet {
-    pub(super) fn parse(
-        text: &str,
+    pub(super) fn read(
+        value: &super::Value,
         subtype: RangeSubtype,
         multirange: bool,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
         Ok(if multirange {
-            Self::Multiple(parse_multirange_with_control(text, subtype, control)?)
+            Self::Multiple(Self::multiple(value, subtype, control)?)
         } else {
-            Self::Single(parse_range_with_control(text, subtype, control)?)
+            Self::Single(Self::single(value, subtype, control)?)
         })
     }
 
-    pub(super) fn parse_auto(
-        text: &str,
+    pub(super) fn single(
+        value: &super::Value,
+        subtype: RangeSubtype,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<CanonicalRange>> {
+        match super::super::range::RangeComparisonValue::from_type_with_control(
+            value,
+            &crate::ColumnType::Range(subtype),
+            None,
+            control,
+        )? {
+            Some(super::super::range::RangeComparisonValue::Range(range)) => Ok(range),
+            _ => Err(super::SQLError::TypeMismatch(
+                "range value is required".into(),
+            )),
+        }
+    }
+
+    pub(super) fn multiple(
+        value: &super::Value,
+        subtype: RangeSubtype,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<CanonicalMultirange>> {
+        match super::super::range::RangeComparisonValue::from_type_with_control(
+            value,
+            &crate::ColumnType::Multirange(subtype),
+            None,
+            control,
+        )? {
+            Some(super::super::range::RangeComparisonValue::Multirange(ranges)) => Ok(ranges),
+            _ => Err(super::SQLError::TypeMismatch(
+                "multirange value is required".into(),
+            )),
+        }
+    }
+
+    pub(super) fn read_auto(
+        value: &super::Value,
         subtype: RangeSubtype,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
-        Self::parse(text, subtype, text.trim_start().starts_with('{'), control)
+        let multirange = match value {
+            super::Value::Datum(datum) => matches!(
+                crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()),
+                Some(crate::ColumnType::Multirange(_))
+            ),
+            _ => super::range_text(value)?.trim_start().starts_with('{'),
+        };
+        Self::read(value, subtype, multirange, control)
     }
 
     pub(super) fn ranges(&self) -> &[CanonicalRange] {

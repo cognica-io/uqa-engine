@@ -16,26 +16,42 @@ pub(crate) fn canonical_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 
     Ok([canonical_row_key(values)?, previous, legacy])
 }
 
-/// Selected range fields use their SQL equality class for reservations. Retain predecessor aliases without invoking SQL hash support or decoding deferred physical fields merely to acquire a lock.
+/// Selected physical values and range fields use their SQL equality class for reservations. Observation does not invoke SQL hash support; predecessor aliases keep their original representation.
 pub(crate) fn canonical_row_lock_keys_with_catalog(
     values: &[Value],
     catalog: &dyn SQLValueCatalog,
 ) -> ExecResult<SmallVec<[Vec<u8>; 4]>> {
+    let current = comparison_key(values, Some(catalog))?;
+    let [previous, legacy] = legacy_row_lock_keys(values)?;
+    let mut keys = smallvec![current.bytes, previous, legacy];
+    if current.normalized {
+        keys.push(canonical_row_key(values)?);
+    }
+    Ok(keys)
+}
+
+/// Exact equality for already admitted constraint values, without invoking SQL hash support or producing compatibility lock aliases.
+pub(crate) fn canonical_constraint_key(
+    values: &[Value],
+    catalog: Option<&dyn SQLValueCatalog>,
+) -> ExecResult<Vec<u8>> {
+    Ok(comparison_key(values, catalog)?.bytes)
+}
+
+fn comparison_key<'a>(
+    values: &[Value],
+    catalog: Option<&'a dyn SQLValueCatalog>,
+) -> ExecResult<DeclaredReservation<'a>> {
     let mut current = DeclaredReservation {
         bytes: Vec::new(),
         catalog,
-        range_field: false,
+        normalized: false,
     };
     encode_len(values.len(), &mut current)?;
     for value in values {
         encode_value(value, &mut current)?;
     }
-    let [previous, legacy] = legacy_row_lock_keys(values)?;
-    let mut keys = smallvec![current.bytes, previous, legacy];
-    if current.range_field {
-        keys.push(canonical_row_key(values)?);
-    }
-    Ok(keys)
+    Ok(current)
 }
 
 fn legacy_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 2]> {
@@ -58,19 +74,22 @@ fn legacy_row_lock_keys(values: &[Value]) -> ExecResult<[Vec<u8>; 2]> {
 
 struct DeclaredReservation<'a> {
     bytes: Vec<u8>,
-    catalog: &'a dyn SQLValueCatalog,
-    range_field: bool,
+    catalog: Option<&'a dyn SQLValueCatalog>,
+    normalized: bool,
 }
 
 impl KeyOutput for DeclaredReservation<'_> {
     fn enum_catalog(&self) -> Option<&dyn SQLValueCatalog> {
-        Some(self.catalog)
+        self.catalog
     }
     fn uses_declared_field_types(&self) -> bool {
         true
     }
     fn encoded_range_field(&mut self) {
-        self.range_field = true;
+        self.normalized = true;
+    }
+    fn decoded_physical_value(&mut self) {
+        self.normalized = true;
     }
     fn push_byte(&mut self, value: u8) -> ExecResult<()> {
         self.bytes.push(value);

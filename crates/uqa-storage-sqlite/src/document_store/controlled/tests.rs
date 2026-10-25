@@ -41,6 +41,22 @@ fn parity(input: &[u8]) {
     assert_eq!(control.memory().used(), 0);
 }
 
+fn expanded_record() -> Value {
+    Value::Datum(
+        uqa_core::DatumValue::new(16_384, u32::MAX, vec![0]).with_record_fields(vec![
+            uqa_core::RecordDatumField {
+                name: "retained".into(),
+                type_oid: 23,
+                type_modifier: -1,
+                collation_oid: None,
+                length: 4,
+                alignment: b'i',
+                dropped: false,
+            },
+        ]),
+    )
+}
+
 #[test]
 fn typed_blob_round_trips_every_persisted_variant() {
     let scalars = vec![
@@ -103,6 +119,7 @@ fn typed_blob_round_trips_every_persisted_variant() {
             0,
             vec![2, 0, 0, 0, 3, b'x'],
         )),
+        expanded_record(),
         Value::Enum(EnumValue::new(
             16_390,
             EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap(),
@@ -147,6 +164,7 @@ fn typed_blob_round_trips_every_persisted_variant() {
 #[test]
 fn typed_compact_carriers_retain_indirect_metadata_and_release_failed_reads() {
     for value in [
+        expanded_record(),
         Value::BitString(uqa_core::BitStringValue::try_from_packed(Vec::new(), 0).unwrap()),
         Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap()),
         Value::Enum(EnumValue::new(

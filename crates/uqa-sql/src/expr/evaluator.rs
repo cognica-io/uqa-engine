@@ -19,11 +19,37 @@ use super::casting::negate_value;
 use super::context::{cast_value_with_type_resolution, EvalContext};
 
 /// Evaluate a value-producing AST expression against one row and parameter context.
+pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
+    let value = eval_inner(expr, ctx)?;
+    if matches!(
+        expr,
+        Expr::Literal(_)
+            | Expr::TypedLiteral { .. }
+            | Expr::Param(_)
+            | Expr::Column(_)
+            | Expr::QualifiedColumn { .. }
+            | Expr::InternalColumn(_)
+            | Expr::Func { .. }
+    ) {
+        if let Some(engine) = ctx.engine {
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            return super::composites::retain_value_with_control(
+                control.finish(value, None)?,
+                engine.composite_types(),
+                &control,
+            )?
+            .into_uncontrolled()
+            .map_err(|_| SQLError::Internal("ordinary expression retention".into()));
+        }
+    }
+    Ok(value)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "builtin dispatch preserves arity, NULL, and error precedence"
 )]
-pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
+fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     match expr {
         Expr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),

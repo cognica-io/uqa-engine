@@ -52,7 +52,11 @@ pub fn evaluate_with_state(
         ));
     };
     let descriptor = super::descriptor(engine.composite_types(), reference.oid)?;
-    construct_with_state(binding, arguments, &descriptor, control, state, evaluate)
+    let value = construct_with_state(binding, arguments, &descriptor, control, state, evaluate)?;
+    let Value::Record(record) = &*value else {
+        unreachable!("named composite producer");
+    };
+    super::retention::retain_record(record, &descriptor, engine.composite_types(), control)
 }
 
 /// Form a row using a resolved descriptor, after checking all surviving argument types and before evaluating any argument.
@@ -281,17 +285,30 @@ mod tests {
         })
         .unwrap();
         assert_eq!(evaluated, vec![0, 2]);
-        assert_eq!(
-            *value,
-            Value::Record(
-                vec![
-                    ("a1".into(), Value::Int(0)),
-                    ("a3".into(), Value::Int(2)),
-                    ("a4".into(), Value::Null)
-                ]
-                .into()
+        let Value::Datum(datum) = &*value else {
+            panic!("retained constructor output");
+        };
+        assert_eq!(datum.type_oid(), 20_001);
+        for (name, expected) in [
+            ("a1", Value::Int(0)),
+            ("a3", Value::Int(2)),
+            ("a4", Value::Null),
+        ] {
+            let field = crate::expr::datums::read_composite_field_with_control(
+                datum,
+                name,
+                Some(&Catalog),
+                &control,
             )
-        );
+            .unwrap();
+            let decoded = match &*field {
+                Value::Datum(datum) => {
+                    crate::expr::datums::read_with_control(datum, &control).unwrap()
+                }
+                value => control.copy_value(value).unwrap(),
+            };
+            assert_eq!(*decoded, expected);
+        }
         assert!(budget.used() > 0);
         drop(value);
         assert_eq!(budget.used(), 0);

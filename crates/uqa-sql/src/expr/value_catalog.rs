@@ -16,6 +16,11 @@ use uqa_core::{
 
 mod records;
 pub use records::SQLRecordFields;
+mod record_view;
+pub use record_view::SQLRecordView;
+mod types;
+pub(crate) use types::field_type_with_control;
+pub(crate) use types::type_by_oid_with_control;
 
 pub(in crate::expr) struct ValueCompositeCatalog<'a>(
     pub(in crate::expr) Option<&'a dyn SQLValueCatalog>,

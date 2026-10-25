@@ -16,7 +16,7 @@ use uqa_core::{
     ArrayAssignmentError, ArrayValue, Value,
 };
 use uqa_sql::{
-    assignment::{conversion, targets},
+    assignment::{columns::coerce_column_value, targets},
     ast::AssignmentStep,
     ColumnType, SQLError, SQLParam, ScalarExpr,
 };
@@ -91,12 +91,7 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
     } = destination;
     let declared = ty.expect("typed assignment has its declared destination");
     if target.is_whole_column() {
-        return conversion::coerce_assignment_value(
-            services.assignment,
-            value()?,
-            declared,
-            source,
-        );
+        return coerce_column_value(services.assignment, value()?, declared, source);
     }
     let bound = |expr: &ScalarExpr| -> Result<i32, SQLError> {
         let value = eval_mutation_expr(services.expressions, ctes, expr, row, params)?;
@@ -106,12 +101,7 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
                 message: "array subscript in assignment must not be null".into(),
             });
         }
-        let value = conversion::coerce_assignment_value(
-            services.assignment,
-            value,
-            &ColumnType::Integer,
-            None,
-        )?;
+        let value = coerce_column_value(services.assignment, value, &ColumnType::Integer, None)?;
         match value {
             Value::Int(value) => i32::try_from(value).map_err(|_| SQLError::Routine {
                 sqlstate: "22003".into(),
@@ -156,8 +146,7 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
             }
         });
     }
-    let value =
-        conversion::coerce_assignment_value(services.assignment, value()?, &required, source)?;
+    let value = coerce_column_value(services.assignment, value()?, &required, source)?;
     let result = assign_array_with_control(
         current.unwrap_or(&Value::Null),
         &value,
@@ -169,7 +158,7 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
     .into_uncontrolled()
     .expect("ordinary array assignment result");
     if final_column_write {
-        conversion::coerce_assignment_value(
+        coerce_column_value(
             services.assignment,
             result,
             declared,
@@ -230,7 +219,7 @@ fn assign_field_value(
         }
         level_bounds.push(bounds);
     }
-    let value = conversion::coerce_assignment_value(assignment, value()?, required, source)?;
+    let value = coerce_column_value(assignment, value()?, required, source)?;
     let result = assign_levels(current, &types, &levels, &level_bounds, value, assignment)?;
     if !final_column_write {
         return Ok(result);
@@ -240,7 +229,7 @@ fn assign_field_value(
     while let ColumnType::Domain { base: inner, .. } = base {
         base = inner;
     }
-    conversion::coerce_assignment_value(assignment, result, declared, Some(base))
+    coerce_column_value(assignment, result, declared, Some(base))
 }
 
 fn assign_levels(

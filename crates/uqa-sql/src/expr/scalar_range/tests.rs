@@ -9,6 +9,7 @@ use super::*;
 mod constructor_inputs;
 mod elements;
 mod empty;
+mod retained;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken, DecimalValue};
 
 #[test]

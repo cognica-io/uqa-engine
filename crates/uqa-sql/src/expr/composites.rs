@@ -21,6 +21,7 @@ mod changes;
 pub mod constants;
 pub mod constructor;
 pub(crate) mod datum;
+mod descriptor;
 pub(super) mod fields;
 mod input;
 pub mod literal;
@@ -29,7 +30,28 @@ mod retention;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};
 pub use input::parse_record_fields;
 pub use retained::CompositeConstantSource;
-pub use retention::retain_value_with_control;
+pub use retention::{flatten_value_with_control, retain_value_with_control};
+
+/// Classify an admitted physical value without reading its payload or invoking input.
+pub fn datum_is_composite(
+    datum: &uqa_core::DatumValue,
+    engine: &dyn super::EngineHook,
+) -> Result<bool> {
+    if datum.record_fields().is_some() {
+        return Ok(true);
+    }
+    let ty = engine
+        .resolve_type_oid(datum.type_oid())
+        .map_err(SQLError::Internal)?;
+    let mut ty = ty.as_ref();
+    while let Some(ColumnType::Domain { base, .. }) = ty {
+        ty = Some(base);
+    }
+    Ok(matches!(
+        ty,
+        Some(ColumnType::Composite(_) | ColumnType::Record)
+    ))
+}
 
 /// One live attribute of a composite type in attribute-number order.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -234,7 +256,7 @@ fn composite_from_fields(
         };
         return Err(cannot_cast("record", target, Some(detail.into())));
     }
-    values
+    let fields = values
         .iter()
         .zip(&descriptor.attributes)
         .enumerate()
@@ -270,13 +292,16 @@ fn composite_from_fields(
             )?;
             Ok((attribute.name.clone(), converted))
         })
-        .collect::<Result<Vec<_>>>()
-        .map(|fields| {
-            Value::Record(uqa_core::RecordValue::from_parts(
-                fields,
-                Some(descriptor.type_oid),
-            ))
-        })
+        .collect::<Result<Vec<_>>>()?;
+    let record = uqa_core::RecordValue::from_parts(fields, Some(descriptor.type_oid));
+    retention::retain_record(
+        &record,
+        descriptor,
+        engine.composite_types(),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary record coercion retention".into()))
 }
 
 /// Cast a value to a composite type: the identity for a value of the same type, `record_in` for unknown literals and string-category sources, and attribute-wise coercion for anonymous rows and records. Returns `None` when the target is not a composite type.

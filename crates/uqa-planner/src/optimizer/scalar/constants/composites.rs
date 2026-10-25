@@ -94,6 +94,11 @@ pub(in crate::optimizer::scalar) fn fold_composite_constructor(
                 )
                 .map_err(Into::into)
         },
+    )?;
+    let value = uqa_sql::expr::composites::retain_value_with_control(
+        value,
+        types.composite_types(),
+        &control,
     )?
     .into_uncontrolled()
     .expect("ordinary constant evaluation");

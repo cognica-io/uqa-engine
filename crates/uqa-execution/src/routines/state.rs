@@ -73,7 +73,7 @@ impl<'a> Interpreter<'a> {
             def,
             datums,
             values: vec![Value::Null; datums.len()],
-            record_schemas: HashMap::new(),
+            record_descriptors: HashMap::new(),
             bindings,
             cursor_arguments,
             err_stack: Vec::new(),
@@ -148,13 +148,13 @@ impl<'a> Interpreter<'a> {
     ) -> Result<(), SQLError> {
         if let Some(index) = parsed.new_datum {
             self.values[index] = context.new.clone();
-            self.record_schemas
-                .insert(index, context.row_schema.clone());
+            self.record_descriptors
+                .insert(index, context.row_schema.clone().into());
         }
         if let Some(index) = parsed.old_datum {
             self.values[index] = context.old.clone();
-            self.record_schemas
-                .insert(index, context.row_schema.clone());
+            self.record_descriptors
+                .insert(index, context.row_schema.clone().into());
         }
         let argument_values = context
             .arguments
@@ -234,7 +234,7 @@ impl<'a> Interpreter<'a> {
             types: self.services.expressions,
             datums: self.datums,
             values: &self.values,
-            record_schemas: &self.record_schemas,
+            record_descriptors: &self.record_descriptors,
             bindings: &self.bindings,
             error: self.err_stack.last().map(|error| &error.diagnostics),
             param_count: self.def.params.len(),

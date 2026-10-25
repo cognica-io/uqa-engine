@@ -28,6 +28,7 @@ pub(super) trait KeyOutput {
     }
 
     fn encoded_range_field(&mut self) {}
+    fn decoded_physical_value(&mut self) {}
 
     fn legacy_numeric_reservation(&self) -> bool {
         false

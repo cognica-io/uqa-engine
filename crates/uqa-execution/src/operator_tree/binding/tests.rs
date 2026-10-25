@@ -44,6 +44,49 @@ fn predicate(sql: &str) -> ScalarExpr {
 }
 
 #[test]
+fn composite_null_tests_keep_catalog_observation_while_scalar_tests_lower() {
+    use uqa_sql::{
+        ast::{ColumnDef, CompositeTypeReference},
+        ColumnType,
+    };
+    let inputs = Inputs::default();
+    let binding = RetrievalBinding {
+        hook: &inputs,
+        graphs: &inputs,
+    };
+    let composite = ColumnType::Composite(CompositeTypeReference {
+        schema: "public".into(),
+        name: "pair".into(),
+        oid: 16_384,
+        relation_oid: 16_385,
+        array_oid: 16_386,
+    });
+    for sql in [
+        "SELECT * FROM docs WHERE v IS NULL",
+        "SELECT * FROM docs WHERE docs.v IS NOT NULL",
+        "SELECT * FROM docs WHERE v IS NULL AND id = 1",
+    ] {
+        let expression = predicate(sql);
+        assert!(has_column_null_test(&expression));
+        for ty in [composite.clone(), ColumnType::Record] {
+            assert!(binding
+                .lower_relation_where(&[ColumnDef::nullable("v", ty)], &expression, &[])
+                .unwrap()
+                .is_none());
+        }
+        assert!(binding
+            .lower_relation_where(
+                &[ColumnDef::nullable("v", ColumnType::Integer)],
+                &expression,
+                &[]
+            )
+            .unwrap()
+            .is_some());
+    }
+    assert!(inputs.events.borrow().is_empty());
+}
+
+#[test]
 fn parameter_expression_predicates_bind_each_invocations_values() {
     let inputs = Inputs::default();
     let binding = RetrievalBinding {
@@ -176,7 +219,9 @@ fn logical_attention_binds_callbacks_once_before_physical_model_construction() {
         hook: &inputs,
         graphs: &inputs,
     };
-    let expression = predicate("SELECT * FROM docs WHERE fuse_multihead(bayesian_match(body, query_text()), knn_match(embedding, ARRAY[1.0, 0.0], 2), n_heads => 3, normalized => true, alpha => 0.4)");
+    let expression = predicate(
+        "SELECT * FROM docs WHERE fuse_multihead(bayesian_match(body, query_text()), knn_match(embedding, ARRAY[1.0, 0.0], 2), n_heads => 3, normalized => true, alpha => 0.4)",
+    );
     let logical = retrieval::lower_where_bound(
         &binding,
         &expression,
@@ -230,7 +275,9 @@ fn retrieval_validation_precedes_runtime_argument_effects() {
         binding.lower_function("knn_match", &args, &[]),
         Err(SQLError::BadArity { actual: 2, .. })
     ));
-    let expression = predicate("SELECT * FROM docs WHERE fuse_bayesian_evidence(text_match(body, query_text()), knn_match(embedding, ARRAY[1.0, 0.0], 2))");
+    let expression = predicate(
+        "SELECT * FROM docs WHERE fuse_bayesian_evidence(text_match(body, query_text()), knn_match(embedding, ARRAY[1.0, 0.0], 2))",
+    );
     assert!(
         matches!(binding.lower_where(&expression, &[]), Err(SQLError::TypeMismatch(message)) if message.contains("requires probability-valued signals"))
     );
@@ -268,7 +315,9 @@ fn logical_attention_defers_checked_model_capacity_to_execution() {
     };
     // This exceeds Vec's byte-capacity limit before any allocation is attempted.
     let heads = (isize::MAX as usize / std::mem::size_of::<uqa_fusion::AttentionFusion>()) + 1;
-    let expression = predicate(&format!("SELECT * FROM docs WHERE fuse_multihead(bayesian_match(body, 'rust'), knn_match(embedding, ARRAY[1.0, 0.0], 2), n_heads => {heads})"));
+    let expression = predicate(&format!(
+        "SELECT * FROM docs WHERE fuse_multihead(bayesian_match(body, 'rust'), knn_match(embedding, ARRAY[1.0, 0.0], 2), n_heads => {heads})"
+    ));
     let logical = retrieval::lower_where_bound(
         &binding,
         &expression,

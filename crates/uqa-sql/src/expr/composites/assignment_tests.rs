@@ -55,6 +55,9 @@ impl EngineHook for Catalog {
     fn resolve_type_name(&self, name: &str) -> std::result::Result<Option<ColumnType>, String> {
         Ok(ColumnType::from_sql_name(name).ok())
     }
+    fn resolve_type_oid(&self, oid: u32) -> std::result::Result<Option<ColumnType>, String> {
+        Ok((oid == 42_001).then(target))
+    }
 }
 
 fn row(value: Value, oid: u32) -> Value {
@@ -82,11 +85,10 @@ fn admitted_xid_fields_are_not_reinterpreted_as_integer_inputs() {
         )
         .unwrap()
         .unwrap();
-        let Value::Record(fields) = assigned else {
-            panic!("assigned composite")
-        };
-        assert_eq!(fields.type_oid(), Some(42_001));
-        assert_eq!(fields.values()[0], Value::Int(value));
+        assert_eq!(
+            assigned_field(&assigned, &Catalog(ColumnType::Xid)),
+            Value::Int(value)
+        );
     }
 }
 
@@ -102,10 +104,7 @@ fn admitted_bpchar_fields_keep_padding_in_composite_assignment() {
     )
     .unwrap()
     .unwrap();
-    let Value::Record(fields) = &assigned else {
-        panic!("assigned composite")
-    };
-    assert_eq!(fields.values()[0], field);
+    assert_eq!(assigned_field(&assigned, &catalog), field);
     assert_eq!(
         crate::result::format_postgres_text(&assigned, &target(), Some(&catalog)).unwrap(),
         r#"("a   ")"#
@@ -122,10 +121,10 @@ fn unknown_field_input_is_converted_while_a_declared_integer_remains_incompatibl
     )
     .unwrap()
     .unwrap();
-    let Value::Record(fields) = assigned else {
-        panic!("assigned composite")
-    };
-    assert_eq!(fields.values()[0], Value::Int(42));
+    assert_eq!(
+        assigned_field(&assigned, &Catalog(ColumnType::Xid)),
+        Value::Int(42)
+    );
     let error = cast_to_composite(
         &Catalog(ColumnType::Xid),
         &row(Value::Int(42), 23),
@@ -146,19 +145,35 @@ fn builtin_array_field_identities_resolve_without_a_user_catalog_oid_lookup() {
     ] {
         let input = Value::Array(uqa_core::ArrayValue::try_new(vec![element.clone()]).unwrap());
         let assigned = cast_to_composite(
-            &Catalog(ColumnType::Array(Box::new(element_type))),
+            &Catalog(ColumnType::Array(Box::new(element_type.clone()))),
             &row(input, oid),
             Some(&ColumnType::Record),
             &target(),
         )
         .unwrap()
         .unwrap();
-        let Value::Record(fields) = assigned else {
-            panic!("assigned composite")
-        };
-        let Value::Array(array) = &fields.values()[0] else {
+        let field = assigned_field(
+            &assigned,
+            &Catalog(ColumnType::Array(Box::new(element_type))),
+        );
+        let Value::Array(array) = field else {
             panic!("assigned array")
         };
         assert_eq!(array.elements(), &[element]);
     }
+}
+
+fn assigned_field(value: &Value, catalog: &Catalog) -> Value {
+    let Value::Datum(datum) = value else {
+        panic!("retained assigned composite");
+    };
+    assert_eq!(datum.type_oid(), 42_001);
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let field =
+        crate::expr::datums::read_composite_field_with_control(datum, "n", Some(catalog), &control)
+            .unwrap();
+    let Value::Datum(field) = &*field else {
+        panic!("physical assigned field");
+    };
+    crate::expr::datums::read(field).unwrap()
 }

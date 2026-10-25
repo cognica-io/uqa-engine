@@ -437,7 +437,7 @@ impl Engine {
                     constraint: self.foreign_key_constraint_identity(table, &foreign_key)?,
                     firing_relation: firing_relation.clone(),
                     row: Some(row),
-                    referenced: false,
+                    referenced_values: None,
                 });
             }
         }
@@ -567,6 +567,7 @@ impl Engine {
         event: super::DeferredReferencedKey<'_>,
         row_table: &str,
         doc_id: uqa_core::DocId,
+        values: std::sync::Arc<[crate::Value]>,
     ) -> Result<(), SQLError> {
         let canonical_row_table = self.row_lock_table_name(row_table)?;
         let check = crate::DeferredForeignKeyCheck {
@@ -576,7 +577,7 @@ impl Engine {
                 table: self.row_locks.table_key(&canonical_row_table),
                 doc_id,
             }),
-            referenced: true,
+            referenced_values: Some(values),
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -606,7 +607,7 @@ impl Engine {
             constraint: self.referenced_key_constraint_identity(&event)?,
             firing_relation: self.deferred_firing_relation(event.firing_table)?,
             row: None,
-            referenced: true,
+            referenced_values: None,
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {

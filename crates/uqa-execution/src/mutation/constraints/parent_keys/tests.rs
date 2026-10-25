@@ -16,6 +16,27 @@ fn wide_key(index: usize) -> Vec<Value> {
 }
 
 #[test]
+fn deferred_parent_keys_compare_physical_and_logical_values_before_spilling() {
+    let physical = Value::Datum(uqa_core::DatumValue::new(
+        23,
+        0,
+        7_i32.to_le_bytes().to_vec(),
+    ));
+    for allowance in [0, 64 * 1024] {
+        for value in [Value::Int(7), physical.clone()] {
+            let mut builder = ParentKeyBuffer::new(allowance, CancellationToken::new());
+            builder.insert(&[value], None).unwrap();
+            let keys = builder.finish().unwrap();
+            assert!(keys.contains(&[Value::Int(7)], None).unwrap());
+            assert!(keys
+                .contains(std::slice::from_ref(&physical), None)
+                .unwrap());
+            assert!(!keys.contains(&[Value::Int(8)], None).unwrap());
+        }
+    }
+}
+
+#[test]
 fn deferred_parent_keys_bound_wide_retention_and_keep_exact_membership() {
     const COUNT: usize = 2048;
     let former = allocation_counter::measure(|| {
@@ -30,19 +51,19 @@ fn deferred_parent_keys_bound_wide_retention_and_keep_exact_membership() {
     let bounded = allocation_counter::measure(|| {
         let mut keys = ParentKeyBuffer::new(64 * 1024, CancellationToken::new());
         for index in (0..COUNT).rev() {
-            keys.insert(&wide_key(index)).unwrap();
+            keys.insert(&wide_key(index), None).unwrap();
         }
-        keys.insert(&wide_key(17)).unwrap();
+        keys.insert(&wide_key(17), None).unwrap();
         let keys = keys.finish().unwrap();
         for index in (0..COUNT).step_by(31) {
             let before = keys.reads.get();
-            assert!(keys.contains(&wide_key(index)).unwrap());
+            assert!(keys.contains(&wide_key(index), None).unwrap());
             assert!(keys.reads.get() - before <= 12);
             let mut different = wide_key(index);
             different[1] = Value::Str("λ".repeat(2048));
-            assert!(!keys.contains(&different).unwrap());
+            assert!(!keys.contains(&different, None).unwrap());
         }
-        assert!(!keys.contains(&wide_key(COUNT)).unwrap());
+        assert!(!keys.contains(&wide_key(COUNT), None).unwrap());
     });
     assert!(bounded.bytes_max <= 512 * 1024, "{bounded:?}");
 }
@@ -78,12 +99,12 @@ fn deferred_parent_key_spill_preserves_core_normalized_equality() {
     for allowance in [0, 1, 64 * 1024] {
         let mut keys = ParentKeyBuffer::new(allowance, CancellationToken::new());
         for key in &inputs {
-            keys.insert(key).unwrap();
+            keys.insert(key, None).unwrap();
         }
         let keys = keys.finish().unwrap();
         for key in &probes {
             assert_eq!(
-                keys.contains(key).unwrap(),
+                keys.contains(key, None).unwrap(),
                 expected.contains(key),
                 "{key:?}"
             );
@@ -110,24 +131,29 @@ fn deferred_parent_key_digest_collisions_require_exact_owned_keys() {
 fn deferred_parent_keys_retain_cancellation_and_spill_oversized_keys() {
     let cancellation = CancellationToken::new();
     let mut builder = ParentKeyBuffer::new(0, cancellation.clone());
-    builder.insert(&[Value::Int(1)]).unwrap();
+    builder.insert(&[Value::Int(1)], None).unwrap();
     let keys = builder.finish().unwrap();
     let mut builder = ParentKeyBuffer::new(0, cancellation.clone());
     cancellation.cancel();
     assert_eq!(
-        keys.contains(&[Value::Int(1)]).unwrap_err().sqlstate(),
+        keys.contains(&[Value::Int(1)], None)
+            .unwrap_err()
+            .sqlstate(),
         Some("57014")
     );
     assert_eq!(
-        builder.insert(&[Value::Int(2)]).unwrap_err().sqlstate(),
+        builder
+            .insert(&[Value::Int(2)], None)
+            .unwrap_err()
+            .sqlstate(),
         Some("57014")
     );
     let mut builder = ParentKeyBuffer::new(0, CancellationToken::new());
     let key = vec![Value::Str("x".repeat(1024 * 1024))];
-    builder.insert(&key).unwrap();
+    builder.insert(&key, None).unwrap();
     let keys = builder.finish().unwrap();
-    assert!(keys.contains(&key).unwrap());
+    assert!(keys.contains(&key, None).unwrap());
     assert!(!keys
-        .contains(&[Value::Str("x".repeat(1024 * 1024 - 1))])
+        .contains(&[Value::Str("x".repeat(1024 * 1024 - 1))], None)
         .unwrap());
 }

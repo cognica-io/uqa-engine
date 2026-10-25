@@ -122,14 +122,14 @@ pub fn aggregate_value_with_args(
         }
         "min" => acc.min.clone().unwrap_or(Value::Null),
         "max" => acc.max.clone().unwrap_or(Value::Null),
-        "string_agg" => super::string_agg::finish(&acc.values.ordered_values(enums)?)?,
+        "string_agg" => super::string_agg::finish(&acc.values.ordered_values(enums)?, enums)?,
         "array_agg" => {
             let ordered_values = acc.values.ordered_values(enums)?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
             if let super::AggregateStatePlan::BufferedArrays = acc.state_plan {
-                return super::array_inputs::ArrayInputShape::stack(ordered_values);
+                return super::array_inputs::ArrayInputShape::stack(ordered_values, enums);
             }
             ArrayValue::try_new(ordered_values)
                 .map(Value::Array)
@@ -429,11 +429,15 @@ fn percentile_cont_with_catalog(
     let mut high_value = None;
     let mut index = 0_u64;
     values.for_each_ordered(enums, |record| {
-        if index == low {
-            low_value = Some(value_as_f64(&record.value)?);
-        }
-        if index == high {
-            high_value = Some(value_as_f64(&record.value)?);
+        if index == low || index == high {
+            let value = super::observation::read(&record.value, enums)?;
+            let value = value_as_f64(&value)?;
+            if index == low {
+                low_value = Some(value);
+            }
+            if index == high {
+                high_value = Some(value);
+            }
         }
         index = index
             .checked_add(1)

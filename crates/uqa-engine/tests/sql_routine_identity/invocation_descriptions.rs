@@ -148,3 +148,18 @@ fn verify_provider(provider: usize, reference: &str) {
         &selected(&reference, |case| case["final_cleanup"] == true),
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn procedural_retained_records_match_postgresql(#[case] provider: usize) {
+    verify_provider(
+        provider,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/retained_procedural_records.expected.json"
+        )),
+    );
+}

@@ -24,7 +24,7 @@ mod reservations;
 mod traversal;
 use output::{BudgetedOutput, KeyOutput};
 pub use record_images::record_image_key_with_catalog_and_control;
-pub(crate) use reservations::canonical_row_lock_keys_with_catalog;
+pub(crate) use reservations::{canonical_constraint_key, canonical_row_lock_keys_with_catalog};
 use traversal::{Children, Frames};
 
 use crate::{ExecError, ExecResult};
@@ -519,7 +519,8 @@ fn encode_leaf(
     }
     match value {
         Value::Datum(datum) => {
-            if output.invokes_sql_hash_operator() {
+            if output.uses_declared_field_types() {
+                output.decoded_physical_value();
                 let value = uqa_sql::expr::datums::read_with_value_catalog_and_control(
                     datum,
                     output.enum_catalog(),

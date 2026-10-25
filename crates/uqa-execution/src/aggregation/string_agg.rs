@@ -9,18 +9,23 @@
 use uqa_core::Value;
 use uqa_sql::SQLError;
 
-pub(super) fn finish(values: &[Value]) -> Result<Value, SQLError> {
+pub(super) fn finish(
+    values: &[Value],
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+) -> Result<Value, SQLError> {
     let Some(first) = values.first() else {
         return Ok(Value::Null);
     };
-    let binary = matches!(pair(first)?.0, Value::Bytes(_));
+    let first = super::observation::read(pair(first)?.0, catalog)?;
+    let binary = matches!(&*first, Value::Bytes(_));
     let mut output = Vec::new();
-    for (index, value) in values.iter().enumerate() {
+    append(&mut output, &first, binary)?;
+    for value in values.iter().skip(1) {
         let (value, delimiter) = pair(value)?;
-        if index > 0 {
-            append(&mut output, delimiter, binary)?;
-        }
-        append(&mut output, value, binary)?;
+        let delimiter = super::observation::read(delimiter, catalog)?;
+        append(&mut output, &delimiter, binary)?;
+        let value = super::observation::read(value, catalog)?;
+        append(&mut output, &value, binary)?;
     }
     if binary {
         Ok(Value::Bytes(output))

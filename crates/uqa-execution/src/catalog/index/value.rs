@@ -35,7 +35,8 @@ pub struct ColumnValueIndex {
 }
 
 fn value_is_row(value: &Value) -> bool {
-    matches!(value, Value::Row(_) | Value::Record(_))
+    // A physical value can be a composite whose NULL bitmap differs from the scalar null posting. Catalog-free eligibility cannot classify it as a scalar.
+    matches!(value, Value::Row(_) | Value::Record(_) | Value::Datum(_))
 }
 
 fn value_is_temporal(value: &Value) -> bool {

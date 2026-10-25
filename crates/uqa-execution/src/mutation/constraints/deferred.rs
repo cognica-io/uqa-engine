@@ -94,7 +94,7 @@ pub fn validate_deferred_foreign_key_checks(
                 validation
                     .cross_type_parent_keys
                     .as_ref()
-                    .map(|keys| keys.contains(&values))
+                    .map(|keys| keys.contains(&values, Some(context.values)))
                     .transpose()?
                     .unwrap_or(false)
             };
@@ -118,20 +118,15 @@ fn deferred_violation(
     document: &uqa_storage::document_store::Document,
 ) -> Result<SQLError, SQLError> {
     let foreign_key = &validation.foreign_key;
-    let values = foreign_key
-        .local_columns
-        .iter()
-        .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
-        .collect::<Vec<_>>();
-    if check.referenced {
+    if let Some(values) = &check.referenced_values {
         let referencing = &check.constraint.relation.name;
         let key = super::foreign_key_key(
             context,
             &check.firing_relation.qualified_name(),
             &foreign_key.ref_columns,
-            table,
-            &foreign_key.local_columns,
-            &values,
+            &check.firing_relation.qualified_name(),
+            &foreign_key.ref_columns,
+            values,
         )?;
         return Ok(SQLError::Diagnostic {
             sqlstate: "23503".into(),
@@ -146,6 +141,11 @@ fn deferred_violation(
             hint: None,
         });
     }
+    let values = foreign_key
+        .local_columns
+        .iter()
+        .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+        .collect::<Vec<_>>();
     let referenced = foreign_key_relation_name(&foreign_key.ref_table);
     let key = super::foreign_key_key(
         context,

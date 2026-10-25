@@ -8,8 +8,8 @@
 
 use super::{
     range::{
-        multirange_from_produced_ranges, parse_multirange_with_control, parse_range_with_control,
-        range_bound_flags, range_from_values_with_control,
+        multirange_from_produced_ranges, parse_range_with_control, range_bound_flags,
+        range_from_values_with_control,
     },
     CanonicalMultirange, CanonicalRange, Result, SQLError, Value,
 };
@@ -137,7 +137,11 @@ fn range_constructor(
             subtype.range_name()
         )));
     }
-    let bounds = match args.get(2) {
+    let decoded = match args.get(2) {
+        Some(Value::Datum(datum)) => Some(super::datums::read_with_control(datum, control)?),
+        _ => None,
+    };
+    let bounds = match decoded.as_deref().or_else(|| args.get(2)) {
         None => Some("[)"),
         Some(Value::Null) => None,
         Some(Value::Str(bounds) | Value::FixedChar(bounds)) => Some(bounds.as_str()),
@@ -161,9 +165,29 @@ fn multirange_constructor(
     let mut ranges = ProductionVec::new(*control);
     for argument in args {
         control.check()?;
+        let decoded = match argument {
+            Value::Datum(datum)
+                if crate::catalog::type_metadata::builtin_array_element(datum.type_oid())
+                    .is_some() =>
+            {
+                Some(super::datums::read_array_input_with_catalog_and_control(
+                    datum, None, control,
+                )?)
+            }
+            _ => None,
+        };
+        let argument = decoded.as_deref().unwrap_or(argument);
         match argument {
             Value::Str(text) | Value::FixedChar(text) => {
                 ranges.push_produced(parse_range_with_control(text, subtype, control)?)?;
+            }
+            Value::Datum(datum)
+                if matches!(
+                    crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()),
+                    Some(crate::ColumnType::Range(_))
+                ) =>
+            {
+                ranges.push_produced(RangeSet::single(argument, subtype, control)?)?;
             }
             Value::Array(array) => {
                 if array.dimensions().len() > 1 {
@@ -178,13 +202,7 @@ fn multirange_constructor(
                     if matches!(value, Value::Null) {
                         return Err(null_multirange_member());
                     }
-                    let (Value::Str(text) | Value::FixedChar(text)) = value else {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "{} variadic input must contain ranges",
-                            subtype.multirange_name()
-                        )));
-                    };
-                    ranges.push_produced(parse_range_with_control(text, subtype, control)?)?;
+                    ranges.push_produced(RangeSet::single(value, subtype, control)?)?;
                 }
             }
             Value::Null if args.len() == 1 => return inline_value(Value::Null, control),
@@ -220,7 +238,7 @@ fn accessor(
             "{operation} takes 1 argument"
         )));
     };
-    let ranges = RangeSet::parse(range_text(argument)?, subtype, multirange, control)?;
+    let ranges = RangeSet::read(argument, subtype, multirange, control)?;
     if operation == "isempty" {
         return inline_value(
             Value::Bool(if multirange {
@@ -286,16 +304,15 @@ fn merge(
                 "range_merge(multirange) takes 1 argument".into(),
             ));
         };
-        parse_multirange_with_control(range_text(argument)?, subtype, control)?
-            .merge_cover_with_control(control)?
+        RangeSet::multiple(argument, subtype, control)?.merge_cover_with_control(control)?
     } else {
         let [left, right] = args else {
             return Err(SQLError::TypeMismatch(
                 "range_merge(range, range) takes 2 arguments".into(),
             ));
         };
-        let left = parse_range_with_control(range_text(left)?, subtype, control)?;
-        let right = parse_range_with_control(range_text(right)?, subtype, control)?;
+        let left = RangeSet::single(left, subtype, control)?;
+        let right = RangeSet::single(right, subtype, control)?;
         left.merge_cover_with_control(&right, control)?
     };
     text_value(merged.to_text_with_control(control)?, control)
@@ -313,8 +330,8 @@ fn operator(
             "range {operation} operator takes 2 arguments"
         )));
     };
-    let left = RangeSet::parse(range_text(left)?, subtype, left_multirange, control)?;
-    let right = RangeSet::parse_auto(range_text(right)?, subtype, control)?;
+    let left = RangeSet::read(left, subtype, left_multirange, control)?;
+    let right = RangeSet::read_auto(right, subtype, control)?;
     inline_value(
         Value::Bool(match operation {
             "overlap" => left.overlaps(&right, control)?,
@@ -344,7 +361,7 @@ fn element_containment(
     } else {
         (right, left)
     };
-    let range = RangeSet::parse(range_text(range)?, subtype, multirange, control)?;
+    let range = RangeSet::read(range, subtype, multirange, control)?;
     for member in range.ranges() {
         if member.contains_value_with_control(element, control)? {
             return inline_value(Value::Bool(true), control);

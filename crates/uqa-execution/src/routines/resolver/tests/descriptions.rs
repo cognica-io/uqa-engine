@@ -108,7 +108,7 @@ fn native_procedural_parameters_reuse_declarations_but_read_current_values() {
             types: &types,
             datums: &parsed.datums,
             values: &values,
-            record_schemas: &schemas,
+            record_descriptors: &schemas,
             bindings: &bindings,
             error: None,
             param_count: 0,

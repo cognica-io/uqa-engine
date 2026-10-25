@@ -21,6 +21,8 @@ pub(in crate::expr) mod inline;
 mod malformed;
 mod records;
 
+pub use arrays::ArrayShape;
+
 /// Whether catalog-free constant evaluation could reach an admitted physical value.
 pub fn contains_datum(value: &Value) -> bool {
     super::observations::any_nested_value(value, &mut |value| matches!(value, Value::Datum(_)))
@@ -37,10 +39,10 @@ pub(in crate::expr) fn record_type_oid(
 }
 
 /// Shape functions inspect only the detoasted array header, without resolving or observing its elements.
-pub(in crate::expr) fn array_shape(
+pub fn array_shape(
     datum: &DatumValue,
     control: &ProductionControl<'_>,
-) -> Result<arrays::ArrayShape, SQLError> {
+) -> Result<ArrayShape, SQLError> {
     control.check()?;
     let payload = payload(datum, control)?;
     arrays::ArrayShape::read(payload.bytes())
@@ -123,6 +125,18 @@ pub fn read_composite_field_with_control(
     let payload = payload(datum, control)?;
     records::read_with_lookup(payload.bytes(), Some(field), control, |oid| {
         super::composites::descriptor(catalog, oid).map(Some)
+    })
+}
+
+pub(in crate::expr) fn read_composite_field_in_descriptor(
+    datum: &DatumValue,
+    field: &str,
+    descriptor: &std::sync::Arc<super::composites::CompositeTypeDescriptor>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let payload = payload(datum, control)?;
+    records::read_with_lookup(payload.bytes(), Some(field), control, |_| {
+        Ok(Some(descriptor.clone()))
     })
 }
 
@@ -298,7 +312,7 @@ fn read_payload(
                         bytes,
                         catalog,
                         control,
-                    )
+                    );
                 }
                 _ => {}
             }

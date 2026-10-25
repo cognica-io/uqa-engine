@@ -87,6 +87,11 @@ impl RoutineValueDescription {
         match &self.0 {
             RoutineValueKind::Record => match value {
                 Value::Record(_) | Value::Null => Ok(value.clone()),
+                Value::Datum(datum)
+                    if crate::expr::composites::datum_is_composite(datum, context)? =>
+                {
+                    Ok(value.clone())
+                }
                 Value::Row(row) if row.field_types().is_some() => Ok(value.clone()),
                 Value::Row(values) => Ok(Value::Record(
                     values
@@ -104,6 +109,11 @@ impl RoutineValueDescription {
             },
             RoutineValueKind::Trigger => match value {
                 Value::Record(_) | Value::Row(_) | Value::Null => Ok(value.clone()),
+                Value::Datum(datum)
+                    if crate::expr::composites::datum_is_composite(datum, context)? =>
+                {
+                    Ok(value.clone())
+                }
                 _ => Err(SQLError::Routine {
                     sqlstate: "42804".into(),
                     message: "trigger function must return a row or NULL".into(),

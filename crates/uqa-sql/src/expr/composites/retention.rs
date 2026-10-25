@@ -19,7 +19,11 @@ pub fn retain_value_with_control(
     catalog: Option<&dyn CompositeTypeCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    if needs_retention(&value, control)? {
+    if needs_transformation(
+        &value,
+        control,
+        |value| matches!(value, Value::Record(record) if record.type_oid().is_some()),
+    )? {
         value.transform_with_control(control, |value| {
             let Value::Record(record) = value else {
                 return Ok(None);
@@ -47,15 +51,47 @@ pub(super) fn retain_record(
     Ok(control.finish(Value::Datum(datum), memory)?)
 }
 
-fn needs_retention(value: &Value, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
+/// A table tuple stores the flat physical value, while procedural record copies
+/// retain their expanded field binding. This transition never reads a payload.
+pub fn flatten_value_with_control(
+    value: Produced<Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    if !needs_transformation(
+        &value,
+        control,
+        |value| matches!(value, Value::Datum(datum) if datum.record_fields().is_some()),
+    )? {
+        return Ok(value);
+    }
+    value.transform_with_control(control, |value| {
+        if let Value::Datum(datum) = value {
+            if datum.record_fields().is_some() {
+                return control
+                    .copy_value(&Value::Datum(datum.clone().without_record_fields()))
+                    .map(Some)
+                    .map_err(Into::into);
+            }
+        }
+        Ok(None)
+    })
+}
+
+fn needs_transformation(
+    value: &Value,
+    control: &ProductionControl<'_>,
+    selected: impl Fn(&Value) -> bool,
+) -> Result<bool, SQLError> {
     let mut stack = ProductionSmallVec::<[&[Value]; 8]>::new(*control);
     let mut values = std::slice::from_ref(value);
     loop {
         control.check()?;
         if let Some((value, remaining)) = values.split_first() {
             values = remaining;
+            if selected(value) {
+                return Ok(true);
+            }
             let children = match value {
-                Value::Record(record) if record.type_oid().is_some() => return Ok(true),
                 Value::Record(record) => record.values(),
                 Value::Row(row) => row.values(),
                 Value::Array(array) => array.elements(),

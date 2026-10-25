@@ -95,8 +95,8 @@ impl InsertConflictOverlay {
             let Some(values) = constraint.values(context, table, document)? else {
                 continue;
             };
-            let key =
-                crate::canonical_row_key(&values).map_err(crate::physical::physical_exec_error)?;
+            let key = crate::distinct::canonical_constraint_key(&values, Some(context.values))
+                .map_err(crate::physical::physical_exec_error)?;
             let overlay = self
                 .connection
                 .query_row(
@@ -190,8 +190,8 @@ impl InsertConflictOverlay {
             let Some(values) = constraint.values(context, table, document)? else {
                 continue;
             };
-            let key =
-                crate::canonical_row_key(&values).map_err(crate::physical::physical_exec_error)?;
+            let key = crate::distinct::canonical_constraint_key(&values, Some(context.values))
+                .map_err(crate::physical::physical_exec_error)?;
             self.connection
                 .execute(
                     "INSERT OR IGNORE INTO overlay_keys (physical_table, constraint_index, key, identity) VALUES (?1, ?2, ?3, ?4)",

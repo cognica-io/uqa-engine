@@ -385,7 +385,11 @@ pub fn find_foreign_key_parent(
             let Some(document) = context.reads.get_document(&physical_table, doc_id)? else {
                 continue;
             };
-            if foreign_key_parent_values(fk, &document, &lookup.comparison)? == lookup.values {
+            if index_keys::key_values_equal(
+                &foreign_key_parent_values(fk, &document, &lookup.comparison)?,
+                &lookup.values,
+                context.values,
+            )? {
                 return Ok(Some(PhysicalDocumentIdentity {
                     table: physical_table.clone(),
                     doc_id,

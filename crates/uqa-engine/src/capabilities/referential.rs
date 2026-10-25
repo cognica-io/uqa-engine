@@ -31,10 +31,10 @@ impl ReferentialDeferrals for Engine {
         &self,
         constraint_table: &str,
         firing_table: &str,
-        row_table: &str,
-        doc_id: DocId,
+        row: (&str, DocId),
         foreign_key: &ForeignKey,
         derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
+        values: std::sync::Arc<[uqa_core::Value]>,
     ) -> Result<(), SQLError> {
         Engine::defer_foreign_key_check(
             self,
@@ -44,8 +44,9 @@ impl ReferentialDeferrals for Engine {
                 foreign_key,
                 derived,
             },
-            row_table,
-            doc_id,
+            row.0,
+            row.1,
+            values,
         )
     }
     fn defer_foreign_key_parent_event(

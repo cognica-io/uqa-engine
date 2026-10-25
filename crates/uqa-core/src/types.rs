@@ -56,7 +56,7 @@ pub use array::{
     ControlledArrayElements,
 };
 pub use bit_string::BitStringValue;
-pub use datum::DatumValue;
+pub use datum::{DatumValue, RecordDatumField};
 pub use decimal::DecimalValue;
 pub use enum_value::{
     EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, MAX_ENUM_LABEL_KEY_BYTES,

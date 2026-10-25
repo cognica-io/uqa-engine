@@ -376,6 +376,27 @@ impl AggregateAccumulator {
         value: &Value,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
+        // Only transitions that inspect scalar payloads decode them. COUNT and
+        // collection transitions retain lazy inputs; MIN/MAX use SQL comparison.
+        let decoded;
+        let value = if matches!(value, Value::Datum(_)) {
+            if matches!(
+                self.state_plan,
+                AggregateStatePlan::Generic
+                    | AggregateStatePlan::Sum
+                    | AggregateStatePlan::SumReal
+                    | AggregateStatePlan::BoolAnd
+                    | AggregateStatePlan::BoolOr
+                    | AggregateStatePlan::Statistics
+            ) {
+                decoded = super::observation::read(value, enums)?;
+                &*decoded
+            } else {
+                value
+            }
+        } else {
+            value
+        };
         match self.state_plan {
             AggregateStatePlan::Generic => {
                 self.count = self

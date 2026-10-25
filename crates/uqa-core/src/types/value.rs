@@ -142,6 +142,8 @@ struct TaggedDatum<'a> {
     type_oid: u32,
     offset: u32,
     hex: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    record_fields: Option<&'a [crate::RecordDatumField]>,
 }
 
 impl Serialize for Value {
@@ -199,6 +201,7 @@ impl Serialize for Value {
                 type_oid: value.type_oid(),
                 offset: value.offset(),
                 hex: &hex_text::<S::Error>(value.bytes())?,
+                record_fields: value.record_fields(),
             }
             .serialize(serializer),
             Self::Map(value) => value.serialize(serializer),

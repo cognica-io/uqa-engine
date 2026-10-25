@@ -63,10 +63,10 @@ pub trait ReferentialDeferrals {
         &self,
         constraint_table: &str,
         firing_table: &str,
-        row_table: &str,
-        doc_id: DocId,
+        row: (&str, DocId),
         foreign_key: &ForeignKey,
         derived: Option<&uqa_sql::ast::ReferencedPartitionConstraint>,
+        values: std::sync::Arc<[uqa_core::Value]>,
     ) -> Result<(), SQLError>;
     fn defer_foreign_key_parent_event(
         &self,

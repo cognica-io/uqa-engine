@@ -15,6 +15,7 @@ mod interval;
 mod legacy_vectors;
 mod mode;
 mod ranges;
+mod retained;
 
 #[test]
 fn numeric_extrema_preserve_total_order_and_nan_regardless_of_input_order() {

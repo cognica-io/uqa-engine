@@ -50,7 +50,8 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
         }
         let comparison =
             foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
-        let expected = comparison.normalize_referenced(old_values)?;
+        let referenced_values: std::sync::Arc<[Value]> = old_values.into();
+        let expected = comparison.normalize_referenced(referenced_values.to_vec())?;
         context.deferrals.defer_foreign_key_parent_event(
             &ref_table,
             firing.relation,
@@ -70,6 +71,7 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
                     foreign_key: &fk,
                     derived: firing.derived,
                     expected: &expected,
+                    referenced_values: &referenced_values,
                     root_deletes: &|_, _| Ok(false),
                 },
                 &|table, id| Ok(table == parent.table && id == parent.doc_id),
@@ -90,10 +92,10 @@ pub fn defer_updated_key_checks<S: Clone + 'static>(
             context.deferrals.defer_foreign_key_check(
                 &ref_table,
                 firing.relation,
-                &child.table,
-                child.doc_id,
+                (&child.table, child.doc_id),
                 &fk,
                 firing.derived,
+                referenced_values.clone(),
             )?;
         }
     }
@@ -151,7 +153,8 @@ pub(crate) fn defer_deleted_key_checks_excluding<S: Clone + 'static>(
         }
         let comparison =
             foreign_key_comparison_types(context.constraints.partitions.catalog, &ref_table, &fk)?;
-        let expected = comparison.normalize_referenced(key_values)?;
+        let referenced_values: std::sync::Arc<[Value]> = key_values.into();
+        let expected = comparison.normalize_referenced(referenced_values.to_vec())?;
         context.deferrals.defer_foreign_key_parent_event(
             &ref_table,
             parent_table,
@@ -174,6 +177,7 @@ pub(crate) fn defer_deleted_key_checks_excluding<S: Clone + 'static>(
                     foreign_key: &fk,
                     derived: firing.derived,
                     expected: &expected,
+                    referenced_values: &referenced_values,
                     root_deletes,
                 },
                 &excluded_parents,
@@ -197,10 +201,10 @@ pub(crate) fn defer_deleted_key_checks_excluding<S: Clone + 'static>(
             context.deferrals.defer_foreign_key_check(
                 &ref_table,
                 parent_table,
-                &child.table,
-                child.doc_id,
+                (&child.table, child.doc_id),
                 &fk,
                 firing.derived,
+                referenced_values.clone(),
             )?;
         }
     }
@@ -214,6 +218,7 @@ struct PeriodKeyChecks<'a> {
     foreign_key: &'a ForeignKey,
     derived: Option<&'a uqa_sql::ast::ReferencedPartitionConstraint>,
     expected: &'a [Value],
+    referenced_values: &'a std::sync::Arc<[Value]>,
     /// The rows the same statement deletes, which need no check.
     root_deletes: &'a DeletedRowLookup<'a>,
 }
@@ -251,7 +256,11 @@ fn defer_period_key_checks<S: Clone + 'static>(
                 else {
                     return Ok(true);
                 };
-                if child_lookup.values[..ordinary_len] != key.expected[..ordinary_len] {
+                if !crate::mutation::constraints::index_keys::key_values_equal(
+                    &child_lookup.values[..ordinary_len],
+                    &key.expected[..ordinary_len],
+                    context.constraints.values,
+                )? {
                     return Ok(true);
                 }
                 if crate::mutation::constraints::period::period_foreign_key_coverage_excluding(
@@ -266,10 +275,10 @@ fn defer_period_key_checks<S: Clone + 'static>(
                 context.deferrals.defer_foreign_key_check(
                     key.constraint_table,
                     key.firing_relation,
-                    &physical_table,
-                    child_id,
+                    (&physical_table, child_id),
                     key.foreign_key,
                     key.derived,
+                    key.referenced_values.clone(),
                 )?;
                 Ok(true)
             },

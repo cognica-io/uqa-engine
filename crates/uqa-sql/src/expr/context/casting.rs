@@ -490,10 +490,7 @@ fn record_identity_cast(
     if matches!(target, ColumnType::Record) {
         // Composite-to-record coercion is a binary relabel: even malformed physical fields remain unread.
         if let Value::Datum(datum) = value {
-            let ty = engine
-                .resolve_type_oid(datum.type_oid())
-                .map_err(SQLError::Internal)?;
-            if matches!(ty, Some(ColumnType::Composite(_))) {
+            if crate::expr::composites::datum_is_composite(datum, engine)? {
                 return Ok(Some(control.copy_value(value)?));
             }
         }

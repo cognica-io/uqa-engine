@@ -103,7 +103,8 @@ mod statement_cancellation;
 mod temporal_input;
 mod value_catalog;
 pub mod variadic_any;
-pub use value_catalog::{EngineValueCatalog, SQLRecordFields, SQLValueCatalog};
+pub(crate) use value_catalog::type_by_oid_with_control;
+pub use value_catalog::{EngineValueCatalog, SQLRecordFields, SQLRecordView, SQLValueCatalog};
 
 #[cfg(test)]
 use binary::eval_comparison_op;

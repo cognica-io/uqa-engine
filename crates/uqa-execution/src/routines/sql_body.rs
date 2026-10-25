@@ -250,7 +250,7 @@ fn shape_result(
         let mut rows = Vec::with_capacity(last.rows.len());
         for index in 0..last.rows.len() {
             let value = shape(result_row_values(last, index).unwrap_or_default())?;
-            rows.push(output_values(def, value, outputs.len())?);
+            rows.push(output_values(def, value, outputs.len(), Some(expressions))?);
         }
         return Ok(RoutineOutcome {
             value: Value::Null,
@@ -267,7 +267,10 @@ fn shape_result(
     let (value, out_values) = if outputs.is_empty() {
         (value, Vec::new())
     } else {
-        (Value::Null, output_values(def, value, outputs.len())?)
+        (
+            Value::Null,
+            output_values(def, value, outputs.len(), Some(expressions))?,
+        )
     };
     Ok(RoutineOutcome {
         value,
@@ -307,7 +310,7 @@ fn result_value(
                             validate_sql_function_record(types, source, &target)?;
                         }
                     }
-                    let fields = row_fields(value, expected.len())?;
+                    let fields = row_fields(value, expected.len(), Some(expressions))?;
                     return Ok(Value::Record(
                         expected
                             .iter()
@@ -374,15 +377,24 @@ fn output_values(
     def: &CreateFunction,
     value: Value,
     output_count: usize,
+    engine: Option<&dyn uqa_sql::expr::EngineHook>,
 ) -> Result<Vec<Value>, SQLError> {
     if output_count == 0 || (output_count == 1 && !def.is_procedure) {
         Ok(vec![value])
     } else {
-        row_fields(value, output_count)
+        row_fields(value, output_count, engine)
     }
 }
 
-pub(super) fn row_fields(value: Value, expected: usize) -> Result<Vec<Value>, SQLError> {
+pub(super) fn row_fields(
+    value: Value,
+    expected: usize,
+    engine: Option<&dyn uqa_sql::expr::EngineHook>,
+) -> Result<Vec<Value>, SQLError> {
+    let value = match value {
+        Value::Datum(datum) => uqa_sql::expr::datums::read_with_catalog(&datum, engine)?,
+        value => value,
+    };
     let fields = match value {
         Value::Record(fields) => fields.into_values(),
         Value::Row(fields) => fields.into_values(),

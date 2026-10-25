@@ -31,6 +31,7 @@ mod array_inputs;
 mod distinct;
 mod executor;
 mod finalize;
+mod observation;
 mod ordering;
 mod output;
 mod partial_state;

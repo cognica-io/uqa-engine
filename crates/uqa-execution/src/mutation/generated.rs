@@ -7,7 +7,7 @@
 //! Recompute stored generated values from a relation's declared row schema.
 
 use uqa_core::Value;
-use uqa_sql::assignment::{conversion::coerce_assignment_value, AssignmentContext};
+use uqa_sql::assignment::{columns::coerce_column_value, AssignmentContext};
 use uqa_sql::{
     ast::{ColumnDef, Expr, GeneratedColumn, GeneratedColumnKind},
     ResultRow, RowSchema, SQLError,
@@ -41,7 +41,7 @@ pub fn refresh_stored_generated_columns(
         let (value, source) = evaluate(&generated.expression, document, &schema)?;
         document.insert(
             column.name.clone(),
-            coerce_assignment_value(assignment, value, &column.ty, source.as_ref())?,
+            coerce_column_value(assignment, value, &column.ty, source.as_ref())?,
         );
     }
     Ok(())
