@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Lazy typed NEW expressions for partial INSERT assignments.
+//! Lazy typed NEW expressions for INSERT and UPDATE assignments.
 
 use super::{InternalRelationId, SQLError, ScalarExpr};
 use crate::{
@@ -47,6 +47,46 @@ pub(super) fn column_expression(
         scalar: cast(current, &column.ty),
         subqueries: insert.subqueries.clone(),
     };
+    crate::plan::subqueries::prune_expression(&mut expression);
+    Ok(expression)
+}
+
+pub(super) fn update_column_expression(
+    context: RuleAnalysisContext<'_>,
+    update: &crate::plan::UpdatePlan,
+    column: &ColumnDef,
+    old: ScalarExpr,
+) -> Result<ExpressionPlan, SQLError> {
+    let mut expression = ExpressionPlan {
+        scalar: old,
+        subqueries: update.subqueries.clone(),
+    };
+    for input in &update.assignments {
+        for target in input
+            .target
+            .targets()
+            .iter()
+            .filter(|target| target.column == column.name)
+        {
+            if matches!(input.target, crate::ast::AssignmentTargets::Multiple(_)) {
+                return Err(SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message: "NEW variables in ON UPDATE rules cannot reference columns that are part of a multiple assignment in the subject UPDATE command".into(),
+                });
+            }
+            let value = if matches!(input.value, ScalarExpr::Default) {
+                let default = super::values::default_expression(context, column)?
+                    .unwrap_or(crate::ast::Expr::Literal(Value::Null));
+                crate::plan::input_projection::append_expression(
+                    &mut expression.subqueries,
+                    ExpressionPlan::lower(default),
+                )
+            } else {
+                input.value.clone()
+            };
+            expression.scalar = assignment(context, target, &column.ty, expression.scalar, value)?;
+        }
+    }
     crate::plan::subqueries::prune_expression(&mut expression);
     Ok(expression)
 }

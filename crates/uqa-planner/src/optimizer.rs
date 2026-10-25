@@ -54,6 +54,7 @@ use command::optimize_command;
 use implicit_fusion::{rewrite_implicit_hybrid_fusion, source_allows_unqualified_signals};
 use join_reorder::reorder_unified_plan_joins;
 pub(crate) use scalar::constants::retain_computed_integer;
+pub(crate) use scalar::optimize_qualification;
 use scalar::{optimize_assignments, optimize_projections, optimize_scalar_slot};
 use traversal::{optimize_query, optimize_source, optimize_unified_plan};
 

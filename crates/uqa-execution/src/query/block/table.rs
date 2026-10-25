@@ -200,24 +200,12 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             .collect(),
         bound_columns,
     )?;
-    let source_schema: Vec<String> = source_projection
-        .and_then(|projection| {
-            if open_document {
-                Some(projection.requested_columns().map(str::to_owned).collect())
-            } else {
-                projection.explicit_columns()
-            }
-        })
-        .map_or_else(
-            || table_columns,
-            |columns| {
-                // Pruning can request an unresolved output name. Only input names from binding may become physical columns, or an implicit GROUP BY alias would incorrectly appear to be a source column.
-                columns
-                    .into_iter()
-                    .filter(|column| schema.has_unqualified_column(column))
-                    .collect()
-            },
-        );
+    let source_schema = selected_source_columns(
+        table_columns,
+        source_projection.as_ref(),
+        schema,
+        open_document,
+    );
 
     if let Some(facet_fields) = facet_projection_fields(&stmt.projections)? {
         let execution = FacetExecution {
@@ -519,3 +507,31 @@ fn reads_stored_fields_only(expression: &ScalarExpr, stored: &crate::RowSchema) 
     });
     stored_only
 }
+
+/// Keep explicit hidden-column demands even when a whole-row or correlated expression also requires every declared field. The physical row retains declaration order; unresolved output aliases never become input columns.
+fn selected_source_columns(
+    table_columns: Vec<String>,
+    projection: Option<&SourceProjection>,
+    schema: &crate::RowSchema,
+    open_document: bool,
+) -> Vec<String> {
+    let Some(projection) = projection else {
+        return table_columns;
+    };
+    let mut requested = projection
+        .requested_columns()
+        .filter(|column| open_document || schema.has_unqualified_column(column))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut selected = Vec::new();
+    for column in table_columns {
+        if projection.contains(&column) {
+            requested.remove(column.as_str());
+            selected.push(column);
+        }
+    }
+    selected.extend(requested.into_iter().map(str::to_owned));
+    selected
+}
+
+#[cfg(test)]
+mod tests;

@@ -8,37 +8,13 @@
 
 use super::super::{
     operator_join_relation_schemas, overlay_outer_schema, rename_schema, JoinSchemaBinding,
-    SourceBindingInput, SourcePlan, SourceScope,
+    SourcePlan, SourceScope,
 };
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
 use crate::semantics::sets::placement::SetPlacement;
 
 impl Preparation<'_> {
-    pub(super) fn source_input(
-        &mut self,
-        input: SourceBindingInput<'_>,
-        subqueries: &[QueryPlan],
-        scope: SourceScope<'_>,
-    ) -> Result<RowSchema, SQLError> {
-        let SourceBindingInput::Join {
-            source,
-            left,
-            right,
-        } = input
-        else {
-            return self.source_in_scope(input.source(), subqueries, scope);
-        };
-        let schema = self.join_source_output(source, (left, right), subqueries, scope)?;
-        let schema = if scope.retain_names {
-            SourceScope::describe_output(source, schema)
-        } else {
-            schema
-        };
-        self.parameters.retain_source_schema(source, &schema);
-        Ok(schema)
-    }
-
     pub(super) fn source(
         &mut self,
         source: &SourcePlan,
@@ -205,6 +181,7 @@ impl Preparation<'_> {
         let outer = condition.as_ref();
         if let Some(on) = on {
             let joined = RowSchema::join(left, right, std::iter::empty::<String>());
+            let joined = crate::binding::with_query_table_pseudo_columns(&joined);
             let input = overlay_outer_schema(&joined, outer);
             self.in_placement(SetPlacement::JoinCondition, |analysis| {
                 analysis.require_boolean(on, &input, subqueries, "JOIN/ON")

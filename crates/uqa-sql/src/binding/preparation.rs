@@ -446,7 +446,7 @@ pub(super) fn projection_metadata(
     })
 }
 
-/// Record the input collation of each call in a stored expression whose routines are already bound for storage, as analysis records it for an executable statement. Nothing else in the expression changes, so a definition that has no other analysis pass, such as an index key or a trigger condition, keeps each call's selection.
+/// Record input collations and type-observer selections on already bound stored calls, as analysis records them for an executable statement. Constants and routine identities stay unchanged, while definitions without another analysis pass retain the complete selected metadata.
 pub(crate) fn assign_stored_input_collations(
     routines: &dyn RoutineResolution,
     expression: &mut crate::plan::ExpressionPlan,
@@ -467,7 +467,7 @@ pub(crate) fn assign_stored_input_collations(
         .apply(&mut expression.scalar, &mut expression.subqueries)
 }
 
-/// Record the input collation of each call in a stored query whose routines are already bound for storage, such as a view that an earlier release stored without selections. Nothing else in the query changes.
+/// Restore input collations and type-observer selections on already bound stored queries without rereading constants or changing routine identities.
 pub fn assign_stored_query_input_collations(
     routines: &dyn RoutineResolution,
     query: &mut QueryPlan,

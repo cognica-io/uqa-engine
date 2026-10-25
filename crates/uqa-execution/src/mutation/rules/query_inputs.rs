@@ -14,10 +14,10 @@ use crate::{
 use std::{collections::BTreeSet, rc::Rc};
 use uqa_sql::{
     ast::{InternalRelationId, RuleEvent, Statement},
-    plan::{InsertPlan, QueryPlan},
+    plan::InsertPlan,
     semantics::rules::{
-        action_binding::{bind_rule_action, bind_rule_expr_scoped, rule_action_target_columns},
-        binding::{InsertQueryResolver, RuleAction, RuleQueryInput},
+        action_binding::{bind_rule_action, rule_action_target_columns},
+        binding::{RuleQueryInput, RuleQueryResolver},
         clear_statement_returning,
         returning::{augment_rule_returning_action, validate_rule_returning_provider_width},
         statement_has_returning,
@@ -30,12 +30,7 @@ fn execute_insert_query_rules<S: Clone + 'static>(
     insert: &InsertPlan,
     params: &[SQLParam],
     scope: &crate::query::CteScope<S>,
-    prune: fn(
-        &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
-        &mut QueryPlan,
-        &BTreeSet<usize>,
-        usize,
-    ),
+    prune: crate::mutation::views::commands::SourceOutputPruning,
 ) -> Result<RuleExecutionOutcome, SQLError> {
     let rules = context
         .analysis
@@ -49,28 +44,20 @@ fn execute_insert_query_rules<S: Clone + 'static>(
         &insert.returning_aliases,
         &insert.subqueries,
     );
-    let mut outcome = RuleExecutionOutcome {
-        returning: None,
-        affected_rows: 0,
-        sets_command_tag: false,
-    };
+    let mut outcome = RuleExecutionOutcome::default();
     for rule in rules {
         for action in &rule.definition.actions {
             let target_columns = rule_action_target_columns(context.analysis.sources, action)?;
             let relation = InternalRelationId::allocate();
-            let mut resolver = InsertQueryResolver::new(context.analysis, insert, relation)?;
+            let mut resolver = RuleQueryResolver::from_insert(context.analysis, insert, relation)?;
             let mut bound = bind_rule_action(
                 context.analysis.sources,
                 action,
                 &target_columns,
                 &mut resolver,
             )?;
-            let condition = rule
-                .definition
-                .condition
-                .as_ref()
-                .map(|condition| bind_rule_expr_scoped(condition, &mut resolver, &BTreeSet::new()))
-                .transpose()?;
+            let condition =
+                resolver.condition(context.binding, &rule, &definitions, &privilege_subject)?;
             let captures = request.captures() && statement_has_returning(action);
             let consumer = if captures {
                 if outcome.returning.is_some() {
@@ -115,28 +102,33 @@ fn execute_insert_query_rules<S: Clone + 'static>(
                     expressions: resolver.expressions,
                 })
             };
-            let result = {
-                let _stored =
-                    uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition(
-                    );
-                context.statements.execute(
-                    RuleAction::bind(context.analysis, context.returning.aggregates, bound, input)?,
-                    params,
-                    Some(scope),
-                    &privilege_subject,
-                    consumer
-                        .as_ref()
-                        .map(|consumer| Rc::clone(consumer) as Rc<dyn QueryRowConsumer>),
-                )?
-            };
-            complete_action(&mut outcome, &rule, action, result, consumer)?;
+            let result = context.execute_action(
+                bound,
+                input,
+                params,
+                scope,
+                &privilege_subject,
+                consumer
+                    .as_ref()
+                    .map(|consumer| Rc::clone(consumer) as Rc<dyn QueryRowConsumer>),
+            )?;
+
+            complete_action(
+                &mut outcome,
+                RuleEvent::Insert,
+                &rule,
+                action,
+                result,
+                consumer,
+            )?;
         }
     }
     Ok(outcome)
 }
 
-fn complete_action(
+pub(super) fn complete_action(
     outcome: &mut RuleExecutionOutcome,
+    event: RuleEvent,
     rule: &uqa_sql::catalog::events::StoredRule,
     action: &Statement,
     result: StatementOutput,
@@ -144,7 +136,12 @@ fn complete_action(
 ) -> Result<(), SQLError> {
     if rule.definition.instead
         && rule.definition.condition.is_none()
-        && matches!(action, Statement::Insert(_))
+        && matches!(
+            (event, action),
+            (RuleEvent::Insert, Statement::Insert(_))
+                | (RuleEvent::Update, Statement::Update(_))
+                | (RuleEvent::Delete, Statement::Delete(_))
+        )
     {
         outcome.affected_rows = match &result {
             StatementOutput::Mutation(result) => result.affected_rows,
@@ -175,17 +172,18 @@ fn returning_consumer<'a, S: Clone + 'static>(
     request: RuleReturningRequest,
     target_columns: &BTreeSet<String>,
 ) -> Result<Rc<super::returning::RuleReturningConsumer<'a>>, SQLError> {
-    let provider = uqa_sql::semantics::returning::dml_statement_returning_schema(
+    let provider = uqa_sql::semantics::rules::returning::rule_action_returning_schema(
+        context.analysis.sources,
         context.returning,
-        action.clone(),
-    )?
-    .ok_or_else(|| SQLError::Internal("rule action lost its RETURNING descriptor".into()))?;
+        action,
+        RuleEvent::Insert,
+        definitions,
+    )?;
     validate_rule_returning_provider_width(provider.len(), definitions.len())?;
     augment_rule_returning_action(bound, None, definitions.len(), request, target_columns)?;
     Ok(Rc::new(super::returning::RuleReturningConsumer::new(
         context.assignment,
         definitions,
-        None,
         context.projection,
         ReturningRows::with_budget(
             context.memory.work_mem_bytes()?,
@@ -200,12 +198,7 @@ pub fn run_insert_query_rules<S: Clone + 'static>(
     queries: &uqa_sql::semantics::rules::binding::InsertRuleQueries,
     params: &[SQLParam],
     scope: &crate::query::CteScope<S>,
-    prune: fn(
-        &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
-        &mut QueryPlan,
-        &BTreeSet<usize>,
-        usize,
-    ),
+    prune: crate::mutation::views::commands::SourceOutputPruning,
 ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
     let mut output = None;
     let mut affected = 0;

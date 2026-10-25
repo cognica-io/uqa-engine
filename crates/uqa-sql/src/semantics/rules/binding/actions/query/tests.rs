@@ -101,7 +101,7 @@ fn native_rule_expressions_retain_event_collation_in_each_scalar_scope() {
         .unwrap();
         let insert = &queries.relations[0];
         let relation = InternalRelationId::allocate();
-        let mut resolver = InsertQueryResolver::new(context, insert, relation).unwrap();
+        let mut resolver = RuleQueryResolver::from_insert(context, insert, relation).unwrap();
         let action = crate::compile("SELECT NEW.n, NEW.n COLLATE \"POSIX\", (SELECT NEW.n)")
             .unwrap()
             .remove(0);
@@ -151,6 +151,91 @@ fn native_rule_expressions_retain_event_collation_in_each_scalar_scope() {
 }
 
 struct RuleContracts(Vec<StoredRule>);
+
+#[test]
+fn mutation_inputs_keep_native_namespaces_and_event_collations() {
+    let context = RuleAnalysisContext {
+        rules: &Catalog,
+        sources: &Catalog,
+        returning: &Catalog,
+        domains: &Catalog,
+        composites: None,
+    };
+    let mut binding = crate::binding::fixture::empty_binding_context();
+    binding.catalog = crate::binding::fixture::catalog(BTreeMap::from([(
+        crate::RelationIdentity::new("public", "input"),
+        crate::binding::fixture::table_definition(
+            Catalog.rule_relation_definitions("input").unwrap(),
+        ),
+    )]));
+    for expression in [
+        "'x' COLLATE \"POSIX\"",
+        "(SELECT 'x' COLLATE \"POSIX\")",
+        "(input).n",
+        "CASE WHEN input.tableoid=1::oid THEN 'x' ELSE 'y' END",
+        "(SELECT CASE WHEN input.tableoid=1::oid THEN 'x' ELSE 'y' END)",
+    ] {
+        let UnifiedPlan::Command(command) = UnifiedPlan::lower(
+            crate::compile(&format!("UPDATE input SET n={expression}"))
+                .unwrap()
+                .remove(0),
+        ) else {
+            panic!("command")
+        };
+        let CommandPlan::Update(statement) = command.as_ref() else {
+            panic!("UPDATE")
+        };
+        let mutation = mutation::RuleMutation::Update(statement);
+        let schema = crate::binding::analyze_source_plan_schema(
+            &Catalog,
+            &mutation.target_source(),
+            &[],
+            &binding,
+            None,
+        )
+        .unwrap();
+        let mut input = mutation::MutationRuleInput::bind(
+            context,
+            crate::binding::correlation::CorrelationContext {
+                routines: &Catalog,
+                catalog: binding.catalog.as_ref(),
+                resolution: &binding.resolution,
+                scoped_relations: None,
+            },
+            mutation,
+            (&schema, None),
+            true,
+            &"caller".into(),
+            &"owner".into(),
+        )
+        .unwrap();
+        let action = crate::compile("SELECT OLD.n, NEW.n COLLATE \"POSIX\", (SELECT NEW.n)")
+            .unwrap()
+            .remove(0);
+        let bound = crate::semantics::rules::action_binding::bind_rule_action(
+            &Catalog,
+            &action,
+            &BTreeSet::new(),
+            &mut input.resolver,
+        )
+        .unwrap();
+        let action =
+            RuleAction::bind(context, &|_: &str| false, bound, Some(input.finish(None))).unwrap();
+        let UnifiedPlan::Query(query) = action.lower(&|_: &str| false).unwrap() else {
+            panic!("query")
+        };
+        let output =
+            crate::binding::analyze_query_plan_schema(&Catalog, &query, &[], &binding, None)
+                .unwrap_or_else(|error| panic!("{expression}: {error}"));
+        assert_eq!(
+            (0..3)
+                .map(|position| output.column_collation(position))
+                .collect::<Vec<_>>(),
+            vec![Some(950), Some(951), Some(950)],
+            "{expression}"
+        );
+    }
+}
 
 impl RuleCatalog for RuleContracts {
     fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {

@@ -85,9 +85,18 @@ fn update_source_qualification_prepares_once_for_fixed_statement_rows() {
                 schema("target_id"),
                 PhysicalRow::from_values(vec![Value::Int(id)]),
             );
-            let matched = matching_update_sources(&mut qualification, &sources, &target).unwrap();
-            assert_eq!(matched.qualification_count, 1);
-            assert_eq!(matched.first.unwrap().row.value(0), Some(&Value::Int(id)));
+            let matched = sources
+                .read_rows()
+                .unwrap()
+                .filter_map(|source| {
+                    let source = source.unwrap();
+                    update_join_qualifies(&mut qualification, &target, &source)
+                        .unwrap()
+                        .then_some(source)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(matched.len(), 1);
+            assert_eq!(matched[0].row.value(0), Some(&Value::Int(id)));
         }
         assert_eq!(
             factory.0.load(Ordering::Relaxed),
@@ -155,14 +164,7 @@ fn prepared_update_qualification_keeps_source_counts_order_and_rechecks() {
     let empty = SpillBuffer::new(1)
         .into_shared(source_schema.clone())
         .unwrap();
-    assert_eq!(
-        count_source_qualifications(&mut qualification, &empty).unwrap(),
-        0
-    );
-    assert!(matching_update_sources(&mut qualification, &empty, &target)
-        .unwrap()
-        .first
-        .is_none());
+    assert_eq!(empty.read_rows().unwrap().count(), 0);
     assert_eq!(factory.0.load(Ordering::Relaxed), 0);
     let mut spill = SpillBuffer::new(1);
     spill
@@ -175,19 +177,24 @@ fn prepared_update_qualification_keeps_source_counts_order_and_rechecks() {
         ))
         .unwrap();
     let sources = spill.into_shared(source_schema).unwrap();
-    assert_eq!(
-        count_source_qualifications(&mut qualification, &sources).unwrap(),
-        3
-    );
-    let matched = matching_update_sources(&mut qualification, &sources, &target).unwrap();
-    assert_eq!(matched.qualification_count, 3);
-    let first = matched.first.unwrap();
+    let matched = sources
+        .read_rows()
+        .unwrap()
+        .filter_map(|source| {
+            let source = source.unwrap();
+            update_join_qualifies(&mut qualification, &target, &source)
+                .unwrap()
+                .then_some(source)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matched.len(), 3);
+    let first = &matched[0];
     assert_eq!(first.row.value(0), Some(&Value::Int(2)));
-    assert!(update_join_qualifies(&mut qualification, &target, &first).unwrap());
+    assert!(update_join_qualifies(&mut qualification, &target, first).unwrap());
     let changed = OwnedPhysicalRow::new(
         schema("source_id"),
         PhysicalRow::from_values(vec![Value::Int(0)]),
     );
     assert!(!update_join_qualifies(&mut qualification, &target, &changed).unwrap());
-    assert_eq!(factory.0.load(Ordering::Relaxed), 2);
+    assert_eq!(factory.0.load(Ordering::Relaxed), 1);
 }

@@ -779,6 +779,16 @@ fn analyze_query_plan_in_scope(
     }
 }
 
+pub fn ensure_select_privileges_for_query(
+    query: &QueryPlan,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
+) -> Result<(), SQLError> {
+    let mut universe = SourceLineage::default();
+    let mut required = BTreeSet::new();
+    analyze_query_plan(query, ctes, &[], &mut universe, &mut required)?;
+    ensure_required_select(&universe, &required, ctes)
+}
+
 pub fn ensure_select_privileges_for_query_block(
     statement: &QueryBlockPlan,
     source: &SourcePlan,

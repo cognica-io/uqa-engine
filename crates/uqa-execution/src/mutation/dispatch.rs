@@ -22,7 +22,7 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let rewrite = context.mutation.rules.views.rewrite;
+    let rewrite = context.mutation.rules.views;
     if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
         if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
             let _ = view_privileges::ensure_insert(rewrite.authorization, stmt)?;
@@ -89,7 +89,7 @@ fn set_returning_values_query<S: Clone + Send + Sync + 'static>(
         },
         || {
             uqa_sql::semantics::insert_values::implicit_target_columns(
-                context.mutation.rules.views.rewrite,
+                context.mutation.rules.views,
                 &stmt.table,
             )
         },
@@ -103,45 +103,7 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let rewrite = context.mutation.rules.views.rewrite;
-    if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
-        if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
-            let _ = view_privileges::ensure_update(rewrite.authorization, stmt)?;
-            let relation = uqa_core::RelationIdentity::from_legacy_name(&stmt.table)
-                .map_err(SQLError::Internal)?;
-            return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!("cannot change materialized view \"{}\"", relation.name),
-            });
-        }
-        if view_rewrite::has_instead_of_trigger(
-            rewrite,
-            &stmt.table,
-            uqa_sql::ast::TriggerEvent::Update,
-        )? || uqa_sql::semantics::rules::analysis::relation_suppresses_original_query(
-            context.mutation.rules.rules.analysis,
-            &stmt.table,
-            uqa_sql::ast::RuleEvent::Update,
-        )? {
-            let _ = view_privileges::ensure_update(rewrite.authorization, stmt)?;
-            super::routine_calls::update(context, stmt, params, inherited_ctes)?;
-            return super::views::commands::run_view_update_inner(
-                context,
-                prune,
-                stmt,
-                params,
-                inherited_ctes,
-            );
-        }
-        let bindings = inherited_ctes
-            .map(crate::query::binding::binding_context)
-            .transpose()?
-            .map(uqa_sql::binding::snapshot::BindingSnapshot::from);
-        let rewritten =
-            view_rewrite::rewrite_update_to_base(rewrite, stmt, params, bindings.as_ref())?;
-        return run_update(context, prune, &rewritten, params, inherited_ctes);
-    }
-    crate::mutation::update::table::run_table_update(context, stmt, params, inherited_ctes)
+    super::rules::schedule::run_update(context, prune, stmt, params, inherited_ctes)
 }
 
 pub fn run_delete<S: Clone + Send + Sync + 'static>(
@@ -151,45 +113,7 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let rewrite = context.mutation.rules.views.rewrite;
-    if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
-        if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
-            let _ = view_privileges::ensure_delete(rewrite.authorization, stmt)?;
-            let relation = uqa_core::RelationIdentity::from_legacy_name(&stmt.table)
-                .map_err(SQLError::Internal)?;
-            return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!("cannot change materialized view \"{}\"", relation.name),
-            });
-        }
-        if view_rewrite::has_instead_of_trigger(
-            rewrite,
-            &stmt.table,
-            uqa_sql::ast::TriggerEvent::Delete,
-        )? || uqa_sql::semantics::rules::analysis::relation_suppresses_original_query(
-            context.mutation.rules.rules.analysis,
-            &stmt.table,
-            uqa_sql::ast::RuleEvent::Delete,
-        )? {
-            let _ = view_privileges::ensure_delete(rewrite.authorization, stmt)?;
-            super::routine_calls::delete(context, stmt, params, inherited_ctes)?;
-            return super::views::commands::run_view_delete_inner(
-                context,
-                prune,
-                stmt,
-                params,
-                inherited_ctes,
-            );
-        }
-        let bindings = inherited_ctes
-            .map(crate::query::binding::binding_context)
-            .transpose()?
-            .map(uqa_sql::binding::snapshot::BindingSnapshot::from);
-        let rewritten =
-            view_rewrite::rewrite_delete_to_base(rewrite, stmt, params, bindings.as_ref())?;
-        return run_delete(context, prune, &rewritten, params, inherited_ctes);
-    }
-    crate::mutation::delete::run_table_delete(context, stmt, params, inherited_ctes)
+    super::rules::schedule::run_delete(context, prune, stmt, params, inherited_ctes)
 }
 
 pub fn run_merge<S: Clone + Send + Sync + 'static>(
@@ -199,7 +123,7 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let rewrite = context.mutation.rules.views.rewrite;
+    let rewrite = context.mutation.rules.views;
     if rewrite.catalog.target_view_kind(&stmt.target)?.is_some() {
         let scope = super::merge::analysis::merge_analysis_scope(
             context.mutation.scopes,

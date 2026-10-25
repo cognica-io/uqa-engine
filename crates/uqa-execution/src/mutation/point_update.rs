@@ -13,19 +13,65 @@ use crate::mutation::output::MutationOutput;
 use crate::query::locking::context::update_lock_strength;
 use std::collections::BTreeMap;
 use uqa_core::Value;
-use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     assignment::columns::coerce_to_column_type_from,
-    ast::{BinaryOp, ColumnType},
+    ast::ColumnType,
     plan::UpdatePlan,
     semantics::{
-        mutation_inputs::{expr_is_row_independent, top_level_column},
+        mutation_inputs::{
+            point_lookup_input, row_independent_assignments, RowIndependentAssignment,
+        },
         mutation_patch as patch_eligibility,
     },
-    SQLError, SQLParam, ScalarExpr,
+    SQLError, SQLParam,
 };
 pub mod context;
 pub use context::{PointMutationContext, RowIndependentUpdateValues, RowUpdateVectors};
+
+struct PointUpdateInput<'a> {
+    lookup_field: &'a str,
+    lookup_input: &'a uqa_sql::ScalarExpr,
+    assignments: Vec<RowIndependentAssignment<'a>>,
+}
+
+impl<'a> PointUpdateInput<'a> {
+    /// Complete physical path selection before any lookup expression or assignment can run.
+    fn select<S: Clone + 'static>(
+        context: &PointMutationContext<'_, S>,
+        stmt: &'a UpdatePlan,
+        columns: Option<&[uqa_sql::ast::ColumnDef]>,
+    ) -> Result<Option<Self>, SQLError> {
+        if !stmt.returning.is_empty()
+            || columns
+                .is_some_and(|columns| columns.iter().any(|column| column.generated.is_some()))
+        {
+            return Ok(None);
+        }
+        let Some((lookup_field, lookup_input)) = point_lookup_input(stmt.predicate.as_ref()) else {
+            return Ok(None);
+        };
+        let Some(assignments) = row_independent_assignments(&stmt.assignments) else {
+            return Ok(None);
+        };
+        if !patch_eligibility::can_patch_update_without_full_row(
+            context.constraints.catalog,
+            &stmt.table,
+            context.constraints.referrers,
+            assignments.iter().map(|assignment| assignment.column),
+        )? || !patch_eligibility::point_lookup_field_is_unique(
+            context.constraints.catalog,
+            &stmt.table,
+            lookup_field,
+        )? {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            lookup_field,
+            lookup_input,
+            assignments,
+        }))
+    }
+}
 
 pub fn try_run_point_update<S: Clone + 'static>(
     context: PointMutationContext<'_, S>,
@@ -37,45 +83,27 @@ pub fn try_run_point_update<S: Clone + 'static>(
         .catalog
         .try_describe_table(&stmt.table)
         .map_err(|error| dml_storage_error("UPDATE", error))?;
-    if columns
-        .as_ref()
-        .is_some_and(|columns| columns.iter().any(|column| column.generated.is_some()))
-    {
-        return Ok(None);
-    }
-    if !stmt.returning.is_empty() {
-        return Ok(None);
-    }
-    let Some((lookup_field, lookup_value)) = point_lookup_filter(
-        stmt.predicate.as_ref(),
-        context,
-        params,
-        stmt.statement_privilege_subject.as_ref(),
-        stmt.relations_bound,
-    )?
+    let Some(PointUpdateInput {
+        lookup_field,
+        lookup_input,
+        assignments,
+    }) = PointUpdateInput::select(&context, stmt, columns.as_deref())?
     else {
         return Ok(None);
     };
-    let Some((updates, vectors)) = row_independent_update_values(context, stmt, params)? else {
-        return Ok(None);
-    };
-    if !patch_eligibility::can_patch_update_without_full_row(
-        context.constraints.catalog,
-        &stmt.table,
-        context.constraints.referrers,
-        &updates,
-    )? {
-        return Ok(None);
-    }
+    let scope = context.scopes.command_scope(
+        stmt.statement_privilege_subject.as_ref(),
+        stmt.relations_bound,
+    )?;
+    let lookup_value = eval_mutation_expr(
+        context.assignment.expressions,
+        &scope,
+        lookup_input,
+        None,
+        params,
+    )?;
     if matches!(lookup_value, Value::Null) {
         return Ok(Some(MutationOutput::from_affected(0)));
-    }
-    if !patch_eligibility::point_lookup_field_is_unique(
-        context.constraints.catalog,
-        &stmt.table,
-        &lookup_field,
-    )? {
-        return Ok(None);
     }
     if let Some(read) = crate::serializable::SerializableRelationRead::for_mutation(
         context.observations,
@@ -85,44 +113,58 @@ pub fn try_run_point_update<S: Clone + 'static>(
             columns
                 .as_deref()
                 .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?,
-            &uqa_storage::ValueIndexKey::Column(lookup_field.clone()),
+            &uqa_storage::ValueIndexKey::Column(lookup_field.to_owned()),
             &uqa_core::Predicate::Equals(lookup_value.clone()),
         )?;
     }
     let Some(doc_id) =
         context
             .storage
-            .find_doc_id_by_field(&stmt.table, &lookup_field, &lookup_value)?
+            .find_doc_id_by_field(&stmt.table, lookup_field, &lookup_value)?
     else {
         return Ok(Some(MutationOutput::from_affected(0)));
     };
+    let (mut updates, mut vectors) =
+        evaluate_point_assignments(&context, stmt, &assignments, params)?;
+    let assigned_columns = assignments
+        .iter()
+        .map(|assignment| assignment.column.to_owned())
+        .collect::<Vec<_>>();
     let target = lock_mutation_target(
         context.locking.session,
         &stmt.table,
         &stmt.target_qualifier,
         doc_id,
-        update_lock_strength(
-            context.locking.catalog,
-            &stmt.table,
-            &stmt
-                .assignments
-                .iter()
-                .flat_map(|assignment| assignment.target.column_names())
-                .map(str::to_owned)
-                .collect::<Vec<_>>(),
-        ),
+        update_lock_strength(context.locking.catalog, &stmt.table, &assigned_columns),
     )?;
-    let MutationLockTarget::Present { doc_id, .. } = target else {
+    let MutationLockTarget::Present { doc_id, recheck } = target else {
         return Ok(Some(MutationOutput::from_affected(0)));
     };
+    if recheck {
+        context
+            .constraints
+            .transactions
+            .refresh_explicit_statement_snapshot()?;
+    }
     context.transaction.prepare_writer()?;
     if context
         .storage
-        .find_doc_id_by_field(&stmt.table, &lookup_field, &lookup_value)?
+        .find_doc_id_by_field(&stmt.table, lookup_field, &lookup_value)?
         != Some(doc_id)
     {
         return Ok(Some(MutationOutput::from_affected(0)));
     }
+    if recheck {
+        (updates, vectors) = evaluate_point_assignments(&context, stmt, &assignments, params)?;
+    }
+    crate::mutation::constraints::validate_patch_not_null(
+        context.constraints,
+        &stmt.table,
+        doc_id,
+        columns.as_deref().unwrap_or_default(),
+        &assigned_columns,
+        &updates,
+    )?;
     let affected = patch_point_row(&context, &stmt.table, doc_id, &updates, &vectors)?;
     Ok(Some(MutationOutput::from_affected(u64::from(affected))))
 }
@@ -145,51 +187,12 @@ fn patch_point_row<S: Clone + 'static>(
     Ok(affected)
 }
 
-pub fn point_lookup_filter<S: Clone + 'static>(
-    filter: Option<&ScalarExpr>,
-    context: PointMutationContext<'_, S>,
-    params: &[SQLParam],
-    privilege_subject: Option<&RoleReference>,
-    relations_bound: bool,
-) -> Result<Option<(String, Value)>, SQLError> {
-    let Some(ScalarExpr::Binary {
-        op: BinaryOp::Equal,
-        lhs,
-        rhs,
-    }) = filter
-    else {
-        return Ok(None);
-    };
-    if let Some(field) = top_level_column(lhs) {
-        if expr_is_row_independent(rhs) {
-            let ctes = context
-                .scopes
-                .command_scope(privilege_subject, relations_bound)?;
-            return Ok(Some((
-                field.to_string(),
-                eval_mutation_expr(context.assignment.expressions, &ctes, rhs, None, params)?,
-            )));
-        }
-    }
-    if let Some(field) = top_level_column(rhs) {
-        if expr_is_row_independent(lhs) {
-            let ctes = context
-                .scopes
-                .command_scope(privilege_subject, relations_bound)?;
-            return Ok(Some((
-                field.to_string(),
-                eval_mutation_expr(context.assignment.expressions, &ctes, lhs, None, params)?,
-            )));
-        }
-    }
-    Ok(None)
-}
-
-pub fn row_independent_update_values<S: Clone + 'static>(
-    context: PointMutationContext<'_, S>,
+fn evaluate_point_assignments<S: Clone + 'static>(
+    context: &PointMutationContext<'_, S>,
     stmt: &UpdatePlan,
+    assignments: &[RowIndependentAssignment<'_>],
     params: &[SQLParam],
-) -> Result<Option<RowIndependentUpdateValues>, SQLError> {
+) -> Result<RowIndependentUpdateValues, SQLError> {
     let mut updates = BTreeMap::new();
     let mut vectors = BTreeMap::new();
     let ctes = context.scopes.command_scope(
@@ -201,15 +204,9 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         .expressions
         .expressions
         .bind_scope(ctes.clone());
-    for assignment in &stmt.assignments {
-        let uqa_sql::ast::AssignmentTargets::Single(target) = &assignment.target else {
-            return Ok(None);
-        };
-        if !target.is_whole_column() || !expr_is_row_independent(&assignment.value) {
-            return Ok(None);
-        }
+    for assignment in assignments {
         let source = uqa_sql::type_resolution::assignment_source_type(
-            &assignment.value,
+            assignment.value,
             &crate::RowSchema::default(),
             params,
             hook.as_ref(),
@@ -218,11 +215,11 @@ pub fn row_independent_update_values<S: Clone + 'static>(
             context.assignment.assignment,
             context.assignment.columns,
             &stmt.table,
-            &target.column,
+            assignment.column,
             eval_mutation_expr(
                 context.assignment.expressions,
                 &ctes,
-                &assignment.value,
+                assignment.value,
                 None,
                 params,
             )?,
@@ -231,15 +228,15 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         if let Some(ty @ (ColumnType::Vector(_) | ColumnType::Tensor(_))) = context
             .constraints
             .catalog
-            .column_type(&stmt.table, &target.column)
+            .column_type(&stmt.table, assignment.column)
             .map_err(|err| dml_storage_error("UPDATE", err))?
         {
             let values = index_vectors_for_type(&value, &ty)?;
-            vectors.insert(target.column.clone(), values);
+            vectors.insert(assignment.column.to_owned(), values);
         }
-        updates.insert(target.column.clone(), value);
+        updates.insert(assignment.column.to_owned(), value);
     }
-    Ok(Some((updates, vectors)))
+    Ok((updates, vectors))
 }
 
 use uqa_sql::assignment::vectors::index_vectors_for_type;

@@ -41,7 +41,7 @@ pub(super) fn optimize_command(
                 {
                     optimize_assignments(assignments, config)?;
                     if let Some(predicate) = predicate {
-                        optimize_scalar_slot(predicate, config)?;
+                        super::optimize_qualification(predicate, config)?;
                     }
                 }
             }
@@ -59,7 +59,7 @@ pub(super) fn optimize_command(
             }
             optimize_assignments(&mut plan.assignments, config)?;
             if let Some(predicate) = &mut plan.predicate {
-                optimize_scalar_slot(predicate, config)?;
+                super::optimize_qualification(predicate, config)?;
                 if config.enable_filter_pushdown {
                     prioritize_access_predicates(predicate);
                 }
@@ -80,7 +80,7 @@ pub(super) fn optimize_command(
                 optimize_source(source, config, aggregates)?;
             }
             if let Some(predicate) = &mut plan.predicate {
-                optimize_scalar_slot(predicate, config)?;
+                super::optimize_qualification(predicate, config)?;
                 if config.enable_filter_pushdown {
                     prioritize_access_predicates(predicate);
                 }
@@ -98,7 +98,7 @@ pub(super) fn optimize_command(
                 super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
             }
             optimize_source(&mut plan.source, config, aggregates)?;
-            optimize_scalar_slot(&mut plan.join_condition, config)?;
+            super::optimize_qualification(&mut plan.join_condition, config)?;
             for clause in &mut plan.when_clauses {
                 match clause {
                     MergeWhenPlan::UpdateMatched {
@@ -110,7 +110,7 @@ pub(super) fn optimize_command(
                         assignments,
                     } => {
                         if let Some(condition) = condition {
-                            optimize_scalar_slot(condition, config)?;
+                            super::optimize_qualification(condition, config)?;
                         }
                         optimize_assignments(assignments, config)?;
                     }
@@ -120,14 +120,14 @@ pub(super) fn optimize_command(
                     | MergeWhenPlan::NothingNotMatched { condition }
                     | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
                         if let Some(condition) = condition {
-                            optimize_scalar_slot(condition, config)?;
+                            super::optimize_qualification(condition, config)?;
                         }
                     }
                     MergeWhenPlan::InsertNotMatched {
                         condition, values, ..
                     } => {
                         if let Some(condition) = condition {
-                            optimize_scalar_slot(condition, config)?;
+                            super::optimize_qualification(condition, config)?;
                         }
                         for value in values {
                             optimize_scalar_slot(value, config)?;

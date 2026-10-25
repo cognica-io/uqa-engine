@@ -4,16 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! DELETE execution for views with INSTEAD OF triggers and rewrite rules.
+//! DELETE execution for views with INSTEAD OF triggers.
 
 use super::{
-    build_join_spill_with_ctes, build_returning_value_row, count_view_source_qualifications,
-    finish_view_dml, matching_source_context, materialize_view_rows, required_view_delete_columns,
-    resolve_view_target, target_row, validate_dml_expression_qualifiers,
-    validate_returning_alias_relations, view_document, view_values, with_mutation_snapshot,
-    BTreeSet, CteScope, DeletePlan, DmlReturningShape, MutationStatementContext,
-    ReturningValueProjectionRow, RuleRowBuffer, SQLError, SQLParam, SourceOutputPruning,
-    ViewDmlSourceMatch, ViewSourceQualification,
+    build_join_spill_with_ctes, build_returning_value_row, finish_view_dml,
+    matching_source_context, materialize_view_rows, resolve_view_target, target_row,
+    validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
+    view_values, with_mutation_snapshot, BTreeSet, CteScope, DeletePlan, DmlReturningShape,
+    MutationImageBuffer, MutationStatementContext, ReturningValueProjectionRow, SQLError, SQLParam,
+    SourceOutputPruning, ViewDmlSourceMatch,
 };
 use crate::mutation::output::MutationOutput;
 
@@ -28,34 +27,27 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let target = resolve_view_target(context.mutation.rules.views.rewrite, &stmt.table)?;
+    let target = resolve_view_target(context.mutation.rules.views, &stmt.table)?;
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
         if let Some(predicate) = stmt.predicate.as_ref() {
             validate_dml_expression_qualifiers(predicate, &allowed)?;
         }
     }
-    let original_query_survives =
-        !uqa_sql::semantics::rules::analysis::relation_suppresses_original_query(
-            context.mutation.rules.rules.analysis,
+    let has_before_statement_trigger = !context
+        .mutation
+        .preparation
+        .referential
+        .triggers
+        .catalog
+        .triggers_for(
             &target.canonical_name,
-            uqa_sql::ast::RuleEvent::Delete,
-        )?;
-    let has_before_statement_trigger = original_query_survives
-        && !context
-            .mutation
-            .preparation
-            .referential
-            .triggers
-            .catalog
-            .triggers_for(
-                &target.canonical_name,
-                uqa_sql::ast::TriggerTiming::Before,
-                uqa_sql::ast::TriggerEvent::Delete,
-                false,
-                &[],
-            )?
-            .is_empty();
+            uqa_sql::ast::TriggerTiming::Before,
+            uqa_sql::ast::TriggerEvent::Delete,
+            false,
+            &[],
+        )?
+        .is_empty();
     let (statement_commands, _running_statement) =
         crate::mutation::statement_end::statement_commands(inherited_ctes);
     let view_statement = crate::mutation::triggers::queue::StatementEvent::new(
@@ -72,12 +64,12 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
         }
         None => None,
     };
-    if original_query_survives {
-        statement_commands.after_triggers().fire_before_statement(
-            &context.mutation.preparation.referential.triggers,
-            &view_statement,
-        )?;
-    }
+
+    statement_commands.after_triggers().fire_before_statement(
+        &context.mutation.preparation.referential.triggers,
+        &view_statement,
+    )?;
+
     let mut statement_scope = None;
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
@@ -104,94 +96,6 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 ctes,
             )?;
             ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
-            let row_independent_delete_qualification = if stmt.source.is_none()
-                && !context
-                    .mutation
-                    .rules
-                    .rules
-                    .analysis
-                    .rules
-                    .rules_for(&target.canonical_name, uqa_sql::ast::RuleEvent::Delete)?
-                    .is_empty()
-            {
-                crate::mutation::expressions::row_independent_mutation_qualification_count(
-                    read_context
-                        .mutation
-                        .preparation
-                        .referential
-                        .assignment
-                        .expressions,
-                    stmt.predicate.as_ref(),
-                    params,
-                    ctes,
-                )?
-            } else {
-                None
-            };
-            if stmt.view_rule_relations.is_empty()
-                && !original_query_survives
-                && !uqa_sql::semantics::rules::analysis::relation_rules_require_event_rows(
-                    context.mutation.rules.rules.analysis,
-                    &target.canonical_name,
-                    uqa_sql::ast::RuleEvent::Delete,
-                )?
-            {
-                validate_returning_alias_relations(
-                    &stmt.target_qualifier,
-                    &stmt.returning_aliases,
-                    None,
-                )?;
-                let rule_batch = crate::mutation::rules::prepare_rule_batch(
-                    &context.mutation.rules.rules,
-                    &target.canonical_name,
-                    uqa_sql::ast::RuleEvent::Delete,
-                    Vec::new(),
-                )?;
-                let outcome = rule_batch.execute_actions_with_affected(
-                    &context.mutation.rules.rules.with_projection(
-                        &crate::mutation::rules::RuleOutputProjection::delete(
-                            context.mutation.preparation.returning,
-                            stmt,
-                            params,
-                            ctes,
-                        )
-                        .with_table(&target.canonical_name),
-                    ),
-                    crate::mutation::rules::RuleReturningRequest::from_plan(
-                        &stmt.returning,
-                        &stmt.returning_aliases,
-                        &stmt.subqueries,
-                    ),
-                )?;
-                if let Some(returning) = outcome.returning {
-                    return returning.project(
-                        context.mutation.preparation.returning,
-                        DmlReturningShape {
-                            table: &target.canonical_name,
-                            target_qualifier: &stmt.target_qualifier,
-                            aliases: &stmt.returning_aliases,
-                            returning: &stmt.returning,
-                            params,
-                            ctes,
-                            supplemental_schema: None,
-                        },
-                    );
-                }
-                return finish_view_dml(
-                    &context.mutation.preparation.returning,
-                    DmlReturningShape {
-                        table: &target.canonical_name,
-                        target_qualifier: &stmt.target_qualifier,
-                        aliases: &stmt.returning_aliases,
-                        returning: &stmt.returning,
-                        params,
-                        ctes,
-                        supplemental_schema: None,
-                    },
-                    crate::mutation::returning::ReturningRows::default(),
-                    0,
-                );
-            }
             let mut source_scope = ctes.returning_statement_snapshot_scope();
             let source_privilege_expressions = stmt
                 .predicate
@@ -223,44 +127,17 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 source_rows.as_ref().map(crate::SharedSpill::row_schema),
             )?;
             let mut target_scope = ctes.returning_statement_snapshot_scope();
-            let required_columns = if !original_query_survives
-                && stmt.view_rule_relations.is_empty()
-            {
-                required_view_delete_columns(context.mutation.rules.rules.analysis, &target, stmt)?
-            } else {
-                None
-            };
             let candidates = materialize_view_rows(
                 &read_context.query,
                 prune_source_outputs,
                 &target,
-                required_columns.as_ref(),
+                None,
                 params,
                 &mut target_scope,
             )?;
             let snapshot = ctes.returning_statement_snapshot_scope();
-            let source_delete_qualification_count = source_rows
-                .as_ref()
-                .map(|source_rows| {
-                    count_view_source_qualifications(ViewSourceQualification {
-                        expressions: read_context
-                            .mutation
-                            .preparation
-                            .referential
-                            .assignment
-                            .expressions,
-                        target: &target,
-                        target_qualifier: &stmt.target_qualifier,
-                        predicate: stmt.predicate.as_ref(),
-                        candidates: &candidates,
-                        source_rows,
-                        params,
-                        ctes: &snapshot,
-                    })
-                })
-                .transpose()?;
             let cancellation = context.mutation.rules.rules.cancellation.clone();
-            let mut pending = RuleRowBuffer::new(
+            let mut pending = MutationImageBuffer::new(
                 context.mutation.rules.rules.memory.work_mem_bytes()?,
                 cancellation.clone(),
             );
@@ -294,7 +171,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                     ViewDmlSourceMatch::TargetOnly => None,
                     ViewDmlSourceMatch::Source(source) => Some(source),
                 };
-                pending.push(crate::mutation::rules::RuleRowImage {
+                pending.push(crate::mutation::row_images::OwnedMutationImages {
                     old_storage_table: None,
                     old_doc_id: None,
                     old: Some(view_document(&target, &old)?),
@@ -306,67 +183,11 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
             }
             let pending = pending.finish();
             drop(candidates);
-            let mut outer_rule_batches = crate::mutation::rules::views::prepare_view_rule_batches(
-                crate::mutation::rules::views::ViewRuleBatchRequest {
-                    context: context.mutation.rules,
-                    relations: &stmt.view_rule_relations,
-                    event: uqa_sql::ast::RuleEvent::Delete,
-                    rows: &pending,
-                    params,
-                    scope: &snapshot,
-                    insert_plans: &[],
-                    update_plans: &[],
-                    document_relation: Some(&target.canonical_name),
-                },
-            )?;
-            let mut rule_batch = crate::mutation::rules::prepare_retained_rule_batch(
-                &context.mutation.rules.rules,
-                &target.canonical_name,
-                uqa_sql::ast::RuleEvent::Delete,
-                pending.clone(),
-            )?;
-            let action_qualification_count = source_delete_qualification_count
-                .or(row_independent_delete_qualification)
-                .unwrap_or_else(|| rule_batch.event_row_count());
-            outer_rule_batches.configure_action_qualification(Some(action_qualification_count));
-            rule_batch.set_action_qualification_count(action_qualification_count);
-            let outer_rule_outcome = outer_rule_batches.execute_actions_with_affected(
-                &context.mutation.rules.rules,
-                stmt.view_rule_returning.as_ref(),
-                context.mutation.preparation.returning,
-                params,
-                ctes,
-            )?;
-            let rule_outcome = rule_batch.execute_actions_with_affected(
-                &context.mutation.rules.rules.with_projection(
-                    &crate::mutation::rules::RuleOutputProjection::delete(
-                        context.mutation.preparation.returning,
-                        stmt,
-                        params,
-                        ctes,
-                    )
-                    .with_table(&target.canonical_name),
-                ),
-                crate::mutation::rules::RuleReturningRequest::from_plan(
-                    &stmt.returning,
-                    &stmt.returning_aliases,
-                    &stmt.subqueries,
-                ),
-            )?;
-            if rule_outcome.returning.is_some() && outer_rule_outcome.returning.is_some() {
-                return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: "cannot have RETURNING lists in multiple rules".into(),
-                });
-            }
             let mut affected = 0_u64;
             let mut returning_rows = crate::mutation::returning::ReturningRows::new(
                 context.query.source.relational.runtime,
             )?;
             for index in 0..pending.len() {
-                if rule_batch.suppresses(index)? {
-                    continue;
-                }
                 let row = pending.get(index)?;
                 let old = view_values(&target, row.old)?;
                 let source_context = row.context;
@@ -404,15 +225,15 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                     )?;
                 }
             }
-            if original_query_survives {
-                crate::mutation::statement_end::end_command(
-                    &statement_commands,
-                    &context.mutation.preparation.referential.triggers,
-                    std::slice::from_ref(&view_statement),
-                    crate::mutation::triggers::events::AfterRowEvents::default(),
-                )?;
-            }
-            let mut result = finish_view_dml(
+
+            crate::mutation::statement_end::end_command(
+                &statement_commands,
+                &context.mutation.preparation.referential.triggers,
+                std::slice::from_ref(&view_statement),
+                crate::mutation::triggers::events::AfterRowEvents::default(),
+            )?;
+
+            let result = finish_view_dml(
                 &context.mutation.preparation.returning,
                 DmlReturningShape {
                     table: &target.canonical_name,
@@ -426,37 +247,6 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 returning_rows,
                 affected,
             )?;
-            if let Some(rule_returning) = rule_outcome.returning {
-                return rule_returning.project(
-                    context.mutation.preparation.returning,
-                    DmlReturningShape {
-                        table: &target.canonical_name,
-                        target_qualifier: &stmt.target_qualifier,
-                        aliases: &stmt.returning_aliases,
-                        returning: &stmt.returning,
-                        params,
-                        ctes,
-                        supplemental_schema: source_rows
-                            .as_ref()
-                            .map(crate::SharedSpill::row_schema),
-                    },
-                );
-            }
-            if let Some(rule_returning) = outer_rule_outcome.returning {
-                return rule_returning.project(
-                    context.mutation.preparation.returning,
-                    params,
-                    ctes,
-                    source_rows.as_ref().map(crate::SharedSpill::row_schema),
-                );
-            }
-            if !original_query_survives {
-                result.affected_rows = if outer_rule_outcome.sets_command_tag {
-                    outer_rule_outcome.affected_rows
-                } else {
-                    rule_outcome.affected_rows
-                };
-            }
             Ok(result)
         };
     let result = match statement_snapshot.as_deref() {

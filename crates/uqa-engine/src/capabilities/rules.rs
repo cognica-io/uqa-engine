@@ -6,14 +6,12 @@
 
 //! Capture rule namespaces and expression scopes for execution.
 use crate::Engine;
-use uqa_core::Value;
 use uqa_execution::{
-    mutation::rules::{RuleContext, RuleExpressions, RuleSecurity, RuleStatements},
+    mutation::rules::{RuleContext, RuleSecurity, RuleStatements},
     statement::plan_executor::StatementOutput,
-    PhysicalRow, RowSchema,
 };
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::{plan::ExpressionPlan, semantics::rules::analysis::RuleAnalysisContext, SQLError};
+use uqa_sql::{semantics::rules::analysis::RuleAnalysisContext, SQLError};
 impl Engine {
     pub(crate) fn rule_analysis_context(&self) -> RuleAnalysisContext<'_> {
         RuleAnalysisContext {
@@ -35,7 +33,6 @@ impl Engine {
             binding: self.catalog_routine_analysis_context(),
             security: self,
             statements: self,
-            expressions: self,
             returning: self.returning_analysis_context(),
             assignment: self,
             projection: None,
@@ -87,41 +84,15 @@ impl RuleStatements<crate::session::StatementReadSnapshot> for Engine {
         )
     }
 }
-impl RuleExpressions for Engine {
-    fn prepare_condition(&self, expression: &mut ExpressionPlan) -> Result<(), SQLError> {
-        uqa_planner::statement_planning::schema_expressions::optimize_rule_condition(
-            &self.statement_planning_context(),
-            expression,
-        )
-    }
-    fn evaluate_stored(
-        &self,
-        expression: &ExpressionPlan,
-        schema: &RowSchema,
-        row: &PhysicalRow,
-        privilege_subject: &RoleReference,
-    ) -> Result<Value, SQLError> {
-        crate::capabilities::query_expressions::eval_stored_expression_plan_with_row(
-            self,
-            expression,
-            schema,
-            row,
-            &[],
-            Some(privilege_subject),
-        )
-    }
-}
 
 impl Engine {
     pub(crate) fn view_rule_execution_context(
         &self,
-    ) -> uqa_execution::mutation::rules::views::ViewRuleContext<
-        '_,
-        crate::session::StatementReadSnapshot,
-    > {
-        uqa_execution::mutation::rules::views::ViewRuleContext {
+    ) -> uqa_execution::mutation::rules::ViewRuleContext<'_, crate::session::StatementReadSnapshot>
+    {
+        uqa_execution::mutation::rules::ViewRuleContext {
             rules: self.rule_execution_context(),
-            views: self.view_row_context(),
+            views: self.view_rewrite_context(),
         }
     }
 }

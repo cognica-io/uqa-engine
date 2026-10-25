@@ -530,6 +530,89 @@ static void explained_rule_delivery(uqa_engine engine, uqa_result result) {
         "DROP FUNCTION pg_temp.c_rule_after(); DROP SEQUENCE c_rule_rows; DROP SEQUENCE c_rule_after", result));
 }
 
+static void joined_mutation_candidates(uqa_engine engine, uqa_result result) {
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP SEQUENCE c_candidate_ticks; CREATE TEMP TABLE c_candidate_target(m bigint); "
+        "INSERT INTO c_candidate_target VALUES(0); "
+        "UPDATE c_candidate_target SET m=nextval('c_candidate_ticks') FROM generate_series(1,2) g(k); "
+        "SELECT m,nextval('c_candidate_ticks') FROM c_candidate_target", result));
+    assert(integer(result, 0) == 1 && integer(result, 1) == 3);
+    assert(uqa_engine_execute(engine,
+        "UPDATE c_candidate_target SET m=1/(k-2) FROM generate_series(1,2) g(k)", result) == UQA_ERROR_SQL);
+    sqlstate("22012");
+    CHECK(uqa_engine_execute(engine,
+        "CREATE FUNCTION pg_temp.c_candidate_skip() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "BEGIN IF NEW.m=1 THEN RETURN NULL; END IF; RETURN NEW; END $$; "
+        "CREATE TRIGGER c_candidate_skip BEFORE UPDATE ON c_candidate_target FOR EACH ROW EXECUTE FUNCTION pg_temp.c_candidate_skip(); "
+        "UPDATE c_candidate_target SET m=k FROM generate_series(1,2) g(k) RETURNING m", result));
+    assert(integer(result, 0) == 2);
+    CHECK(uqa_engine_execute(engine,
+        "DROP TABLE c_candidate_target; DROP FUNCTION pg_temp.c_candidate_skip(); DROP SEQUENCE c_candidate_ticks", result));
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP SEQUENCE c_point_ticks; "
+        "CREATE DOMAIN pg_temp.c_point_type AS bigint CHECK(nextval('c_point_ticks')>0); "
+        "CREATE TEMP TABLE c_point_target(id integer PRIMARY KEY,value pg_temp.c_point_type); "
+        "INSERT INTO c_point_target VALUES(1,0); ALTER SEQUENCE c_point_ticks RESTART WITH 1; "
+        "UPDATE c_point_target SET value=7 WHERE id=999; SELECT nextval('c_point_ticks')", result));
+    assert(integer(result, 0) == 1);
+    CHECK(uqa_engine_execute(engine,
+        "ALTER TABLE c_point_target ADD CHECK(value>=0); ALTER SEQUENCE c_point_ticks RESTART WITH 1; "
+        "UPDATE c_point_target SET value=7 WHERE id=1; SELECT nextval('c_point_ticks')", result));
+    assert(integer(result, 0) == 2);
+    CHECK(uqa_engine_execute(engine,
+        "DROP TABLE c_point_target; DROP DOMAIN pg_temp.c_point_type; DROP SEQUENCE c_point_ticks", result));
+}
+
+static void explained_mutation_rule_delivery(uqa_engine engine, uqa_result result) {
+    const char *queries[] = {
+        "UPDATE c_mutation_event SET n=nextval('c_mutation_rows')+$1::bigint RETURNING n,NULL::aclitem",
+        "DELETE FROM c_mutation_event WHERE nextval('c_mutation_rows')>$1::bigint RETURNING n,NULL::aclitem",
+        "UPDATE c_mutation_target SET n=c_mutation_target.n FROM generate_series(1,2) g(k) WHERE nextval('c_mutation_rows')>$1::bigint RETURNING NULL::aclitem",
+        "DELETE FROM c_mutation_target USING generate_series(1,2) g(k) WHERE nextval('c_mutation_rows')>$1::bigint RETURNING NULL::aclitem"
+    };
+    uqa_value value = NULL;
+    uint32_t state = 0;
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP SEQUENCE c_mutation_rows; CREATE TEMP SEQUENCE c_mutation_after; "
+        "CREATE TEMP TABLE c_mutation_target(n bigint); INSERT INTO c_mutation_target SELECT n FROM generate_series(1,8) g(n); "
+        "CREATE FUNCTION pg_temp.c_mutation_after() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "BEGIN PERFORM nextval('c_mutation_after'); RETURN NULL; END $$; "
+        "CREATE TRIGGER c_mutation_after AFTER UPDATE OR DELETE ON c_mutation_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.c_mutation_after(); "
+        "CREATE TEMP VIEW c_mutation_event AS SELECT n FROM c_mutation_target; "
+        "CREATE RULE c_mutation_update AS ON UPDATE TO c_mutation_event DO INSTEAD UPDATE c_mutation_target SET n=NEW.n WHERE n=OLD.n RETURNING n; "
+        "CREATE RULE c_mutation_delete AS ON DELETE TO c_mutation_event DO INSTEAD DELETE FROM c_mutation_target WHERE n=OLD.n RETURNING n", result));
+    CHECK(uqa_value_create_int64(0, &value));
+    for (int query = 0; query < 4; ++query) {
+        char sql[512];
+        uqa_statement statement = NULL;
+        int size = snprintf(sql, sizeof(sql), "EXPLAIN (ANALYZE, SERIALIZE BINARY) %s", queries[query]);
+        assert(size > 0 && (size_t)size < sizeof(sql));
+        CHECK(uqa_statement_prepare(engine, sql, &statement));
+        CHECK(uqa_statement_bind(statement, 1, value));
+        CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT before_mutation_output", result));
+        for (int attempt = 1; attempt <= 2; ++attempt) {
+            assert(uqa_statement_execute(statement, result) == UQA_ERROR_SQL);
+            sqlstate("42883");
+            CHECK(uqa_transaction_get_state(engine, &state));
+            assert(state == UQA_TRANSACTION_FAILED);
+            CHECK(uqa_engine_execute(engine, "ROLLBACK TO before_mutation_output", result));
+            CHECK(uqa_transaction_get_state(engine, &state));
+            assert(state == UQA_TRANSACTION_ACTIVE);
+            CHECK(uqa_engine_execute(engine,
+                "SELECT currval('c_mutation_rows'),count(*) FROM c_mutation_target", result));
+            assert(integer(result, 0) == query * 2 + attempt && integer(result, 1) == 8);
+        }
+        CHECK(uqa_engine_execute(engine, "SELECT nextval('c_mutation_after')", result));
+        assert(integer(result, 0) == query + 1);
+        CHECK(uqa_engine_execute(engine, "ROLLBACK", result));
+        CHECK(uqa_statement_finalize(&statement));
+    }
+    CHECK(uqa_value_destroy(&value));
+    CHECK(uqa_engine_execute(engine,
+        "DROP VIEW c_mutation_event; DROP TABLE c_mutation_target; "
+        "DROP FUNCTION pg_temp.c_mutation_after(); DROP SEQUENCE c_mutation_rows; DROP SEQUENCE c_mutation_after", result));
+}
+
 static void explained_generic_parameters(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_value value = NULL;
@@ -913,6 +996,8 @@ int main(void) {
     explained_costs(engine, result);
     explained_serialization(engine, result);
     explained_rule_delivery(engine, result);
+    explained_mutation_rule_delivery(engine, result);
+    joined_mutation_candidates(engine, result);
     explained_generic_parameters(engine, result);
     explained_read_only_destination(engine, result);
     xml_values(engine, result);

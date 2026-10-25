@@ -202,12 +202,18 @@ impl Preparation<'_> {
         let captured_outer = outer
             .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
         let outer = captured_outer.as_deref();
-        let source_rewrites = crate::semantics::view_rewrite::resolve_outer_sources(
-            block,
-            outer,
-            &mut |source, subqueries, scope| self.source_input(source, subqueries, scope),
-        )?;
-        let block = source_rewrites.as_ref();
+        if !block.deferred_outer_rewrites.is_empty() {
+            return self.rewritten_block(block, outer, preserve_unknown);
+        }
+        self.analyzed_block(block, outer, preserve_unknown)
+    }
+
+    fn analyzed_block(
+        &mut self,
+        block: &QueryBlockPlan,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+    ) -> Result<QueryOutput, SQLError> {
         let source = block
             .from
             .as_ref()
@@ -218,7 +224,48 @@ impl Preparation<'_> {
         if let Some(from) = &block.from {
             self.parameters.retain_source_schema(from, &source);
         }
-        self.block_with_source(block, &source, outer, preserve_unknown)
+        self.in_query_level(|analysis| {
+            analysis.block_level_output(block, &source, outer, preserve_unknown)
+        })
+    }
+
+    fn rewritten_block(
+        &mut self,
+        original: &QueryBlockPlan,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+    ) -> Result<QueryOutput, SQLError> {
+        if let Some(block) = self.parameters.take_rewritten_block(original) {
+            let result = self.analyzed_block(&block, outer, preserve_unknown);
+            self.parameters.retain_rewritten_block(original, block);
+            return result;
+        }
+        // Namespace discovery precedes identity-based input analysis. No constants or call selections may refer to temporary rewrite copies.
+        let params = self.parameters.values();
+        let source_rewrites = crate::semantics::view_rewrite::resolve_outer_sources(
+            original,
+            outer,
+            &mut |source, subqueries, scope| {
+                self.scope
+                    .bind_source_input(self.routines, source, subqueries, &params, scope)
+            },
+        )?;
+        let block = source_rewrites.as_ref();
+        let source = block
+            .from
+            .as_ref()
+            .map(|source| {
+                self.scope
+                    .bind_source(self.routines, source, &block.subqueries, &params, outer)
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let block = Box::new(
+            crate::semantics::view_rewrite::resolve_outer_rewrites(block, &source).into_owned(),
+        );
+        let result = self.analyzed_block(&block, outer, preserve_unknown);
+        self.parameters.retain_rewritten_block(original, block);
+        result
     }
 
     pub(super) fn block_with_source(
@@ -231,11 +278,19 @@ impl Preparation<'_> {
         let captured_outer = outer
             .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
         let outer = captured_outer.as_deref();
-        let rewritten = crate::semantics::view_rewrite::resolve_outer_rewrites(block, source);
-        let block = rewritten.as_ref();
-        self.in_query_level(|analysis| {
-            analysis.block_level_output(block, source, outer, preserve_unknown)
-        })
+        match crate::semantics::view_rewrite::resolve_outer_rewrites(block, source) {
+            std::borrow::Cow::Borrowed(block) => self.in_query_level(|analysis| {
+                analysis.block_level_output(block, source, outer, preserve_unknown)
+            }),
+            std::borrow::Cow::Owned(rewritten) => {
+                let rewritten = Box::new(rewritten);
+                let result = self.in_query_level(|analysis| {
+                    analysis.block_level_output(&rewritten, source, outer, preserve_unknown)
+                });
+                self.parameters.retain_rewritten_block(block, rewritten);
+                result
+            }
+        }
     }
 
     fn block_level_output(

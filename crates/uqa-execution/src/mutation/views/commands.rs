@@ -19,10 +19,7 @@ use crate::query::{sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use std::collections::BTreeSet;
 use uqa_core::Value;
-use uqa_sql::semantics::view_mutation::{
-    required_view_delete_columns, required_view_update_columns, resolve_view_target,
-    view_qualification_references_target,
-};
+use uqa_sql::semantics::view_mutation::resolve_view_target;
 pub use uqa_sql::semantics::view_mutation::{target_columns, ViewMutationTarget as ViewDmlTarget};
 use uqa_sql::semantics::{
     mutation_qualifiers::validate_dml_expression_qualifiers,

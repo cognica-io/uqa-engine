@@ -21,7 +21,6 @@ use crate::{SharedSpill, SharedSpillScan};
 #[derive(Clone)]
 struct RetainedRows {
     rows: SharedSpill,
-    admitted_types: Option<Arc<[Option<String>]>>,
 }
 
 #[cfg(test)]
@@ -70,28 +69,6 @@ pub struct RetainedRowScope {
 
 impl RetainedRowScope {
     pub fn enter(relation: InternalRelationId, rows: SharedSpill) -> Result<Self, SQLError> {
-        Self::register(relation, rows, None)
-    }
-
-    /// Preserve the read-time semantics of typed constants without evaluating them before statement analysis. Whole-row values with no declared type stay unchanged.
-    pub(crate) fn enter_admitted(
-        relation: InternalRelationId,
-        rows: SharedSpill,
-        types: Arc<[Option<String>]>,
-    ) -> Result<Self, SQLError> {
-        if types.len() != rows.row_schema().physical_width() {
-            return Err(SQLError::Internal(
-                "retained constant types do not match their row width".into(),
-            ));
-        }
-        Self::register(relation, rows, Some(types))
-    }
-
-    fn register(
-        relation: InternalRelationId,
-        rows: SharedSpill,
-        admitted_types: Option<Arc<[Option<String>]>>,
-    ) -> Result<Self, SQLError> {
         let descriptor = RetainedRowSource::new(relation, rows.row_schema().clone(), rows.rows())?;
         ACTIVE_ROWS.with(|active| {
             match Arc::make_mut(&mut active.borrow_mut()).entry(relation) {
@@ -99,10 +76,7 @@ impl RetainedRowScope {
                     "retained row source is already active".into(),
                 )),
                 Entry::Vacant(entry) => {
-                    entry.insert(RetainedRows {
-                        rows,
-                        admitted_types,
-                    });
+                    entry.insert(RetainedRows { rows });
                     Ok(())
                 }
             }
@@ -150,70 +124,8 @@ pub(crate) fn build_retained_source(
     Ok(SharedSpillScan::new(retained_rows(source)?.rows))
 }
 
-pub(super) fn build_retained_source_operator<S: Clone + Send + Sync + 'static>(
-    context: &super::SourceContext<'_, S>,
+pub(super) fn build_retained_source_operator(
     source: &RetainedRowSource,
-    ctes: &super::CteScope<S>,
 ) -> Result<SharedSpillScan, SQLError> {
-    let retained = retained_rows(source)?;
-    let rows = if let Some(types) = retained.admitted_types {
-        let hook = context.relational.expression_scope(ctes.clone());
-        read_admitted_rows(
-            retained.rows,
-            &types,
-            hook.as_ref(),
-            context.relational.runtime.work_mem_bytes()?,
-            context.relational.runtime.cancellation,
-        )?
-    } else {
-        retained.rows
-    };
-    Ok(SharedSpillScan::new(rows))
-}
-
-fn read_admitted_rows(
-    rows: SharedSpill,
-    types: &[Option<String>],
-    hook: &dyn uqa_sql::expr::EngineHook,
-    work_mem: usize,
-    cancellation: &uqa_core::CancellationToken,
-) -> Result<SharedSpill, SQLError> {
-    use crate::physical::physical_exec_error;
-    use crate::{PhysicalOperator, PhysicalRow, SpillBuffer};
-    use uqa_core::memory::ProductionControl;
-    use uqa_sql::expr::composites::literal::{contains_records, evaluate_with_control};
-
-    cancellation.check()?;
-    let schema = rows.row_schema().clone();
-    let mut input = SharedSpillScan::new(rows);
-    let mut output = SpillBuffer::new(work_mem / 2);
-    let mut writer =
-        crate::spill::SpillBatchWriter::new(schema.clone()).map_err(physical_exec_error)?;
-    input.open().map_err(physical_exec_error)?;
-    while let Some(batch) = input.next().map_err(physical_exec_error)? {
-        for row in batch.rows {
-            cancellation.check()?;
-            let mut values = row.into_physical_values();
-            for (value, ty) in values.iter_mut().zip(types) {
-                let Some(ty) = ty.as_deref().filter(|_| contains_records(value)) else {
-                    continue;
-                };
-                *value = evaluate_with_control(
-                    value,
-                    ty,
-                    Some(hook),
-                    &ProductionControl::uncontrolled(),
-                )?
-                .into_uncontrolled()
-                .expect("ordinary admitted rule input");
-            }
-            writer
-                .push(&mut output, PhysicalRow::from_values(values))
-                .map_err(physical_exec_error)?;
-        }
-    }
-    input.close().map_err(physical_exec_error)?;
-    cancellation.check()?;
-    writer.finish(&mut output).map_err(physical_exec_error)?;
-    output.into_shared(schema).map_err(physical_exec_error)
+    Ok(SharedSpillScan::new(retained_rows(source)?.rows))
 }

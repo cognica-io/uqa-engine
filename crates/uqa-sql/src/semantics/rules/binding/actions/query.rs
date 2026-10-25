@@ -20,6 +20,9 @@ use std::collections::{BTreeMap, BTreeSet};
 mod schedule;
 pub use schedule::InsertRuleQueries;
 mod assignments;
+mod conditions;
+mod mutation;
+pub use mutation::{MutationRuleInput, RuleMutation};
 #[cfg(test)]
 mod tests;
 mod values;
@@ -68,7 +71,7 @@ pub struct RuleQueryInput {
     pub query: QueryPlan,
     pub inline: bool,
     pub relation: InternalRelationId,
-    pub condition: Option<Expr>,
+    pub condition: Option<crate::plan::ExpressionPlan>,
     pub expressions: BTreeMap<crate::ast::InternalColumnRef, crate::plan::ExpressionPlan>,
 }
 
@@ -134,22 +137,20 @@ impl RuleQueryInput {
                 CommandPlan::Update(update) => {
                     update.source = prepend(update.source.take().map(|s| *s), source).map(Box::new);
                     add_native_condition(&mut update.predicate, &mut update.subqueries, predicate);
-                    add_condition(
+                    add_native_condition(
                         &mut update.predicate,
                         &mut update.subqueries,
                         self.condition,
-                        None,
                     );
                     Ok(())
                 }
                 CommandPlan::Delete(delete) => {
                     delete.source = prepend(delete.source.take().map(|s| *s), source).map(Box::new);
                     add_native_condition(&mut delete.predicate, &mut delete.subqueries, predicate);
-                    add_condition(
+                    add_native_condition(
                         &mut delete.predicate,
                         &mut delete.subqueries,
                         self.condition,
-                        None,
                     );
                     Ok(())
                 }
@@ -166,7 +167,7 @@ fn attach_query(
     query: &mut QueryPlan,
     source: Option<SourcePlan>,
     predicate: Option<crate::plan::ExpressionPlan>,
-    condition: Option<Expr>,
+    condition: Option<crate::plan::ExpressionPlan>,
 ) -> Result<(), SQLError> {
     if let RelationalPlan::Values { rows, subqueries } = &mut query.root {
         if rows.len() == 1 {
@@ -208,7 +209,7 @@ fn attach_query(
         RelationalPlan::QueryBlock(block) => {
             block.from = prepend(block.from.take(), source);
             add_native_condition(&mut block.r#where, &mut block.subqueries, predicate);
-            add_condition(&mut block.r#where, &mut block.subqueries, condition, None);
+            add_native_condition(&mut block.r#where, &mut block.subqueries, condition);
             Ok(())
         }
         RelationalPlan::SetOp { .. }
@@ -317,14 +318,14 @@ fn projection_block(projections: Vec<ProjectionPlan>) -> QueryBlockPlan {
 }
 
 /// NEW fields are expressions over the input query, so unused fields never run.
-pub struct InsertQueryResolver {
+pub struct RuleQueryResolver {
     pub table: String,
-    pub columns: Vec<(String, Expr)>,
+    pub columns: Vec<(String, Result<Expr, SQLError>)>,
     pub old: BTreeMap<String, Expr>,
     pub expressions: BTreeMap<crate::ast::InternalColumnRef, crate::plan::ExpressionPlan>,
 }
 
-impl VariableResolver for InsertQueryResolver {
+impl VariableResolver for RuleQueryResolver {
     fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(None)
     }
@@ -343,7 +344,7 @@ impl VariableResolver for InsertQueryResolver {
             self.columns
                 .iter()
                 .map(|(_, expression)| expression.clone())
-                .collect()
+                .collect::<Result<Vec<_>, _>>()?
         } else if name.eq_ignore_ascii_case("old") {
             self.columns
                 .iter()
@@ -367,8 +368,8 @@ impl VariableResolver for InsertQueryResolver {
             self.columns
                 .iter()
                 .find(|(name, _)| name == column)
-                .map(|(_, expression)| Some(expression.clone()))
-                .ok_or_else(|| SQLError::UnknownColumn(format!("{qualifier}.{column}")))
+                .map(|(_, expression)| expression.clone().map(Some))
+                .unwrap_or_else(|| Err(SQLError::UnknownColumn(format!("{qualifier}.{column}"))))
         } else if qualifier.eq_ignore_ascii_case("old") {
             self.old
                 .get(column)
@@ -384,7 +385,7 @@ impl VariableResolver for InsertQueryResolver {
     }
 }
 
-impl InsertQueryResolver {
+impl RuleQueryResolver {
     /// Describe the source positions referenced by an action and its condition before planner pruning.
     pub fn input_columns(
         &self,
@@ -434,7 +435,7 @@ impl InsertQueryResolver {
         Ok(Some((positions, supplied.len())))
     }
 
-    pub fn new(
+    pub fn from_insert(
         context: crate::semantics::rules::analysis::RuleAnalysisContext<'_>,
         insert: &crate::plan::InsertPlan,
         relation: InternalRelationId,
@@ -489,7 +490,7 @@ impl InsertQueryResolver {
                     assignments::column_expression(context, insert, column, relation)?;
                 expression.scalar = metadata.bind_input(expression.scalar);
                 expressions.insert(reference, expression);
-                columns.push((column.name.clone(), Expr::InternalColumn(reference)));
+                columns.push((column.name.clone(), Ok(Expr::InternalColumn(reference))));
                 continue;
             }
             let supplied_position = supplied
@@ -510,7 +511,7 @@ impl InsertQueryResolver {
             expression.scalar = metadata.bind_input(expression.scalar);
             let reference = InternalRelationId::allocate().column(0);
             expressions.insert(reference, expression);
-            columns.push((column.name.clone(), Expr::InternalColumn(reference)));
+            columns.push((column.name.clone(), Ok(Expr::InternalColumn(reference))));
         }
         let inputs = inline_input_expressions(insert, relation)?;
         for expression in expressions.values_mut() {

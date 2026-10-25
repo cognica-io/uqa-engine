@@ -94,6 +94,7 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
             params,
         )?;
     }
+    let source_schema = uqa_sql::binding::with_query_table_pseudo_columns(&source_schema);
     let source_schema = uqa_sql::binding::overlay_outer_schema(
         &source_schema,
         outer_row.as_ref().map(|row| &row.schema),

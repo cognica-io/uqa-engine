@@ -7,8 +7,8 @@
 //! Independent query inputs for the original INSERT and each view/rule relation.
 
 use super::{
-    add_condition, projection_block, BTreeSet, Expr, InsertQueryResolver, InternalRelationId,
-    ProjectionPlan, QueryPlan, RelationalPlan, SQLError, ScalarExpr, SourcePlan,
+    add_condition, projection_block, BTreeSet, Expr, InternalRelationId, ProjectionPlan, QueryPlan,
+    RelationalPlan, RuleQueryResolver, SQLError, ScalarExpr, SourcePlan,
 };
 use crate::{
     ast::{BooleanTest, FunctionBinding, FunctionDispatch, FunctionOrderSyntax, RuleEvent},
@@ -132,7 +132,7 @@ fn original_query(
     }
     let subject = subjects(&insert.table)?;
     let relation = InternalRelationId::allocate();
-    let mut resolver = InsertQueryResolver::new(context, insert, relation)?;
+    let mut resolver = RuleQueryResolver::from_insert(context, insert, relation)?;
     let source = insert.source.as_deref().expect("INSERT query input");
     let mut block = original_block(insert, source, relation, resolver.columns.len())?;
     for condition in conditions {

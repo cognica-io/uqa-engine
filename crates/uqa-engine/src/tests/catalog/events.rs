@@ -7,6 +7,48 @@
 use uqa_sql::ast::RuleEvent;
 use uqa_sql::ir::ScalarExpr;
 #[test]
+fn stored_rule_conditions_keep_selected_builtin_signatures() {
+    let engine = crate::Engine::new();
+    engine.sql("CREATE TABLE rule_metadata(c text COLLATE \"C\"); INSERT INTO rule_metadata VALUES ('old'); CREATE TABLE rule_metadata_output(c text); CREATE RULE route AS ON UPDATE TO rule_metadata WHERE pg_collation_for(NEW.c)='\"C\"' DO INSTEAD INSERT INTO rule_metadata_output VALUES (NEW.c)", &[]).unwrap();
+    let rule = engine
+        .event_lookup_context()
+        .rules_for("public.rule_metadata", RuleEvent::Update)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let mut observer = false;
+    rule.bound_condition_plan()
+        .unwrap()
+        .0
+        .scalar
+        .visit(&mut |node| {
+            if let ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } = node
+            {
+                observer |= matches!(
+                    binding.dispatch,
+                    Some(uqa_sql::ast::FunctionDispatch::CollationFor {
+                        collation_oid: 950,
+                        ..
+                    })
+                );
+            }
+        });
+    assert!(observer);
+    engine
+        .sql("UPDATE rule_metadata SET c='new' COLLATE \"POSIX\"", &[])
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT c FROM rule_metadata_output", &[])
+            .unwrap()
+            .value_at(0, 0),
+        Some(&uqa_core::Value::Str("new".into()))
+    );
+}
+#[test]
 fn stored_rule_conditions_use_only_structural_event_row_references() {
     let engine = crate::Engine::new();
     engine

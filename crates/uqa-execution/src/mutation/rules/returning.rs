@@ -5,7 +5,6 @@
 //
 
 //! Physical capture and outer projection of a rule action's RETURNING rows.
-use super::RuleRows;
 use crate::mutation::output::MutationOutput;
 use crate::{
     mutation::returning::{
@@ -53,7 +52,7 @@ impl RuleReturningResult {
 pub struct RuleReturningImages {
     images: ReturningRows,
     width: usize,
-    source_rows: Option<RuleRows>,
+    context_schema: Option<RowSchema>,
     affected_rows: u64,
 }
 
@@ -62,7 +61,7 @@ impl RuleReturningImages {
         Self {
             images: ReturningRows::default(),
             width: 0,
-            source_rows: None,
+            context_schema: None,
             affected_rows: 0,
         }
     }
@@ -76,14 +75,7 @@ impl RuleReturningImages {
         for image in self.images.into_rows()? {
             let image = image?;
             let values = image.row.into_physical_values();
-            let source = source_index(&values, self.width * 3, self.source_rows.as_ref())?
-                .map(|index| {
-                    self.source_rows
-                        .as_ref()
-                        .expect("validated source owner")
-                        .get(index)
-                })
-                .transpose()?;
+            let source = source_context(&values, self.width * 3, self.context_schema.as_ref())?;
             rows.push_to(
                 build_returning_value_row(
                     *context,
@@ -94,7 +86,7 @@ impl RuleReturningImages {
                         old: Some(&values[self.width..self.width * 2]),
                         new: Some(&values[self.width * 2..self.width * 3]),
                         aliases: shape.aliases,
-                        context: source.as_ref().and_then(|source| source.context.as_ref()),
+                        context: source.as_ref(),
                     },
                     shape.returning,
                     shape.params,
@@ -107,57 +99,16 @@ impl RuleReturningImages {
     }
 }
 
-#[cfg(test)]
-fn capture_rule_returning_result(
-    mut images: ReturningRows,
-    assignment: &dyn uqa_sql::assignment::AssignmentContext,
-    result: MutationOutput,
-    columns: &[uqa_sql::ast::ColumnDef],
-    source_rows: Option<RuleRows>,
-) -> Result<RuleReturningImages, SQLError> {
-    let width = columns.len();
-    let image_width = width.saturating_mul(3);
-    let expected_width = image_width + usize::from(source_rows.is_some());
-    if result.schema.len() != expected_width {
-        return Err(SQLError::Internal(format!(
-            "rewrite-rule RETURNING provider produced {} columns, expected {}",
-            result.schema.len(),
-            expected_width
-        )));
-    }
-    let schema = RowSchema::new(result.schema.columns().to_vec());
-    let affected_rows = result.affected_rows;
-    for batch in result.into_batches() {
-        let batch = batch?;
-        for row in batch.rows {
-            let row = OwnedPhysicalRow::new(batch.schema.clone(), row);
-            images.push(coerce_image(
-                assignment,
-                columns,
-                source_rows.as_ref(),
-                &schema,
-                &row,
-            )?)?;
-        }
-    }
-    Ok(RuleReturningImages {
-        images,
-        width,
-        source_rows,
-        affected_rows,
-    })
-}
-
 fn coerce_image(
     assignment: &dyn uqa_sql::assignment::AssignmentContext,
     columns: &[uqa_sql::ast::ColumnDef],
-    source_rows: Option<&RuleRows>,
+    context_schema: Option<&RowSchema>,
     schema: &RowSchema,
     input: &OwnedPhysicalRow,
 ) -> Result<OwnedPhysicalRow, SQLError> {
     let width = columns.len();
     let image_width = width.saturating_mul(3);
-    let expected_width = image_width + usize::from(source_rows.is_some());
+    let expected_width = image_width + context_schema.map_or(0, RowSchema::len);
     let row = input.view();
     let mut values = Vec::with_capacity(expected_width);
     for offset in [0, width, width * 2] {
@@ -173,48 +124,38 @@ fn coerce_image(
             )?);
         }
     }
-    if source_rows.is_some() {
-        values.push(row.value_at(image_width).cloned().ok_or_else(|| {
-            SQLError::Internal("rewrite-rule RETURNING provider lost its source index".into())
+    for position in image_width..expected_width {
+        values.push(row.value_at(position).cloned().ok_or_else(|| {
+            SQLError::Internal("rewrite-rule RETURNING provider lost its source context".into())
         })?);
     }
-    source_index(&values, image_width, source_rows)?;
     Ok(OwnedPhysicalRow::new(
         schema.clone(),
         PhysicalRow::from_values(values),
     ))
 }
 
-fn source_index(
+fn source_context(
     values: &[Value],
     image_width: usize,
-    source_rows: Option<&RuleRows>,
-) -> Result<Option<usize>, SQLError> {
-    let Some(source_rows) = source_rows else {
-        return Ok(None);
-    };
-    let source_index = match values.get(image_width) {
-        Some(Value::Int(index)) if *index >= 0 => usize::try_from(*index).map_err(|_| {
-            SQLError::Internal("rewrite-rule RETURNING source index exceeds usize".into())
-        })?,
-        Some(value) => {
-            return Err(SQLError::Internal(format!(
-                "rewrite-rule RETURNING source index is not a non-negative integer: {value:?}"
-            )))
-        }
-        None => {
-            return Err(SQLError::Internal(
-                "rewrite-rule RETURNING provider lost its source index".into(),
+    schema: Option<&RowSchema>,
+) -> Result<Option<OwnedPhysicalRow>, SQLError> {
+    schema
+        .map(|schema| {
+            let context = values
+                .get(image_width..)
+                .filter(|values| values.len() == schema.len())
+                .ok_or_else(|| {
+                    SQLError::Internal(
+                        "rewrite-rule RETURNING provider lost its source context".into(),
+                    )
+                })?;
+            Ok(OwnedPhysicalRow::new(
+                schema.clone(),
+                PhysicalRow::from_values(context.to_vec()),
             ))
-        }
-    };
-    (source_index < source_rows.len())
-        .then_some(Some(source_index))
-        .ok_or_else(|| {
-            SQLError::Internal(
-                "rewrite-rule RETURNING source index is outside the event row set".into(),
-            )
         })
+        .transpose()
 }
 
 #[cfg(test)]

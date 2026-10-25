@@ -85,7 +85,7 @@ pub(super) fn optimize_plan_authorized(
     optimizer_config: crate::optimizer::OptimizerConfig<'_>,
     mut plan: UnifiedPlan,
 ) -> Result<UnifiedPlan, SQLError> {
-    rule_inputs::rewrite_plan(rules, &mut plan)?;
+    rule_inputs::rewrite_plan(rules, &mut plan, &optimizer_config)?;
     let callback_error = std::cell::RefCell::new(None);
     let statistics = CatalogSourceStatistics {
         context,

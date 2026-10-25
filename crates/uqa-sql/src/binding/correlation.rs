@@ -223,6 +223,41 @@ pub fn query_depends_on_outer_row(
     query_has_external_reference(context, plan, &mut Vec::new())
 }
 
+/// Whether a scalar expression needs a row outside its declared FROM namespace. Scalar subqueries keep their own local aliases and CTEs; an uncorrelated subquery does not introduce an outer-row dependency.
+pub fn expression_depends_on_outer_row(
+    context: CorrelationContext<'_>,
+    expression: &crate::plan::ExpressionPlan,
+    source: Option<&SourcePlan>,
+    definitions: &[crate::plan::CtePlan],
+) -> Result<bool, SQLError> {
+    let mut ctes = BTreeMap::new();
+    for cte in definitions.iter().filter(|cte| cte.recursive) {
+        ctes.insert(
+            cte.name.clone(),
+            RelationColumns {
+                names: cte.columns.iter().cloned().collect(),
+                ordered: cte.columns.clone(),
+                complete: false,
+            },
+        );
+    }
+    for cte in definitions {
+        let columns = cte_output_columns(context, cte, &ctes, &[])?;
+        ctes.insert(cte.name.clone(), columns);
+    }
+    let mut scopes = match source {
+        Some(source) => vec![source_scope(context, source, &ctes, &[])?],
+        None => Vec::new(),
+    };
+    expression_references_outer(
+        context,
+        &expression.scalar,
+        &expression.subqueries,
+        &mut scopes,
+        &ctes,
+    )
+}
+
 /// Whether a subquery refers to the caller's own row. Seed enclosing identities so references beyond that row are not mistaken for level-zero variables.
 pub(crate) fn query_depends_on_current_row(
     context: CorrelationContext<'_>,

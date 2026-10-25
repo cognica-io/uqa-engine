@@ -20,16 +20,30 @@ use super::{
     ViewRuleUpdatePlan,
 };
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves view qualifier and row identity"
-)]
 pub fn rewrite_update_to_base(
     services: ViewRewriteContext<'_>,
     statement: &UpdatePlan,
     params: &[crate::SQLParam],
     inherited_ctes: Option<&super::CteScope>,
 ) -> Result<UpdatePlan, SQLError> {
+    rewrite_update_rule_inputs(services, statement, params, inherited_ctes, &mut |_| {
+        Ok(true)
+    })?
+    .ok_or_else(|| SQLError::Internal("ordinary view rewrite suppressed its input".into()))
+}
+
+/// Visit each view's original mutation before translating it to the next relation. A replacement rule can end the original query without inspecting or executing a lower view.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
+pub fn rewrite_update_rule_inputs(
+    services: ViewRewriteContext<'_>,
+    statement: &UpdatePlan,
+    params: &[crate::SQLParam],
+    inherited_ctes: Option<&super::CteScope>,
+    visit: &mut dyn FnMut(&mut UpdatePlan) -> Result<bool, SQLError>,
+) -> Result<Option<UpdatePlan>, SQLError> {
     validate_public_view_targets(
         services,
         &statement.table,
@@ -47,7 +61,19 @@ pub fn rewrite_update_to_base(
         inherited_ctes,
     )?;
     validate_public_update_contract(services, statement, source_schema.as_ref())?;
-    let view = canonical_view_name(services, &statement.table)?;
+    let mut plan = statement.clone();
+    let mut privileges = LayerPrivileges::new();
+    plan.target_privilege_subject = Some(privileges.check(
+        services.authorization,
+        &plan.table,
+        plan.target_privilege_subject.as_ref(),
+        || crate::semantics::view_privileges::ensure_update(services.authorization, &plan),
+    )?);
+    if !visit(&mut plan)? {
+        privileges.finish()?;
+        return Ok(None);
+    }
+    let view = canonical_view_name(services, &plan.table)?;
     validate_direct_view_rule_path(
         services,
         &view,
@@ -62,16 +88,8 @@ pub fn rewrite_update_to_base(
             NotUpdatableReason::NoUpdatableColumns,
         ));
     }
-    validate_update_targets(&initial_layer, statement)?;
+    validate_update_targets(&initial_layer, &plan)?;
     let mut initial_layer = Some(initial_layer);
-    let mut plan = statement.clone();
-    let mut privileges = LayerPrivileges::new();
-    plan.target_privilege_subject = Some(privileges.check(
-        services.authorization,
-        &plan.table,
-        plan.target_privilege_subject.as_ref(),
-        || crate::semantics::view_privileges::ensure_update(services.authorization, &plan),
-    )?);
     let mut cascaded = false;
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
@@ -83,6 +101,10 @@ pub fn rewrite_update_to_base(
             && instead_of_trigger_definition(services, &plan.table, TriggerEvent::Update)?
         {
             break;
+        }
+        if !visited.is_empty() && !visit(&mut plan)? {
+            privileges.finish()?;
+            return Ok(None);
         }
         let Some(layer) = next_rewritten_layer(
             services,
@@ -329,19 +351,33 @@ pub fn rewrite_update_to_base(
         &source_star_boundaries,
     )?;
     privileges.finish()?;
-    Ok(plan)
+    Ok(Some(plan))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves view qualifier and row identity"
-)]
 pub fn rewrite_delete_to_base(
     services: ViewRewriteContext<'_>,
     statement: &DeletePlan,
     params: &[crate::SQLParam],
     inherited_ctes: Option<&super::CteScope>,
 ) -> Result<DeletePlan, SQLError> {
+    rewrite_delete_rule_inputs(services, statement, params, inherited_ctes, &mut |_| {
+        Ok(true)
+    })?
+    .ok_or_else(|| SQLError::Internal("ordinary view rewrite suppressed its input".into()))
+}
+
+/// Retain a DELETE rule's native event relation before automatic view translation.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
+pub fn rewrite_delete_rule_inputs(
+    services: ViewRewriteContext<'_>,
+    statement: &DeletePlan,
+    params: &[crate::SQLParam],
+    inherited_ctes: Option<&super::CteScope>,
+    visit: &mut dyn FnMut(&mut DeletePlan) -> Result<bool, SQLError>,
+) -> Result<Option<DeletePlan>, SQLError> {
     let source_schema = dml_source_schema(
         services,
         statement.source.as_deref(),
@@ -359,6 +395,10 @@ pub fn rewrite_delete_to_base(
         plan.target_privilege_subject.as_ref(),
         || crate::semantics::view_privileges::ensure_delete(services.authorization, &plan),
     )?);
+    if !visit(&mut plan)? {
+        privileges.finish()?;
+        return Ok(None);
+    }
     let mut initial_layer = None;
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
@@ -370,6 +410,10 @@ pub fn rewrite_delete_to_base(
             && instead_of_trigger_definition(services, &plan.table, TriggerEvent::Delete)?
         {
             break;
+        }
+        if !visited.is_empty() && !visit(&mut plan)? {
+            privileges.finish()?;
+            return Ok(None);
         }
         let Some(layer) = next_rewritten_layer(
             services,
@@ -530,5 +574,5 @@ pub fn rewrite_delete_to_base(
         &source_star_boundaries,
     )?;
     privileges.finish()?;
-    Ok(plan)
+    Ok(Some(plan))
 }

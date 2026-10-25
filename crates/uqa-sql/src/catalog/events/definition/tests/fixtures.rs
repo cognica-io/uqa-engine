@@ -263,6 +263,9 @@ impl RoutineExecutionAuthority for Catalog {
     }
 }
 impl ViewPrivilegeCatalog for Catalog {
+    fn ensure_query_select(&self, _: &crate::plan::QueryPlan) -> Result<(), SQLError> {
+        panic!("unexpected view query authorization")
+    }
     fn bound_role(
         &self,
         identity: crate::catalog::roles::RoleIdentity,

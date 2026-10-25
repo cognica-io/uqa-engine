@@ -82,6 +82,10 @@ def main():
         "INSERT INTO serialization_event VALUES(nextval('serialization_rows')),(nextval('serialization_rows')) RETURNING n, NULL::aclitem",
         "INSERT INTO serialization_partial(n[nextval('serialization_rows')::integer]) SELECT 7 FROM generate_series(1,8) RETURNING n, NULL::aclitem",
         "INSERT INTO serialization_nested(n[nextval('serialization_rows')::integer].a) SELECT 7 FROM generate_series(1,8) RETURNING n, NULL::aclitem",
+        "UPDATE serialization_update_event SET n=nextval('serialization_rows') RETURNING n, NULL::aclitem",
+        "DELETE FROM serialization_delete_event WHERE nextval('serialization_rows')>0 RETURNING n, NULL::aclitem",
+        "UPDATE serialization_target SET n=serialization_target.n FROM generate_series(1,2) g(k) WHERE nextval('serialization_rows')>0 RETURNING NULL::aclitem",
+        "DELETE FROM serialization_target USING generate_series(1,2) g(k) WHERE nextval('serialization_rows')>0 RETURNING NULL::aclitem",
     ]
     mutation_setup = "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()"
     failures = []
@@ -93,6 +97,10 @@ def main():
             setup += "; CREATE TEMP TABLE serialization_partial(n bigint[]); CREATE RULE serialization_route AS ON INSERT TO serialization_partial DO INSTEAD INSERT INTO serialization_target VALUES(NEW.n[1]) RETURNING ARRAY[n]"
         if "serialization_nested" in mutation:
             setup += "; CREATE TYPE serialization_pair AS (a bigint,b bigint); CREATE TEMP TABLE serialization_nested(n serialization_pair[]); CREATE RULE serialization_route AS ON INSERT TO serialization_nested DO INSTEAD INSERT INTO serialization_target VALUES((NEW.n[1]).a) RETURNING ARRAY[ROW(n,NULL)::serialization_pair]"
+        if "serialization_update_event" in mutation:
+            setup += "; CREATE TEMP VIEW serialization_update_event AS SELECT n FROM serialization_target; CREATE RULE serialization_update_route AS ON UPDATE TO serialization_update_event DO INSTEAD UPDATE serialization_target SET n=NEW.n WHERE n=OLD.n RETURNING n"
+        if "serialization_delete_event" in mutation:
+            setup += "; CREATE TEMP VIEW serialization_delete_event AS SELECT n FROM serialization_target; CREATE RULE serialization_delete_route AS ON DELETE TO serialization_delete_event DO INSTEAD DELETE FROM serialization_target WHERE n=OLD.n RETURNING n"
         statement = "EXPLAIN (ANALYZE, SERIALIZE BINARY) " + mutation
         script = "BEGIN; CREATE SCHEMA serialization_capture; SET LOCAL search_path=serialization_capture,pg_temp,public; " + setup + "; SAVEPOINT before_output;\n\\set ON_ERROR_STOP off\n" + statement + ";\n\\set ON_ERROR_STOP on\nROLLBACK TO before_output; SELECT json_build_object('rows', currval('serialization_rows'), 'after', nextval('serialization_after')); ROLLBACK;"
         result = subprocess.run(command + ["-XAtq", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose"], input=script, capture_output=True, text=True, check=True)

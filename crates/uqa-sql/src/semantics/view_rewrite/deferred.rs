@@ -33,7 +33,7 @@ pub fn resolve_outer_expression_rewrites(
     }
 }
 
-/// A view rewrite retained across an open native row descriptor. Names in an intervening query scope shadow these substitutions, even when their values are NULL.
+/// An outer-column rewrite retained across an open native row descriptor. Names in an intervening query scope shadow these substitutions, even when their values are NULL.
 #[derive(Debug, Clone)]
 pub struct DeferredOuterRewrite {
     outer_columns: Arc<BTreeMap<ColumnIdentity, crate::ast::InternalColumnRef>>,
@@ -84,6 +84,33 @@ pub fn resolve_outer_rewrites<'a>(
 }
 
 impl DeferredOuterRewrite {
+    /// Bind expressions whose original input attributes already have internal identities. Nested query namespaces resolve their own names before consulting these outer replacements.
+    pub(crate) fn from_inputs(inputs: BTreeMap<ColumnIdentity, ExpressionPlan>) -> Self {
+        Self {
+            outer_columns: Arc::new(BTreeMap::new()),
+            replacements: Arc::new(
+                inputs
+                    .into_iter()
+                    .map(|(identity, expression)| {
+                        (
+                            identity,
+                            OuterReplacement {
+                                expression,
+                                qualifier: String::new(),
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
+            shadowed_qualifiers: BTreeSet::new(),
+            shadowed_columns: BTreeSet::new(),
+        }
+    }
+
+    pub(crate) fn bind_expression(&self, expression: &mut ExpressionPlan) {
+        self.expression(&mut expression.scalar, &mut expression.subqueries);
+    }
+
     pub(super) fn rebase(
         &mut self,
         context: &super::correlation::CorrelatedRewriteContext<'_>,
@@ -236,6 +263,11 @@ impl DeferredOuterRewrite {
             let identity = match node {
                 ScalarExpr::Column(column) if !self.shadowed_columns.contains(column.as_str()) => {
                     ColumnIdentity::unqualified(column.as_str())
+                }
+                ScalarExpr::QualifiedStar(qualifier)
+                    if !self.shadowed_qualifiers.contains(qualifier.as_str()) =>
+                {
+                    ColumnIdentity::unqualified(qualifier.as_str())
                 }
                 ScalarExpr::QualifiedColumn { qualifier, column }
                     if !self.shadowed_qualifiers.contains(qualifier) =>

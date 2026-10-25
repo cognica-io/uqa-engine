@@ -59,6 +59,7 @@ impl SchemaScope {
         } = binding;
         if let Some(on) = on {
             let input = RowSchema::join(left, right, std::iter::empty::<String>());
+            let input = super::with_query_table_pseudo_columns(&input);
             let input = overlay_outer_schema(&input, outer);
             if self.validate_references {
                 self.bind_expression_type(routines, on, &input, subqueries, params)?;

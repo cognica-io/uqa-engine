@@ -14,6 +14,8 @@ use uqa_sql::SQLError;
 mod conditional;
 pub(super) mod constants;
 mod nodes;
+mod qualification;
+pub(crate) use qualification::optimize_qualification;
 
 use conditional::{optimize_boolean, optimize_case, optimize_coalesce};
 use constants::fold_selected_literal;

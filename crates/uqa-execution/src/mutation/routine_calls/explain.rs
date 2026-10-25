@@ -39,14 +39,13 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
     let view = mutation
         .rules
         .views
-        .rewrite
         .catalog
         .target_view_kind(target)?
         .is_some();
     match &command {
         CommandPlan::Insert(plan) => {
             if view {
-                view_privileges::ensure_insert(mutation.rules.views.rewrite.authorization, plan)?;
+                view_privileges::ensure_insert(mutation.rules.views.authorization, plan)?;
             } else {
                 let columns =
                     plan.on_conflict
@@ -71,7 +70,7 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
         }
         CommandPlan::Update(plan) => {
             if view {
-                view_privileges::ensure_update(mutation.rules.views.rewrite.authorization, plan)?;
+                view_privileges::ensure_update(mutation.rules.views.authorization, plan)?;
             } else {
                 mutation_privileges::ensure_update_target_privileges(mutation.privileges, plan)?;
             }
@@ -79,7 +78,7 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
         }
         CommandPlan::Delete(plan) => {
             if view {
-                view_privileges::ensure_delete(mutation.rules.views.rewrite.authorization, plan)?;
+                view_privileges::ensure_delete(mutation.rules.views.authorization, plan)?;
             } else {
                 mutation_privileges::ensure_delete_target_privileges(mutation.privileges, plan)?;
             }
@@ -87,7 +86,7 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
         }
         CommandPlan::Merge(plan) => {
             if view {
-                view_privileges::ensure_merge(mutation.rules.views.rewrite.authorization, plan)?;
+                view_privileges::ensure_merge(mutation.rules.views.authorization, plan)?;
             } else {
                 super::super::merge::analysis::ensure_merge_privileges(mutation, plan, None)?;
             }

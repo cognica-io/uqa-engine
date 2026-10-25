@@ -8,11 +8,8 @@
 use crate::session::StatementReadSnapshot;
 use crate::Engine;
 use uqa_core::DocId;
-use uqa_execution::mutation::{
-    rows::context::{
-        MutationExpressionContext, MutationRowCatalog, MutationRowContext, MutationTupleMetadata,
-    },
-    views::ViewRowContext,
+use uqa_execution::mutation::rows::context::{
+    MutationExpressionContext, MutationRowCatalog, MutationRowContext, MutationTupleMetadata,
 };
 use uqa_sql::{ast::ColumnDef, RowSchema, SQLError};
 use uqa_storage::DocumentMetadata;
@@ -84,14 +81,6 @@ impl Engine {
         MutationExpressionContext {
             types: self,
             expressions: self,
-        }
-    }
-    pub(crate) fn view_row_context(&self) -> ViewRowContext<'_, StatementReadSnapshot> {
-        ViewRowContext {
-            volatility: self,
-            rewrite: self.view_rewrite_context(),
-            rows: self.mutation_row_context(),
-            expressions: self.mutation_expression_context(),
         }
     }
 }

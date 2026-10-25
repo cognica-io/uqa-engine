@@ -873,6 +873,8 @@ mod unified_plan_tests {
 }
 
 mod cache;
+mod mutation_recheck;
+mod null_qualifications;
 mod operators;
 mod regex_cache;
 mod retrieval_planning;

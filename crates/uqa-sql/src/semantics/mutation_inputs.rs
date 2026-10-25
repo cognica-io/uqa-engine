@@ -7,6 +7,51 @@
 //! Row-independent mutation input shapes.
 use crate::ScalarExpr;
 
+/// A whole-column assignment whose expression needs no input row. Selecting it never evaluates the expression or its target coercion.
+pub struct RowIndependentAssignment<'a> {
+    pub column: &'a str,
+    pub value: &'a ScalarExpr,
+}
+
+pub fn row_independent_assignments(
+    assignments: &[crate::plan::AssignmentPlan],
+) -> Option<Vec<RowIndependentAssignment<'_>>> {
+    assignments
+        .iter()
+        .map(|assignment| {
+            let crate::ast::AssignmentTargets::Single(target) = &assignment.target else {
+                return None;
+            };
+            (target.is_whole_column() && expr_is_row_independent(&assignment.value)).then_some(
+                RowIndependentAssignment {
+                    column: &target.column,
+                    value: &assignment.value,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Borrow an equality lookup without evaluating its value before the caller selects the complete physical path.
+pub fn point_lookup_input(filter: Option<&ScalarExpr>) -> Option<(&str, &ScalarExpr)> {
+    let ScalarExpr::Binary {
+        op: crate::ast::BinaryOp::Equal,
+        lhs,
+        rhs,
+    } = filter?
+    else {
+        return None;
+    };
+    for (column, value) in [(lhs, rhs), (rhs, lhs)] {
+        if let Some(column) = top_level_column(column) {
+            if expr_is_row_independent(value) {
+                return Some((column, value));
+            }
+        }
+    }
+    None
+}
+
 pub fn top_level_column(expr: &ScalarExpr) -> Option<&str> {
     match expr {
         ScalarExpr::Column(name) => Some(name),

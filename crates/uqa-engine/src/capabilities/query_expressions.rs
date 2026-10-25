@@ -7,7 +7,6 @@
 //! Engine-backed scalar and function callback adapters.
 
 use std::sync::Arc;
-use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_execution::SharedExpressionEvaluator;
 use uqa_sql::expr::RowLookup;
@@ -494,8 +493,8 @@ mod function_invocation;
 mod routine_descriptions;
 mod type_resolution;
 
-use uqa_execution::{PhysicalRow, RowSchema};
-use uqa_sql::{plan::ExpressionPlan, ResultRow};
+use uqa_execution::RowSchema;
+use uqa_sql::ResultRow;
 
 pub(crate) fn eval_lowered_expression(
     engine: &Engine,
@@ -531,19 +530,5 @@ pub(crate) fn eval_lowered_expression_with_schema(
     let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
     uqa_execution::query::catalog_expression::eval_lowered_expression_with_schema(
         engine, scope, expression, row, schema, params,
-    )
-}
-
-pub(crate) fn eval_stored_expression_plan_with_row(
-    engine: &Engine,
-    expression: &ExpressionPlan,
-    schema: &RowSchema,
-    row: &PhysicalRow,
-    params: &[SQLParam],
-    privilege_subject: Option<&RoleReference>,
-) -> Result<Value, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_statement(engine, privilege_subject);
-    uqa_execution::query::catalog_expression::eval_stored_expression_plan_with_row(
-        engine, scope, expression, schema, row, params,
     )
 }

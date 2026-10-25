@@ -289,3 +289,43 @@ fn nested_query_authority_is_checked_independently_of_its_action_owner() {
         assert_eq!(scope.resolution.current_user, RoleReference::from("reader"));
     }
 }
+
+#[test]
+fn complete_query_permissions_keep_declared_inputs_and_the_selected_owner() {
+    for (sql, permitted) in [
+        ("SELECT id FROM public.input", true),
+        (
+            "SELECT id FROM (SELECT id,secret FROM public.input) AS derived",
+            false,
+        ),
+        (
+            "WITH c AS (SELECT secret FROM public.input) SELECT * FROM c",
+            false,
+        ),
+        ("SELECT id,1/0 FROM public.input", true),
+    ] {
+        for subject in ["owner", "reader"] {
+            let mut catalog = Catalog::new(false);
+            catalog
+                .required_subjects
+                .insert("public.input".into(), "owner".into());
+            let mut query = query(sql);
+            query.relation_privilege_subject = Some(subject.into());
+            let scope = catalog.scope();
+            let result =
+                crate::semantics::privileges::ensure_select_privileges_for_query(&query, &scope);
+            assert_eq!(
+                result.is_ok(),
+                permitted && subject == "owner",
+                "{sql}: {subject}: {result:?}"
+            );
+            if let Err(error) = result {
+                assert_eq!(error.sqlstate(), Some("42501"));
+            }
+            assert_eq!(
+                scope.privilege_subject().unwrap(),
+                &RoleReference::from("reader")
+            );
+        }
+    }
+}

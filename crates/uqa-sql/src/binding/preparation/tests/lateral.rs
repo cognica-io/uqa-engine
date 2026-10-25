@@ -139,3 +139,27 @@ fn lateral_outer_join_permissions_match_postgresql_diagnostics() {
         );
     }
 }
+
+#[test]
+fn stored_and_prepared_queries_share_metadata_namespaces() {
+    let context = assignment_context();
+    for sql in [
+        "SELECT (SELECT _meta.doc_id), (SELECT _meta.score), (SELECT tableoid), (SELECT xmin) FROM assignment_target",
+        "SELECT id FROM assignment_target JOIN (VALUES (1)) marker(n) ON marker.n=(SELECT _meta.doc_id)",
+        "SELECT id FROM assignment_target JOIN (VALUES (1)) marker(n) ON (SELECT tableoid)=1::oid AND (SELECT xmin)='1'::xid",
+        "SELECT id FROM assignment_target JOIN (VALUES (1)) _meta(doc_id) ON _meta.doc_id=(SELECT _meta.doc_id)",
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        infer_prepared_parameter_types(&NoRoutines, &plan, &[], &context)
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        let UnifiedPlan::Query(query) = &mut plan else { panic!("query") };
+        crate::binding::bind_query_plan_routines_for_storage(
+            &NoRoutines, query, &[], &context, None,
+        ).unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    let plan = UnifiedPlan::lower(crate::compile(
+        "SELECT a.id FROM assignment_target a JOIN assignment_target b ON (SELECT _meta.doc_id)=1",
+    ).unwrap().remove(0));
+    let error = infer_prepared_parameter_types(&NoRoutines, &plan, &[], &context).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P01"));
+}

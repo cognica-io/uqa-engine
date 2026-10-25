@@ -5,7 +5,6 @@
 //
 
 use super::*;
-use crate::mutation::rules::RuleRowImage;
 use crate::query::runtime::{QueryMemorySettings, QueryRuntimeView};
 use parking_lot::RwLock;
 use uqa_core::CancellationToken;
@@ -73,27 +72,35 @@ fn columns(ty: &str) -> Vec<ColumnDef> {
     table.columns
 }
 
-fn action_output(
+fn capture(
     runtime: QueryRuntimeView<'_>,
+    definitions: &[ColumnDef],
     types: Vec<Option<ColumnType>>,
+    context: Option<RowSchema>,
     input: impl IntoIterator<Item = Vec<Value>>,
-) -> MutationOutput {
-    // Repeated labels require positional capture: a named SQL row would discard two images.
+) -> Result<RuleReturningImages, SQLError> {
+    use crate::query::consumer::QueryRowConsumer;
     let schema = RowSchema::with_types(vec!["v".into(); types.len()], types);
-    let mut rows = ReturningRows::new(runtime).unwrap();
+    let consumer =
+        RuleReturningConsumer::new(&Assignment, definitions, None, ReturningRows::new(runtime)?)
+            .with_context(context);
+    consumer.begin(schema.columns(), &schema)?;
+    let mut count = 0;
     for values in input {
-        rows.push(OwnedPhysicalRow::new(
+        consumer.consume(OwnedPhysicalRow::new(
             schema.clone(),
             PhysicalRow::from_values(values),
-        ))
-        .unwrap();
+        ))?;
+        count += 1;
     }
-    let count = rows.len() as u64;
-    MutationOutput::from_returning(schema, rows, count).unwrap()
+    let RuleReturningResult::Images(images) = consumer.finish(count) else {
+        panic!("retained images")
+    };
+    Ok(images)
 }
 
 #[test]
-fn captured_rule_images_spill_and_share_original_contexts_without_complete_output() {
+fn native_rule_images_spill_and_preserve_context_without_complete_output() {
     let definitions = columns("text");
     let context_schema = RowSchema::with_qualified_types(
         "source",
@@ -101,95 +108,61 @@ fn captured_rule_images_spill_and_share_original_contexts_without_complete_outpu
         vec![Some(ColumnType::Text)],
     )
     .with_column_collations([Some(950)]);
-    let mut source = RuleRowImage::empty();
-    source.context = Some(OwnedPhysicalRow::new(
-        context_schema.clone(),
-        PhysicalRow::from_values(vec![Value::Str("source".repeat(350_000))]),
-    ));
-    let sources = RuleRows::from_rows([Ok(source)], 64 * 1024, CancellationToken::new()).unwrap();
     with_runtime(64 * 1024, |runtime| {
         let allocated = allocation_counter::measure(|| {
-            let output = action_output(
+            let captured = capture(
                 runtime,
-                vec![
-                    Some(ColumnType::Text),
-                    Some(ColumnType::Text),
-                    Some(ColumnType::Text),
-                    Some(ColumnType::BigInteger),
-                ],
-                (0..2048).map(|_| {
-                    vec![
-                        Value::Str("c".repeat(8192)),
-                        Value::Str("o".repeat(8192)),
-                        Value::Str("n".repeat(8192)),
-                        Value::Int(0),
-                    ]
-                }),
-            );
-            let captured = capture_rule_returning_result(
-                ReturningRows::new(runtime).unwrap(),
-                &Assignment,
-                output,
                 &definitions,
-                Some(sources.clone()),
+                vec![Some(ColumnType::Text); 4],
+                Some(context_schema.clone()),
+                (0..2048).map(|_| {
+                    ["c", "o", "n", "s"]
+                        .map(|s| Value::Str(s.repeat(8192)))
+                        .to_vec()
+                }),
             )
             .unwrap();
             assert_eq!(captured.affected_rows, 2048);
             assert_eq!(captured.images.len(), 2048);
-            assert_eq!(captured.source_rows.as_ref().unwrap().len(), 1);
-            let mut count = 0;
+            let schema = captured.context_schema.unwrap();
+            assert!(schema.shares_index(&context_schema));
             for image in captured.images.into_rows().unwrap() {
                 let values = image.unwrap().row.into_physical_values();
-                for (index, byte) in [b'c', b'o', b'n'].into_iter().enumerate() {
+                for (index, byte) in [b'c', b'o', b'n', b's'].into_iter().enumerate() {
                     let Value::Str(text) = &values[index] else {
                         panic!("text image")
                     };
                     assert_eq!(text.len(), 8192);
                     assert!(text.bytes().all(|actual| actual == byte));
                 }
-                assert_eq!(
-                    source_index(&values, 3, captured.source_rows.as_ref()).unwrap(),
-                    Some(0)
-                );
-                count += 1;
+                let source = source_context(&values, 3, Some(&schema)).unwrap().unwrap();
+                assert!(source.schema.shares_index(&context_schema));
+                assert_eq!(source.row.value(0), Some(&values[3]));
             }
-            assert_eq!(count, 2048);
         });
-        // The 48 MiB image set and 2.1 MiB source context are never copied into complete output vectors.
+        // The 64 MiB result retains only bounded encoded pages and the current delivered row.
         assert!(allocated.bytes_max < 2 * 1024 * 1024, "{allocated:?}");
     });
-    let source = sources.get(0).unwrap().context.unwrap();
-    assert!(source.schema.shares_index(&context_schema));
-    assert_eq!(
-        source.row.value(0),
-        Some(&Value::Str("source".repeat(350_000)))
-    );
 }
 
 #[test]
-fn captured_rule_images_keep_positional_assignment_nulls_and_original_source_indices() {
+fn native_rule_images_keep_positional_assignment_nulls_and_context_values() {
     let definitions = columns("numeric(5,1)");
-    let sources = RuleRows::from_rows(
-        [Ok(RuleRowImage::empty()), Ok(RuleRowImage::empty())],
-        1,
-        CancellationToken::new(),
-    )
-    .unwrap();
+    let context = RowSchema::with_qualified_types(
+        "source",
+        vec!["id".into()],
+        vec![Some(ColumnType::Integer)],
+    );
     with_runtime(1, |runtime| {
-        let output = action_output(
+        let captured = capture(
             runtime,
-            vec![Some(ColumnType::Integer); 4],
-            [
-                vec![Value::Int(1), Value::Null, Value::Int(3), Value::Int(1)],
-                vec![Value::Int(4), Value::Int(5), Value::Null, Value::Int(0)],
-            ],
-        );
-        let captured = capture_rule_returning_result(
-            ReturningRows::new(runtime).unwrap(),
-            &Assignment,
-            output,
             &definitions,
-            Some(sources.clone()),
+            vec![Some(ColumnType::Integer); 4],
+            Some(context.clone()),
+            [
+                vec![Value::Int(1), Value::Null, Value::Int(3), Value::Int(91)],
+                vec![Value::Int(4), Value::Int(5), Value::Null, Value::Int(37)],
+            ],
         )
         .unwrap();
         let rows = captured
@@ -198,71 +171,49 @@ fn captured_rule_images_keep_positional_assignment_nulls_and_original_source_ind
             .unwrap()
             .map(|row| row.unwrap().row.into_physical_values())
             .collect::<Vec<_>>();
-        assert_eq!(rows.len(), 2);
         for (values, expected) in rows
             .iter()
             .zip([[Some(1), None, Some(3)], [Some(4), Some(5), None]])
         {
             for (value, expected) in values.iter().zip(expected) {
-                match expected {
-                    Some(integer) => assert_eq!(
-                        *value,
-                        Value::Decimal(
-                            uqa_core::DecimalValue::parse(&format!("{integer}.0")).unwrap()
-                        )
-                    ),
-                    None => assert_eq!(*value, Value::Null),
-                }
+                assert_eq!(
+                    *value,
+                    expected.map_or(Value::Null, |integer| Value::Decimal(
+                        uqa_core::DecimalValue::parse(&format!("{integer}.0")).unwrap()
+                    ))
+                );
             }
         }
-        assert_eq!(source_index(&rows[0], 3, Some(&sources)).unwrap(), Some(1));
-        assert_eq!(source_index(&rows[1], 3, Some(&sources)).unwrap(), Some(0));
+        assert_eq!(
+            source_context(&rows[0], 3, Some(&context))
+                .unwrap()
+                .unwrap()
+                .row
+                .value(0),
+            Some(&Value::Int(91))
+        );
+        assert_eq!(
+            source_context(&rows[1], 3, Some(&context))
+                .unwrap()
+                .unwrap()
+                .row
+                .value(0),
+            Some(&Value::Int(37))
+        );
     });
 }
 
 #[test]
-fn captured_rule_images_reject_invalid_source_indices_and_observe_cancellation() {
+fn native_rule_images_reject_incomplete_descriptors_and_observe_cancellation() {
     let definitions = columns("integer");
-    let sources =
-        RuleRows::from_rows([Ok(RuleRowImage::empty())], 1, CancellationToken::new()).unwrap();
-    for index in [
-        Value::Int(-1),
-        Value::Int(1),
-        Value::Null,
-        Value::Str("0".into()),
-    ] {
-        with_runtime(1, |runtime| {
-            let output = action_output(
-                runtime,
-                vec![Some(ColumnType::Integer); 4],
-                [vec![Value::Int(1), Value::Int(2), Value::Int(3), index]],
-            );
-            let error = capture_rule_returning_result(
-                ReturningRows::new(runtime).unwrap(),
-                &Assignment,
-                output,
-                &definitions,
-                Some(sources.clone()),
-            )
-            .err()
-            .unwrap();
-            assert!(
-                matches!(error, SQLError::Internal(message) if message.starts_with("rewrite-rule RETURNING source index"))
-            );
-        });
-    }
+    let context = RowSchema::new(vec!["source".into()]);
     with_runtime(1, |runtime| {
-        let output = action_output(
+        let error = capture(
             runtime,
-            vec![Some(ColumnType::Integer); 3],
-            [vec![Value::Int(1), Value::Int(2), Value::Int(3)]],
-        );
-        let error = capture_rule_returning_result(
-            ReturningRows::new(runtime).unwrap(),
-            &Assignment,
-            output,
             &definitions,
-            Some(sources.clone()),
+            vec![Some(ColumnType::Integer); 3],
+            Some(context),
+            [],
         )
         .err()
         .unwrap();
@@ -271,22 +222,16 @@ fn captured_rule_images_reject_invalid_source_indices_and_observe_cancellation()
         );
     });
     with_runtime(1, |runtime| {
-        let output = action_output(
-            runtime,
-            vec![Some(ColumnType::Integer); 3],
-            [vec![Value::Int(1), Value::Int(2), Value::Int(3)]],
-        );
         runtime.cancellation.cancel();
-        let error = capture_rule_returning_result(
-            ReturningRows::new(runtime).unwrap(),
-            &Assignment,
-            output,
+        let error = capture(
+            runtime,
             &definitions,
+            vec![Some(ColumnType::Integer); 3],
             None,
+            [vec![Value::Int(1), Value::Int(2), Value::Int(3)]],
         )
         .err()
         .unwrap();
         assert_eq!(error.sqlstate(), Some("57014"));
     });
-    assert!(sources.get(0).unwrap().context.is_none());
 }

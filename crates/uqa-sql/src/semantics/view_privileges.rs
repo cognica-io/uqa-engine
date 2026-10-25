@@ -438,6 +438,7 @@ pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> 
 
 /// Authorization access to one loaded view and the current statement's SELECT privileges.
 pub trait ViewPrivilegeCatalog {
+    fn ensure_query_select(&self, query: &crate::plan::QueryPlan) -> Result<(), SQLError>;
     fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
     fn current_role(&self) -> RoleReference;
     fn bound_role(

@@ -9,8 +9,6 @@ use crate::{Batch, PhysicalOperator, PhysicalRow, RowSchema, SpillBuffer};
 use uqa_core::Value;
 use uqa_sql::ColumnType;
 
-mod admitted;
-
 fn rows(count: usize, payload: usize) -> (InternalRelationId, SharedSpill) {
     let relation = InternalRelationId::allocate();
     let schema = RowSchema::with_internal_relation_metadata(

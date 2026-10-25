@@ -602,7 +602,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         events,
         statement_snapshot,
     } = prepare_view_merge(
-        context.mutation.rules.views.rewrite,
+        context.mutation.rules.views,
         mutation.scopes,
         triggers,
         context.snapshots,

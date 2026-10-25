@@ -29,6 +29,7 @@ mod lateral;
 mod literal_collations;
 mod operator_joins;
 mod ordered_calls;
+mod rewritten_inputs;
 mod row_stars;
 mod set_contexts;
 mod set_ordering;

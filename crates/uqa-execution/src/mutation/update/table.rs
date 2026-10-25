@@ -8,8 +8,7 @@
 use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
-    assignment::MutationAssignmentTarget,
-    candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
+    candidate::PhysicalMutationLockTarget,
     command_scope::MutationOverlayScope,
     prepared::{
         decode_prepared_mutation_action_row, prepared_mutation_action_schema,
@@ -103,59 +102,21 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         &statement_relation,
         &assigned_columns,
     );
-    let update_rules = context
+    crate::mutation::routine_calls::update(context, stmt, params, inherited_ctes)?;
+    let has_before_statement_trigger = !context
         .mutation
-        .rules
-        .rules
-        .analysis
-        .rules
-        .rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Update)?;
-    let has_update_rules = !update_rules.is_empty();
-    let has_view_update_rules = !stmt.view_rule_relations.is_empty();
-    let has_any_update_rules = has_update_rules || has_view_update_rules;
-    let view_original_query = !stmt.view_rule_relations.iter().try_fold(
-        false,
-        |suppressed, relation| -> Result<bool, SQLError> {
-            Ok(suppressed
-                || context
-                    .mutation
-                    .rules
-                    .rules
-                    .analysis
-                    .rules
-                    .rules_for(relation, uqa_sql::ast::RuleEvent::Update)?
-                    .iter()
-                    .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
-        },
-    )?;
-    let update_original_query = view_original_query
-        && !update_rules
-            .iter()
-            .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
-    if update_original_query {
-        crate::mutation::routine_calls::update(context, stmt, params, inherited_ctes)?;
-    }
-    let evaluate_view_assignments = view_original_query
-        || uqa_sql::semantics::rules::analysis::surviving_view_rules_reference_row(
-            context.mutation.rules.rules.analysis,
-            &stmt.view_rule_relations,
-            uqa_sql::ast::RuleEvent::Update,
-        )?;
-    let has_before_statement_trigger = update_original_query
-        && !context
-            .mutation
-            .preparation
-            .referential
-            .triggers
-            .catalog
-            .triggers_for(
-                &stmt.table,
-                uqa_sql::ast::TriggerTiming::Before,
-                uqa_sql::ast::TriggerEvent::Update,
-                false,
-                &assigned_columns,
-            )?
-            .is_empty();
+        .preparation
+        .referential
+        .triggers
+        .catalog
+        .triggers_for(
+            &stmt.table,
+            uqa_sql::ast::TriggerTiming::Before,
+            uqa_sql::ast::TriggerEvent::Update,
+            false,
+            &assigned_columns,
+        )?
+        .is_empty();
     let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
         Some(snapshot) => Some(snapshot),
         None if has_before_statement_trigger
@@ -170,12 +131,12 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         uqa_sql::ast::TriggerEvent::Update,
         &assigned_columns,
     );
-    if update_original_query && !has_any_update_rules {
-        statement_commands.after_triggers().fire_before_statement(
-            &context.mutation.preparation.referential.triggers,
-            &update_statement,
-        )?;
-    }
+
+    statement_commands.after_triggers().fire_before_statement(
+        &context.mutation.preparation.referential.triggers,
+        &update_statement,
+    )?;
+
     let mut statement_scope = None;
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
@@ -237,21 +198,6 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     &statement_commands,
                 );
             }
-            let row_independent_update_qualification = if has_any_update_rules {
-                crate::mutation::expressions::row_independent_mutation_qualification_count(
-                    read_context
-                        .mutation
-                        .preparation
-                        .referential
-                        .assignment
-                        .expressions,
-                    stmt.predicate.as_ref(),
-                    params,
-                    ctes,
-                )?
-            } else {
-                None
-            };
             let target_tables = read_context
                 .mutation
                 .preparation
@@ -288,14 +234,6 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     uqa_sql::ast::TriggerEvent::Update,
                     &assigned_columns,
                 )?
-                && !context
-                    .mutation
-                    .rules
-                    .rules
-                    .analysis
-                    .rules
-                    .relation_has_rules(&stmt.table)?
-                && !has_view_update_rules
             {
                 if let Some(result) = crate::mutation::point_update::try_run_point_update(
                     context.mutation.point_update(),
@@ -305,7 +243,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     statement_end::end_command(
                         &statement_commands,
                         &context.mutation.preparation.referential.triggers,
-                        &update_statement_events(update_original_query, &update_statement),
+                        std::slice::from_ref(&update_statement),
                         crate::mutation::triggers::events::AfterRowEvents::default(),
                     )?;
                     return Ok(result);
@@ -372,15 +310,11 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             let candidates = candidates.finish()?;
             let snapshot_ctes = ctes.returning_statement_snapshot_scope();
             let overlay = MutationOverlayScope::new(context.mutation.state);
-            let mut pending_updates = crate::mutation::rules::RuleRowBuffer::new(
-                context.mutation.rules.rules.memory.work_mem_bytes()?,
-                context.mutation.rules.rules.cancellation.clone(),
-            );
             let action_schema = prepared_mutation_action_schema();
             let mut prepared_updates =
                 crate::SpillBuffer::new(context.mutation.rules.rules.memory.work_mem_bytes()?);
             let mut events = crate::mutation::events::MutationEventQueue::default();
-            let mut locked_ids = super::locked_rows::LockedRows::new(
+            let mut completed_ids = super::locked_rows::LockedRows::new(
                 context.mutation.rules.rules.memory.work_mem_bytes()?,
                 cancel.clone(),
                 "UPDATE locked rows",
@@ -417,20 +351,26 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     doc_id,
                     &candidate,
                 )?;
-                if !preselected {
-                    if let Some(filter) = stmt.predicate.as_ref() {
-                        if !qualification.evaluate(
-                            read_context,
-                            &snapshot_ctes,
-                            filter,
-                            &candidate_row,
-                            (&storage_table, doc_id),
-                            params,
-                        )? {
-                            continue;
-                        }
+                if let Some(filter) = stmt.predicate.as_ref() {
+                    if !qualification.evaluate(
+                        read_context,
+                        &snapshot_ctes,
+                        filter,
+                        &candidate_row,
+                        (&storage_table, doc_id),
+                        params,
+                    )? {
+                        continue;
                     }
                 }
+                let projected = super::projection::project_update_row(
+                    read_context.mutation.preparation.referential.assignment,
+                    stmt,
+                    params,
+                    &snapshot_ctes,
+                    candidate.clone(),
+                    &candidate_row,
+                )?;
                 let target = crate::mutation::locking::lock_physical_mutation_target(
                     context.mutation.preparation.referential.locking.session,
                     &storage_table,
@@ -457,7 +397,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 }
                 let storage_table = identity.table;
                 let doc_id = identity.doc_id;
-                if !locked_ids.insert_if_absent(&storage_table, doc_id)? {
+                if completed_ids.contains(&storage_table, doc_id)? {
                     continue;
                 }
                 if recheck {
@@ -469,7 +409,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                         .transactions
                         .refresh_explicit_statement_snapshot()?;
                 }
-                let Some(mut doc) = context
+                let Some(original_doc) = context
                     .mutation
                     .preparation
                     .referential
@@ -479,127 +419,45 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 else {
                     continue;
                 };
-                let original_doc = doc.clone();
-                let target_row = crate::mutation::rows::target_row_for_storage(
-                    context.mutation.preparation.referential.assignment.rows,
-                    &stmt.table,
-                    &storage_table,
-                    &stmt.target_qualifier,
-                    doc_id,
-                    &original_doc,
-                )?;
-                if recheck || preselected {
+                let doc = if recheck {
+                    let target_row = crate::mutation::rows::target_row_for_storage(
+                        context.mutation.preparation.referential.assignment.rows,
+                        &stmt.table,
+                        &storage_table,
+                        &stmt.target_qualifier,
+                        doc_id,
+                        &original_doc,
+                    )?;
                     if let Some(filter) = stmt.predicate.as_ref() {
-                        let qualifies = if recheck {
-                            let refreshed = MutationStatementContext {
-                                query: context.query,
-                                mutation: read_context.mutation,
-                                snapshots: read_context.snapshots,
-                            };
-                            crate::mutation::qualification::RowQualification::new(None).evaluate(
-                                &refreshed,
-                                &snapshot_ctes,
-                                filter,
-                                &target_row,
-                                (&storage_table, doc_id),
-                                params,
-                            )?
-                        } else {
-                            qualification.evaluate(
-                                read_context,
-                                &snapshot_ctes,
-                                filter,
-                                &target_row,
-                                (&storage_table, doc_id),
-                                params,
-                            )?
+                        let refreshed = MutationStatementContext {
+                            query: context.query,
+                            mutation: read_context.mutation,
+                            snapshots: read_context.snapshots,
                         };
-                        if !qualifies {
+                        if !crate::mutation::qualification::RowQualification::new(None).evaluate(
+                            &refreshed,
+                            &snapshot_ctes,
+                            filter,
+                            &target_row,
+                            (&storage_table, doc_id),
+                            params,
+                        )? {
                             continue;
                         }
                     }
-                }
-                if evaluate_view_assignments {
-                    let mut assignment_position = 0;
-                    for (position, assignment) in stmt.assignments.iter().enumerate() {
-                        let source = crate::mutation::assignment::AssignmentSource::evaluate(
-                            read_context.mutation.preparation.referential.assignment,
-                            &snapshot_ctes,
-                            assignment,
-                            Some(&target_row),
-                            params,
-                        )?;
-                        for (target_position, assignment_target) in
-                            assignment.target.targets().iter().enumerate()
-                        {
-                            let final_write = crate::mutation::assignment::final_column_write(
-                                &stmt.assignments,
-                                position,
-                                target_position,
-                            );
-                            let value = if view_original_query {
-                                crate::mutation::assignment::eval_mutation_assignment_input(
-                                    read_context.mutation.preparation.referential.assignment,
-                                    &snapshot_ctes,
-                                    MutationAssignmentTarget {
-                                        table: &stmt.table,
-                                        target: assignment_target,
-                                        current: doc.get(&assignment_target.column),
-                                        final_column_write: final_write,
-                                        action: "UPDATE",
-                                        new_row: false,
-                                    },
-                                    source
-                                        .input(assignment.target.source_position(target_position)),
-                                    Some(&target_row),
-                                    params,
-                                )?
-                            } else {
-                                crate::mutation::assignment::eval_view_rule_update_assignment(
-                                    read_context.mutation.preparation.referential.assignment,
-                                    &snapshot_ctes,
-                                    stmt,
-                                    crate::mutation::assignment::ViewRuleAssignment {
-                                        position: assignment_position,
-                                        target:
-                                            crate::mutation::assignment::TypedAssignmentTarget {
-                                                target: assignment_target,
-                                                ty: None,
-                                                current: doc.get(&assignment_target.column),
-                                                final_column_write: final_write,
-                                            },
-                                        input: source.input(
-                                            assignment.target.source_position(target_position),
-                                        ),
-                                    },
-                                    Some(&target_row),
-                                    params,
-                                )?
-                            };
-                            if let Some(value) = value {
-                                doc.insert(assignment_target.column.clone(), value);
-                            } else {
-                                doc.remove(&assignment_target.column);
-                            }
-                            assignment_position += 1;
-                        }
-                    }
-                }
-                if has_any_update_rules {
-                    pending_updates.push(
-                        crate::mutation::rules::RuleRowImage::from_rewrite_candidate(
-                            MutationRewriteCandidate {
-                                identity: PhysicalDocumentIdentity {
-                                    table: storage_table,
-                                    doc_id,
-                                },
-                                old_document: original_doc,
-                                proposed_document: doc,
-                                context: None,
-                            },
-                        ),
-                    )?;
-                } else if let Some(prepared) = crate::mutation::update::prepare_update_row(
+                    super::projection::project_update_row(
+                        read_context.mutation.preparation.referential.assignment,
+                        stmt,
+                        params,
+                        &snapshot_ctes,
+                        original_doc.clone(),
+                        &target_row,
+                    )?
+                } else {
+                    projected
+                };
+
+                if let Some(prepared) = crate::mutation::update::prepare_update_row(
                     context.mutation.preparation,
                     stmt,
                     params,
@@ -611,6 +469,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     doc,
                     None,
                 )? {
+                    completed_ids.insert(&storage_table, doc_id)?;
                     if let Some(returning) = prepared.returning {
                         returning_rows.push_to(
                             returning,
@@ -630,157 +489,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 }
             }
             let published = overlay.finish();
-            let mut rule_published = None;
-            let (view_rule_returning, rule_returning) = if has_any_update_rules {
-                let rule_rows = pending_updates.finish();
-                let mut view_rule_batches =
-                    crate::mutation::rules::views::prepare_view_rule_batches(
-                        crate::mutation::rules::views::ViewRuleBatchRequest {
-                            context: context.mutation.rules,
-                            relations: &stmt.view_rule_relations,
-                            event: uqa_sql::ast::RuleEvent::Update,
-                            rows: &rule_rows,
-                            params,
-                            scope: &snapshot_ctes,
-                            insert_plans: &[],
-                            update_plans: &stmt.view_rule_update_plans,
-                            document_relation: None,
-                        },
-                    )?;
-                view_rule_batches
-                    .configure_action_qualification(row_independent_update_qualification);
-                let base_rule_indices = view_rule_batches.unsuppressed_indices(
-                    rule_rows.len(),
-                    context.mutation.rules.rules.memory.work_mem_bytes()?,
-                    cancel.clone(),
-                )?;
-                let mut rule_batch = (has_update_rules && view_original_query)
-                    .then(|| {
-                        crate::mutation::rules::prepare_retained_rule_batch(
-                            &context.mutation.rules.rules,
-                            &stmt.table,
-                            uqa_sql::ast::RuleEvent::Update,
-                            rule_rows.select_indices(
-                                &base_rule_indices,
-                                context.mutation.rules.rules.memory.work_mem_bytes()?,
-                                context.mutation.rules.rules.cancellation.clone(),
-                            )?,
-                        )
-                    })
-                    .transpose()?;
-                if let Some(rule_batch) = rule_batch.as_mut() {
-                    let count = row_independent_update_qualification
-                        .unwrap_or_else(|| rule_batch.event_row_count());
-                    rule_batch.set_action_qualification_count(count);
-                }
-                let mut base_rule_suppressed =
-                    crate::mutation::rules::RuleSuppression::new(rule_rows.len(), cancel.clone());
-                if let Some(rule_batch) = rule_batch.as_ref() {
-                    for (local_index, global_index) in base_rule_indices.reader()?.enumerate() {
-                        let global_index = global_index?;
-                        if rule_batch.suppresses(local_index)? {
-                            base_rule_suppressed.suppress(global_index)?;
-                        }
-                    }
-                }
-                let view_rule_outcome = view_rule_batches.execute_actions_with_affected(
-                    &context.mutation.rules.rules,
-                    stmt.view_rule_returning.as_ref(),
-                    context.mutation.preparation.returning,
-                    params,
-                    ctes,
-                )?;
-                let rule_outcome = rule_batch
-                    .as_ref()
-                    .map(|rule_batch| {
-                        rule_batch.execute_actions_with_affected(
-                            &context.mutation.rules.rules.with_projection(
-                                &crate::mutation::rules::RuleOutputProjection::update(
-                                    context.mutation.preparation.returning,
-                                    stmt,
-                                    params,
-                                    ctes,
-                                ),
-                            ),
-                            crate::mutation::rules::RuleReturningRequest::from_plan(
-                                &stmt.returning,
-                                &stmt.returning_aliases,
-                                &stmt.subqueries,
-                            ),
-                        )
-                    })
-                    .transpose()?;
-                if !update_original_query {
-                    affected = if view_rule_outcome.sets_command_tag {
-                        view_rule_outcome.affected_rows
-                    } else {
-                        rule_outcome
-                            .as_ref()
-                            .map_or(0, |outcome| outcome.affected_rows)
-                    };
-                }
-                let view_rule_returning = view_rule_outcome.returning;
-                let rule_returning = rule_outcome.and_then(|outcome| outcome.returning);
-                if view_rule_returning.is_some() && rule_returning.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "0A000".into(),
-                        message: "cannot have RETURNING lists in multiple rules".into(),
-                    });
-                }
-                if update_original_query {
-                    statement_commands.after_triggers().fire_before_statement(
-                        &context.mutation.preparation.referential.triggers,
-                        &update_statement,
-                    )?;
-                }
-                let overlay = MutationOverlayScope::new(context.mutation.state);
-                for index in 0..rule_rows.len() {
-                    let base_suppressed = base_rule_suppressed.suppresses(index)?;
-                    if view_rule_batches.suppresses(index)? || base_suppressed {
-                        continue;
-                    }
-                    let candidate = rule_rows.get(index)?.into_rewrite_candidate()?;
-                    if let Some(prepared) = crate::mutation::update::prepare_update_row(
-                        context.mutation.preparation,
-                        stmt,
-                        params,
-                        &snapshot_ctes,
-                        statement,
-                        &candidate.identity.table,
-                        candidate.identity.doc_id,
-                        candidate.old_document,
-                        candidate.proposed_document,
-                        None,
-                    )? {
-                        if let Some(returning) = prepared.returning {
-                            returning_rows.push_to(
-                                returning,
-                                context.mutation.preparation.returning.destination,
-                            )?;
-                        }
-                        affected += u64::from(prepared.affected);
-                        push_prepared_mutation_action(
-                            &mut prepared_updates,
-                            &action_schema,
-                            PreparedMutationAction::Rewrite(prepared.rewrite),
-                        )?;
-                        events.append_after_rows(
-                            prepared.after_row_events,
-                            &context.mutation.preparation.referential.triggers,
-                        )?;
-                    }
-                }
-                rule_published = overlay.finish();
-                (view_rule_returning, rule_returning)
-            } else {
-                debug_assert_eq!(pending_updates.len(), 0);
-                (None, None)
-            };
             if prepared_updates.rows() != 0 {
                 context.mutation.state.prepare_writer()?;
-                let mut publication = statement_end::publication_batch(&statement_commands)
-                    .with_published(published)
-                    .with_published(rule_published);
+                let mut publication =
+                    statement_end::publication_batch(&statement_commands).with_published(published);
                 for row in prepared_updates
                     .drain_rows()
                     .map_err(crate::physical::physical_exec_error)?
@@ -805,18 +517,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             statement_end::end_command(
                 &statement_commands,
                 &context.mutation.preparation.referential.triggers,
-                &update_statement_events(update_original_query, &update_statement),
+                std::slice::from_ref(&update_statement),
                 events.into_after_rows(),
             )?;
             if !stmt.returning.is_empty() {
-                if let Some(view_rule_returning) = view_rule_returning {
-                    return view_rule_returning.project(
-                        context.mutation.preparation.returning,
-                        params,
-                        ctes,
-                        None,
-                    );
-                }
                 let shape = DmlReturningShape {
                     table: &stmt.table,
                     target_qualifier: &stmt.target_qualifier,
@@ -826,9 +530,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     ctes,
                     supplemental_schema: None,
                 };
-                if let Some(rule_returning) = rule_returning {
-                    return rule_returning.project(context.mutation.preparation.returning, shape);
-                }
+
                 return crate::mutation::returning::dml_returning_result(
                     context.mutation.preparation.returning,
                     shape,
@@ -849,15 +551,4 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         statement_scope.as_mut(),
         result,
     )
-}
-
-/// The relations and operations an UPDATE writes: its own statement, unless the statement's rules replaced it.
-pub(super) fn update_statement_events(
-    update_original_query: bool,
-    statement: &StatementEvent,
-) -> Vec<StatementEvent> {
-    update_original_query
-        .then(|| statement.clone())
-        .into_iter()
-        .collect()
 }

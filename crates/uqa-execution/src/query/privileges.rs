@@ -51,6 +51,15 @@ pub(crate) fn with_scope<S: Clone, T>(
     );
     apply(&scope)
 }
+pub fn ensure_select_privileges_for_query<S: Clone>(
+    query: &QueryPlan,
+    ctes: &CteScope<S>,
+) -> Result<(), SQLError> {
+    with_scope(ctes, |scope| {
+        logical::ensure_select_privileges_for_query(query, scope)
+    })
+}
+
 pub fn ensure_select_privileges_for_query_block<S: Clone>(
     statement: &QueryBlockPlan,
     source: &SourcePlan,

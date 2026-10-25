@@ -7,6 +7,73 @@
 use super::*;
 
 #[test]
+fn mutation_predicates_distinguish_target_rows_from_local_source_names() {
+    let binding = crate::binding::fixture::empty_binding_context();
+    let context = CorrelationContext {
+        routines: &crate::binding::fixture::NoRoutines,
+        catalog: binding.catalog.as_ref(),
+        resolution: &binding.resolution,
+        scoped_relations: None,
+    };
+    for (sql, target) in [
+        ("UPDATE event SET n=1 WHERE (SELECT 1)=1", false),
+        ("UPDATE event SET n=1 WHERE event.n>0", true),
+        (
+            "UPDATE event SET n=1 WHERE (SELECT n FROM (VALUES(1)) local(n))>0",
+            false,
+        ),
+        (
+            "UPDATE event SET n=1 WHERE (SELECT event.n FROM (VALUES(1)) local(n))>0",
+            true,
+        ),
+        (
+            "UPDATE event SET n=1 WHERE (SELECT event.n FROM (VALUES(1)) event(n))>0",
+            false,
+        ),
+        (
+            "UPDATE event SET n=1 FROM (VALUES(1)) source(m) WHERE (SELECT m)>0",
+            false,
+        ),
+        (
+            "UPDATE event SET n=1 FROM (VALUES(1)) source(m) WHERE (SELECT n)>0",
+            true,
+        ),
+        (
+            "WITH input(m) AS (VALUES(1)) UPDATE event SET n=1 FROM input WHERE m>0",
+            false,
+        ),
+        (
+            "WITH input(m) AS (VALUES(1)) UPDATE event SET n=1 WHERE (SELECT m FROM input)>0",
+            false,
+        ),
+    ] {
+        let crate::plan::UnifiedPlan::Command(command) =
+            crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("command")
+        };
+        let crate::plan::CommandPlan::Update(update) = command.as_ref() else {
+            panic!("UPDATE")
+        };
+        let predicate = crate::plan::ExpressionPlan {
+            scalar: update.predicate.clone().unwrap(),
+            subqueries: update.subqueries.clone(),
+        };
+        assert_eq!(
+            expression_depends_on_outer_row(
+                context,
+                &predicate,
+                update.source.as_deref(),
+                &update.ctes,
+            )
+            .unwrap(),
+            target,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn implicit_action_inputs_preserve_their_enclosing_row_identity() {
     let binding = crate::binding::fixture::empty_binding_context();
     let context = CorrelationContext {

@@ -109,7 +109,7 @@ pub fn column_prune_for_stmt_with_filter(
         })
         .collect();
     let mut valid = true;
-    collect_from_prune_columns(from, scope, &mut prune, &mut valid);
+    collect_from_prune_columns(from, &stmt.subqueries, scope, &mut prune, &mut valid);
     collect_join_binding_prune_columns(catalog, resolution, from, &mut prune)?;
     collect_query_block_prune_columns(stmt, filter, scope, &mut prune, &mut valid);
     if !valid {
@@ -152,7 +152,45 @@ fn collect_query_block_prune_columns(
                 .flat_map(|window| window.spec.expressions()),
         );
     for expression in expressions {
-        collect_expr_prune_columns(expression, scope, prune, valid);
+        collect_expression_prune_columns(expression, &stmt.subqueries, scope, prune, valid);
+    }
+}
+
+fn collect_expression_prune_columns(
+    expression: &ScalarExpr,
+    subqueries: &[uqa_sql::plan::QueryPlan],
+    scope: PruneScope<'_>,
+    prune: &mut ColumnPrune,
+    valid: &mut bool,
+) {
+    collect_expr_prune_columns(expression, scope, prune, valid);
+    if expr_contains_subquery(expression) {
+        let mut visitor = |reference: &ScalarExpr| {
+            collect_reference_prune_columns(reference, scope, prune, valid);
+        };
+        let mut references =
+            uqa_sql::binding::scoped_references::ScopedReferences::new(&mut visitor);
+        references.expression(expression, subqueries);
+        if !references.is_complete() {
+            *valid = false;
+        }
+    }
+}
+
+fn collect_reference_prune_columns(
+    reference: &ScalarExpr,
+    scope: PruneScope<'_>,
+    prune: &mut ColumnPrune,
+    valid: &mut bool,
+) {
+    if matches!(
+        reference,
+        ScalarExpr::Column(_)
+            | ScalarExpr::QualifiedColumn { .. }
+            | ScalarExpr::QualifiedStar(_)
+            | ScalarExpr::InternalColumn(_)
+    ) {
+        collect_expr_prune_columns(reference, scope, prune, valid);
     }
 }
 
@@ -460,6 +498,7 @@ pub use uqa_sql::semantics::collect_from_qualifiers;
 
 fn collect_from_prune_columns(
     from: &SourcePlan,
+    subqueries: &[uqa_sql::plan::QueryPlan],
     scope: PruneScope<'_>,
     prune: &mut ColumnPrune,
     valid: &mut bool,
@@ -469,32 +508,36 @@ fn collect_from_prune_columns(
         SourcePlan::Join {
             left, right, on, ..
         } => {
-            collect_from_prune_columns(left, scope, prune, valid);
-            collect_from_prune_columns(right, scope, prune, valid);
+            collect_from_prune_columns(left, subqueries, scope, prune, valid);
+            collect_from_prune_columns(right, subqueries, scope, prune, valid);
             if let Some(on) = on.as_ref() {
-                collect_expr_prune_columns(on, scope, prune, valid);
+                collect_expression_prune_columns(on, subqueries, scope, prune, valid);
             }
         }
         SourcePlan::Values { rows, .. } => {
             for row in rows {
                 for expr in row {
-                    collect_expr_prune_columns(expr, scope, prune, valid);
+                    collect_expression_prune_columns(expr, subqueries, scope, prune, valid);
                 }
             }
         }
         SourcePlan::Function { args, .. } => {
             for expr in args {
-                collect_expr_prune_columns(expr, scope, prune, valid);
+                collect_expression_prune_columns(expr, subqueries, scope, prune, valid);
             }
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
                 for expr in &function.args {
-                    collect_expr_prune_columns(expr, scope, prune, valid);
+                    collect_expression_prune_columns(expr, subqueries, scope, prune, valid);
                 }
             }
         }
-        SourcePlan::Subquery { .. } => {
+        SourcePlan::Subquery { body, .. } => {
+            let mut visitor = |reference: &ScalarExpr| {
+                collect_reference_prune_columns(reference, scope, prune, valid);
+            };
+            uqa_sql::binding::scoped_references::ScopedReferences::new(&mut visitor).query(body);
             *valid = false;
         }
         SourcePlan::Table { .. } => {}

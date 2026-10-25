@@ -213,12 +213,16 @@ fn returning_conversion_failure_stops_rows_before_after_statement_triggers(
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
 fn rule_query_inputs_match_postgresql(#[case] provider: Provider) {
-    let reference: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../tests/parity/pg18/rules_query_inputs.expected.json"
-    ))
-    .unwrap();
+    let references = [
+        include_str!("../../../../../tests/parity/pg18/rules_query_inputs.expected.json"),
+        include_str!("../../../../../tests/parity/pg18/rules_update_delete_inputs.expected.json"),
+    ]
+    .map(|text| serde_json::from_str::<serde_json::Value>(text).unwrap());
     let mut failures = Vec::new();
-    for case in reference["cases"].as_array().unwrap() {
+    for case in references
+        .iter()
+        .flat_map(|reference| reference["cases"].as_array().unwrap())
+    {
         let directory = tempfile::tempdir().unwrap();
         let engine = provider.open(&directory.path().join("rules.db"));
         engine.sql(case["setup"].as_str().unwrap(), &[]).unwrap();

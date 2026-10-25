@@ -15,6 +15,7 @@ use uqa_sql::{
     semantics::{rules::RuleCatalog, view_rewrite::context::ViewRewriteContext},
     SQLError, ScalarExpr,
 };
+mod view_projection;
 
 pub trait RuleInputColumns {
     fn source_column_names(
@@ -32,11 +33,59 @@ pub struct RuleInputPlanningContext<'a> {
 pub fn rewrite_plan(
     context: &RuleInputPlanningContext<'_>,
     plan: &mut UnifiedPlan,
+    config: &crate::optimizer::OptimizerConfig<'_>,
 ) -> Result<(), SQLError> {
+    view_projection::rewrite(context, plan, config)?;
+    prune_captured_inputs(context.volatility, plan);
     match plan {
         UnifiedPlan::Query(query) => rewrite_query(context, query),
         UnifiedPlan::Command(command) => rewrite_command(context, command),
     }
+}
+
+/// Internal producer slots have structural identities. Their unused projections can be removed before expression folding without changing the query's cardinality or visible namespace.
+fn prune_captured_inputs(
+    volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    plan: &mut UnifiedPlan,
+) {
+    let mut required = std::collections::BTreeMap::<_, BTreeSet<usize>>::new();
+    plan.visit_scalar_expressions(&mut |expression| {
+        expression.visit(&mut |node| {
+            let column = match node {
+                ScalarExpr::InternalColumn(column) => Some(*column),
+                ScalarExpr::Func {
+                    binding: Some(binding),
+                    ..
+                } => uqa_sql::semantics::function_implicit_row_input(binding),
+                _ => None,
+            };
+            if let Some(column) = column {
+                required
+                    .entry(column.relation())
+                    .or_default()
+                    .insert(column.attribute());
+            }
+        });
+    });
+    let empty = BTreeSet::new();
+    plan.visit_sources_mut(&mut |source| {
+        if let SourcePlan::Subquery {
+            captured_output: Some(relation),
+            body,
+            ..
+        } = source
+        {
+            if let RelationalPlan::QueryBlock(block) = &body.root {
+                let width = block.projections.len();
+                crate::mutation_outputs::prune_unused_query_outputs(
+                    volatility,
+                    body,
+                    required.get(relation).unwrap_or(&empty),
+                    width,
+                );
+            }
+        }
+    });
 }
 
 fn rewrite_ctes(
@@ -296,3 +345,6 @@ fn validate_rule_contracts(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

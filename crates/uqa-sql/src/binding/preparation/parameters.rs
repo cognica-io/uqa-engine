@@ -159,6 +159,7 @@ pub(super) struct ParameterTypes<'a> {
     query_schemas: Option<QuerySchemas>,
     /// Generated field references remain at stable addresses throughout analysis, including inference that does not retain an executable plan.
     row_expansions: RowExpansions,
+    rewritten_blocks: RewrittenBlocks,
 }
 
 /// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
@@ -183,9 +184,12 @@ pub(super) struct InputConstants(
     BTreeMap<NonNull<Option<crate::ast::FunctionBinding>>, crate::ast::FunctionBinding>,
     QuerySchemas,
     RowExpansions,
+    RewrittenBlocks,
 );
 
 type RowExpansions = BTreeMap<NonNull<ScalarExpr>, Vec<(usize, Vec<ScalarExpr>)>>;
+mod rewritten_blocks;
+use rewritten_blocks::{install_rewritten_block, RewrittenBlocks};
 
 #[derive(Default)]
 struct QuerySchemas {
@@ -392,9 +396,11 @@ impl InputConstants {
             && self.8.sources.is_empty()
             && self.8.groupings.is_empty()
             && self.9.is_empty()
+            && self.10.is_empty()
     }
 
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
+        install_rewritten_block(&mut self.10, query);
         self.8.apply_query(query);
     }
 
@@ -455,13 +461,16 @@ impl<'a> ParameterTypes<'a> {
     }
 
     pub(super) fn apply_query_schemas(
-        self,
+        mut self,
         query: &mut crate::plan::QueryPlan,
         routines: &dyn super::RoutineResolution,
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.unwrap_or_default();
-        query.visit_queries_mut(&mut |query| schemas.apply_query(query));
+        query.visit_queries_mut(&mut |query| {
+            install_rewritten_block(&mut self.rewritten_blocks, query);
+            schemas.apply_query(query);
+        });
         schemas.groupings.apply_query(query, routines, params)
     }
 
@@ -628,6 +637,7 @@ impl<'a> ParameterTypes<'a> {
             call_collations: None,
             query_schemas: None,
             row_expansions: RowExpansions::default(),
+            rewritten_blocks: RewrittenBlocks::default(),
         }
     }
 
@@ -666,6 +676,9 @@ impl<'a> ParameterTypes<'a> {
         expression: &ScalarExpr,
         selected: &crate::ast::FunctionBinding,
     ) {
+        if let Some(calls) = &mut self.call_collations {
+            calls.record_observer(expression, selected);
+        }
         if !selected.builtin
             || crate::fixed_builtin_return_type(selected).is_some()
             || crate::catalog::json_path::JsonPathFunction::lookup(&selected.name).is_some()
@@ -735,6 +748,7 @@ impl<'a> ParameterTypes<'a> {
     pub(super) fn take_input_constants(&mut self) -> InputConstants {
         let mut constants = self.input_constants.take().unwrap_or_default();
         constants.9 = std::mem::take(&mut self.row_expansions);
+        constants.10 = std::mem::take(&mut self.rewritten_blocks);
         constants
     }
 

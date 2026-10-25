@@ -456,6 +456,46 @@
         "rows": 1,
         "after": 1
       }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after(); CREATE TEMP VIEW serialization_update_event AS SELECT n FROM serialization_target; CREATE RULE serialization_update_route AS ON UPDATE TO serialization_update_event DO INSTEAD UPDATE serialization_target SET n=NEW.n WHERE n=OLD.n RETURNING n",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) UPDATE serialization_update_event SET n=nextval('serialization_rows') RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after(); CREATE TEMP VIEW serialization_delete_event AS SELECT n FROM serialization_target; CREATE RULE serialization_delete_route AS ON DELETE TO serialization_delete_event DO INSTEAD DELETE FROM serialization_target WHERE n=OLD.n RETURNING n",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) DELETE FROM serialization_delete_event WHERE nextval('serialization_rows')>0 RETURNING n, NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) UPDATE serialization_target SET n=serialization_target.n FROM generate_series(1,2) g(k) WHERE nextval('serialization_rows')>0 RETURNING NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
+    },
+    {
+      "setup": "CREATE TEMP SEQUENCE serialization_rows; CREATE TEMP SEQUENCE serialization_after; CREATE TEMP TABLE serialization_target(n bigint); INSERT INTO serialization_target SELECT n FROM generate_series(1,8) g(n); CREATE FUNCTION pg_temp.serialization_after() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('serialization_after'); RETURN NULL; END $$; CREATE TRIGGER serialization_after AFTER INSERT OR UPDATE OR DELETE ON serialization_target FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.serialization_after()",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE BINARY) DELETE FROM serialization_target USING generate_series(1,2) g(k) WHERE nextval('serialization_rows')>0 RETURNING NULL::aclitem",
+      "sqlstate": "42883",
+      "message": "no binary output function available for type aclitem",
+      "effects": {
+        "rows": 1,
+        "after": 1
+      }
     }
   ],
   "mutation_order": {

@@ -26,7 +26,9 @@ use crate::binding::snapshot::BindingSnapshot as CteScope;
 pub mod context;
 use context::{stored_view_schema, ViewRewriteContext};
 
+mod captured_projection;
 mod correlation;
+pub use captured_projection::{capture_view_projection, CapturedViewProjection};
 mod deferred;
 pub use deferred::{
     bind_outer_rewrite_scope, resolve_outer_expression_rewrites, resolve_outer_rewrites,
@@ -58,7 +60,10 @@ use returning::{
 };
 pub use rewrite_insert::rewrite_insert_to_base;
 pub use rewrite_merge::rewrite_merge_to_base;
-pub use rewrite_update_delete::{rewrite_delete_to_base, rewrite_update_to_base};
+pub use rewrite_update_delete::{
+    rewrite_delete_rule_inputs, rewrite_delete_to_base, rewrite_update_rule_inputs,
+    rewrite_update_to_base,
+};
 pub use rule_inputs::{rule_input_requirements, validate_grouped_rule_inputs};
 pub use updatability::NotUpdatableReason;
 use updatability::{view_not_updatable, ColumnRestriction, ColumnWrite, ViewCommand};

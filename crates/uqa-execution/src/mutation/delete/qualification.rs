@@ -67,132 +67,28 @@ pub(super) fn recheck_delete_candidate<S: Clone + Send + Sync + 'static>(
     Ok(qualifies.then(|| (doc, source_context.cloned())))
 }
 
-pub(super) struct QualifiedDeleteCandidate {
-    pub(super) row: Option<(Document, Option<crate::OwnedPhysicalRow>)>,
-    pub(super) qualification_count: usize,
+/// A plain DELETE has one target input; USING exposes every joined input, including duplicate matches, before mutation identity de-duplication.
+pub(super) enum DeleteSourceRows {
+    Plain(bool),
+    Joined(crate::spill::SpillRows<crate::spill::SharedSpillReader>),
 }
-
-pub(super) struct DeleteCandidateQualification<'a, 'services, S: Clone + 'static> {
-    pub(super) reads: &'services dyn MutationRead,
-    pub(super) rows: MutationRowContext<'services>,
-    pub(super) expressions: MutationExpressionContext<'services, S>,
-    pub(super) stmt: &'a DeletePlan,
-    pub(super) storage_table: &'a str,
-    pub(super) params: &'a [SQLParam],
-    pub(super) ctes: &'a CteScope<S>,
-    pub(super) using_rows: Option<&'a crate::SharedSpill>,
-    pub(super) doc_id: DocId,
-    pub(super) count_all_qualifications: bool,
-}
-
-pub(super) fn qualified_delete_candidate<S: Clone + Send + Sync + 'static>(
-    context: DeleteCandidateQualification<'_, '_, S>,
-) -> Result<QualifiedDeleteCandidate, SQLError> {
-    let DeleteCandidateQualification {
-        reads,
-        rows,
-        expressions,
-        stmt,
-        storage_table,
-        params,
-        ctes,
-        using_rows,
-        doc_id,
-        count_all_qualifications,
-    } = context;
-    let Some(doc) = reads.get_document(storage_table, doc_id)? else {
-        return Ok(QualifiedDeleteCandidate {
-            row: None,
-            qualification_count: 0,
-        });
-    };
-    let target_row = crate::mutation::rows::target_row_for_storage(
-        rows,
-        &stmt.table,
-        storage_table,
-        &stmt.target_qualifier,
-        doc_id,
-        &doc,
-    )?;
-    match using_rows {
-        None => {
-            let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
-                crate::mutation::expressions::eval_mutation_expr(
-                    expressions,
-                    ctes,
-                    filter,
-                    Some(&target_row),
-                    params,
-                )
-                .map(|value| uqa_sql::expr::truthy(&value))
-            })?;
-            Ok(QualifiedDeleteCandidate {
-                row: qualifies.then_some((doc, None)),
-                qualification_count: usize::from(qualifies),
-            })
-        }
-        Some(rows) => {
-            let reader = rows
-                .read_rows()
-                .map_err(crate::query::projection::physical_exec_error)?;
-            let mut first = None;
-            let mut qualification_count = 0;
-            for using_row in reader {
-                let source_context =
-                    using_row.map_err(crate::query::projection::physical_exec_error)?;
-                let joined = dml_join_rows(&target_row, &source_context);
-                let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
-                    crate::mutation::expressions::eval_mutation_expr(
-                        expressions,
-                        ctes,
-                        filter,
-                        Some(&joined),
-                        params,
-                    )
-                    .map(|value| uqa_sql::expr::truthy(&value))
-                })?;
-                if qualifies {
-                    qualification_count += 1;
-                    if first.is_none() {
-                        first = Some(source_context);
-                    }
-                    if !count_all_qualifications {
-                        break;
-                    }
-                }
-            }
-            Ok(QualifiedDeleteCandidate {
-                row: first.map(|source_context| (doc, Some(source_context))),
-                qualification_count,
-            })
-        }
+impl DeleteSourceRows {
+    pub(super) fn new(rows: Option<&crate::SharedSpill>) -> Result<Self, SQLError> {
+        rows.map_or(Ok(Self::Plain(true)), |rows| {
+            rows.read_rows()
+                .map(Self::Joined)
+                .map_err(crate::physical::physical_exec_error)
+        })
     }
 }
-
-pub(super) fn count_delete_source_qualifications<S: Clone + Send + Sync + 'static>(
-    expressions: MutationExpressionContext<'_, S>,
-    stmt: &DeletePlan,
-    ctes: &CteScope<S>,
-    using_rows: &crate::SharedSpill,
-    params: &[SQLParam],
-) -> Result<usize, SQLError> {
-    let mut count = 0;
-    for source in using_rows
-        .read_rows()
-        .map_err(crate::query::projection::physical_exec_error)?
-    {
-        let source = source.map_err(crate::query::projection::physical_exec_error)?;
-        let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |predicate| {
-            crate::mutation::expressions::eval_mutation_expr(
-                expressions,
-                ctes,
-                predicate,
-                Some(&source),
-                params,
-            )
-            .map(|value| uqa_sql::expr::truthy(&value))
-        })?;
-        count += usize::from(qualifies);
+impl Iterator for DeleteSourceRows {
+    type Item = Result<Option<crate::OwnedPhysicalRow>, SQLError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Plain(remaining) => std::mem::take(remaining).then_some(Ok(None)),
+            Self::Joined(rows) => rows
+                .next()
+                .map(|row| row.map(Some).map_err(crate::physical::physical_exec_error)),
+        }
     }
-    Ok(count)
 }

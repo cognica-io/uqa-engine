@@ -174,7 +174,7 @@ pub(super) fn optimize_query_block(
     )?;
     super::optimize_projections(&mut block.projections, config)?;
     if let Some(predicate) = &mut block.r#where {
-        optimize_scalar_slot(predicate, config)?;
+        super::optimize_qualification(predicate, config)?;
         let allow_unqualified_signals = source_allows_unqualified_signals(block.from.as_ref());
         rewrite_implicit_hybrid_fusion(predicate, allow_unqualified_signals);
         if config.enable_filter_pushdown {
@@ -190,7 +190,7 @@ pub(super) fn optimize_query_block(
         }
     }
     if let Some(having) = &mut block.having {
-        optimize_scalar_slot(having, config)?;
+        super::optimize_qualification(having, config)?;
     }
     for order in &mut block.order_by {
         optimize_scalar_slot(&mut order.expr, config)?;
@@ -251,7 +251,7 @@ pub(super) fn optimize_source(
             optimize_source(right, config, aggregates)?;
             *lateral |= function_lateral && matches!(right.as_ref(), SourcePlan::Subquery { .. });
             if let Some(on) = on {
-                optimize_scalar_slot(on, config)?;
+                super::optimize_qualification(on, config)?;
                 if config.enable_filter_pushdown {
                     prioritize_access_predicates(on);
                 }

@@ -214,6 +214,8 @@ impl SchemaScope {
                     )?,
                     None => RowSchema::default(),
                 };
+                let source_schema =
+                    super::analysis::with_query_source_columns(&source_schema, block);
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 for subquery in &mut block.subqueries {
                     self.bind_query_routines_for_storage(
@@ -265,6 +267,8 @@ impl SchemaScope {
                     || Ok(RowSchema::default()),
                     |source| self.bind_source(routines, source, &block.subqueries, params, outer),
                 )?;
+                let source_schema =
+                    super::analysis::with_query_source_columns(&source_schema, block);
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 if let Some(filter) = block.r#where.as_mut() {
                     self.bind_scalar_routines_for_storage(
@@ -530,6 +534,7 @@ impl SchemaScope {
                     let right_schema =
                         self.bind_source_in_scope(engine, right, subqueries, params, right_scope)?;
                     let input = RowSchema::join(&left_schema, &right_schema, std::iter::empty());
+                    let input = super::with_query_table_pseudo_columns(&input);
                     let condition = scope.condition();
                     let input = overlay_outer_schema(&input, condition.as_ref());
                     self.bind_scalar_routines_for_storage(engine, on, &input, subqueries, params)?;

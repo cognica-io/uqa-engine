@@ -9,16 +9,20 @@ use std::collections::BTreeMap;
 use uqa_sql::ColumnType;
 
 #[test]
-fn rule_events_spill_original_images_and_replay_selected_ordinals_with_bounded_memory() {
+fn mutation_images_spill_original_images_and_replay_selected_ordinals_with_bounded_memory() {
     // Initialize the encrypted-file runtime before checking that event ownership releases its own allocations.
-    let warm =
-        RuleRows::from_rows([Ok(RuleRowImage::empty())], 0, CancellationToken::new()).unwrap();
+    let warm = MutationImages::from_rows(
+        [Ok(OwnedMutationImages::empty())],
+        0,
+        CancellationToken::new(),
+    )
+    .unwrap();
     assert!(warm.get(0).is_ok());
     drop(warm);
     let allocated = allocation_counter::measure(|| {
-        let mut buffer = RuleRowBuffer::new(64 * 1024, CancellationToken::new());
+        let mut buffer = MutationImageBuffer::new(64 * 1024, CancellationToken::new());
         for index in 0..2048 {
-            let mut row = RuleRowImage::empty();
+            let mut row = OwnedMutationImages::empty();
             row.old_doc_id = Some(index);
             row.new_doc_id = Some(u64::MAX - index);
             row.old = Some(BTreeMap::from([(
@@ -50,7 +54,7 @@ fn rule_events_spill_original_images_and_replay_selected_ordinals_with_bounded_m
 }
 
 #[test]
-fn rule_events_preserve_complete_context_schema_lock_lineage_and_absent_images() {
+fn mutation_images_preserve_complete_context_schema_lock_lineage_and_absent_images() {
     let schema = RowSchema::with_qualified_types(
         "input",
         vec!["value".into()],
@@ -58,7 +62,7 @@ fn rule_events_preserve_complete_context_schema_lock_lineage_and_absent_images()
     )
     .with_column_collations([Some(950)]);
     let origin = crate::batch::RowLockOrigin::new("input", "public.source", u64::MAX);
-    let mut row = RuleRowImage::empty();
+    let mut row = OwnedMutationImages::empty();
     row.old_storage_table = Some("schema.\"table\"".into());
     row.old_doc_id = Some(u64::MAX);
     row.old = Some(BTreeMap::new());
@@ -68,8 +72,8 @@ fn rule_events_preserve_complete_context_schema_lock_lineage_and_absent_images()
             .with_lock_origin(origin.clone()),
     ));
     for bytes in [0, 64 * 1024] {
-        let rows = RuleRows::from_rows(
-            [Ok(RuleRowImage::empty()), Ok(row.clone())],
+        let rows = MutationImages::from_rows(
+            [Ok(OwnedMutationImages::empty()), Ok(row.clone())],
             bytes,
             CancellationToken::new(),
         )
@@ -92,12 +96,17 @@ fn rule_events_preserve_complete_context_schema_lock_lineage_and_absent_images()
 }
 
 #[test]
-fn rule_event_failure_and_cancellation_preserve_the_published_owner() {
+fn mutation_image_failure_and_cancellation_preserve_the_published_owner() {
     let cancellation = CancellationToken::new();
-    let rows = RuleRows::from_rows([Ok(RuleRowImage::empty())], 0, cancellation.clone()).unwrap();
+    let rows =
+        MutationImages::from_rows([Ok(OwnedMutationImages::empty())], 0, cancellation.clone())
+            .unwrap();
     let retained = rows.clone();
-    let failed = RuleRows::from_rows(
-        [Ok(RuleRowImage::empty()), Err(invalid("projection failed"))],
+    let failed = MutationImages::from_rows(
+        [
+            Ok(OwnedMutationImages::empty()),
+            Err(invalid("projection failed")),
+        ],
         0,
         CancellationToken::new(),
     );
@@ -106,56 +115,9 @@ fn rule_event_failure_and_cancellation_preserve_the_published_owner() {
     cancellation.cancel();
     assert!(rows.get(0).is_err());
     assert!(retained.get(0).is_err());
-    let mut buffer = RuleRowBuffer::new(0, cancellation);
-    assert!(buffer.push(RuleRowImage::empty()).is_err());
+    let mut buffer = MutationImageBuffer::new(0, cancellation);
+    assert!(buffer.push(OwnedMutationImages::empty()).is_err());
     assert!(buffer.finish().is_empty());
     let bad = PhysicalRow::from_values(vec![Value::Null; WIDTH]);
     assert!(decode(bad, None).is_err());
-}
-
-#[test]
-fn rule_event_selection_shares_full_ownership_and_replays_fragmented_indices() {
-    use crate::mutation::rules::{RuleIndexBuffer, RuleIndices};
-
-    let cancellation = CancellationToken::new();
-    let rows = RuleRows::from_rows(
-        (0..7).map(|index| {
-            let mut row = RuleRowImage::empty();
-            row.old_doc_id = Some(index);
-            Ok(row)
-        }),
-        0,
-        cancellation.clone(),
-    )
-    .unwrap();
-    let all = RuleIndices::all(rows.len(), cancellation.clone());
-    let selected = rows.select_indices(&all, 0, cancellation.clone()).unwrap();
-    assert!(Arc::ptr_eq(&rows.0, &selected.0));
-    let mut selection = RuleIndexBuffer::new(1, cancellation.clone()).unwrap();
-    for index in [6, 2, 2, 0] {
-        selection.push(index).unwrap();
-    }
-    let selected = rows
-        .select_indices(&selection.finish().unwrap(), 0, cancellation.clone())
-        .unwrap();
-    assert_eq!(
-        selected
-            .iter()
-            .map(|row| row.unwrap().old_doc_id.unwrap())
-            .collect::<Vec<_>>(),
-        [6, 2, 2, 0]
-    );
-    let mut invalid = RuleIndexBuffer::new(1, cancellation.clone()).unwrap();
-    invalid.push(rows.len()).unwrap();
-    assert!(rows
-        .select_indices(&invalid.finish().unwrap(), 0, cancellation.clone())
-        .is_err());
-    cancellation.cancel();
-    assert_eq!(
-        rows.select_indices(&all, 0, cancellation)
-            .err()
-            .unwrap()
-            .sqlstate(),
-        Some("57014")
-    );
 }
