@@ -8,6 +8,61 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn unsigned_catalog_assignment_retains_the_analyzed_source_identity() {
+    let control = ProductionControl::uncontrolled();
+    for (source, target, input, expected) in [
+        (
+            ColumnType::Oid,
+            ColumnType::Oid,
+            i64::from(u32::MAX),
+            i64::from(u32::MAX),
+        ),
+        (
+            ColumnType::Xid,
+            ColumnType::Xid,
+            i64::from(u32::MAX),
+            i64::from(u32::MAX),
+        ),
+        (
+            ColumnType::Integer,
+            ColumnType::Oid,
+            -1,
+            i64::from(u32::MAX),
+        ),
+        (
+            ColumnType::BigInteger,
+            ColumnType::Oid,
+            i64::from(u32::MAX),
+            i64::from(u32::MAX),
+        ),
+    ] {
+        let value = control.finish(Value::Int(input), None).unwrap();
+        assert_eq!(
+            *convert_value_to_column_type_from_with_control(
+                value,
+                &target,
+                Some(&source),
+                &control
+            )
+            .unwrap(),
+            Value::Int(expected)
+        );
+    }
+    let value = control.finish(Value::Int(-1), None).unwrap();
+    assert_eq!(
+        convert_value_to_column_type_from_with_control(
+            value,
+            &ColumnType::Oid,
+            Some(&ColumnType::BigInteger),
+            &control
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("22003")
+    );
+}
+
+#[test]
 fn physical_identity_assignment_keeps_unread_payloads_and_original_allowances() {
     let budget = MemoryBudget::new(8192);
     let token = CancellationToken::new();

@@ -36,9 +36,12 @@ pub fn convert_value_to_column_type_from_with_control(
         return super::normalize_legacy_vector_carrier_with_control(&value, ty, control)
             .map(|normalized| normalized.unwrap_or(value));
     }
-    if let (ColumnType::InternalChar, Some(source)) = (ty, source) {
+    if let (ColumnType::InternalChar | ColumnType::Oid | ColumnType::Xid, Some(source)) =
+        (ty, source)
+    {
         let name = source.catalog_name_with_control(control)?;
-        return cast_value_from_with_control(&value, "\"char\"", Some(&name), control);
+        let target = ty.catalog_name_with_control(control)?;
+        return cast_value_from_with_control(&value, &target, Some(&name), control);
     }
     convert_value_to_column_type_with_control(value, ty, control)
 }
