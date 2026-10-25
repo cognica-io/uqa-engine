@@ -1,5 +1,8 @@
+#
 # Unified Query Algebra
+#
 # Copyright (c) 2023-2026 Cognica, Inc.
+#
 
 cmake_minimum_required(VERSION 3.24)
 project(UQA LANGUAGES C)

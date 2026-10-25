@@ -1,5 +1,9 @@
+#
 # Unified Query Algebra
+#
 # Copyright (c) 2023-2026 Cognica, Inc.
+#
+
 @PACKAGE_INIT@
 
 include("${CMAKE_CURRENT_LIST_DIR}/UQATargets.cmake")

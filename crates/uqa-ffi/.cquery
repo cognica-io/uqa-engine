@@ -1,0 +1,5 @@
+%clang++
+%c -std=gnu23
+%cpp -std=gnu++2b
+
+-Iinclude
