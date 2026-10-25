@@ -62,6 +62,7 @@ pub(in crate::expr) fn parse_pg_array_literal_with_input(
         Err(ShapeProductionError::Shape(_)) => return Err(parser.dimension_error()),
         Err(ShapeProductionError::Control(error)) => return Err(error.into()),
     }
+    // The parser owns syntactic dimensions. A converted scalar domain may itself contain an array; its carrier must not add another syntactic dimension.
     let array = match &declared_dimensions {
         Some(declared) => {
             let mut bounds = ProductionVec::new(*control);
@@ -71,7 +72,14 @@ pub(in crate::expr) fn parse_pg_array_literal_with_input(
             }
             ArrayValue::with_lower_bounds_with_control(items, bounds.finish()?, control)?
         }
-        None => ArrayValue::try_new_with_control(items, control)?,
+        None if items.is_empty() => ArrayValue::try_new_with_control(items, control)?,
+        None => {
+            let mut bounds = ProductionVec::new(*control);
+            for _ in 0..parser.rank() {
+                bounds.push_copy(1)?;
+            }
+            ArrayValue::with_lower_bounds_with_control(items, bounds.finish()?, control)?
+        }
     }
     .ok_or_else(|| parser.dimension_error())?;
     if let Some(declared) = declared_dimensions {

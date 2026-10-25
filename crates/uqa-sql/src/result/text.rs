@@ -189,7 +189,7 @@ fn format_array(
         }
         match value {
             Value::Null => text.push_str("NULL")?,
-            Value::List(_) | Value::Array(_) => {
+            Value::List(_) => {
                 text.push_str(&format_array(value, element, catalog, control)?)?;
             }
             _ => {

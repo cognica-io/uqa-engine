@@ -596,6 +596,14 @@ UQA_API uqa_status UQA_CALL uqa_value_get_array_shape(
     uqa_value_view value, uqa_array_shape *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_element(
     uqa_value_view value, uint64_t index, uqa_value_view *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_array(
+    uqa_engine engine, const char *type_name,
+    const uqa_array_dimension *dimensions, uint32_t rank,
+    const uqa_value_view *elements, uint64_t element_count, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_array_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const uqa_array_dimension *dimensions, uint32_t rank,
+    const uqa_value_view *elements, uint64_t element_count, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_buffer_create(uqa_buffer *out);
 UQA_API uqa_status UQA_CALL uqa_value_format_sql(
     uqa_value_view value, uqa_buffer buffer);
@@ -611,6 +619,10 @@ Owned values and borrowed value views are immutable after construction. Scalar c
 `uqa_value_get_vector_f32` and `uqa_value_get_tensor_f32` return borrowed packed float32 storage with the source value's lifetime. An empty tensor has NULL data, zero rows and its positive declared dimension. SQL arrays are distinct types and cannot use these getters. Domain values use their underlying dense type. Typed NULL returns `UQA_ERROR_NULL` and clears the output. Observation uses the native finite-value and dimension conversion under the source's FFI allowance, publishes a stable cache only after success and preserves the source on failure; releasing other retained values permits another attempt. Explicit SQL casts and assignment share the same native conversion.
 
 `uqa_value_get_array_shape` returns immutable dimensions, signed SQL lower bounds, rank and total element count. `uqa_value_get_element` uses a zero-based row-major position independently of those lower bounds and returns a borrowed scalar child with its declared element type, including NULL. Core owns positional traversal; observing one child does not flatten or copy the array or interpret that child's retained payload. A multidimensional SQL array has one scalar element descriptor; a domain element keeps its domain identity. Both getters also accept the native `int2vector` and `oidvector` array carriers, preserving their distinct type identity and zero-based bounds. Dense VECTOR/TENSOR values use their separate getters.
+
+`uqa_value_create_array` accepts an array type declaration, explicit dimensions and a flat row-major sequence of value views. Its `_n` variant accepts a length-delimited type name. Every supplied pointer identifies a value; SQL NULL uses `uqa_value_create_null` or a typed NULL constructor. Dimensions and children are copied, so callers may release their inputs after success. Rank zero or a zero-length dimension with zero elements creates a dimensionless empty array. The product of lengths must equal `element_count`; rank, signed bounds and cardinality obey native array limits. Invalid shapes return a native SQL diagnostic. An array-valued domain is one scalar element: its own shape and bounds do not add dimensions to the containing array.
+
+Array construction resolves all retained source identities before converting any element, uses native explicit scalar casts and validates outer domains inside the session's existing transaction boundary. Domain checks run during the relevant conversion, and reusing admitted values does not rerun them. FFI admits input copies and the return owner before native execution, publishes only after native completion and preserves SQL failure/savepoint semantics. Input spans, same-database catalog identity, cancellation, resource limits and callback reentry use the same rules as contextual text input.
 
 A dimensionless empty array has NULL dimensions, rank zero and count zero. An explicitly shaped empty catalog vector retains its one zero-length dimension. A NULL array returns `UQA_ERROR_NULL`; a position outside the array returns `UQA_ERROR_RANGE`. Failure clears the output. Shape metadata and requested child wrappers are admitted under the parent's FFI allowance, cached only after successful construction and remain stable until the parent or its containing result is released or refilled. Releasing other retained handles permits another attempt after an admission failure. `uqa_value_create_copy` creates an independent child owner. Array observation participates in the source session's operation gate and cancellation scope; concurrent admission can return `UQA_ERROR_BUSY` without publishing a partial view.
 

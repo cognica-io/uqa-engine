@@ -437,6 +437,15 @@ UQA_API uqa_status UQA_CALL uqa_value_get_tensor_f32(
     uqa_value_view value, uqa_tensor_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_array_shape(
     uqa_value_view value, uqa_array_shape *out);
+/* type_name is an array declaration; elements are copied in row-major order. */
+UQA_API uqa_status UQA_CALL uqa_value_create_array(
+    uqa_engine engine, const char *type_name,
+    const uqa_array_dimension *dimensions, uint32_t rank,
+    const uqa_value_view *elements, uint64_t element_count, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_array_n(
+    uqa_engine engine, const char *type_name, size_t type_name_size,
+    const uqa_array_dimension *dimensions, uint32_t rank,
+    const uqa_value_view *elements, uint64_t element_count, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_element(
     uqa_value_view value, uint64_t index, uqa_value_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_copy(

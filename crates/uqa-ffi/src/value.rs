@@ -34,7 +34,9 @@ mod packed;
 pub use packed::*;
 mod dense;
 pub use dense::*;
+mod array_input;
 mod arrays;
+pub use array_input::*;
 pub use arrays::*;
 
 enum ValueSource {

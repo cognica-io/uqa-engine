@@ -11,6 +11,32 @@ use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::{SQLError, SQLParam};
 
 impl Engine {
+    /// Construct a typed host array in the session's native statement/catalog scope. SQL owns parameter identities, scalar conversion, dimensions and domain constraints.
+    pub fn create_array_parameter_with_control(
+        &self,
+        type_name: &str,
+        dimensions: &[usize],
+        lower_bounds: &[i32],
+        elements: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<SQLParam>, SQLError> {
+        self.with_direct_query_snapshot(
+            false,
+            |engine| {
+                uqa_sql::params::create_array_parameter_with_control(
+                    type_name,
+                    dimensions,
+                    lower_bounds,
+                    elements,
+                    engine,
+                    engine,
+                    control,
+                )
+            },
+            std::convert::identity,
+        )
+    }
+
     /// Create a typed parameter from external text, or a typed SQL NULL from `None`. Type input runs with the session's current catalog, privileges and presentation settings. Domain checks and input callbacks share native transaction admission, commit and failure recovery; the returned parameter retains the supplied production allowance.
     pub fn create_typed_parameter_with_control(
         &self,

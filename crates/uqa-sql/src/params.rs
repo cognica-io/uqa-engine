@@ -14,7 +14,9 @@ use uqa_core::{
 
 use crate::ast::ColumnType;
 
+mod array;
 mod input;
+pub use array::create_array_parameter_with_control;
 pub use input::create_typed_parameter_with_control;
 mod binding;
 mod packed;

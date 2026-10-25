@@ -16,6 +16,9 @@ mod shape;
 pub use assignment::ArrayAssignmentError;
 pub use elements::{ArrayTraversalError, BudgetedArrayElements, ControlledArrayElements};
 
+const MAX_DIMENSIONS: usize = 6;
+const MAX_ELEMENTS: usize = 134_217_727;
+
 #[derive(Debug, Clone, Eq)]
 pub struct ArrayValue {
     storage: Box<ArrayStorage>,
@@ -46,7 +49,7 @@ impl ArrayValue {
             .ok()
     }
 
-    /// Explicit bounds preserve a one-dimensional empty array, including the zero-based empty legacy-vector shape.
+    /// Explicit bounds determine the rank, preserving array-valued scalar leaves and a one-dimensional empty array, including the zero-based empty legacy-vector shape.
     pub fn with_lower_bounds(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Option<Self> {
         let control = crate::memory::ProductionControl::uncontrolled();
         Self::with_lower_bounds_with_control(
@@ -61,7 +64,7 @@ impl ArrayValue {
 
     /// Validate borrowed input before a tagged decoder transfers its values. Rejected tags must preserve the complete original map.
     pub(super) fn decoded_shape(elements: &[Value], bound_count: usize) -> Option<Vec<usize>> {
-        shape::unbounded(elements, bound_count == 1)
+        shape::unbounded(elements, Some(bound_count))
     }
 
     pub(super) fn decoded_shape_budgeted(
@@ -70,7 +73,7 @@ impl ArrayValue {
         memory: &crate::memory::MemoryBudget,
         cancellation: &crate::CancellationToken,
     ) -> Result<Option<crate::memory::Budgeted<Vec<usize>>>, super::ValueRetentionError> {
-        shape::budgeted(elements, bound_count == 1, memory, cancellation)
+        shape::budgeted(elements, Some(bound_count), memory, cancellation)
     }
 
     /// Reserve this exact boxed layout before consuming validated decoded buffers.
@@ -85,7 +88,7 @@ impl ArrayValue {
         lower_bounds: Vec<i32>,
     ) -> Self {
         debug_assert_eq!(dimensions.len(), lower_bounds.len());
-        normalize_nested_arrays(&mut elements);
+        normalize_nested_arrays(&mut elements, dimensions.len());
         Self {
             storage: Box::new(ArrayStorage {
                 elements,
@@ -197,9 +200,10 @@ impl ArrayValue {
     }
 }
 
-fn normalize_nested_arrays(elements: &mut [Value]) {
+fn normalize_nested_arrays(elements: &mut [Value], rank: usize) {
     production::normalize(
         elements,
+        rank,
         &mut None,
         &crate::memory::ProductionControl::uncontrolled(),
     )

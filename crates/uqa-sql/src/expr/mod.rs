@@ -18,7 +18,9 @@ use crate::params::SQLParam;
 use crate::result::ResultRow;
 
 mod array_access;
+pub(crate) mod array_construction;
 pub use array_access::eval_array_access_with_control;
+pub use array_construction::construct_array_with_control;
 mod array_transform;
 pub mod bit_string;
 pub mod datums;

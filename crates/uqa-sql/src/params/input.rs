@@ -10,7 +10,7 @@ use crate::{
     expr::EngineHook, type_resolution::FunctionTypeResolver, ColumnType, SQLError, SQLParam,
 };
 use uqa_core::{
-    memory::{Produced, ProductionControl},
+    memory::{Produced, ProductionControl, ProductionVec},
     Value,
 };
 
@@ -26,10 +26,7 @@ pub fn create_typed_parameter_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<SQLParam>, SQLError> {
     control.check()?;
-    let ty = match types.resolve_type_name(type_name)? {
-        Some(ty) => ty.retain_external_with_control(control)?,
-        None => ColumnType::from_sql_name_with_control(type_name, control)?,
-    };
+    let ty = resolve_type(type_name, types, control)?;
     // Reading a value has CAST semantics. Type USAGE governs declarations, not value input.
     let value = match text {
         Some(text) => {
@@ -47,6 +44,74 @@ pub fn create_typed_parameter_with_control(
         Some(input),
         control,
     )?;
+    finish(value, ty, control)
+}
+
+pub(super) fn bind_sources(
+    parameters: &[SQLParam],
+    types: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Option<ColumnType>>>, SQLError> {
+    let mut sources = ProductionVec::new(*control);
+    sources.reserve(parameters.len())?;
+    for parameter in parameters {
+        let source = super::bind_parameter_type_with_control(parameter, types, control)?;
+        let (source, memory) = match source {
+            Some(source) => {
+                let (ty, memory) = source.into_parts();
+                (Some(ty), memory)
+            }
+            None => (None, control.empty_reservation()),
+        };
+        sources.push_produced(control.finish(source, memory)?)?;
+    }
+    Ok(sources.finish()?)
+}
+
+pub(super) fn cast_parameter(
+    parameter: &SQLParam,
+    source: Option<&ColumnType>,
+    target: &ColumnType,
+    input: &dyn EngineHook,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let source = source
+        .map(|ty| ty.catalog_name_with_control(control))
+        .transpose()?;
+    let target = target.catalog_name_with_control(control)?;
+    let owned;
+    let value = if let Some(value) = parameter.scalar_value() {
+        value
+    } else {
+        owned = parameter.to_value_with_control(control)?;
+        &owned
+    };
+    crate::expr::cast_value_with_type_resolution_with_control(
+        value,
+        Some(source.as_deref().map_or("unknown", String::as_str)),
+        &target,
+        Some(input),
+        control,
+    )
+}
+
+pub(super) fn resolve_type(
+    type_name: &str,
+    types: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    control.check()?;
+    Ok(match types.resolve_type_name(type_name)? {
+        Some(ty) => ty.retain_external_with_control(control)?,
+        None => ColumnType::from_sql_name_with_control(type_name, control)?,
+    })
+}
+
+pub(super) fn finish(
+    value: Produced<Value>,
+    ty: Produced<ColumnType>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<SQLParam>, SQLError> {
     let (value, value_memory) = value.into_parts();
     let (ty, type_memory) = ty.into_parts();
     Ok(control.finish(

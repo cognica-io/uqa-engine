@@ -13,7 +13,6 @@ use super::{
 };
 use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema, RowCast};
 use std::sync::OnceLock;
-use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
@@ -26,8 +25,8 @@ pub(super) fn array(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let element_oid = context.with_type_schema(|schema| {
-        uqa_sql::type_resolution::scalar_array_element_oid_with_control(
+    let element_type = context.with_type_schema(|schema| {
+        uqa_sql::type_resolution::scalar_array_input_type_with_control(
             items,
             schema,
             context.params(),
@@ -35,17 +34,12 @@ pub(super) fn array(
             control,
         )
     })?;
-    let items = evaluate_items(items, context, control)?;
-    let array = ArrayValue::try_new_with_control(items, control)?.ok_or_else(|| {
-        SQLError::TypeMismatch("multidimensional arrays must have matching dimensions".into())
-    })?;
-    let (array, memory) = array.into_parts();
-    control
-        .finish(
-            Value::Array(array.with_element_type_oid(element_oid)),
-            memory,
-        )
-        .map_err(Into::into)
+    uqa_sql::expr::construct_array_with_control(
+        items.len(),
+        element_type.as_deref(),
+        control,
+        |index| eval_scalar_inner(&items[index], context, control),
+    )
 }
 
 pub(super) fn row(

@@ -6,14 +6,11 @@
 
 //! Bounded array replacement preserves `PostgreSQL` dimensions and row-major slice input.
 
-use super::{ArrayValue, ControlledArrayElements};
+use super::{ArrayValue, ControlledArrayElements, MAX_DIMENSIONS, MAX_ELEMENTS};
 use crate::{
     memory::{Produced, ProductionControl, ProductionVec},
     Value, ValueRetentionError,
 };
-
-const MAX_DIMENSIONS: usize = 6;
-const MAX_ELEMENTS: usize = 134_217_727;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArrayAssignmentError {

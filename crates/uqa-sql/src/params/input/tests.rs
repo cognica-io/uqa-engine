@@ -142,3 +142,84 @@ fn both_cancellation_tokens_remain_active_during_type_resolution() {
         }
     }
 }
+
+#[test]
+fn structured_arrays_share_scalar_casts_bounds_and_retention() {
+    use crate::params::create_array_parameter_with_control;
+    let catalog = Builtins { cancel: None };
+    let budget = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let held = control.copy_text("held").unwrap();
+    let elements = [
+        SQLParam::typed_scalar(Value::Int(7), ColumnType::Integer),
+        SQLParam::Scalar(Value::Null),
+        SQLParam::Scalar(Value::Str("9".into())),
+        SQLParam::Scalar(Value::Int(10)),
+    ];
+    let array = create_array_parameter_with_control(
+        "smallint[][]",
+        &[2, 2],
+        &[-3, 7],
+        &elements,
+        &catalog,
+        &catalog,
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        crate::result::format_postgres_text(
+            array.scalar_value().unwrap(),
+            array.declared_scalar_type().unwrap(),
+            None
+        )
+        .unwrap(),
+        "[-3:-2][7:8]={{7,NULL},{9,10}}"
+    );
+    assert_eq!(
+        budget.used(),
+        held.reserved_bytes() + array.reserved_bytes()
+    );
+    drop(array);
+    for (name, dimensions, count, state) in [
+        ("integer[]", vec![3], 4, "22023"),
+        ("integer", vec![4], 4, "42804"),
+        ("smallint[]", vec![1], 1, "22003"),
+    ] {
+        let overflowing = [SQLParam::Scalar(Value::Int(32768))];
+        let input = if count == 1 {
+            &overflowing[..]
+        } else {
+            &elements[..]
+        };
+        let error = create_array_parameter_with_control(
+            name,
+            &dimensions,
+            &[1],
+            input,
+            &catalog,
+            &catalog,
+            &control,
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state));
+        assert_eq!(budget.used(), held.reserved_bytes());
+    }
+    for token in [&original, &invoking] {
+        token.cancel();
+        let error = create_array_parameter_with_control(
+            "integer[]",
+            &[4],
+            &[1],
+            &elements,
+            &catalog,
+            &catalog,
+            &control,
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+        token.reset();
+        assert_eq!(budget.used(), held.reserved_bytes());
+    }
+}

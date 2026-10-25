@@ -6,7 +6,7 @@
 
 //! AST scalar evaluation orchestration.
 
-use uqa_core::{ArrayValue, Value};
+use uqa_core::Value;
 
 use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
@@ -84,24 +84,22 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let crate::ScalarExpr::Array(items) = scalar else {
                 unreachable!("array lowering")
             };
-            let element_oid = crate::type_resolution::scalar_array_element_oid_with_control(
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            let element_type = crate::type_resolution::scalar_array_input_type_with_control(
                 &items,
                 &crate::RowSchema::default(),
                 ctx.params,
                 ctx.engine,
-                &uqa_core::memory::ProductionControl::uncontrolled(),
+                &control,
             )?;
-            let mut out = Vec::with_capacity(elements.len());
-            for e in elements {
-                out.push(eval(e, ctx)?);
-            }
-            ArrayValue::try_new(out)
-                .map(|array| Value::Array(array.with_element_type_oid(element_oid)))
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(
-                        "multidimensional arrays must have matching dimensions".into(),
-                    )
-                })
+            Ok(super::construct_array_with_control(
+                elements.len(),
+                element_type.as_deref(),
+                &control,
+                |index| Ok(control.finish(eval(&elements[index], ctx)?, None)?),
+            )?
+            .into_uncontrolled()
+            .expect("ordinary array constructor"))
         }
         Expr::CompositeRow { items, binding } => {
             let control = uqa_core::memory::ProductionControl::uncontrolled();

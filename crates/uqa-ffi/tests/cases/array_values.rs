@@ -48,6 +48,7 @@ fn child_admission_preserves_existing_views_and_recovers_on_every_provider() {
             );
             assert_eq!(uqa_config_destroy(&raw mut config), UQA_OK);
             assert_eq!(uqa_result_create(&raw mut result), UQA_OK);
+            assert_eq!(uqa_engine_execute(engine, c"CREATE SEQUENCE array_admission_calls; SELECT nextval('array_admission_calls'); CREATE DOMAIN array_admission_element AS integer CHECK (nextval('array_admission_calls') > 0)".as_ptr(), result), UQA_OK);
             assert_eq!(
                 uqa_engine_execute(engine, c"SELECT ARRAY[1,2,3]".as_ptr(), result),
                 UQA_OK
@@ -78,6 +79,7 @@ fn child_admission_preserves_existing_views_and_recovers_on_every_provider() {
             let mut number = 0;
             assert_eq!(uqa_value_get_int32(first, &raw mut number), UQA_OK);
             assert_eq!(number, 1);
+            reject_constructor(engine, first);
             for mut copy in retained {
                 assert_eq!(uqa_value_destroy(&raw mut copy), UQA_OK);
             }
@@ -88,9 +90,49 @@ fn child_admission_preserves_existing_views_and_recovers_on_every_provider() {
             assert_eq!(uqa_value_get_element(array, 1, &raw mut again), UQA_OK);
             assert_eq!(second, again);
             cancellation(engine, array);
+            assert_eq!(
+                uqa_engine_execute(
+                    engine,
+                    c"SELECT currval('array_admission_calls')".as_ptr(),
+                    result
+                ),
+                UQA_OK
+            );
+            let mut count = 0;
+            assert_eq!(uqa_result_get_value(result, 0, 0, &raw mut first), UQA_OK);
+            assert_eq!(uqa_value_get_int64(first, &raw mut count), UQA_OK);
+            assert_eq!(count, 1);
+            assert_eq!(uqa_transaction_rollback(engine), UQA_OK);
             assert_eq!(uqa_result_destroy(&raw mut result), UQA_OK);
             assert_eq!(uqa_engine_close(&raw mut engine), UQA_OK);
         }
+    }
+}
+
+fn reject_constructor(engine: *mut UQAEngine, first: *const UQAValue) {
+    unsafe {
+        let dimension = UQAArrayDimension {
+            length: 1,
+            lower_bound: 1,
+        };
+        let mut constructed = ptr::null_mut();
+        assert_eq!(uqa_transaction_begin(engine), UQA_OK);
+        assert_eq!(
+            uqa_value_create_array(
+                engine,
+                c"array_admission_element[]".as_ptr(),
+                &raw const dimension,
+                1,
+                &raw const first,
+                1,
+                &raw mut constructed
+            ),
+            UQA_ERROR_LIMIT
+        );
+        assert!(constructed.is_null());
+        let mut state = UQA_TRANSACTION_IDLE;
+        assert_eq!(uqa_transaction_get_state(engine, &raw mut state), UQA_OK);
+        assert_eq!(state, UQA_TRANSACTION_ACTIVE);
     }
 }
 

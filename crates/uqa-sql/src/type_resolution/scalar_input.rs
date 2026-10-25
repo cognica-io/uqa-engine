@@ -83,18 +83,43 @@ pub fn scalar_array_element_oid_with_control(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<u32>, SQLError> {
+    Ok(
+        scalar_array_element_type_with_control(items, schema, params, engine, control)?
+            .map(|ty| crate::catalog::type_metadata::pg_type_oid(&ty) as u32),
+    )
+}
+
+/// Select the scalar element while preserving a domain over an array as one element. Only actual array dimensions unwrap; catalog vectors and domain identities remain scalar.
+pub fn scalar_array_element_type_with_control(
+    items: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let ty = scalar_array_input_type_with_control(items, schema, params, engine, control)?;
+    ty.map(|ty| {
+        ty.array_element_type()
+            .unwrap_or(&ty)
+            .clone_with_control(control)
+            .map_err(Into::into)
+    })
+    .transpose()
+}
+
+/// The common type of ARRAY arguments distinguishes a nested dimension from a scalar domain whose base is an array.
+pub fn scalar_array_input_type_with_control(
+    items: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    engine: Option<&dyn crate::expr::EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
     if items.is_empty() {
         return Ok(None);
     }
-    let ty = array_element_type_from_bound_inputs(items, schema, params, engine, control)?;
-    Ok(ty.map(|ty| {
-        let mut element = &*ty;
-        while let Some(inner) = super::common::array_element_type(element) {
-            element = inner;
-        }
-        crate::catalog::type_metadata::pg_type_oid(element) as u32
-    }))
+    array_element_type_from_bound_inputs(items, schema, params, engine, control)
 }
 
 fn array_element_type_from_bound_inputs(

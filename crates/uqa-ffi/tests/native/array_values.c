@@ -86,8 +86,20 @@ static void binding(uqa_engine engine, uqa_result result) {
     uqa_value_view parameter = NULL, value = NULL, element = NULL;
     uqa_statement statement = NULL;
     uqa_cursor cursor = NULL;
-    CHECK(uqa_value_create_from_text(engine, "integer[][][]",
-        "[-3:-2][7:9]={{11,NULL,13},{21,22,23}}", &array));
+    {
+        const int32_t numbers[] = {11, 0, 13, 21, 22, 23};
+        uqa_array_dimension dimensions[] = {{2, -3}, {3, 7}};
+        uqa_value owners[6] = {NULL, NULL, NULL, NULL, NULL, NULL};
+        uqa_value_view elements[6];
+        for (int i = 0; i < 6; ++i) {
+            if (i == 1) CHECK(uqa_value_create_null(&owners[i]));
+            else CHECK(uqa_value_create_int32(numbers[i], &owners[i]));
+            elements[i] = owners[i];
+        }
+        CHECK(uqa_value_create_array_n(engine, "integer[][][]suffix", 13, dimensions, 2, elements, 6, &array));
+        dimensions[0].lower_bound = 99;
+        for (int i = 0; i < 6; ++i) CHECK(uqa_value_destroy(&owners[i]));
+    }
     matrix(array);
     CHECK(uqa_value_get_element(array, 5, &element));
     CHECK(uqa_value_create_copy(element, &retained_element));
@@ -228,6 +240,71 @@ static void catalog_children(uqa_engine engine, uqa_result result) {
     CHECK(uqa_value_destroy(&retained));
 }
 
+static void array_input(uqa_engine engine, uqa_result result) {
+    uqa_value one = NULL, zero = NULL, array = NULL, first = NULL, second = NULL;
+    uqa_value_view elements[3], value = NULL, child = NULL;
+    uqa_array_dimension dimensions[] = {{2, -1}};
+    uqa_array_shape shape = {NULL, 0, 0};
+    CHECK(uqa_value_create_int32(1, &one));
+    CHECK(uqa_value_create_int32(0, &zero));
+    elements[0] = one; elements[1] = one; elements[2] = one;
+    assert(uqa_value_create_array(engine, "integer[]", dimensions, 1, elements, 1, &array) == UQA_ERROR_SQL && array == NULL);
+    assert(uqa_value_create_array(engine, "integer", dimensions, 1, elements, 2, &array) == UQA_ERROR_SQL && array == NULL);
+    assert(uqa_value_create_array(engine, "integer[]", NULL, 1, elements, 2, &array) == UQA_ERROR_INVALID_ARGUMENT && array == NULL);
+    assert(uqa_value_create_array(engine, "integer[]", dimensions, 1, NULL, 2, &array) == UQA_ERROR_INVALID_ARGUMENT && array == NULL);
+    CHECK(uqa_value_create_array(engine, "integer[]", NULL, 0, NULL, 0, &array));
+    CHECK(uqa_value_get_array_shape(array, &shape));
+    assert(shape.rank == 0 && shape.element_count == 0);
+    CHECK(uqa_value_destroy(&array));
+    CHECK(uqa_engine_execute(engine,
+        "CREATE SEQUENCE array_input_calls; "
+        "CREATE DOMAIN counted_element AS integer CHECK (nextval('array_input_calls') > 0 AND VALUE > 0); "
+        "CREATE DOMAIN counted_array AS counted_element[] CHECK (cardinality(VALUE) = 2)", result));
+    CHECK(uqa_value_create_array(engine, "counted_array", dimensions, 1, elements, 2, &array));
+    formatted(array, "[-1:0]={1,1}");
+    value = array;
+    CHECK(uqa_engine_execute_params(engine, "SELECT $1, currval('array_input_calls')", &value, 1, result));
+    CHECK(uqa_result_get_value(result, 0, 1, &value));
+    formatted(value, "2");
+    CHECK(uqa_value_destroy(&array));
+    elements[1] = zero;
+    dimensions[0].length = 3;
+    CHECK(uqa_engine_execute(engine, "BEGIN; SAVEPOINT before_array", result));
+    assert(uqa_value_create_array(engine, "counted_element[]", dimensions, 1, elements, 3, &array) == UQA_ERROR_SQL && array == NULL);
+    assert(uqa_engine_execute(engine, "SELECT 1", result) == UQA_ERROR_SQL);
+    CHECK(uqa_engine_execute(engine, "ROLLBACK TO before_array; SELECT currval('array_input_calls')", result));
+    CHECK(uqa_result_get_value(result, 0, 0, &value));
+    formatted(value, "4");
+    CHECK(uqa_engine_execute(engine, "COMMIT; CREATE DOMAIN array_leaf AS integer[]; CREATE TABLE array_domain_data(v array_leaf[])", result));
+    CHECK(uqa_value_create_from_text(engine, "array_leaf", "{1,2}", &first));
+    CHECK(uqa_value_create_from_text(engine, "array_leaf", "{3}", &second));
+    elements[0] = first; elements[1] = second;
+    dimensions[0].length = 2; dimensions[0].lower_bound = 1;
+    CHECK(uqa_value_create_array(engine, "array_leaf[]", dimensions, 1, elements, 2, &array));
+    CHECK(uqa_value_destroy(&first)); CHECK(uqa_value_destroy(&second));
+    formatted(array, "{\"{1,2}\",\"{3}\"}");
+    CHECK(uqa_value_get_array_shape(array, &shape));
+    assert(shape.rank == 1 && shape.element_count == 2);
+    CHECK(uqa_value_get_element(array, 0, &child));
+    kind(child, UQA_TYPE_DOMAIN);
+    CHECK(uqa_value_get_array_shape(child, &shape));
+    assert(shape.rank == 1 && shape.element_count == 2);
+    CHECK(uqa_value_get_element(child, 1, &value));
+    formatted(value, "2");
+    value = array;
+    CHECK(uqa_engine_execute_params(engine, "INSERT INTO array_domain_data VALUES ($1)", &value, 1, result));
+    CHECK(uqa_value_destroy(&array));
+    CHECK(uqa_engine_execute(engine,
+        "SELECT ARRAY[ARRAY[1,2]::array_leaf,ARRAY[3]::array_leaf], '{\"{1,2}\",\"{3}\"}'::array_leaf[]", result));
+    for (uint32_t i = 0; i < 2; ++i) {
+        CHECK(uqa_result_get_value(result, 0, i, &value));
+        formatted(value, "{\"{1,2}\",\"{3}\"}");
+        CHECK(uqa_value_get_array_shape(value, &shape));
+        assert(shape.rank == 1 && shape.element_count == 2);
+    }
+    CHECK(uqa_value_destroy(&one)); CHECK(uqa_value_destroy(&zero));
+}
+
 int main(void) {
     char path[4096];
     int length = snprintf(path, sizeof(path), "%s/array-data", getenv("UQA_TEST_DATABASE_DIR"));
@@ -241,6 +318,7 @@ int main(void) {
     empty_and_catalog_vectors(engine, result);
     text_and_binary_children(engine, result);
     catalog_children(engine, result);
+    array_input(engine, result);
     CHECK(uqa_engine_execute(engine, "SELECT v FROM array_data", result));
     CHECK(uqa_result_get_value(result, 0, 0, &value));
     matrix(value);
@@ -252,6 +330,9 @@ int main(void) {
         CHECK(uqa_engine_execute(engine, "SELECT v FROM array_data", result));
         CHECK(uqa_result_get_value(result, 0, 0, &value));
         matrix(value);
+        CHECK(uqa_engine_execute(engine, "SELECT v FROM array_domain_data", result));
+        CHECK(uqa_result_get_value(result, 0, 0, &value));
+        formatted(value, "{\"{1,2}\",\"{3}\"}");
         CHECK(uqa_result_destroy(&result));
         CHECK(uqa_engine_close(&engine));
     }

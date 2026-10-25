@@ -13,24 +13,21 @@ use crate::{
 
 type Shape = Option<(Vec<usize>, Option<MemoryReservation>)>;
 
-pub(super) fn unbounded(elements: &[Value], preserve_empty_dimension: bool) -> Option<Vec<usize>> {
-    validate(elements, preserve_empty_dimension, None, &mut || Ok(()))
+pub(super) fn unbounded(elements: &[Value], rank: Option<usize>) -> Option<Vec<usize>> {
+    validate(elements, rank, None, &mut || Ok(()))
         .ok()?
         .map(|(dimensions, _)| dimensions)
 }
 
 pub(super) fn budgeted(
     elements: &[Value],
-    preserve_empty_dimension: bool,
+    rank: Option<usize>,
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Option<Budgeted<Vec<usize>>>, ValueRetentionError> {
-    validate(
-        elements,
-        preserve_empty_dimension,
-        Some(memory),
-        &mut || cancellation.check().map_err(Into::into),
-    )
+    validate(elements, rank, Some(memory), &mut || {
+        cancellation.check().map_err(Into::into)
+    })
     .map(|shape| {
         shape.map(|(dimensions, memory)| {
             Budgeted::new(dimensions, memory.expect("controlled array dimensions"))
@@ -40,37 +37,32 @@ pub(super) fn budgeted(
 
 pub(super) fn produced(
     elements: &[Value],
-    preserve_empty_dimension: bool,
+    rank: Option<usize>,
     control: &crate::memory::ProductionControl<'_>,
 ) -> Result<Option<crate::memory::Produced<Vec<usize>>>, ValueRetentionError> {
-    validate(
-        elements,
-        preserve_empty_dimension,
-        control.budget(),
-        &mut || control.check(),
-    )?
-    .map(|(dimensions, memory)| control.finish(dimensions, memory))
-    .transpose()
+    validate(elements, rank, control.budget(), &mut || control.check())?
+        .map(|(dimensions, memory)| control.finish(dimensions, memory))
+        .transpose()
 }
 
-fn nested(value: &Value) -> Option<&[Value]> {
+fn nested(value: &Value, depth: usize, rank: Option<usize>) -> Option<&[Value]> {
     match value {
         Value::List(values) => Some(values),
-        Value::Array(array) => Some(array.elements()),
+        Value::Array(array) if rank != Some(depth) => Some(array.elements()),
         _ => None,
     }
 }
 
 fn validate(
     elements: &[Value],
-    preserve_empty_dimension: bool,
+    mut rank: Option<usize>,
     memory: Option<&MemoryBudget>,
     check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
 ) -> Result<Shape, ValueRetentionError> {
     check()?;
     let mut dimensions = Buffer::new(memory);
     if elements.is_empty() {
-        if preserve_empty_dimension {
+        if rank == Some(1) {
             dimensions.push(0)?;
         }
         return Ok(Some(dimensions.into_parts()));
@@ -79,7 +71,17 @@ fn validate(
     loop {
         check()?;
         dimensions.push(first.len())?;
-        let Some(children) = first.first().and_then(nested) else {
+        if rank.is_none() {
+            if let Some(Value::Array(array)) = first.first().filter(
+                |value| matches!(value, Value::Array(array) if !array.dimensions().is_empty()),
+            ) {
+                rank = Some(dimensions.as_slice().len() + array.dimensions().len());
+            }
+        }
+        let Some(children) = first
+            .first()
+            .and_then(|value| nested(value, dimensions.as_slice().len(), rank))
+        else {
             break;
         };
         first = children;
@@ -94,7 +96,10 @@ fn validate(
             continue;
         };
         let child_depth = *depth + 1;
-        match (nested(value), dimensions.as_slice().get(child_depth)) {
+        match (
+            nested(value, child_depth, rank),
+            dimensions.as_slice().get(child_depth),
+        ) {
             (None, None) => {}
             (Some(children), Some(&length)) if children.len() == length => {
                 if !children.is_empty() {
