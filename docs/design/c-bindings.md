@@ -232,7 +232,7 @@ All exported operations return `uqa_status`, including metadata accessors and de
 All declaration excerpts below retain `UQA_API` and `UQA_CALL`. Header verification must compile these definitions directly; replacing them with empty test macros would hide missing definitions and would not test export/import or calling-convention declarations.
 
 - Ordinary string inputs use NUL-terminated UTF-8 `const char *`, so callers pass string literals or existing C strings directly. These inputs require a non-NULL pointer, including for an empty string. Input APIs do not require `uqa_string_view` construction. SQL text, names, paths, keys, and callback error messages follow this convention.
-- String-taking operations also provide explicit-length `*_n` variants using `const char *` followed by `size_t`. Lengths count bytes, exclude a terminator, and permit non-terminated input. A zero-length span may have a NULL pointer; positive lengths require readable contiguous storage. Embedded NUL remains invalid where the native operation/type forbids it. BYTEA uses byte buffers, not C strings. Check length arithmetic, multiplication, and Rust slice-size limits before allocation or pointer conversion.
+- String-taking operations also provide explicit-length `*_n` variants using `const char *` followed by `size_t`. Lengths count bytes, exclude a terminator, and permit non-terminated input. Optional empty spans may have a NULL pointer; required paths, role/savepoint/function/column names and UDF-context messages remain non-NULL even at length zero. Memory open requires a NULL path and zero length. Positive lengths require readable contiguous storage. Embedded NUL remains invalid where the native operation/type forbids it. BYTEA uses byte buffers, not C strings. Check length arithmetic, multiplication, and Rust slice-size limits before allocation or pointer conversion.
 - `uqa_string_view` is an output-only borrowed view. Returned text need not be NUL-terminated, so consumers use its size; the owning object, callback scope, or loaded library determines its lifetime. String arrays such as subscription channels use `const char *const *`; explicit-length array variants receive a parallel length array. Non-UTF-8 native paths require a separate future path interface.
 - Row counts and row indices use `uint64_t`; column and parameter indices use `uint32_t`. Rows and columns are zero-based; parameters are one-based, matching `$1`.
 - Booleans use `uint8_t` with only 0 and 1 accepted. Public ABI widths do not depend on C enums, `long`, Rust `bool`, or Rust enum discriminants.
@@ -355,10 +355,16 @@ typedef uint32_t uqa_open_flags;
 UQA_API uqa_status UQA_CALL uqa_engine_open(
     const char *path, uqa_open_flags flags,
     uqa_config config, uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_n(
+    const char *path, size_t path_size, uqa_open_flags flags,
+    uqa_config config, uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_session(
     uqa_engine source, uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_session_for_user(
     uqa_engine source, const char *role,
+    uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_session_for_user_n(
+    uqa_engine source, const char *role, size_t role_size,
     uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_get_capabilities(
     uqa_engine engine, uint64_t *out);
@@ -443,10 +449,16 @@ UQA_API uqa_status UQA_CALL uqa_transaction_commit(uqa_engine engine);
 UQA_API uqa_status UQA_CALL uqa_transaction_rollback(uqa_engine engine);
 UQA_API uqa_status UQA_CALL uqa_savepoint_create(
     uqa_engine engine, const char *name);
+UQA_API uqa_status UQA_CALL uqa_savepoint_create_n(
+    uqa_engine engine, const char *name, size_t name_size);
 UQA_API uqa_status UQA_CALL uqa_savepoint_rollback(
     uqa_engine engine, const char *name);
+UQA_API uqa_status UQA_CALL uqa_savepoint_rollback_n(
+    uqa_engine engine, const char *name, size_t name_size);
 UQA_API uqa_status UQA_CALL uqa_savepoint_release(
     uqa_engine engine, const char *name);
+UQA_API uqa_status UQA_CALL uqa_savepoint_release_n(
+    uqa_engine engine, const char *name, size_t name_size);
 UQA_API uqa_status UQA_CALL uqa_transaction_get_state(
     uqa_engine engine, uint32_t *out_state);
 ```
@@ -1080,14 +1092,31 @@ UQA_API uqa_status UQA_CALL uqa_udf_register_scalar(
     uqa_udf_options options, uqa_udf_scalar_fn function,
     void *user_data, uqa_user_data_destroy_fn destroy_user_data,
     uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_scalar_n(
+    uqa_engine engine, const char *name, size_t name_size,
+    uqa_udf_options options, uqa_udf_scalar_fn function,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
 UQA_API uqa_status UQA_CALL uqa_udf_register_table(
     uqa_engine engine, const char *name, uqa_udf_options options,
     const char *const *columns, uint32_t column_count,
     uqa_udf_create_scan_fn create_scan, uqa_udf_next_fn next,
     uqa_udf_destroy_scan_fn destroy_scan,
     void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_table_n(
+    uqa_engine engine, const char *name, size_t name_size,
+    uqa_udf_options options, const char *const *columns,
+    const size_t *column_sizes, uint32_t column_count,
+    uqa_udf_create_scan_fn create_scan, uqa_udf_next_fn next,
+    uqa_udf_destroy_scan_fn destroy_scan,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
 UQA_API uqa_status UQA_CALL uqa_udf_register_aggregate(
     uqa_engine engine, const char *name, uqa_udf_options options,
+    uqa_udf_create_state_fn create_state, uqa_udf_observe_fn observe,
+    uqa_udf_finish_fn finish, uqa_udf_destroy_state_fn destroy_state,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_aggregate_n(
+    uqa_engine engine, const char *name, size_t name_size,
+    uqa_udf_options options,
     uqa_udf_create_state_fn create_state, uqa_udf_observe_fn observe,
     uqa_udf_finish_fn finish, uqa_udf_destroy_state_fn destroy_state,
     void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
@@ -1104,6 +1133,8 @@ UQA_API uqa_status UQA_CALL uqa_udf_context_set_result(
     uqa_udf_context context, uqa_value_view value);
 UQA_API uqa_status UQA_CALL uqa_udf_context_fail(
     uqa_udf_context context, const char *message);
+UQA_API uqa_status UQA_CALL uqa_udf_context_fail_n(
+    uqa_udf_context context, const char *message, size_t message_size);
 
 /* next returns UQA_OK after emitting one row, or UQA_DONE without a row.
  * emit copies the values before returning; wrong width and a second row fail.
@@ -1130,6 +1161,8 @@ UQA_API uqa_status UQA_CALL uqa_udf_row_sink_emit(
  * clears the handle even when the destructor returns an error. */
 UQA_API uqa_status UQA_CALL uqa_udf_unregister(uqa_udf *function);
 ```
+
+Each registration has an `_n` form with a byte length immediately after the function name; table registration additionally takes `column_sizes`, a parallel array with one byte length per column. These forms copy all names before returning, accept non-terminated UTF-8 spans, and reject embedded NUL or invalid UTF-8. The column count remains positive and requires both arrays. `uqa_udf_context_fail_n` copies the explicit message span into the active callback diagnostic with the same failure and cleanup semantics as `uqa_udf_context_fail`. Required name and message pointers remain non-NULL even at length zero.
 
 Registration names identify the function kind consistently: `uqa_udf_register_scalar`, `uqa_udf_register_table`, and `uqa_udf_register_aggregate`. Each accepts its kind's callback contract and returns the same `uqa_udf` handle type, released by `uqa_udf_unregister`. Create reusable options with `uqa_udf_options_create` and release them with `uqa_udf_options_destroy`; registration copies their settings, and NULL selects defaults. The paired options getters/setters use the same explicit volatility codes and 0/1 `may_mutate_engine` flag. Defaults remain VOLATILE and may-mutate. Setters validate individual values; registration validates the complete combination and rejects mutation with a more stable declaration. The C boundary does not add typed SQL overloads, schema lookup rules, or optimizer contracts that the current name-based runtime registry lacks. A future signature-rich registration API must first extend the SQL/Execution interfaces.
 

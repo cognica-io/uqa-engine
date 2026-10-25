@@ -60,15 +60,21 @@ impl SQLScalarFunction for Scalar {
     }
 }
 
-ffi_fn!(uqa_udf_register_scalar(engine: *mut UQAEngine, name: *const c_char, options_pointer: *mut UQAUDFOptions, function: Option<UQAUDFScalarFn>, user_data: *mut c_void, destroy_user_data: Option<UQAUserDataDestroyFn>, out: *mut *mut UQAUDF) {
-    let out = boundary::new_handle(out)?;
-    let name = boundary::text(name)?;
-    let function = function.ok_or_else(|| UQAError::invalid("scalar callback must not be NULL"))?;
-    let options = options(options_pointer)?;
-    let session = &boundary::input(engine)?.session;
-    let _call = session.enter()?;
-    let handle = UQAUDF::prepare(session, user_data, destroy_user_data)?;
-    let native = session.native.register_scalar_function_retained(name, options, Scalar { function, data: Arc::clone(&handle.data) }).map_err(registration_error)?;
-    *out = handle.publish(native);
-    Ok(UQA_OK)
-});
+macro_rules! scalar_registration {
+    ($api:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($api(engine: *mut UQAEngine, name: *const c_char, $($size: usize,)? options_pointer: *mut UQAUDFOptions, function: Option<UQAUDFScalarFn>, user_data: *mut c_void, destroy_user_data: Option<UQAUserDataDestroyFn>, out: *mut *mut UQAUDF) {
+            let out = boundary::new_handle(out)?;
+            let name = boundary::$read(name $(, $size)?)?;
+            let function = function.ok_or_else(|| UQAError::invalid("scalar callback must not be NULL"))?;
+            let options = options(options_pointer)?;
+            let session = &boundary::input(engine)?.session;
+            let _call = session.enter()?;
+            let handle = UQAUDF::prepare(session, user_data, destroy_user_data)?;
+            let native = session.native.register_scalar_function_retained(name, options, Scalar { function, data: Arc::clone(&handle.data) }).map_err(registration_error)?;
+            *out = handle.publish(native);
+            Ok(UQA_OK)
+        });
+    };
+}
+scalar_registration!(uqa_udf_register_scalar, text);
+scalar_registration!(uqa_udf_register_scalar_n, required_text_n, name_size);

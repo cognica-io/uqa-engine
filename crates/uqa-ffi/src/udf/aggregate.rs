@@ -109,18 +109,24 @@ impl SQLAggregateState for State {
     }
 }
 
-ffi_fn!(uqa_udf_register_aggregate(engine: *mut UQAEngine, name: *const c_char, options_pointer: *mut UQAUDFOptions, create_state: Option<UQAUDFCreateStateFn>, observe: Option<UQAUDFObserveFn>, finish: Option<UQAUDFFinishFn>, destroy_state: Option<UQAUDFDestroyStateFn>, user_data: *mut c_void, destroy_user_data: Option<UQAUserDataDestroyFn>, out: *mut *mut UQAUDF) {
-    let out = boundary::new_handle(out)?;
-    let name = boundary::text(name)?;
-    let create = create_state.ok_or_else(|| UQAError::invalid("aggregate create_state must not be NULL"))?;
-    let observe = observe.ok_or_else(|| UQAError::invalid("aggregate observe must not be NULL"))?;
-    let finish = finish.ok_or_else(|| UQAError::invalid("aggregate finish must not be NULL"))?;
-    let destroy = destroy_state.ok_or_else(|| UQAError::invalid("aggregate destroy_state must not be NULL"))?;
-    let options = options(options_pointer)?;
-    let session = &boundary::input(engine)?.session;
-    let _call = session.enter()?;
-    let handle = UQAUDF::prepare(session, user_data, destroy_user_data)?;
-    let native = session.native.register_aggregate_function_retained(name, options, Aggregate { create, observe, finish, destroy, data: Arc::clone(&handle.data) }).map_err(registration_error)?;
-    *out = handle.publish(native);
-    Ok(UQA_OK)
-});
+macro_rules! aggregate_registration {
+    ($api:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($api(engine: *mut UQAEngine, name: *const c_char, $($size: usize,)? options_pointer: *mut UQAUDFOptions, create_state: Option<UQAUDFCreateStateFn>, observe: Option<UQAUDFObserveFn>, finish: Option<UQAUDFFinishFn>, destroy_state: Option<UQAUDFDestroyStateFn>, user_data: *mut c_void, destroy_user_data: Option<UQAUserDataDestroyFn>, out: *mut *mut UQAUDF) {
+            let out = boundary::new_handle(out)?;
+            let name = boundary::$read(name $(, $size)?)?;
+            let create = create_state.ok_or_else(|| UQAError::invalid("aggregate create_state must not be NULL"))?;
+            let observe = observe.ok_or_else(|| UQAError::invalid("aggregate observe must not be NULL"))?;
+            let finish = finish.ok_or_else(|| UQAError::invalid("aggregate finish must not be NULL"))?;
+            let destroy = destroy_state.ok_or_else(|| UQAError::invalid("aggregate destroy_state must not be NULL"))?;
+            let options = options(options_pointer)?;
+            let session = &boundary::input(engine)?.session;
+            let _call = session.enter()?;
+            let handle = UQAUDF::prepare(session, user_data, destroy_user_data)?;
+            let native = session.native.register_aggregate_function_retained(name, options, Aggregate { create, observe, finish, destroy, data: Arc::clone(&handle.data) }).map_err(registration_error)?;
+            *out = handle.publish(native);
+            Ok(UQA_OK)
+        });
+    };
+}
+aggregate_registration!(uqa_udf_register_aggregate, text);
+aggregate_registration!(uqa_udf_register_aggregate_n, required_text_n, name_size);

@@ -290,13 +290,24 @@ UQA_API uqa_status UQA_CALL uqa_config_get_ffi_memory_limit(
 UQA_API uqa_status UQA_CALL uqa_config_set_ffi_memory_limit(
     uqa_config config, uint64_t bytes);
 
+/* _n string lengths count UTF-8 bytes, excluding a terminator. No terminator
+ * is required; embedded NUL and invalid UTF-8 are rejected. Required paths,
+ * role names and savepoint names remain non-NULL even at length zero.
+ * Memory open requires a NULL path and, for open_n, a zero path_size.
+ * Inputs need remain valid only until the operation returns. */
 UQA_API uqa_status UQA_CALL uqa_engine_open(
     const char *path, uqa_open_flags flags, uqa_config config,
     uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_n(
+    const char *path, size_t path_size, uqa_open_flags flags,
+    uqa_config config, uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_session(
     uqa_engine source, uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_open_session_for_user(
     uqa_engine source, const char *role,
+    uqa_engine *out);
+UQA_API uqa_status UQA_CALL uqa_engine_open_session_for_user_n(
+    uqa_engine source, const char *role, size_t role_size,
     uqa_engine *out);
 UQA_API uqa_status UQA_CALL uqa_engine_get_capabilities(
     uqa_engine engine, uint64_t *out);
@@ -348,10 +359,16 @@ UQA_API uqa_status UQA_CALL uqa_transaction_commit(uqa_engine engine);
 UQA_API uqa_status UQA_CALL uqa_transaction_rollback(uqa_engine engine);
 UQA_API uqa_status UQA_CALL uqa_savepoint_create(
     uqa_engine engine, const char *name);
+UQA_API uqa_status UQA_CALL uqa_savepoint_create_n(
+    uqa_engine engine, const char *name, size_t name_size);
 UQA_API uqa_status UQA_CALL uqa_savepoint_rollback(
     uqa_engine engine, const char *name);
+UQA_API uqa_status UQA_CALL uqa_savepoint_rollback_n(
+    uqa_engine engine, const char *name, size_t name_size);
 UQA_API uqa_status UQA_CALL uqa_savepoint_release(
     uqa_engine engine, const char *name);
+UQA_API uqa_status UQA_CALL uqa_savepoint_release_n(
+    uqa_engine engine, const char *name, size_t name_size);
 UQA_API uqa_status UQA_CALL uqa_transaction_get_state(
     uqa_engine engine, uint32_t *out_state);
 

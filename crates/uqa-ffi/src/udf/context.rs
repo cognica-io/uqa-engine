@@ -64,8 +64,14 @@ ffi_fn!(uqa_udf_context_set_result(context: *mut UQAUDFContext, value: *const UQ
     Ok(UQA_OK)
 });
 
-ffi_fn!(uqa_udf_context_fail(context: *mut UQAUDFContext, message: *const c_char) {
-    let context = boundary::input(context)?;
-    callback::check_scope(&context.failure)?;
-    callback::fail(UQA_ERROR_SQL, boundary::text(message)?)
-});
+macro_rules! context_failure {
+    ($api:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($api(context: *mut UQAUDFContext, message: *const c_char $(, $size: usize)?) {
+            let context = boundary::input(context)?;
+            callback::check_scope(&context.failure)?;
+            callback::fail(UQA_ERROR_SQL, boundary::$read(message $(, $size)?)?)
+        });
+    };
+}
+context_failure!(uqa_udf_context_fail, text);
+context_failure!(uqa_udf_context_fail_n, required_text_n, message_size);

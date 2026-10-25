@@ -145,6 +145,13 @@ pub(crate) unsafe fn text_n<'a>(data: *const c_char, size: usize) -> Result<&'a 
     Ok(text)
 }
 
+pub(crate) unsafe fn required_text_n<'a>(data: *const c_char, size: usize) -> Result<&'a str> {
+    if data.is_null() {
+        return Err(UQAError::invalid("C string must not be NULL"));
+    }
+    text_n(data, size)
+}
+
 pub(crate) unsafe fn text<'a>(data: *const c_char) -> Result<&'a str> {
     if data.is_null() {
         return Err(UQAError::invalid("C string must not be NULL"));

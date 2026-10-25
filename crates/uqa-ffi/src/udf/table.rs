@@ -110,6 +110,7 @@ impl SQLTableFunction for Table {
 unsafe fn copy_columns(
     session: &Arc<Session>,
     columns: *const *const c_char,
+    sizes: Option<*const usize>,
     count: u32,
 ) -> boundary::Result<Produced<Vec<String>>> {
     if count == 0 {
@@ -118,11 +119,18 @@ unsafe fn copy_columns(
         ));
     }
     let names = boundary::span(columns, count as usize)?;
+    let sizes = sizes
+        .map(|sizes| boundary::span(sizes, count as usize))
+        .transpose()?;
     let control = session.control();
     let mut copied = ProductionVec::new(control);
     copied.reserve(names.len())?;
-    for name in names {
-        copied.push_produced(control.copy_text(boundary::text(*name)?)?)?;
+    for (index, name) in names.iter().enumerate() {
+        let name = match sizes {
+            Some(sizes) => boundary::required_text_n(*name, sizes[index])?,
+            None => boundary::text(*name)?,
+        };
+        copied.push_produced(control.copy_text(name)?)?;
     }
     Ok(copied.finish()?)
 }
@@ -178,18 +186,30 @@ ffi_fn!(uqa_udf_row_sink_emit(sink: *mut UQAUDFRowSink, values: *const *const UQ
     Ok(UQA_OK)
 });
 
-ffi_fn!(uqa_udf_register_table(engine: *mut UQAEngine, name: *const c_char, options_pointer: *mut UQAUDFOptions, columns: *const *const c_char, column_count: u32, create_scan: Option<UQAUDFCreateScanFn>, next: Option<UQAUDFNextFn>, destroy_scan: Option<UQAUDFDestroyScanFn>, user_data: *mut c_void, destroy_user_data: Option<UQAUserDataDestroyFn>, out: *mut *mut UQAUDF) {
-    let out = boundary::new_handle(out)?;
-    let name = boundary::text(name)?;
-    let create = create_scan.ok_or_else(|| UQAError::invalid("table create_scan must not be NULL"))?;
-    let next = next.ok_or_else(|| UQAError::invalid("table next must not be NULL"))?;
-    let destroy = destroy_scan.ok_or_else(|| UQAError::invalid("table destroy_scan must not be NULL"))?;
-    let options = options(options_pointer)?;
-    let session = &boundary::input(engine)?.session;
-    let _call = session.enter()?;
-    let columns = copy_columns(session, columns, column_count)?;
-    let handle = UQAUDF::prepare(session, user_data, destroy_user_data)?;
-    let native = session.native.register_table_function_retained(name, options, Table { columns, create, next, destroy, data: Arc::clone(&handle.data) }).map_err(registration_error)?;
-    *out = handle.publish(native);
-    Ok(UQA_OK)
-});
+macro_rules! table_registration {
+    ($api:ident, $read:ident, $sizes:expr $(, $size:ident, $column_sizes:ident)?) => {
+        ffi_fn!($api(engine: *mut UQAEngine, name: *const c_char, $($size: usize,)? options_pointer: *mut UQAUDFOptions, columns: *const *const c_char, $($column_sizes: *const usize,)? column_count: u32, create_scan: Option<UQAUDFCreateScanFn>, next: Option<UQAUDFNextFn>, destroy_scan: Option<UQAUDFDestroyScanFn>, user_data: *mut c_void, destroy_user_data: Option<UQAUserDataDestroyFn>, out: *mut *mut UQAUDF) {
+            let out = boundary::new_handle(out)?;
+            let name = boundary::$read(name $(, $size)?)?;
+            let create = create_scan.ok_or_else(|| UQAError::invalid("table create_scan must not be NULL"))?;
+            let next = next.ok_or_else(|| UQAError::invalid("table next must not be NULL"))?;
+            let destroy = destroy_scan.ok_or_else(|| UQAError::invalid("table destroy_scan must not be NULL"))?;
+            let options = options(options_pointer)?;
+            let session = &boundary::input(engine)?.session;
+            let _call = session.enter()?;
+            let columns = copy_columns(session, columns, $sizes, column_count)?;
+            let handle = UQAUDF::prepare(session, user_data, destroy_user_data)?;
+            let native = session.native.register_table_function_retained(name, options, Table { columns, create, next, destroy, data: Arc::clone(&handle.data) }).map_err(registration_error)?;
+            *out = handle.publish(native);
+            Ok(UQA_OK)
+        });
+    };
+}
+table_registration!(uqa_udf_register_table, text, None);
+table_registration!(
+    uqa_udf_register_table_n,
+    required_text_n,
+    Some(column_sizes),
+    name_size,
+    column_sizes
+);

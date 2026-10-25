@@ -305,34 +305,40 @@ fn open(
     publish_engine(native, true, config.memory_limit)
 }
 
-ffi_fn!(uqa_engine_open(path: *const c_char, flags: UQAOpenFlags, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
-    let out = boundary::new_handle(out)?;
-    callback::reject_reentry()?;
-    let config = if config.is_null() { None } else { Some(boundary::input(config)?) };
-    if flags == UQA_OPEN_MEMORY {
-        if !path.is_null() {
-            return Err(UQAError::invalid("memory open requires a NULL path"));
-        }
-        let defaults = UQAConfig::default();
-        let config = config.unwrap_or(&defaults);
-        if config.key.is_some() || config.compression.is_some() || config.trusted_anchor.is_some() {
-            return Err(UQAError::invalid("memory databases do not accept encryption, compression or anchors"));
-        }
-        *out = publish_engine(Engine::new(), false, config.memory_limit)?;
-        return Ok(UQA_OK);
-    }
-    let backend = match flags {
-        UQA_OPEN_SQLITE_NATIVE => PersistentBackend::SQLiteNative { auto: false },
-        UQA_OPEN_REDB => PersistentBackend::Redb,
-        flags if flags == UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteNative { auto: true },
-        UQA_OPEN_SQLITE_KV => PersistentBackend::SQLiteKeyValue { auto: false },
-        flags if flags == UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteKeyValue { auto: true },
-        _ => return Err(UQAError::invalid("open requires exactly one storage flag; SQLITE_AUTO modifies SQLite only")),
+macro_rules! engine_open {
+    ($api:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($api(path: *const c_char, $($size: usize,)? flags: UQAOpenFlags, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
+            let out = boundary::new_handle(out)?;
+            callback::reject_reentry()?;
+            let config = if config.is_null() { None } else { Some(boundary::input(config)?) };
+            if flags == UQA_OPEN_MEMORY {
+                if !path.is_null() $(|| $size != 0)? {
+                    return Err(UQAError::invalid("memory open requires a NULL path"));
+                }
+                let defaults = UQAConfig::default();
+                let config = config.unwrap_or(&defaults);
+                if config.key.is_some() || config.compression.is_some() || config.trusted_anchor.is_some() {
+                    return Err(UQAError::invalid("memory databases do not accept encryption, compression or anchors"));
+                }
+                *out = publish_engine(Engine::new(), false, config.memory_limit)?;
+                return Ok(UQA_OK);
+            }
+            let backend = match flags {
+                UQA_OPEN_SQLITE_NATIVE => PersistentBackend::SQLiteNative { auto: false },
+                UQA_OPEN_REDB => PersistentBackend::Redb,
+                flags if flags == UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteNative { auto: true },
+                UQA_OPEN_SQLITE_KV => PersistentBackend::SQLiteKeyValue { auto: false },
+                flags if flags == UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteKeyValue { auto: true },
+                _ => return Err(UQAError::invalid("open requires exactly one storage flag; SQLITE_AUTO modifies SQLite only")),
+            };
+            let path = boundary::$read(path $(, $size)?)?;
+            *out = open(path, config, backend)?;
+            Ok(UQA_OK)
+        });
     };
-    let path = boundary::text(path)?;
-    *out = open(path, config, backend)?;
-    Ok(UQA_OK)
-});
+}
+engine_open!(uqa_engine_open, text);
+engine_open!(uqa_engine_open_n, required_text_n, path_size);
 ffi_fn!(uqa_engine_open_session(source: *mut UQAEngine, out: *mut *mut UQAEngine) {
     let out = boundary::new_handle(out)?;
     let session = &boundary::input(source)?.session;
@@ -342,16 +348,26 @@ ffi_fn!(uqa_engine_open_session(source: *mut UQAEngine, out: *mut *mut UQAEngine
     *out = publish_engine(native, true, session.memory.limit())?;
     Ok(UQA_OK)
 });
-ffi_fn!(uqa_engine_open_session_for_user(source: *mut UQAEngine, role: *const c_char, out: *mut *mut UQAEngine) {
-    let out = boundary::new_handle(out)?;
-    let role = boundary::text(role)?;
-    let session = &boundary::input(source)?.session;
-    let _call = session.enter()?;
-    if !session.persistent { return Err(UQAError::new(UQA_ERROR_UNSUPPORTED, "memory databases do not support independent sessions")); }
-    let native = session.native.new_session_for_user(role)?;
-    *out = publish_engine(native, true, session.memory.limit())?;
-    Ok(UQA_OK)
-});
+macro_rules! user_session_open {
+    ($api:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($api(source: *mut UQAEngine, role: *const c_char, $($size: usize,)? out: *mut *mut UQAEngine) {
+            let out = boundary::new_handle(out)?;
+            let role = boundary::$read(role $(, $size)?)?;
+            let session = &boundary::input(source)?.session;
+            let _call = session.enter()?;
+            if !session.persistent { return Err(UQAError::new(UQA_ERROR_UNSUPPORTED, "memory databases do not support independent sessions")); }
+            let native = session.native.new_session_for_user(role)?;
+            *out = publish_engine(native, true, session.memory.limit())?;
+            Ok(UQA_OK)
+        });
+    };
+}
+user_session_open!(uqa_engine_open_session_for_user, text);
+user_session_open!(
+    uqa_engine_open_session_for_user_n,
+    required_text_n,
+    role_size
+);
 ffi_fn!(uqa_engine_get_capabilities(engine: *mut UQAEngine, out: *mut u64) {
     let out = boundary::output(out)?;
     let session = &boundary::input(engine)?.session;
@@ -389,9 +405,9 @@ transaction_operation!(uqa_transaction_commit, commit);
 transaction_operation!(uqa_transaction_rollback, rollback);
 
 macro_rules! savepoint_operation {
-    ($name:ident, $operation:ident) => {
-        ffi_fn!($name(engine: *mut UQAEngine, name: *const c_char) {
-            let name = boundary::text(name)?;
+    ($name:ident, $operation:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($name(engine: *mut UQAEngine, name: *const c_char $(, $size: usize)?) {
+            let name = boundary::$read(name $(, $size)?)?;
             let session = &boundary::input(engine)?.session;
             let _call = session.enter()?;
             session.execute(|native| native.$operation(name))?;
@@ -399,9 +415,27 @@ macro_rules! savepoint_operation {
         });
     };
 }
-savepoint_operation!(uqa_savepoint_create, savepoint);
-savepoint_operation!(uqa_savepoint_release, release_savepoint);
-savepoint_operation!(uqa_savepoint_rollback, rollback_to_savepoint);
+savepoint_operation!(uqa_savepoint_create, savepoint, text);
+savepoint_operation!(
+    uqa_savepoint_create_n,
+    savepoint,
+    required_text_n,
+    name_size
+);
+savepoint_operation!(uqa_savepoint_release, release_savepoint, text);
+savepoint_operation!(
+    uqa_savepoint_release_n,
+    release_savepoint,
+    required_text_n,
+    name_size
+);
+savepoint_operation!(uqa_savepoint_rollback, rollback_to_savepoint, text);
+savepoint_operation!(
+    uqa_savepoint_rollback_n,
+    rollback_to_savepoint,
+    required_text_n,
+    name_size
+);
 
 ffi_fn!(uqa_transaction_get_state(engine: *mut UQAEngine, out: *mut u32) {
     let out = boundary::output(out)?;

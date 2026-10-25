@@ -60,19 +60,41 @@ typedef uqa_status (UQA_CALL *uqa_udf_finish_fn)(
 typedef uqa_status (UQA_CALL *uqa_udf_destroy_state_fn)(
     void *state, void *user_data);
 
+/* _n forms copy UTF-8 byte spans without requiring a terminator. Name and
+ * message pointers must be non-NULL even at length zero; embedded NUL and
+ * invalid UTF-8 are rejected. Table registration requires a nonempty columns
+ * array and an equally sized column_sizes array, with a byte length per name.
+ * Registration copies names, column names and options before returning. */
 UQA_API uqa_status UQA_CALL uqa_udf_register_scalar(
     uqa_engine engine, const char *name,
     uqa_udf_options options, uqa_udf_scalar_fn function,
     void *user_data, uqa_user_data_destroy_fn destroy_user_data,
     uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_scalar_n(
+    uqa_engine engine, const char *name, size_t name_size,
+    uqa_udf_options options, uqa_udf_scalar_fn function,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
 UQA_API uqa_status UQA_CALL uqa_udf_register_table(
     uqa_engine engine, const char *name, uqa_udf_options options,
     const char *const *columns, uint32_t column_count,
     uqa_udf_create_scan_fn create_scan, uqa_udf_next_fn next,
     uqa_udf_destroy_scan_fn destroy_scan,
     void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_table_n(
+    uqa_engine engine, const char *name, size_t name_size,
+    uqa_udf_options options, const char *const *columns,
+    const size_t *column_sizes, uint32_t column_count,
+    uqa_udf_create_scan_fn create_scan, uqa_udf_next_fn next,
+    uqa_udf_destroy_scan_fn destroy_scan,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
 UQA_API uqa_status UQA_CALL uqa_udf_register_aggregate(
     uqa_engine engine, const char *name, uqa_udf_options options,
+    uqa_udf_create_state_fn create_state, uqa_udf_observe_fn observe,
+    uqa_udf_finish_fn finish, uqa_udf_destroy_state_fn destroy_state,
+    void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
+UQA_API uqa_status UQA_CALL uqa_udf_register_aggregate_n(
+    uqa_engine engine, const char *name, size_t name_size,
+    uqa_udf_options options,
     uqa_udf_create_state_fn create_state, uqa_udf_observe_fn observe,
     uqa_udf_finish_fn finish, uqa_udf_destroy_state_fn destroy_state,
     void *user_data, uqa_user_data_destroy_fn destroy_user_data, uqa_udf *out);
@@ -89,6 +111,8 @@ UQA_API uqa_status UQA_CALL uqa_udf_context_set_result(
     uqa_udf_context context, uqa_value_view value);
 UQA_API uqa_status UQA_CALL uqa_udf_context_fail(
     uqa_udf_context context, const char *message);
+UQA_API uqa_status UQA_CALL uqa_udf_context_fail_n(
+    uqa_udf_context context, const char *message, size_t message_size);
 
 /* next returns UQA_OK after emitting one row, or UQA_DONE without a row.
  * emit copies the values before returning; wrong width and a second row fail.

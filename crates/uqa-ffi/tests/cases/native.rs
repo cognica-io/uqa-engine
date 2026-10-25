@@ -45,6 +45,8 @@ native_clients!(statements, "statements.c");
 #[cfg(unix)]
 native_clients!(storage, "storage.c");
 #[cfg(unix)]
+native_clients!(string_spans, "string_spans.c");
+#[cfg(unix)]
 native_clients!(values, "values.c");
 #[cfg(unix)]
 native_clients!(typed_values, "typed_values.c");
