@@ -62,6 +62,55 @@ text_constructor!(
     uqa_value_create_uuid_n,
     ColumnType::Uuid
 );
+text_constructor!(
+    uqa_value_create_xml,
+    uqa_value_create_xml_n,
+    ColumnType::Xml
+);
+
+ffi_fn!(uqa_value_create_void(out: *mut *mut UQAValue) {
+    let out = boundary::new_handle(out)?;
+    *out = super::scalar(Value::Void, Some(ColumnType::Void))?;
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_value_get_void(value: *const UQAValue) {
+    let value = boundary::input(value)?;
+    let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
+    value.check_access(ScalarAccess::Void)?;
+    match value.observed()? {
+        Value::Void => Ok(UQA_OK),
+        value => Err(wrong_type(value)),
+    }
+});
+
+ffi_fn!(uqa_value_create_oid(value: u32, out: *mut *mut UQAValue) {
+    let out = boundary::new_handle(out)?;
+    *out = super::scalar(Value::Int(i64::from(value)), Some(ColumnType::Oid))?;
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_value_create_xid(value: u32, out: *mut *mut UQAValue) {
+    let out = boundary::new_handle(out)?;
+    *out = super::scalar(Value::Int(i64::from(value)), Some(ColumnType::Xid))?;
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_value_create_internal_char(value: u8, out: *mut *mut UQAValue) {
+    let out = boundary::new_handle(out)?;
+    let control = ProductionControl::uncontrolled();
+    let value = uqa_sql::expr::internal_char_value_with_control(value, &control)?;
+    let (value, memory) = value.into_parts();
+    let parameter = control.finish(SQLParam::typed_scalar(value, ColumnType::InternalChar), memory)?;
+    *out = Box::into_raw(UQAValue::owned(parameter, None)?);
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_value_get_internal_char(value: *const UQAValue, out: *mut u8) {
+    let out = boundary::output(out)?;
+    let value = boundary::input(value)?;
+    let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
+    value.check_access(ScalarAccess::InternalChar)?;
+    let observed = value.observed()?;
+    *out = uqa_sql::expr::internal_char_byte(observed).ok_or_else(|| wrong_type(observed))?;
+    Ok(UQA_OK)
+});
 
 macro_rules! integer_getter {
     ($name:ident, $ty:ty, $access:ident) => {
@@ -82,6 +131,8 @@ macro_rules! integer_getter {
 
 integer_getter!(uqa_value_get_int16, i16, Int16);
 integer_getter!(uqa_value_get_int32, i32, Int32);
+integer_getter!(uqa_value_get_oid, u32, Oid);
+integer_getter!(uqa_value_get_xid, u32, Xid);
 
 // The SQL REAL descriptor permits only f32 values; the round trip checks native carrier integrity.
 #[allow(clippy::cast_possible_truncation)]

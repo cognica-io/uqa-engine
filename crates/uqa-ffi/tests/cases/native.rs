@@ -53,6 +53,10 @@ native_clients!(typed_values, "typed_values.c");
 #[cfg(unix)]
 native_clients!(packed_values, "packed_values.c");
 #[cfg(unix)]
+native_clients!(temporal_values, "temporal_values.c");
+#[cfg(unix)]
+native_clients!(catalog_scalars, "catalog_scalars.c");
+#[cfg(unix)]
 native_clients!(dense_values, "dense_values.c");
 #[cfg(unix)]
 native_clients!(array_values, "array_values.c");

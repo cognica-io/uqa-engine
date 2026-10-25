@@ -36,6 +36,9 @@ mod statements;
 #[path = "cases/values.rs"]
 mod values;
 
+#[path = "cases/xml_values.rs"]
+mod xml_values;
+
 #[path = "cases/record_values.rs"]
 mod record_values;
 

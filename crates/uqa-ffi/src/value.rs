@@ -28,6 +28,8 @@ use crate::{
 
 mod scalars;
 pub use scalars::*;
+mod temporal;
+pub use temporal::*;
 mod input;
 pub use input::*;
 mod packed;
@@ -254,6 +256,38 @@ impl UQAValue {
             ScalarAccess::Float => matches!(ty, ColumnType::Real | ColumnType::DoublePrecision),
             ScalarAccess::Float32 => matches!(ty, ColumnType::Real),
             ScalarAccess::Numeric => matches!(ty, ColumnType::Numeric { .. }),
+            ScalarAccess::Void => matches!(ty, ColumnType::Void),
+            ScalarAccess::Xml => matches!(ty, ColumnType::Xml),
+            ScalarAccess::Xid => matches!(ty, ColumnType::Xid),
+            ScalarAccess::InternalChar => matches!(ty, ColumnType::InternalChar),
+            ScalarAccess::Oid => matches!(
+                ty,
+                ColumnType::Oid
+                    | ColumnType::Regproc
+                    | ColumnType::Regprocedure
+                    | ColumnType::Regclass
+                    | ColumnType::Regnamespace
+                    | ColumnType::Regcollation
+                    | ColumnType::Regrole
+                    | ColumnType::Regtype
+            ),
+            ScalarAccess::Date => matches!(ty, ColumnType::Date),
+            ScalarAccess::Time => matches!(ty, ColumnType::Time | ColumnType::TimePrecision(_)),
+            ScalarAccess::TimeTz => {
+                matches!(ty, ColumnType::TimeTz | ColumnType::TimeTzPrecision(_))
+            }
+            ScalarAccess::Timestamp => matches!(
+                ty,
+                ColumnType::Timestamp | ColumnType::TimestampPrecision(_)
+            ),
+            ScalarAccess::TimestampTz => matches!(
+                ty,
+                ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_)
+            ),
+            ScalarAccess::Interval => matches!(
+                ty,
+                ColumnType::Interval | ColumnType::IntervalWithFields { .. }
+            ),
             ScalarAccess::Json => matches!(ty, ColumnType::Json),
             ScalarAccess::JsonB => matches!(ty, ColumnType::JsonB),
             ScalarAccess::Text => matches!(
@@ -265,6 +299,8 @@ impl UQAValue {
                     | ColumnType::Name
                     | ColumnType::RefCursor
                     | ColumnType::Xml
+                    | ColumnType::PgNodeTree
+                    | ColumnType::AclItem
             ),
             ScalarAccess::Bytes => matches!(ty, ColumnType::Bytea),
             ScalarAccess::Uuid => matches!(ty, ColumnType::Uuid),
@@ -482,6 +518,17 @@ enum ScalarAccess {
     Float32,
     Float,
     Numeric,
+    Void,
+    Xml,
+    Oid,
+    Xid,
+    InternalChar,
+    Date,
+    Time,
+    TimeTz,
+    Timestamp,
+    TimestampTz,
+    Interval,
     Json,
     JsonB,
     Text,
@@ -516,6 +563,7 @@ scalar_getter!(uqa_value_get_text, UQAStringView, Text, Value::Str(value) | Valu
 scalar_getter!(uqa_value_get_bytes, UQABytesView, Bytes, Value::Bytes(value) => UQABytesView { data: value.as_ptr(), size: value.len() });
 scalar_getter!(uqa_value_get_json, UQAStringView, Json, Value::Json(value) => value.as_str().into());
 scalar_getter!(uqa_value_get_jsonb, UQAStringView, JsonB, Value::JsonB(value) => value.as_str().into());
+scalar_getter!(uqa_value_get_xml, UQAStringView, Xml, Value::Str(value) => value.as_str().into());
 
 pub struct UQABuffer {
     text: Option<Produced<String>>,

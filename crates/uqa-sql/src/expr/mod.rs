@@ -83,6 +83,9 @@ mod current_time;
 pub mod enums;
 pub(crate) mod hashing;
 pub(crate) mod internal_char;
+pub use internal_char::{
+    carrier_with_control as internal_char_value_with_control, value_byte as internal_char_byte,
+};
 pub(crate) mod interval_style;
 mod pattern;
 mod scalar_array;

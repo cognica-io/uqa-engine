@@ -12,6 +12,7 @@ on:
       - "examples/c/**"
       - scripts/verify-c-examples.py
       - scripts/verify-c-clients.py
+      - scripts/verify-c-xml-isolation.py
       - .github/workflows/c-bindings.yml
   workflow_call:
 
@@ -79,6 +80,7 @@ jobs:
           suffix=so
           if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
           python3 scripts/verify-c-examples.py --library "target/debug/deps/libuqa_ffi.$suffix"
+          python3 scripts/verify-c-xml-isolation.py --library "target/debug/deps/libuqa_ffi.$suffix"
       - name: Instrument the example consumers with ASan and UBSan
         shell: bash
         run: |
@@ -135,3 +137,4 @@ jobs:
           if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
           python3 scripts/verify-c-clients.py --sanitize --library "target/$target/debug/libuqa_ffi.$suffix"
           python3 scripts/verify-c-examples.py --sanitize --library "target/$target/debug/libuqa_ffi.$suffix"
+          python3 scripts/verify-c-xml-isolation.py --sanitize --library "target/$target/debug/libuqa_ffi.$suffix"

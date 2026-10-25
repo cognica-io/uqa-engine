@@ -98,6 +98,7 @@ pub const UQA_TYPE_TIMETZ: u32 = 14;
 pub const UQA_TYPE_TIMESTAMP: u32 = 15;
 pub const UQA_TYPE_TIMESTAMPTZ: u32 = 16;
 pub const UQA_TYPE_INTERVAL: u32 = 17;
+
 pub const UQA_TYPE_JSON: u32 = 18;
 pub const UQA_TYPE_JSONB: u32 = 19;
 pub const UQA_TYPE_UUID: u32 = 20;
@@ -139,6 +140,43 @@ pub const UQA_CAP_DUCKDB_FDW: u64 = 1 << 3;
 pub const UQA_CAP_ARROW_EXPORT: u64 = 1 << 4;
 pub const UQA_CAP_PERSISTENCE: u64 = 1 << 5;
 pub const UQA_CAP_INDEPENDENT_SESSIONS: u64 = 1 << 6;
+
+pub const UQA_TEMPORAL_FINITE: u32 = 0;
+pub const UQA_TEMPORAL_NEGATIVE_INFINITY: u32 = 1;
+pub const UQA_TEMPORAL_POSITIVE_INFINITY: u32 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct UQADate {
+    pub days: i32,
+    pub kind: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct UQATimestamp {
+    pub micros: i64,
+    pub kind: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct UQATimeTz {
+    pub micros: i64,
+    pub offset_seconds: i32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct UQAInterval {
+    pub micros: i64,
+    pub days: i32,
+    pub months: i32,
+    pub kind: u32,
+    pub reserved: u32,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

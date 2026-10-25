@@ -510,6 +510,8 @@ UQA_API uqa_status UQA_CALL uqa_type_get_oid(
     uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_modifier(
     uqa_type type, int32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_collation_oid(
+    uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_dimensions(
     uqa_type type, uint32_t *out);
 
@@ -539,6 +541,8 @@ A `uqa_type` describes SQL identity separately from physical value representatio
 
 Type wrappers copy their native declaration and retain the original session and FFI allowance. Root, base, element and field wrappers are admitted lazily and published only after success; repeated requests reuse stable views. Catalog field reads do not execute input or domain checks. They share the source session's operation gate and cancellation scope; rejected admission preserves previous views and permits another attempt after other owners are released. Scalar identity getters read the retained declaration without querying the catalog.
 
+`uqa_type_get_collation_oid` returns the native type's default collation identity, including a domain's selected collation and an array element's collation. It returns `UQA_DONE` and zero for a noncollatable or unresolved type. A result expression's explicit `COLLATE` is separate from its type default; composite attribute collations use `uqa_type_get_field`.
+
 Type families include BOOL, INT16/32/64, FLOAT32/64, TEXT/CHAR/VARCHAR, BYTEA, NUMERIC, temporal types, JSON/JSONB, XML, UUID, BIT/VARBIT, ARRAY, ROW/RECORD, ENUM, DOMAIN, RANGE/MULTIRANGE, VECTOR/TENSOR, graph/agtype, and VOID. This is an ABI representation inventory, not an assertion that additional SQL types have been implemented.
 
 ## 10. Values and exact representations
@@ -557,6 +561,14 @@ UQA_API uqa_status UQA_CALL uqa_value_create_from_text_n(
 UQA_API uqa_status UQA_CALL uqa_value_create_int16(int16_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int32(int32_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int64(int64_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_oid(uint32_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_xid(uint32_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_void(uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_internal_char(uint8_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_xml(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_xml_n(
+    const char *value, size_t size, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_float32(float value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_float64(double value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_text(
@@ -589,6 +601,12 @@ UQA_API uqa_status UQA_CALL uqa_value_get_int32(
     uqa_value_view value, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_int64(
     uqa_value_view value, int64_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_oid(uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_xid(uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_void(uqa_value_view value);
+UQA_API uqa_status UQA_CALL uqa_value_get_internal_char(uqa_value_view value, uint8_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_xml(
+    uqa_value_view value, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_text(
     uqa_value_view value, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_numeric(
@@ -711,6 +729,10 @@ Range observation uses the native admitted-value reader and member encoder. Cata
 
 `uqa_value_get_vector_f32` and `uqa_value_get_tensor_f32` return borrowed packed float32 storage with the source value's lifetime. An empty tensor has NULL data, zero rows and its positive declared dimension. SQL arrays are distinct types and cannot use these getters. Domain values use their underlying dense type. Typed NULL returns `UQA_ERROR_NULL` and clears the output. Observation uses the native finite-value and dimension conversion under the source's FFI allowance, publishes a stable cache only after success and preserves the source on failure; releasing other retained values permits another attempt. Explicit SQL casts and assignment share the same native conversion.
 
+`uqa_value_create_xml` and `_n` validate UTF-8 XML content through the native SQL input owner. Contextual `uqa_value_create_from_text` uses the invoking session's XML mode and notice sink. `uqa_value_get_xml` borrows the admitted spelling and accepts XML and domains over XML; it does not repeat parsing or apply result serialization. `uqa_value_create_void` creates a present zero-width value; `uqa_value_get_void` verifies that value through its status without an output slot. SQL NULL returns `UQA_ERROR_NULL`.
+
+`uqa_value_create_oid` and `uqa_value_create_xid` preserve distinct unsigned 32-bit SQL identities. Their getters are distinct; `uqa_value_get_oid` additionally observes native `regproc`, `regprocedure`, `regclass`, `regnamespace`, `regcollation`, `regrole` and `regtype` identities without catalog lookup or text conversion. Catalog aliases use contextual input. NAME, REFCURSOR, ACLITEM and admitted PG_NODE_TREE values use the borrowed text accessor; PG_NODE_TREE retains its native rejection of text input. Internal CHAR uses `uqa_value_create_internal_char` and `uqa_value_get_internal_char` for all 256 byte values, including zero; SQL formatting retains the native octal output for high bytes. Integer values do not silently become OIDs; SQL domains are observed through their base type.
+
 `uqa_value_get_array_shape` returns immutable dimensions, signed SQL lower bounds, rank and total element count. `uqa_value_get_element` uses a zero-based row-major position independently of those lower bounds and returns a borrowed scalar child with its declared element type, including NULL. Core owns positional traversal; observing one child does not flatten or copy the array or interpret that child's retained payload. A multidimensional SQL array has one scalar element descriptor; a domain element keeps its domain identity. Both getters also accept the native `int2vector` and `oidvector` array carriers, preserving their distinct type identity and zero-based bounds. Dense VECTOR/TENSOR values use their separate getters.
 
 `uqa_value_get_field_count` and `uqa_value_get_field` observe named composites, domains over composites, and anonymous records. Positions are zero-based and exclude dropped attributes. Named values use the current descriptor and their original physical tuple; added fields are typed NULL. Anonymous fields keep their producer's type OIDs and modifiers, including REAL, NUMERIC precision and signed scale, array element modifiers, and typed NULL. Observation never repeats input conversion or domain checks. A returned child borrows its parent and retains the type and value selected by that call; later catalog changes create a new observation without invalidating earlier children. Repeated access in the same descriptor generation reuses the published child. A NULL parent returns `UQA_ERROR_NULL`, an incompatible value returns `UQA_ERROR_TYPE`, and an out-of-range index returns `UQA_ERROR_RANGE`. Failures clear outputs, preserve previously published children, and release incomplete allocations. Selecting or testing the nullness of a deferred field does not read its scalar payload; a reached physical read beyond the owned tuple reports the native `XX001` diagnostic.
@@ -759,6 +781,57 @@ These contextual constructors execute within Engine's existing statement/catalog
 | VOID | Present zero-width value, distinct from SQL NULL |
 
 Temporal C values use PostgreSQL's epoch, allowing PostgreSQL's finite timestamp range to fit the exposed int64. Epoch conversion uses checked wide arithmetic in Core. The adapter must not narrow a type's valid SQL domain; any native PostgreSQL mismatch discovered here must be fixed in its owner.
+
+```c
+typedef uint32_t uqa_temporal_kind;
+#define UQA_TEMPORAL_FINITE UINT32_C(0)
+#define UQA_TEMPORAL_NEGATIVE_INFINITY UINT32_C(1)
+#define UQA_TEMPORAL_POSITIVE_INFINITY UINT32_C(2)
+
+/* DATE days and timestamp microseconds are relative to 2000-01-01.
+ * Infinite inputs ignore the payload; getters return a zero payload.
+ * Reserved fields must be zero. Finite constructors validate SQL input ranges;
+ * getters preserve admitted physical values without re-running type input. */
+typedef struct uqa_date {
+    int32_t days;
+    uqa_temporal_kind kind;
+} uqa_date;
+
+typedef struct uqa_timestamp {
+    int64_t micros;
+    uqa_temporal_kind kind;
+    uint32_t reserved;
+} uqa_timestamp;
+
+typedef struct uqa_timetz {
+    int64_t micros;
+    int32_t offset_seconds;
+    uint32_t reserved;
+} uqa_timetz;
+
+typedef struct uqa_interval {
+    int64_t micros;
+    int32_t days;
+    int32_t months;
+    uqa_temporal_kind kind;
+    uint32_t reserved;
+} uqa_interval;
+
+UQA_API uqa_status UQA_CALL uqa_value_create_date(uqa_date value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_time(int64_t micros, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_timetz(uqa_timetz value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_timestamp(uqa_timestamp value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_timestamptz(uqa_timestamp value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_interval(uqa_interval value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_date(uqa_value_view value, uqa_date *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_time(uqa_value_view value, int64_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_timetz(uqa_value_view value, uqa_timetz *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_timestamp(uqa_value_view value, uqa_timestamp *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_timestamptz(uqa_value_view value, uqa_timestamp *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_interval(uqa_value_view value, uqa_interval *out);
+```
+
+The temporal constructors take fixed-size values by value and create portable owned parameters. TIME takes microseconds directly; its closed range is 0 through 86,400,000,000. TIMETZ adds a signed offset in seconds east of UTC, from -57,599 through 57,599. DATE and timestamp payloads use the 2000-01-01 epoch. Finite INTERVAL input retains all three fields independently and excludes only the two native reserved infinite tuples. Unknown kinds and nonzero reserved fields return `UQA_ERROR_INVALID_ARGUMENT`; finite values outside native SQL input ranges return `UQA_ERROR_RANGE`. Infinite kinds ignore payload fields and return zero payloads on observation. Getters accept their declared family, including domains and precision modifiers, and reject other families without coercion. SQL NULL returns `UQA_ERROR_NULL`; every failed getter clears its output. Observed physical values, including values retained after type changes or precision rounding beyond an input boundary, are not reparsed. A physical DATE outside the C signed day carrier reports `UQA_ERROR_RANGE`.
 
 The final header uses `uqa_value_create_*` constructors and matching getters for every admitted scalar family and structural operations such as `uqa_value_get_array_shape`, `uqa_value_get_element`, `uqa_value_get_field_count`, `uqa_value_get_field`, and `uqa_value_get_range_bounds`. Returned children are borrowed from their parent. Constructors retain/copy supplied children, so callers may release their original child handles after success. Explicit typed parameters map to `SQLParam::typed_scalar`; vector/tensor constructors map to their dedicated variants. Typed NULL is supported.
 

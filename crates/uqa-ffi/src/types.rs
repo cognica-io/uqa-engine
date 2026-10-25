@@ -141,6 +141,15 @@ ffi_fn!(uqa_type_get_modifier(ty: *const UQAType, out: *mut i32) {
         .map_err(|_| UQAError::new(UQA_ERROR_RANGE, "native type modifier is outside its ABI range"))?;
     Ok(UQA_OK)
 });
+ffi_fn!(uqa_type_get_collation_oid(ty: *const UQAType, out: *mut u32) {
+    let out = boundary::output(out)?;
+    let ty = &*boundary::input(ty)?.native;
+    if matches!(ty, ColumnType::Named(_)) { return Ok(UQA_DONE); }
+    let oid = type_metadata::pg_type_collation_oid(ty);
+    if oid == 0 { return Ok(UQA_DONE); }
+    *out = u32::try_from(oid).map_err(|_| UQAError::new(UQA_ERROR_RANGE, "native collation OID is outside its ABI range"))?;
+    Ok(UQA_OK)
+});
 ffi_fn!(uqa_type_get_numeric_precision(ty: *const UQAType, out: *mut u32) {
     let out = boundary::output(out)?;
     match &*boundary::input(ty)?.native {

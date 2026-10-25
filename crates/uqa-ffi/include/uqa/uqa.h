@@ -400,6 +400,8 @@ UQA_API uqa_status UQA_CALL uqa_type_get_oid(
     uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_modifier(
     uqa_type type, int32_t *out);
+UQA_API uqa_status UQA_CALL uqa_type_get_collation_oid(
+    uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_numeric_precision(uqa_type type, uint32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_numeric_scale(uqa_type type, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_type_get_dimensions(uqa_type type, uint32_t *out);
@@ -421,6 +423,54 @@ UQA_API uqa_status UQA_CALL uqa_type_get_field(
 /* Constructors copy inputs and preserve their SQL type, including integer and
  * floating widths. NULL from create_null has no declared type. */
 UQA_API uqa_status UQA_CALL uqa_value_create_null(uqa_value *out);
+
+typedef uint32_t uqa_temporal_kind;
+#define UQA_TEMPORAL_FINITE UINT32_C(0)
+#define UQA_TEMPORAL_NEGATIVE_INFINITY UINT32_C(1)
+#define UQA_TEMPORAL_POSITIVE_INFINITY UINT32_C(2)
+
+/* DATE days and timestamp microseconds are relative to 2000-01-01.
+ * Infinite inputs ignore the payload; getters return a zero payload.
+ * Reserved fields must be zero. Finite constructors validate SQL input ranges;
+ * getters preserve admitted physical values without re-running type input. */
+typedef struct uqa_date {
+    int32_t days;
+    uqa_temporal_kind kind;
+} uqa_date;
+
+typedef struct uqa_timestamp {
+    int64_t micros;
+    uqa_temporal_kind kind;
+    uint32_t reserved;
+} uqa_timestamp;
+
+typedef struct uqa_timetz {
+    int64_t micros;
+    int32_t offset_seconds;
+    uint32_t reserved;
+} uqa_timetz;
+
+typedef struct uqa_interval {
+    int64_t micros;
+    int32_t days;
+    int32_t months;
+    uqa_temporal_kind kind;
+    uint32_t reserved;
+} uqa_interval;
+
+UQA_API uqa_status UQA_CALL uqa_value_create_date(uqa_date value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_time(int64_t micros, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_timetz(uqa_timetz value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_timestamp(uqa_timestamp value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_timestamptz(uqa_timestamp value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_interval(uqa_interval value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_date(uqa_value_view value, uqa_date *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_time(uqa_value_view value, int64_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_timetz(uqa_value_view value, uqa_timetz *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_timestamp(uqa_value_view value, uqa_timestamp *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_timestamptz(uqa_value_view value, uqa_timestamp *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_interval(uqa_value_view value, uqa_interval *out);
+
 /* Catalog-aware constructors execute native type input in the Engine's
  * statement/transaction scope and retain the session until value destruction.
  * Type names include native SQL modifiers; NULL input still checks domains.
@@ -438,6 +488,14 @@ UQA_API uqa_status UQA_CALL uqa_value_create_from_text_n(
 UQA_API uqa_status UQA_CALL uqa_value_create_int16(int16_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int32(int32_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_int64(int64_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_oid(uint32_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_xid(uint32_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_void(uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_internal_char(uint8_t value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_xml(
+    const char *value, uqa_value *out);
+UQA_API uqa_status UQA_CALL uqa_value_create_xml_n(
+    const char *value, size_t size, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_bool(uint8_t value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_float32(float value, uqa_value *out);
 UQA_API uqa_status UQA_CALL uqa_value_create_float64(double value, uqa_value *out);
@@ -551,6 +609,12 @@ UQA_API uqa_status UQA_CALL uqa_value_get_int32(
     uqa_value_view value, int32_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_int64(
     uqa_value_view value, int64_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_oid(uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_xid(uqa_value_view value, uint32_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_void(uqa_value_view value);
+UQA_API uqa_status UQA_CALL uqa_value_get_internal_char(uqa_value_view value, uint8_t *out);
+UQA_API uqa_status UQA_CALL uqa_value_get_xml(
+    uqa_value_view value, uqa_string_view *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_bool(uqa_value_view value, uint8_t *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_float32(uqa_value_view value, float *out);
 UQA_API uqa_status UQA_CALL uqa_value_get_float64(uqa_value_view value, double *out);

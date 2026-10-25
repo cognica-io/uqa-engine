@@ -113,8 +113,16 @@ int main(void) {{
 def generate_consumers(source: Path, prefix: Path, manifest: dict) -> list[tuple[str, str, str]]:
     fixtures = sorted((ROOT / "crates/uqa-ffi/tests/native").glob("*.c"))
     examples = sorted((ROOT / "examples/c").glob("*.c"))
+    interop = [ROOT / "crates/uqa-ffi/tests/interop/xml_host.c"]
     cmake = ['cmake_minimum_required(VERSION 3.24)', 'project(UQAConsumers LANGUAGES C CXX)',
-             'find_package(UQA CONFIG REQUIRED)', 'find_package(Threads REQUIRED)',
+             'find_package(UQA CONFIG REQUIRED)', 'find_package(Threads REQUIRED)']
+    # An unmodified host copy must coexist with the packaged parser in both linkage modes.
+    xml_source = ROOT / "crates/uqa-sql/vendor/libxml2"
+    cmake += ['set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)']
+    for feature in re.findall(r"option\(LIBXML2_WITH_(\w+)", (xml_source / "CMakeLists.txt").read_text()):
+        enabled = "ON" if feature in {"THREADS", "VALID"} else "OFF"
+        cmake.append(f'set(LIBXML2_WITH_{feature} {enabled} CACHE BOOL "" FORCE)')
+    cmake += [f'add_subdirectory("{xml_source.as_posix()}" host-xml EXCLUDE_FROM_ALL)',
              'set(CMAKE_C_STANDARD 11)', 'set(CMAKE_C_STANDARD_REQUIRED ON)',
              'set(CMAKE_C_EXTENSIONS OFF)', 'set(CMAKE_CXX_STANDARD 17)',
              'set(CMAKE_CXX_STANDARD_REQUIRED ON)', 'set(CMAKE_CXX_EXTENSIONS OFF)',
@@ -131,13 +139,15 @@ def generate_consumers(source: Path, prefix: Path, manifest: dict) -> list[tuple
             cmake += [f'add_executable({identity} {identity}.{suffix})',
                       f'target_link_libraries({identity} PRIVATE {target})']
             records.append((identity, "identity", ""))
-            for category, paths in (("fixture", fixtures), ("example", examples)):
+            for category, paths in (("fixture", fixtures), ("example", examples), ("interop", interop)):
                 for path in paths:
                     name = f"{category}_{path.stem}_{language}_{linkage}"
                     (source / f"{name}.{suffix}").write_text(f'#include "{path.as_posix()}"\n')
                     cmake += [f'add_executable({name} {name}.{suffix})',
                               f'target_link_libraries({name} PRIVATE {target} Threads::Threads)',
                               'if(UNIX)', f'  target_link_libraries({name} PRIVATE m)', 'endif()']
+                    if category == "interop":
+                        cmake.append(f'target_link_libraries({name} PRIVATE LibXml2::LibXml2)')
                     records.append((name, category, path.stem))
         headers = sorted((prefix / "include/uqa").glob("*.h"))
         for mode, definition in (("producer", "UQA_BUILD_SHARED"), ("consumer", "UQA_USE_SHARED"), ("static", "")):
@@ -161,7 +171,7 @@ def generate_consumers(source: Path, prefix: Path, manifest: dict) -> list[tuple
 
 
 def execute(executable: Path, category: str, scenario: str, work: Path, prefix: Path) -> int:
-    if category == "identity":
+    if category in {"identity", "interop"}:
         env = dict(os.environ, PATH=str(prefix / "bin") + os.pathsep + os.environ.get("PATH", ""))
         subprocess.run([str(executable)], env=env, check=True)
         return 1
