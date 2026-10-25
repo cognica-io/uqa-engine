@@ -31,15 +31,17 @@ fn hidden_captured_outputs_follow_physical_demand() {
         aggregates: &|_: &str| false,
         ctes: Vec::new(),
     };
-    context.outputs(
-        &mut plan,
-        &AnalyzedSource {
-            schema,
-            children: None,
-        },
-        &Demand::from([0]),
-        Some(relation),
-    );
+    context
+        .outputs(
+            &mut plan,
+            &AnalyzedSource {
+                schema,
+                children: None,
+            },
+            &Demand::from([0]),
+            Some(relation),
+        )
+        .unwrap();
     let RelationalPlan::QueryBlock(block) = plan.root else {
         panic!("block")
     };

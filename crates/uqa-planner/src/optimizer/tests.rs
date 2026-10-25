@@ -13,6 +13,25 @@ use super::*;
 mod aggregate_identity;
 mod retained_rows;
 
+#[test]
+fn unused_command_ctes_are_not_constant_evaluated() {
+    for sql in [
+        "WITH unused AS (VALUES(1/0)) INSERT INTO target VALUES(7)",
+        "WITH unused AS (VALUES(1/0)) UPDATE target SET n=7",
+        "WITH unused AS (VALUES(1/0)) DELETE FROM target",
+        "WITH unused AS (VALUES(1/0)) MERGE INTO target USING (VALUES(7)) source(n) ON true WHEN MATCHED THEN DELETE",
+    ] {
+        optimized(sql);
+    }
+    for sql in [
+        "WITH used AS (VALUES(1/0)) INSERT INTO target SELECT * FROM used",
+        "WITH used AS (VALUES(1/0)),effect AS (INSERT INTO target SELECT * FROM used) DELETE FROM target",
+    ] {
+        let result = optimize(UnifiedPlan::lower(compile(sql).unwrap().remove(0)), &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar));
+        assert!(matches!(&result, Err(OptimizerError::Expression(error)) if error.sqlstate() == Some("22012")), "{sql}: {result:?}");
+    }
+}
+
 fn optimized(sql: &str) -> UnifiedPlan {
     let mut statements = compile(sql).expect("SQL compiles");
     optimize(

@@ -56,6 +56,45 @@ static void empty_result(uqa_result result) {
     assert(tag.data == NULL && tag.size == 0);
 }
 
+static void pruned_rule_subqueries(uqa_engine engine, uqa_result result) {
+    uqa_statement statement = NULL;
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP SEQUENCE c_pruned_calls; "
+        "CREATE TEMP TABLE c_pruned_input(n bigint, unused bigint); "
+        "CREATE TEMP TABLE c_pruned_output(n bigint); "
+        "CREATE RULE c_pruned_route AS ON INSERT TO c_pruned_input DO INSTEAD "
+        "INSERT INTO c_pruned_output VALUES(NEW.n)", result));
+    CHECK(uqa_statement_prepare(engine,
+        "INSERT INTO c_pruned_input SELECT (SELECT nextval('c_pruned_calls')),(SELECT 1/0)",
+        &statement));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_execute(statement, result));
+    CHECK(uqa_statement_finalize(&statement));
+    CHECK(uqa_engine_execute(engine,
+        "INSERT INTO c_pruned_input SELECT 7,(SELECT nextval('c_pruned_calls')); "
+        "SELECT count(*),sum(n)::bigint,currval('c_pruned_calls') FROM c_pruned_output", result));
+    assert(integer(result, 0) == 3);
+    assert(integer(result, 1) == 10);
+    assert(integer(result, 2) == 3);
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP VIEW c_pruned_shadow AS SELECT nextval('c_pruned_calls'); "
+        "WITH c_pruned_shadow AS (VALUES(1/0)) "
+        "INSERT INTO c_pruned_input SELECT 8,(SELECT * FROM c_pruned_shadow); "
+        "INSERT INTO c_pruned_input WITH c_pruned_shadow AS (VALUES(1/0)) "
+        "SELECT 9,(SELECT (SELECT * FROM c_pruned_shadow)); "
+        "WITH c_pruned_shadow AS (VALUES(1/0)) "
+        "INSERT INTO c_pruned_input SELECT * FROM "
+        "(SELECT 10,(SELECT * FROM c_pruned_shadow)) input; "
+        "SELECT count(*),sum(n)::bigint,currval('c_pruned_calls') FROM c_pruned_output", result));
+    assert(integer(result, 0) == 6);
+    assert(integer(result, 1) == 37);
+    assert(integer(result, 2) == 3);
+    CHECK(uqa_engine_execute(engine,
+        "DROP VIEW c_pruned_shadow; DROP TABLE c_pruned_input; "
+        "DROP TABLE c_pruned_output; DROP SEQUENCE c_pruned_calls",
+        result));
+}
+
 static void prepared_recovery(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_statement typed_exit = NULL;
@@ -1161,6 +1200,7 @@ int main(void) {
     explained_physical_metadata(engine, result);
     explained_costs(engine, result);
     explained_named_inputs(engine, result);
+    pruned_rule_subqueries(engine, result);
     explained_execution(engine, result);
     explained_serialization(engine, result);
     explained_rule_delivery(engine, result);

@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{
     plan::{ComputePlan, QueryPlan, RelationalPlan},
-    ScalarExpr,
+    SQLError, ScalarExpr,
 };
 
 pub fn prune_unused_query_outputs(
@@ -17,28 +17,41 @@ pub fn prune_unused_query_outputs(
     query: &mut QueryPlan,
     required_positions: &BTreeSet<usize>,
     expected_width: usize,
-) {
+    inherited_ctes: &dyn Fn(&str) -> bool,
+) -> Result<(), SQLError> {
     let RelationalPlan::QueryBlock(block) = &mut query.root else {
-        return;
+        return Ok(());
     };
+    if !crate::optimizer::expand_local_stars(
+        block,
+        query.analyzed_source.as_deref(),
+        query.analyzed_output.as_ref(),
+    ) {
+        return Ok(());
+    }
     let projection_can_be_pruned = matches!(block.compute, ComputePlan::Project)
         && !block.distinct
         && block.distinct_on.is_empty()
         && block.order_by.is_empty()
         && block.projections.len() == expected_width;
     if !projection_can_be_pruned {
-        return;
+        return Ok(());
     }
+    let visible_ctes =
+        |name: &str| query.ctes.iter().any(|cte| cte.name == name) || inherited_ctes(name);
     for (position, projection) in block.projections.iter_mut().enumerate() {
         if !required_positions.contains(&position)
-            && !uqa_sql::semantics::volatility::expr_contains_volatile_function(
+            && !uqa_sql::semantics::volatility::scalar_in_scope_contains_volatile_function(
                 volatility,
                 &projection.expr,
-            )
+                &block.subqueries,
+                &visible_ctes,
+            )?
         {
             projection.expr = ScalarExpr::Literal(Value::Null);
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -68,6 +81,38 @@ mod tests {
     }
 
     #[test]
+    fn star_rule_inputs_use_the_retained_positional_descriptor() {
+        let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(
+            uqa_sql::compile("SELECT * FROM (SELECT 7 AS used,(SELECT 1/0) AS unused) input")
+                .unwrap()
+                .remove(0),
+        ) else {
+            panic!("query");
+        };
+        let schema = uqa_sql::RowSchema::with_qualified_types(
+            "input",
+            vec!["used".into(), "unused".into()],
+            vec![Some(uqa_sql::ColumnType::Integer); 2],
+        );
+        query.analyzed_output = Some(schema.clone());
+        query.analyzed_source = Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+            schema,
+            children: None,
+        }));
+        prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 2, &|_| false)
+            .unwrap();
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block");
+        };
+        assert_eq!(block.projections.len(), 2);
+        assert!(matches!(
+            block.projections[0].expr,
+            ScalarExpr::QualifiedColumn { .. }
+        ));
+        assert_eq!(block.projections[1].expr, ScalarExpr::Literal(Value::Null));
+    }
+
+    #[test]
     fn discarded_mutation_outputs_preserve_volatile_effects_and_erase_unused_errors() {
         let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(
             uqa_sql::compile("SELECT 7, 1/0, nextval('effect'), host_effect()")
@@ -77,7 +122,8 @@ mod tests {
             panic!("query")
         };
         let before = query.clone();
-        prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 4);
+        prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 4, &|_| false)
+            .unwrap();
         let RelationalPlan::QueryBlock(block) = query.root else {
             panic!("block")
         };
@@ -103,7 +149,8 @@ mod tests {
                 panic!("query")
             };
             let before = serde_json::to_value(&query).unwrap();
-            prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 2);
+            prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 2, &|_| false)
+                .unwrap();
             assert_eq!(serde_json::to_value(&query).unwrap(), before);
         }
     }

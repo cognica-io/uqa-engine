@@ -17,8 +17,27 @@ pub fn cte_reference_name(reference: &str) -> Option<String> {
 }
 
 pub fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
-    let targets = plan
-        .ctes
+    reachable_statement_cte_names(&plan.ctes, primary_query_cte_references(plan))
+}
+
+/// The WITH items a command reads, plus every data-modifying item and their dependencies.
+pub fn reachable_command_cte_names(command: &CommandPlan) -> BTreeSet<String> {
+    reachable_statement_cte_names(
+        command.ctes(),
+        primary_command_cte_references(
+            command.ctes(),
+            &command.query_inputs(),
+            command.source_input(),
+        ),
+    )
+}
+
+/// Resolve the same dependency closure for query planning and command execution. An unreferenced SELECT item does not run, even when it contains volatile functions.
+pub fn reachable_statement_cte_names(
+    ctes: &[CtePlan],
+    mut reachable: BTreeSet<String>,
+) -> BTreeSet<String> {
+    let targets = ctes
         .iter()
         .map(|cte| cte.name.clone())
         .collect::<BTreeSet<_>>();
@@ -26,18 +45,15 @@ pub fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
         return BTreeSet::new();
     }
 
-    let mut reachable = plan
-        .ctes
-        .iter()
-        .filter(|cte| cte.body.modifies_data())
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    collect_target_cte_references_from_root(&plan.root, &targets, &BTreeSet::new(), &mut reachable);
+    reachable.extend(
+        ctes.iter()
+            .filter(|cte| cte.body.modifies_data())
+            .map(|cte| cte.name.clone()),
+    );
 
     let mut expanded = BTreeSet::new();
     loop {
-        let pending = plan
-            .ctes
+        let pending = ctes
             .iter()
             .enumerate()
             .filter(|(_, cte)| reachable.contains(&cte.name) && !expanded.contains(&cte.name))
@@ -50,7 +66,7 @@ pub fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
             let visible_dependencies = if cte.recursive {
                 targets.clone()
             } else {
-                plan.ctes[..index]
+                ctes[..index]
                     .iter()
                     .map(|dependency| dependency.name.clone())
                     .collect::<BTreeSet<_>>()
@@ -434,47 +450,7 @@ fn collect_target_cte_references_from_body(
         .iter()
         .map(|cte| cte.name.clone())
         .collect::<BTreeSet<_>>();
-    let mut reachable = command
-        .ctes()
-        .iter()
-        .filter(|cte| cte.body.modifies_data())
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    collect_target_cte_references_from_command_root(
-        command,
-        &locals,
-        &BTreeSet::new(),
-        &mut reachable,
-    );
-    let mut expanded = BTreeSet::new();
-    loop {
-        let pending = command
-            .ctes()
-            .iter()
-            .enumerate()
-            .filter(|(_, cte)| reachable.contains(&cte.name) && !expanded.contains(&cte.name))
-            .collect::<Vec<_>>();
-        if pending.is_empty() {
-            break;
-        }
-        for (index, cte) in pending {
-            expanded.insert(cte.name.clone());
-            let visible = if cte.recursive {
-                locals.clone()
-            } else {
-                command.ctes()[..index]
-                    .iter()
-                    .map(|cte| cte.name.clone())
-                    .collect()
-            };
-            collect_target_cte_references_from_body(
-                &cte.body,
-                &visible,
-                &BTreeSet::new(),
-                &mut reachable,
-            );
-        }
-    }
+    let reachable = reachable_command_cte_names(command);
     let mut root_shadowed = shadowed.clone();
     root_shadowed.extend(locals.iter().cloned());
     collect_target_cte_references_from_command_root(command, targets, &root_shadowed, references);

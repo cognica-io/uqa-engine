@@ -30,7 +30,11 @@ pub(super) fn optimize_unified_plan(
     super::source_demand::prune(plan, config, aggregates)?;
     super::derived_pullup::rewrite(plan, config)?;
     // Analyzed layouts describe the original topology, not later source expansion or join order.
-    plan.visit_queries_mut(&mut |query| query.analyzed_source = None);
+    plan.visit_queries_mut(&mut |query| {
+        query.analyzed_source = None;
+        // Discarded scalar arenas must not keep an enclosing command's CTE alive during constant evaluation.
+        super::subqueries::prune_query(query);
+    });
     match plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
@@ -145,18 +149,16 @@ pub(super) fn optimize_query_block(
     infer_output_demand: bool,
 ) -> Result<(), SQLError> {
     if infer_output_demand {
+        let routines = config.routine_inlining.as_ref();
         super::derived_projection::prune(
             block,
-            aggregates,
-            config
-                .routine_inlining
-                .as_ref()
-                .map(|context| context.routines),
-            config
-                .routine_inlining
-                .as_ref()
-                .map(|context| context.volatility),
-        );
+            super::OutputPruningContext {
+                aggregates,
+                routines: routines.map(|context| context.routines),
+                volatility: routines.map(|context| context.volatility),
+                visible_ctes: &|_| false,
+            },
+        )?;
     }
     if let Some(source) = &mut block.from {
         optimize_source(source, config, aggregates)?;

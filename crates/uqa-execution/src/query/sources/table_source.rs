@@ -54,8 +54,9 @@ pub(super) fn prune_query_outputs<S: Clone + Send + Sync + 'static>(
     context
         .ctes
         .rewrites
-        .prune_query_outputs(query, aliases, projection, &schema);
-    Ok(())
+        .prune_query_outputs(query, aliases, projection, &schema, &|name| {
+            scope.contains_cte_name(name)
+        })
 }
 
 /// Build the physical operator for a table source.

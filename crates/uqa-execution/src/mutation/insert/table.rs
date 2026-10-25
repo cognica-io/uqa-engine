@@ -40,7 +40,7 @@ use crate::{
     },
     query::CteScope,
 };
-use std::{collections::BTreeSet, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 use uqa_sql::assignment::columns::validate_mutation_targets;
 use uqa_sql::{
     plan::{ConflictActionPlan, ConflictPlan, InsertPlan, QueryPlan},
@@ -56,12 +56,7 @@ use uqa_storage::document_store::Document;
 pub struct InsertPlanning<'a> {
     pub inference: InferenceContext<'a>,
     pub returning: ReturningAnalysisContext<'a>,
-    pub prune_source_outputs: fn(
-        &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
-        &mut QueryPlan,
-        &BTreeSet<usize>,
-        usize,
-    ),
+    pub prune_source_outputs: crate::mutation::views::commands::SourceOutputPruning,
 }
 
 #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]

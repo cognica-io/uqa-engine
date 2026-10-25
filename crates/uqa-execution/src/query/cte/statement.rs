@@ -102,11 +102,16 @@ pub fn materialize_command_ctes<S: Clone>(
     params: &[SQLParam],
     scope: &mut CteScope<S>,
 ) -> Result<(), SQLError> {
+    let primary_references = primary_references();
+    let reachable =
+        uqa_sql::semantics::reachable_statement_cte_names(ctes, primary_references.clone());
     materialize_statement_ctes(
         context,
         ctes,
-        ctes.iter().collect(),
-        primary_references,
+        ctes.iter()
+            .filter(|cte| reachable.contains(&cte.name))
+            .collect(),
+        || primary_references,
         params,
         scope,
         &BTreeMap::new(),

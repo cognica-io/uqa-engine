@@ -68,6 +68,37 @@ cases.extend([
 
 recoveries = {'null-slice-bound-rule', 'null-slice-bound-ordinary'}
 
+for name, projection in [
+    ('unused-scalar-error', '7,(SELECT 1/0)'),
+    ('unused-nested-scalar-error', '7,(SELECT (SELECT 1/0))'),
+    ('unused-values-scalar-error', '7,(VALUES ((SELECT 1/0)))'),
+    ('used-volatile-unused-scalar-error', "(SELECT nextval('rule_ticks')),(SELECT 1/0)"),
+    ('unused-scalar-volatile', "7,(SELECT nextval('rule_ticks'))"),
+    ('unused-values-scalar-volatile', "7,(VALUES ((SELECT nextval('rule_ticks'))))"),
+]:
+    cases.append((name, base + '; ' + route + 'INSERT INTO rule_output(n) VALUES(NEW.n)', 'INSERT INTO rule_event SELECT ' + projection))
+
+for name, projection in [
+    ('unused-cte-shadowing-view', '(WITH rule_shadow AS (VALUES(1/0)) SELECT * FROM rule_shadow)'),
+    ('unused-nested-cte-shadowing-view', '(WITH rule_shadow AS (VALUES(1/0)) SELECT (SELECT * FROM rule_shadow))'),
+]:
+    setup = base + "; CREATE TEMP VIEW rule_shadow AS SELECT nextval('rule_ticks'); " + route + 'INSERT INTO rule_output(n) VALUES(NEW.n)'
+    cases.append((name, setup, 'INSERT INTO rule_event SELECT 7,' + projection))
+
+for name, sql in [
+    ('unused-outer-cte-shadowing-view', 'WITH rule_shadow AS (VALUES(1/0)) INSERT INTO rule_event SELECT 7,(SELECT * FROM rule_shadow)'),
+    ('unused-query-cte-shadowing-view', 'INSERT INTO rule_event WITH rule_shadow AS (VALUES(1/0)) SELECT 7,(SELECT * FROM rule_shadow)'),
+    ('unused-outer-nested-cte-shadowing-view', 'WITH rule_shadow AS (VALUES(1/0)) INSERT INTO rule_event SELECT 7,(SELECT (SELECT * FROM rule_shadow))'),
+    ('unused-derived-cte-shadowing-view', 'WITH rule_shadow AS (VALUES(1/0)) INSERT INTO rule_event SELECT * FROM (SELECT 7,(SELECT * FROM rule_shadow)) input'),
+    ('unused-outer-volatile-cte', "WITH rule_shadow AS MATERIALIZED (SELECT nextval('rule_ticks')) INSERT INTO rule_event SELECT 7,(SELECT * FROM rule_shadow)"),
+    ('unused-inner-volatile-cte', "INSERT INTO rule_event SELECT 7,(WITH rule_shadow AS MATERIALIZED (SELECT nextval('rule_ticks')) SELECT * FROM rule_shadow)"),
+    ('unused-cte-catalog-view-scope', 'WITH rule_shadow AS (VALUES(1/0)) INSERT INTO rule_event SELECT 7,(SELECT * FROM rule_visible)'),
+    ('unused-recursive-forward-cte', 'WITH RECURSIVE before_shadow AS (SELECT * FROM rule_shadow),rule_shadow AS (VALUES(1/0)) INSERT INTO rule_event SELECT 7,(SELECT * FROM before_shadow)'),
+    ('unused-quoted-cte-shadowing-view', 'WITH "Rule Shadow" AS (VALUES(1/0)) INSERT INTO rule_event SELECT 7,(SELECT * FROM "Rule Shadow")'),
+]:
+    setup = base + "; CREATE TEMP VIEW rule_shadow AS SELECT nextval('rule_ticks'); CREATE TEMP VIEW rule_visible AS SELECT * FROM rule_shadow; CREATE TEMP VIEW \"Rule Shadow\" AS SELECT nextval('rule_ticks'); " + route + 'INSERT INTO rule_output(n) VALUES(NEW.n)'
+    cases.append((name, setup, sql))
+
 cases.extend([
     ('table-query-constant-action', base + '; CREATE TEMP TABLE rule_source(n bigint); INSERT INTO rule_source VALUES(1),(2); ' + route + 'INSERT INTO rule_output(n) VALUES(7)', "INSERT INTO rule_event(n) SELECT n FROM rule_source ORDER BY n"),
     ('table-query-default-action', base + '; CREATE TEMP TABLE rule_source(n bigint); INSERT INTO rule_source VALUES(1),(2); ' + route + 'INSERT INTO rule_output DEFAULT VALUES', "INSERT INTO rule_event(n) SELECT n FROM rule_source ORDER BY n"),
@@ -195,6 +226,26 @@ recoveries.update({'set-action-error-before-input', 'set-action-error-before-tri
 cases.append(('recursive-conflict-before-input', values_base + '; CREATE RULE route AS ON INSERT TO rule_event DO ALSO INSERT INTO rule_event(n) VALUES(NEW.n+1)', "INSERT INTO rule_event(n) VALUES(nextval('rule_ticks')) ON CONFLICT DO NOTHING"))
 recoveries.add('recursive-conflict-before-input')
 cases.append(('set-action-default-values', set_rule, 'INSERT INTO rule_event DEFAULT VALUES'))
+
+# The command planner and executor share CTE reachability for ordinary mutations and rule inputs.
+for name, sql in [
+    ('ordinary-insert-unused-cte', 'WITH unused AS (VALUES(1/0)) INSERT INTO rule_output(n) VALUES(7)'),
+    ('ordinary-update-unused-cte', 'WITH unused AS (VALUES(1/0)) UPDATE rule_output SET n=8'),
+    ('ordinary-delete-unused-cte', 'WITH unused AS (VALUES(1/0)) DELETE FROM rule_output'),
+    ('ordinary-merge-unused-cte', 'WITH unused AS (VALUES(1/0)) MERGE INTO rule_output target USING (VALUES(8)) source(n) ON true WHEN MATCHED THEN UPDATE SET n=source.n'),
+    ('ordinary-unused-volatile-cte', "WITH unused AS MATERIALIZED (SELECT nextval('rule_ticks')) INSERT INTO rule_output(n) VALUES(7)"),
+    ('ordinary-cte-write-dependency', 'WITH input AS (VALUES(8)),written AS (INSERT INTO rule_event(n,unused) SELECT column1,0 FROM input) INSERT INTO rule_output(n) VALUES(7)'),
+    ('ordinary-cte-unused-chain', 'WITH input AS (VALUES(1/0)),unused AS (SELECT * FROM input) INSERT INTO rule_output(n) VALUES(7)'),
+    ('ordinary-cte-returning-reference', "WITH input AS (SELECT nextval('rule_ticks') AS n) INSERT INTO rule_output(n) VALUES(7) RETURNING (SELECT n FROM input)"),
+    ('ordinary-cte-referenced-error', 'WITH input AS (VALUES(1/0)) INSERT INTO rule_output(n) SELECT * FROM input'),
+]:
+    cases.append((name, base + '; INSERT INTO rule_output(n) VALUES(1)', sql))
+
+for name, sql in [
+    ('unused-derived-scalar-error', 'INSERT INTO rule_event SELECT * FROM (SELECT 7,(SELECT 1/0)) input'),
+    ('unused-derived-scalar-volatile', "INSERT INTO rule_event SELECT * FROM (SELECT 7,(SELECT nextval('rule_ticks'))) input"),
+]:
+    cases.append((name, base + '; ' + route + 'INSERT INTO rule_output(n) VALUES(NEW.n)', sql))
 
 query = "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))"
 output = []

@@ -6,28 +6,27 @@
 
 //! Positional demand through UNION ALL, retaining PostgreSQL append-member simplification boundaries.
 
-use crate::{AggregateClassifier, ComputePlan, QueryPlan, RelationalPlan, SourcePlan};
+use super::OutputPruningContext;
+use crate::{ComputePlan, QueryPlan, RelationalPlan, SourcePlan};
 use uqa_sql::{
     ast::{FunctionVolatility, SetOpKind},
     routines::RoutineResolution,
     semantics::volatility::VolatilityCatalog,
-    ColumnType, RowSchema, ScalarExpr,
+    ColumnType, RowSchema, SQLError, ScalarExpr,
 };
 
 pub(super) fn prune(
     query: &mut QueryPlan,
     required: &dyn Fn(usize) -> bool,
-    aggregates: &dyn AggregateClassifier,
-    routines: Option<&dyn RoutineResolution>,
-    volatility: Option<&dyn VolatilityCatalog>,
-) {
+    context: OutputPruningContext<'_>,
+) -> Result<(), SQLError> {
     let Some(output) = query.analyzed_output.clone() else {
-        return;
+        return Ok(());
     };
     if !simple_union(query, output.column_types()) {
-        return;
+        return Ok(());
     }
-    prune_members(query, required, aggregates, routines, volatility);
+    prune_members(query, required, context)
 }
 
 fn simple_union(query: &QueryPlan, types: &[Option<ColumnType>]) -> bool {
@@ -70,23 +69,20 @@ fn same_types(schema: &RowSchema, types: &[Option<ColumnType>]) -> bool {
 fn prune_members(
     query: &mut QueryPlan,
     required: &dyn Fn(usize) -> bool,
-    aggregates: &dyn AggregateClassifier,
-    routines: Option<&dyn RoutineResolution>,
-    volatility: Option<&dyn VolatilityCatalog>,
-) {
-    let pulled_up = pulled_up_member(query, routines, volatility);
+    context: OutputPruningContext<'_>,
+) -> Result<(), SQLError> {
+    let pulled_up = pulled_up_member(query, context.routines, context.volatility);
     match &mut query.root {
         RelationalPlan::SetOp { left, right, .. } => {
-            prune_members(left, required, aggregates, routines, volatility);
-            prune_members(right, required, aggregates, routines, volatility);
+            prune_members(left, required, context)?;
+            prune_members(right, required, context)?;
         }
         RelationalPlan::QueryBlock(_) if pulled_up == Some(false) => {
-            super::derived_projection::prune_positions(
-                query, required, None, aggregates, routines, volatility,
-            );
+            super::derived_projection::prune_positions(query, required, None, context)?;
         }
         _ => {}
     }
+    Ok(())
 }
 
 fn pulled_up_member(
@@ -189,7 +185,7 @@ mod tests {
     use uqa_sql::ScalarExpr;
 
     struct NoAggregates;
-    impl AggregateClassifier for NoAggregates {
+    impl crate::AggregateClassifier for NoAggregates {
         fn is_registered_aggregate(&self, _: &str) -> bool {
             false
         }
@@ -281,7 +277,12 @@ mod tests {
             };
             let schema = RowSchema::with_types(vec!["z".into()], vec![Some(ColumnType::Integer)]);
             query.visit_queries_mut(&mut |query| query.analyzed_output = Some(schema.clone()));
-            prune(&mut query, &|_| false, &NoAggregates, None, None);
+            prune(
+                &mut query,
+                &|_| false,
+                OutputPruningContext::new(&NoAggregates),
+            )
+            .unwrap();
             let RelationalPlan::SetOp { left, .. } = &query.root else {
                 panic!("union");
             };

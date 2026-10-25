@@ -24,11 +24,14 @@ pub(super) fn optimize_command(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     super::subqueries::prune_command(command);
+    let reachable = uqa_sql::semantics::reachable_command_cte_names(command);
+    if let Some(ctes) = command.ctes_mut() {
+        for cte in ctes.iter_mut().filter(|cte| reachable.contains(&cte.name)) {
+            super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
+        }
+    }
     match command {
         CommandPlan::Insert(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             if let Some(source) = &mut plan.source {
                 optimize_query(source, config, aggregates)?;
             }
@@ -51,9 +54,6 @@ pub(super) fn optimize_command(
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Update(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             if let Some(source) = &mut plan.source {
                 optimize_source(source, config, aggregates)?;
             }
@@ -73,9 +73,6 @@ pub(super) fn optimize_command(
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Delete(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             if let Some(source) = &mut plan.source {
                 optimize_source(source, config, aggregates)?;
             }
@@ -94,9 +91,6 @@ pub(super) fn optimize_command(
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Merge(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             optimize_source(&mut plan.source, config, aggregates)?;
             super::optimize_qualification(&mut plan.join_condition, config)?;
             for clause in &mut plan.when_clauses {

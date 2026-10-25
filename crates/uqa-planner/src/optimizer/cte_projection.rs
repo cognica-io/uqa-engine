@@ -55,20 +55,30 @@ pub(super) fn prune(
             }
         }
         if !all {
-            let cte = query
+            let index = query
                 .ctes
-                .iter_mut()
-                .find(|cte| cte.name == name)
+                .iter()
+                .position(|cte| cte.name == name)
                 .expect("scheduled CTE");
+            let (before, remaining) = query.ctes.split_at_mut(index);
+            let (cte, after) = remaining.split_first_mut().expect("scheduled CTE");
+            let visible = |name: &str| {
+                before.iter().any(|cte| cte.name == name)
+                    || (cte.recursive
+                        && (cte.name == name || after.iter().any(|cte| cte.name == name)))
+            };
             super::derived_projection::prune_outputs(
                 cte.body.query_mut().expect("query CTE"),
                 &cte.columns,
                 &|column| required.contains(column),
                 None,
-                aggregates,
-                routines,
-                Some(volatility),
-            );
+                super::OutputPruningContext {
+                    aggregates,
+                    routines,
+                    volatility: Some(volatility),
+                    visible_ctes: &visible,
+                },
+            )?;
         }
     }
     Ok(())

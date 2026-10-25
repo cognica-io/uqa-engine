@@ -36,7 +36,8 @@ pub type SourceOutputPruning = fn(
     &mut QueryPlan,
     &BTreeSet<usize>,
     usize,
-);
+    &dyn Fn(&str) -> bool,
+) -> Result<(), SQLError>;
 mod checks;
 mod insert;
 mod update_delete;
@@ -65,7 +66,8 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
             &mut query,
             &required_positions,
             target.columns.len(),
-        );
+            &|_| false,
+        )?;
     }
     let privilege_subject = if target.definition.security_invoker() {
         scope.privilege_subject()?.clone()

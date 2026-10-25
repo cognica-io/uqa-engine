@@ -31,6 +31,8 @@ mod query;
 mod query_visit;
 mod rewrite;
 mod scalar;
+mod scoped_visit;
+pub use scoped_visit::ScopedPlanVisitor;
 mod source_metadata;
 mod source_visit;
 mod statement;

@@ -59,7 +59,8 @@ pub trait QueryOutputRewriter: Sync {
         aliases: &[String],
         projection: &uqa_sql::plan::source_projection::SourceProjection,
         schema: &crate::RowSchema,
-    );
+        visible_ctes: &dyn Fn(&str) -> bool,
+    ) -> Result<(), SQLError>;
 
     /// Optimize a catalog-retained query before assembling either its streaming or materialized execution path.
     fn optimize_retained_query(&self, query: &QueryPlan) -> Result<QueryPlan, SQLError>;

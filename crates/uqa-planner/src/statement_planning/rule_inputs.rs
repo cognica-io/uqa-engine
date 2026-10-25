@@ -5,11 +5,10 @@
 //
 
 //! Prune mutation inputs discarded by rewrite rules before constant evaluation.
-use crate::{
-    CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
-};
+use crate::{CommandPlan, RelationalPlan, SourcePlan, UnifiedPlan};
 use std::collections::BTreeSet;
 use uqa_core::Value;
+use uqa_sql::plan::ScopedPlanVisitor;
 use uqa_sql::{
     ast::RuleEvent,
     semantics::{rules::RuleCatalog, view_rewrite::context::ViewRewriteContext},
@@ -36,18 +35,15 @@ pub fn rewrite_plan(
     config: &crate::optimizer::OptimizerConfig<'_>,
 ) -> Result<(), SQLError> {
     view_projection::rewrite(context, plan, config)?;
-    prune_captured_inputs(context.volatility, plan);
-    match plan {
-        UnifiedPlan::Query(query) => rewrite_query(context, query),
-        UnifiedPlan::Command(command) => rewrite_command(context, command),
-    }
+    prune_captured_inputs(context.volatility, plan)?;
+    plan.visit_scoped_mut(&mut Rules(context))
 }
 
 /// Internal producer slots have structural identities. Their unused projections can be removed before expression folding without changing the query's cardinality or visible namespace.
 fn prune_captured_inputs(
     volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
     plan: &mut UnifiedPlan,
-) {
+) -> Result<(), SQLError> {
     let mut required = std::collections::BTreeMap::<_, BTreeSet<usize>>::new();
     plan.visit_scalar_expressions(&mut |expression| {
         expression.visit(&mut |node| {
@@ -67,8 +63,40 @@ fn prune_captured_inputs(
             }
         });
     });
-    let empty = BTreeSet::new();
-    plan.visit_sources_mut(&mut |source| {
+    plan.visit_scoped_mut(&mut CapturedInputs {
+        volatility,
+        required: &required,
+    })
+}
+
+struct Rules<'a, 'b>(&'a RuleInputPlanningContext<'b>);
+impl ScopedPlanVisitor for Rules<'_, '_> {
+    fn command(
+        &mut self,
+        command: &mut CommandPlan,
+        outer: &dyn Fn(&str) -> bool,
+    ) -> Result<bool, SQLError> {
+        if matches!(
+            command,
+            CommandPlan::Explain { .. } | CommandPlan::Prepare { .. }
+        ) {
+            return Ok(false);
+        }
+        prune_rule_inputs(self.0, command, outer)?;
+        Ok(true)
+    }
+}
+
+struct CapturedInputs<'a> {
+    volatility: &'a dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    required: &'a std::collections::BTreeMap<uqa_sql::ast::InternalRelationId, BTreeSet<usize>>,
+}
+impl ScopedPlanVisitor for CapturedInputs<'_> {
+    fn source(
+        &mut self,
+        source: &mut SourcePlan,
+        visible: &dyn Fn(&str) -> bool,
+    ) -> Result<bool, SQLError> {
         if let SourcePlan::Subquery {
             captured_output: Some(relation),
             body,
@@ -78,99 +106,22 @@ fn prune_captured_inputs(
             if let RelationalPlan::QueryBlock(block) = &body.root {
                 let width = block.projections.len();
                 crate::mutation_outputs::prune_unused_query_outputs(
-                    volatility,
+                    self.volatility,
                     body,
-                    required.get(relation).unwrap_or(&empty),
+                    self.required.get(relation).unwrap_or(&BTreeSet::new()),
                     width,
-                );
+                    visible,
+                )?;
             }
         }
-    });
-}
-
-fn rewrite_ctes(
-    context: &RuleInputPlanningContext<'_>,
-    ctes: &mut [CtePlan],
-) -> Result<(), SQLError> {
-    for cte in ctes {
-        match &mut cte.body {
-            CtePlanBody::Query(query) => rewrite_query(context, query)?,
-            CtePlanBody::Command(command) => rewrite_command(context, command)?,
-        }
+        Ok(true)
     }
-    Ok(())
-}
-
-fn rewrite_query(
-    context: &RuleInputPlanningContext<'_>,
-    query: &mut QueryPlan,
-) -> Result<(), SQLError> {
-    rewrite_ctes(context, &mut query.ctes)?;
-    let subqueries = match &mut query.root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = &mut block.from {
-                rewrite_source(context, source)?;
-            }
-            &mut block.subqueries
-        }
-        RelationalPlan::Values { subqueries, .. } => subqueries,
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            rewrite_query(context, left)?;
-            rewrite_query(context, right)?;
-            subqueries
-        }
-    };
-    for query in subqueries {
-        rewrite_query(context, query)?;
-    }
-    Ok(())
-}
-
-fn rewrite_source(
-    context: &RuleInputPlanningContext<'_>,
-    source: &mut SourcePlan,
-) -> Result<(), SQLError> {
-    match source {
-        SourcePlan::Subquery { body, .. } => rewrite_query(context, body)?,
-        SourcePlan::Join { left, right, .. } => {
-            rewrite_source(context, left)?;
-            rewrite_source(context, right)?;
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn rewrite_command(
-    context: &RuleInputPlanningContext<'_>,
-    command: &mut CommandPlan,
-) -> Result<(), SQLError> {
-    match command {
-        CommandPlan::Explain { .. } => return Ok(()),
-        CommandPlan::DeclareCursor { query, .. } => return rewrite_query(context, query),
-        _ => {}
-    }
-    prune_rule_inputs(context, command)?;
-    if let Some(ctes) = command.ctes_mut() {
-        rewrite_ctes(context, ctes)?;
-    }
-    if let Some(source) = command.source_input_mut() {
-        rewrite_source(context, source)?;
-    }
-    for query in command.query_inputs_mut() {
-        rewrite_query(context, query)?;
-    }
-    Ok(())
 }
 
 fn prune_rule_inputs(
     context: &RuleInputPlanningContext<'_>,
     command: &mut CommandPlan,
+    inherited_ctes: &dyn Fn(&str) -> bool,
 ) -> Result<(), SQLError> {
     let (table, bound, event) = match command {
         CommandPlan::Insert(plan) => (&plan.table, plan.target_relation_bound, RuleEvent::Insert),
@@ -246,7 +197,8 @@ fn prune_rule_inputs(
                     source,
                     &positions,
                     columns.len(),
-                );
+                    &|name| plan.ctes.iter().any(|cte| cte.name == name) || inherited_ctes(name),
+                )?;
             }
         }
         CommandPlan::Update(plan) => {

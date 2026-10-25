@@ -30,7 +30,7 @@ pub(super) fn rewrite(
     }
     simplify_conditions(plan, config)?;
     loop {
-        prune_captured_inputs(context.volatility, plan);
+        prune_captured_inputs(context.volatility, plan)?;
         let mut selected = None;
         let mut error = None;
         plan.visit_sources_mut(&mut |source| {

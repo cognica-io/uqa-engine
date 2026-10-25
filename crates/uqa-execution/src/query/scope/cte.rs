@@ -249,11 +249,15 @@ impl<S: Clone> CteScope<S> {
 
     /// Whether `name` resolves to a CTE in this scope: a name declared by an enclosing query's WITH list, or one whose rows or deferred plan are bound in the scope, which is how a DML statement's own WITH list reaches the query it drives.
     pub fn is_visible_cte(&self, name: &str) -> bool {
-        uqa_sql::semantics::cte_reference_name(name).is_some_and(|name| {
-            self.visible_cte_names.contains(&name)
-                || self.rows.contains_key(&name)
-                || self.deferred_ctes.contains_key(&name)
-        })
+        uqa_sql::semantics::cte_reference_name(name)
+            .is_some_and(|name| self.contains_cte_name(&name))
+    }
+
+    /// Test an already decoded, unqualified identifier without applying SQL name parsing a second time.
+    pub fn contains_cte_name(&self, name: &str) -> bool {
+        self.visible_cte_names.contains(name)
+            || self.rows.contains_key(name)
+            || self.deferred_ctes.contains_key(name)
     }
 
     pub fn returning_statement_snapshot_scope(&self) -> Self {

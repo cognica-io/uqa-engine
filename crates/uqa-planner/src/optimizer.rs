@@ -46,7 +46,8 @@ pub use api::{
     optimize_with_aggregates_and_statistics, optimize_with_statistics, ConstantEvaluator,
     OptimizerConfig, OptimizerError, OptimizerResult, SourceStatistics,
 };
-pub use derived_projection::prune_outputs as prune_query_outputs;
+pub(crate) use derived_projection::expand_local_stars;
+pub use derived_projection::{prune_outputs as prune_query_outputs, OutputPruningContext};
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 
 use access_path::{choose_access_path, prioritize_access_predicates};

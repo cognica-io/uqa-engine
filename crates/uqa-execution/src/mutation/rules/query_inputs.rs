@@ -89,7 +89,10 @@ fn execute_insert_query_rules<S: Clone + 'static>(
                     rule.definition.condition.as_ref(),
                     &target_columns,
                 )? {
-                    prune(context.volatility, &mut query, &positions, width);
+                    prune(context.volatility, &mut query, &positions, width, &|name| {
+                        insert.ctes.iter().any(|cte| cte.name == name)
+                            || scope.contains_cte_name(name)
+                    })?;
                 }
                 Some(RuleQueryInput {
                     query,

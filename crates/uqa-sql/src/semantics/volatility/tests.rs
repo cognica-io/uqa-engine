@@ -1,0 +1,403 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+use super::{
+    expr_contains_volatile_function, FunctionBinding, FunctionVolatility, QueryPlan, SQLError,
+    ScalarExpr, VolatilityCatalog,
+};
+
+struct EmptyCatalog;
+impl VolatilityCatalog for EmptyCatalog {
+    fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+        None
+    }
+    fn routine_volatilities(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+    ) -> Option<Vec<FunctionVolatility>> {
+        None
+    }
+    fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+        Ok(None)
+    }
+}
+
+#[test]
+fn external_cte_names_do_not_leak_into_catalog_view_definitions() {
+    struct Catalog;
+    impl VolatilityCatalog for Catalog {
+        fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+            None
+        }
+        fn routine_volatilities(
+            &self,
+            _: &str,
+            _: Option<&FunctionBinding>,
+        ) -> Option<Vec<FunctionVolatility>> {
+            None
+        }
+        fn view_query(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
+            let sql = if name == "visible_view" {
+                "SELECT * FROM shadowed"
+            } else {
+                "SELECT nextval('ticks')"
+            };
+            let crate::plan::UnifiedPlan::Query(query) =
+                crate::plan::UnifiedPlan::lower(crate::compile(sql)?.remove(0))
+            else {
+                unreachable!()
+            };
+            Ok(Some(*query))
+        }
+    }
+    for (sql, expected) in [
+        ("SELECT (SELECT * FROM shadowed)", false),
+        ("SELECT (SELECT (SELECT * FROM shadowed))", false),
+        ("SELECT (SELECT * FROM visible_view)", true),
+        ("SELECT (WITH local AS (SELECT nextval('ticks')) SELECT * FROM local)", true),
+        ("SELECT (WITH RECURSIVE local AS (SELECT * FROM later),later AS (VALUES(1)) SELECT * FROM local)", false),
+    ] {
+        let crate::plan::UnifiedPlan::Query(query) = crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0)) else { unreachable!() };
+        let crate::plan::RelationalPlan::QueryBlock(block) = query.root else { unreachable!() };
+        assert_eq!(super::scalar_in_scope_contains_volatile_function(&Catalog, &block.projections[0].expr, &block.subqueries, &|name| name == "shadowed").unwrap(), expected, "{sql}");
+    }
+}
+
+#[test]
+fn query_volatility_keeps_lexical_ctes_separate_from_catalog_views() {
+    struct Catalog(std::cell::Cell<usize>);
+    impl VolatilityCatalog for Catalog {
+        fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+            None
+        }
+        fn routine_volatilities(
+            &self,
+            _: &str,
+            _: Option<&FunctionBinding>,
+        ) -> Option<Vec<FunctionVolatility>> {
+            None
+        }
+        fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+            self.0.set(self.0.get() + 1);
+            let crate::plan::UnifiedPlan::Query(query) = crate::plan::UnifiedPlan::lower(
+                crate::compile("SELECT nextval('ticks')").unwrap().remove(0),
+            ) else {
+                panic!("query")
+            };
+            Ok(Some(*query))
+        }
+    }
+    for (sql, expected) in [
+        ("WITH shadowed AS (VALUES(1)) SELECT * FROM shadowed", false),
+        (
+            "WITH shadowed AS (VALUES(1)) SELECT (SELECT * FROM shadowed)",
+            false,
+        ),
+        (
+            "WITH shadowed AS (VALUES(1)) SELECT * FROM (SELECT * FROM shadowed) nested",
+            false,
+        ),
+        (
+            "WITH shadowed AS (VALUES(1)), other AS (SELECT * FROM shadowed) SELECT * FROM other",
+            false,
+        ),
+        (
+            "WITH shadowed AS (VALUES(1)) SELECT * FROM public.shadowed",
+            true,
+        ),
+    ] {
+        let crate::plan::UnifiedPlan::Query(query) =
+            crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let catalog = Catalog(std::cell::Cell::new(0));
+        assert_eq!(
+            super::query_contains_volatile_function(&catalog, &query).unwrap(),
+            expected,
+            "{sql}"
+        );
+        assert_eq!(catalog.0.get(), usize::from(expected), "{sql}");
+    }
+}
+use crate::ast::{FrameExclusion, FrameMode};
+use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
+
+#[test]
+fn collation_volatility_follows_only_its_operand() {
+    struct Shadowed;
+    impl VolatilityCatalog for Shadowed {
+        fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+            Some(FunctionVolatility::Volatile)
+        }
+        fn routine_volatilities(
+            &self,
+            _: &str,
+            _: Option<&FunctionBinding>,
+        ) -> Option<Vec<FunctionVolatility>> {
+            unreachable!("host function wins ordinary calls")
+        }
+        fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+            unreachable!("no view")
+        }
+    }
+    for (input, expected) in [
+        ("'x' COLLATE \"C\"", false),
+        ("nextval('effect')::text COLLATE \"C\"", true),
+        ("\"COLLATE\"('x')", true),
+        ("true IS TRUE", false),
+        ("(nextval('effect') > 0) IS NOT FALSE", true),
+        ("\"IS TRUE\"(true)", true),
+        ("(ARRAY[1,2])[1]", false),
+        ("(ARRAY[1,2])[:1]", false),
+        ("(ARRAY[1,2])[nextval('effect')]", true),
+        ("(ARRAY[1,2])[:nextval('effect')]", true),
+        ("slice(ARRAY[1,2], 1, 2)", true),
+        ("subscript(ARRAY[1,2], 1)", true),
+    ] {
+        let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {input}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("SELECT")
+        };
+        let scalar = crate::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+        assert_eq!(
+            expr_contains_volatile_function(&Shadowed, &scalar),
+            expected,
+            "{input}"
+        );
+    }
+    let binding =
+        FunctionBinding::dispatched(crate::ast::FunctionDispatch::Collate { oid: Some(950) });
+    assert_eq!(
+        super::builtin_function_volatility("nextval", Some(&binding), 2),
+        FunctionVolatility::Immutable
+    );
+}
+
+#[test]
+fn builtin_constants_preserve_postgresql_statement_and_session_inputs() {
+    // Checked against PostgreSQL 18.4 pg_proc.provolatile before enabling bound built-in constant folding.
+    for name in [
+        "concat",
+        "concat_ws",
+        "format",
+        "pg_typeof",
+        "row_to_json",
+        "to_json",
+        "to_jsonb",
+        "json_build_object",
+        "jsonb_build_array",
+        "to_char",
+        "to_date",
+        "to_number",
+        "has_table_privilege",
+        "has_column_privilege",
+    ] {
+        assert_eq!(
+            super::builtin_function_volatility(name, None, 2),
+            FunctionVolatility::Stable,
+            "{name}"
+        );
+    }
+    for name in ["repeat", "upper"] {
+        assert_eq!(
+            super::builtin_function_volatility(name, None, 2),
+            FunctionVolatility::Immutable,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        super::builtin_function_volatility("nextval", None, 1),
+        FunctionVolatility::Volatile
+    );
+}
+
+#[test]
+fn sequence_introspection_volatility_matches_postgresql() {
+    for (name, expected) in [
+        ("pg_get_sequence_data", FunctionVolatility::Volatile),
+        ("pg_sequence_last_value", FunctionVolatility::Volatile),
+        ("pg_sequence_parameters", FunctionVolatility::Stable),
+    ] {
+        for qualified in [name.to_string(), format!("pg_catalog.{name}")] {
+            assert_eq!(
+                super::function_volatility(&EmptyCatalog, &qualified, 1),
+                expected,
+                "{qualified}"
+            );
+        }
+    }
+}
+
+#[test]
+fn timestamp_zone_volatility_preserves_session_dependence() {
+    assert_eq!(
+        super::builtin_function_volatility("timezone", None, 1),
+        FunctionVolatility::Stable
+    );
+    assert_eq!(
+        super::builtin_function_volatility("timezone", None, 2),
+        FunctionVolatility::Immutable
+    );
+}
+
+#[test]
+fn volatility_inspection_includes_window_frame_expressions() {
+    let expression = ScalarExpr::WindowCall {
+        name: "sum".into(),
+        args: vec![ScalarExpr::Column("amount".into())],
+        spec: ScalarWindowSpec {
+            definition: None,
+            partition_by: Vec::new(),
+            order_by: Vec::new(),
+            frame: Some(ScalarWindowFrame {
+                mode: FrameMode::Rows,
+                start: ScalarFrameBound::Preceding(Box::new(ScalarExpr::Func {
+                    order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
+                    name: "random".into(),
+                    binding: None,
+                    args: Vec::new(),
+                    distinct: false,
+                    order_by: Vec::new(),
+                    filter: None,
+                })),
+                end: ScalarFrameBound::CurrentRow,
+                between: true,
+                exclusion: FrameExclusion::NoOthers,
+            }),
+        },
+        filter: None,
+        modifiers: crate::ast::WindowCallModifiers::default(),
+    };
+    assert!(expr_contains_volatile_function(&EmptyCatalog, &expression));
+}
+#[test]
+fn scalar_plan_volatility_inspects_its_subquery_body() {
+    for (sql, expected) in [
+        ("SELECT (SELECT 1 / 0)", false),
+        ("SELECT (SELECT nextval('ticks'))", true),
+        ("SELECT (VALUES ((SELECT 1 / 0)))", false),
+        ("SELECT (VALUES ((SELECT nextval('ticks'))))", true),
+        (
+            "SELECT (SELECT v FROM (VALUES ((SELECT 1 / 0))) t(v))",
+            false,
+        ),
+        (
+            "SELECT (SELECT v FROM (VALUES ((SELECT nextval('ticks')))) t(v))",
+            true,
+        ),
+        (
+            "SELECT EXISTS (SELECT 1 FROM a JOIN b ON (SELECT true))",
+            false,
+        ),
+        (
+            "SELECT EXISTS (SELECT 1 FROM a JOIN b ON (SELECT nextval('ticks') > 0))",
+            true,
+        ),
+        (
+            "SELECT (SELECT n FROM generate_series(1, (SELECT 1 / 0)) n)",
+            false,
+        ),
+        (
+            "SELECT (SELECT n FROM generate_series(1, (SELECT nextval('ticks'))) n)",
+            true,
+        ),
+        (
+            "SELECT 1 IN (VALUES (1) UNION ALL VALUES (2) LIMIT (SELECT 1 / 0))",
+            false,
+        ),
+        (
+            "SELECT 1 IN (VALUES (1) UNION ALL VALUES (2) LIMIT (SELECT nextval('ticks')))",
+            true,
+        ),
+    ] {
+        let crate::plan::UnifiedPlan::Query(query) =
+            crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query");
+        };
+        let crate::plan::RelationalPlan::QueryBlock(mut block) = query.root else {
+            panic!("query block");
+        };
+        let plan = crate::plan::ExpressionPlan {
+            scalar: block.projections.remove(0).expr,
+            subqueries: block.subqueries,
+        };
+        assert_eq!(
+            super::expression_plan_contains_volatile_function(&EmptyCatalog, &plan).unwrap(),
+            expected,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
+fn scalar_volatility_follows_only_referenced_arena_entries() {
+    let crate::plan::UnifiedPlan::Query(query) = crate::plan::UnifiedPlan::lower(
+        crate::compile("SELECT (SELECT 1 / 0), (SELECT nextval('ticks'))")
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query")
+    };
+    let crate::plan::RelationalPlan::QueryBlock(block) = query.root else {
+        panic!("block")
+    };
+    for (projection, expected) in block.projections.iter().zip([false, true]) {
+        assert_eq!(
+            super::scalar_with_subqueries_contains_volatile_function(
+                &EmptyCatalog,
+                &projection.expr,
+                &block.subqueries,
+            )
+            .unwrap(),
+            expected,
+        );
+    }
+    assert!(super::scalar_with_subqueries_contains_volatile_function(
+        &EmptyCatalog,
+        &ScalarExpr::ScalarSubquery(block.subqueries.len()),
+        &block.subqueries,
+    )
+    .unwrap());
+}
+
+#[test]
+fn scalar_subquery_volatility_propagates_catalog_failures() {
+    struct FailedCatalog;
+    impl VolatilityCatalog for FailedCatalog {
+        fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+            None
+        }
+        fn routine_volatilities(
+            &self,
+            _: &str,
+            _: Option<&FunctionBinding>,
+        ) -> Option<Vec<FunctionVolatility>> {
+            None
+        }
+        fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+            Err(SQLError::Internal("volatility catalog failure".into()))
+        }
+    }
+    let crate::plan::UnifiedPlan::Query(query) = crate::plan::UnifiedPlan::lower(
+        crate::compile("SELECT 1 FROM inaccessible")
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query")
+    };
+    let error = super::scalar_with_subqueries_contains_volatile_function(
+        &FailedCatalog,
+        &ScalarExpr::ScalarSubquery(0),
+        &[*query],
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("volatility catalog failure"));
+}

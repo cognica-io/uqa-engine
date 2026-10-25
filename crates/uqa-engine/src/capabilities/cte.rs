@@ -90,16 +90,20 @@ impl QueryOutputRewriter for Engine {
         aliases: &[String],
         projection: &uqa_sql::plan::source_projection::SourceProjection,
         schema: &uqa_sql::RowSchema,
-    ) {
+        visible_ctes: &dyn Fn(&str) -> bool,
+    ) -> Result<(), SQLError> {
         uqa_planner::optimizer::prune_query_outputs(
             query,
             aliases,
             &|name| projection.contains(name),
             Some(schema),
-            self,
-            Some(self),
-            Some(self),
-        );
+            uqa_planner::optimizer::OutputPruningContext {
+                aggregates: self,
+                routines: Some(self),
+                volatility: Some(self),
+                visible_ctes,
+            },
+        )
     }
 
     fn optimize_retained_query(&self, query: &QueryPlan) -> Result<QueryPlan, SQLError> {
