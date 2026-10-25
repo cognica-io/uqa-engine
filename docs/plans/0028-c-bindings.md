@@ -25,6 +25,7 @@ Completed checks below cover the stated implementation and local evidence at the
 - [x] Implement the current public headers, fixed status/type/state codes, opaque handles, export/calling-convention macros, panic boundary, borrowed diagnostics and checked pointer/allocation helpers. C11/C++17 header checks pass in all three linkage modes; all forty-two binding, example, interoperability and XML bridge C/header files have the exact required copyright block.
 - [x] Normalize all 28 mixed qualifier spellings across public declarations, callbacks, native clients, examples and the design. All 258 public function declarations use `uqa_status`, `UQA_API` and `UQA_CALL`; writable properties have matching getters, owned handle lifecycle operations match their acquisition family, and common header/design signatures agree. All 248 implemented declarations export; the ten deferred logging declarations remain unexported. Both minimal and Arrow-export 112-test FFI gates pass 176 actual C11/C++17 executions on Memory, native SQLite, SQLite KV and redb; all 38 shared-library example executions pass.
 - [x] Complete all nine explicit-length counterparts for engine/session open, savepoints, scalar/table/aggregate UDF registration and UDF-context error text. Every public string-taking operation now has an `_n` form. Actual C11/C++17 clients on all four providers verify unterminated UTF-8 spans, copied names/columns/diagnostics, invalid UTF-8/NUL/NULL/overflow rejection, unchanged transaction state after rejected input, native savepoint recovery, exactly-once callback cleanup and all three persistent reopens. The new fixture also passes eight static-link and eight consumer ASan/UBSan executions.
+- [x] Reject actual allocator requests for eight checked constructors and encryption-key replacement, preserving NULL outputs, allocation-free borrowed diagnostics, prior configuration and successful retry. Inject native Rust panics through SQL messages, prepared execution, cursor opening and COPY in implicit and explicit transactions on every provider. All 32 scenarios preserve the C boundary, poison the session, release retained resources and native callbacks exactly once, and roll back persistent effects across reopen. Test access is Rust-only and absent from normal builds; automatic consumer, five-platform package and full-library sanitizer jobs include the fault cases.
 - [ ] Finish the remaining API families and qualify the complete symbol/layout surface, platform ABIs and injected panic/allocation failures.
 
 **2. Configuration getters/setters, persistent/memory open, sibling sessions, close/lease rules, callback guard, and cancellation**
@@ -74,7 +75,7 @@ Completed checks below cover the stated implementation and local evidence at the
 
 - [x] Implement native cursor open forms, immutable descriptors, shared retained batch slices, reusable destinations, terminal diagnostics and close. C/C++ and concurrent Rust ABI tests pass for empty/duplicate descriptors, result lifetimes, cancellation, allowance rejection, admission ordering and actual spill release.
 - [x] Qualify real cursor spill I/O failure through C11/C++17 on Memory, native SQLite, SQLite KV and redb, both after implicit completion and inside an explicit transaction. Truncating only the test's encrypted scratch files preserves the previous result, retains the original terminal SQL diagnostic and completion fact, releases every scratch file, permits unrelated session work and makes repeated close harmless. The same fixture passes shared, static and consumer ASan/UBSan executions.
-- [ ] Qualify remaining cursor platform/full-library sanitizer behavior and injected native panic cleanup failures.
+- [ ] Qualify remaining cursor platform/full-library sanitizer behavior and native cleanup-error combinations beyond the checked spill-I/O and panic cases.
 
 **7. COPY callbacks, partial transfers, flush-before-commit behavior, cancellation, and original diagnostics**
 
@@ -130,6 +131,12 @@ Completed checks below cover the stated implementation and local evidence at the
 
 
 ## Verification record
+
+### C allocator failure and native panic qualification
+
+A thread-local test allocator rejects real System allocation requests while other test threads continue normally. Eight checked constructors leave NULL outputs, publish and inspect the static out-of-memory diagnostic with no further allocation, and recover on retry. Failed encryption-key replacement, including input borrowed from the existing key, preserves the original allocation and bytes. Native Rust callbacks inject unwinding through actual C SQL message, prepared execution, cursor opening and COPY entry points in both implicit and explicit transactions on Memory, native SQLite, SQLite KV and redb. No extern C callback unwinds. All 32 scenarios preserve panic diagnostics and unknown completion, reject further session use, permit independent notification polling and retained-resource destruction, release the native callback once and preserve rollback across persistent reopen.
+
+The minimal FFI gate with test support passes 118 tests, including all 176 actual C11/C++17 executions. After test-helper review, the Arrow-export Rust fault/owner gate passes all 29 tests. Strict FFI library/test Clippy, formatting, whitespace, dependency/ownership, single-harness and Rust file-size checks pass. The Rust-only `test-support` feature installs native faulting callbacks behind the existing C boundary without adding exports or altering normal builds. Automatic consumer and full-library sanitizer jobs enable it; all five native package jobs run the fault and owner tests before archiving their installed distribution. Workflow policy passes 26 tests and actionlint accepts both workflows. Final automatic platform, full-library sanitizer and performance/FDW evidence remains pending in the original scopes.
 
 ### EXPLAIN settings, streaming output and controlled rendering
 

@@ -25,6 +25,7 @@ kuromoji = ["uqa-engine/kuromoji"]
 arrow = ["uqa-engine/arrow"]
 duckdb = ["uqa-engine/duckdb"]
 arrow-export = ["dep:uqa-api", "dep:arrow-array", "dep:arrow-schema"]
+test-support = []
 
 [dependencies]
 uqa-core.workspace = true

@@ -6,6 +6,13 @@
 
 //! One integration harness for Rust and native C ABI verification.
 
+#[path = "cases/allocations.rs"]
+mod allocations;
+
+#[cfg(feature = "test-support")]
+#[path = "cases/panics.rs"]
+mod panics;
+
 #[path = "cases/array_values.rs"]
 mod array_values;
 

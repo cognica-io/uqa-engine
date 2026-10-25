@@ -27,6 +27,10 @@ mod types;
 mod udf;
 mod value;
 
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support;
+
 pub use abi::*;
 pub use arrow::*;
 pub use callback::{uqa_callback_fail, uqa_callback_fail_n};

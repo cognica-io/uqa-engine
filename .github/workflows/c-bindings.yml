@@ -66,7 +66,7 @@ jobs:
       - name: Execute C ABI clients on all four storage providers
         shell: bash
         run: |
-          args=()
+          args=(--features test-support)
           if [[ '${{ matrix.features }}' != default ]]; then
             args+=(--no-default-features)
           fi
@@ -127,7 +127,7 @@ jobs:
         shell: bash
         run: |
           target=$(rustc +nightly -vV | sed -n 's/^host: //p')
-          args=(--no-default-features)
+          args=(--no-default-features --features test-support)
           if [[ '${{ matrix.features }}' != minimal ]]; then
             args+=(--features '${{ matrix.features }}')
           fi
