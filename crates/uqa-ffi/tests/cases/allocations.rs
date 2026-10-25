@@ -15,8 +15,36 @@ use std::{
 };
 use uqa_ffi::*;
 
+#[cfg(all(feature = "test-support", feature = "arrow-export"))]
+#[path = "allocations/arrow.rs"]
+mod arrow;
+#[cfg(feature = "test-support")]
+#[path = "allocations/callbacks.rs"]
+mod callbacks;
+#[cfg(feature = "test-support")]
+#[path = "allocations/fixtures.rs"]
+mod fixtures;
+#[cfg(feature = "test-support")]
+#[path = "allocations/handles.rs"]
+mod handles;
+#[cfg(feature = "test-support")]
+#[path = "allocations/notifications.rs"]
+mod notifications;
+#[cfg(feature = "test-support")]
+#[path = "allocations/target.rs"]
+mod target;
+#[cfg(feature = "test-support")]
+#[path = "allocations/values.rs"]
+mod values;
+
+#[derive(Clone, Copy)]
+struct Rejections {
+    count: usize,
+    remaining: Option<usize>,
+}
+
 thread_local! {
-    static REJECTIONS: Cell<Option<usize>> = const { Cell::new(None) };
+    static REJECTIONS: Cell<Option<Rejections>> = const { Cell::new(None) };
 }
 
 struct FaultAllocator;
@@ -24,10 +52,15 @@ struct FaultAllocator;
 fn reject() -> bool {
     REJECTIONS
         .try_with(|state| {
-            let Some(count) = state.get() else {
+            let Some(mut rejection) = state.get() else {
                 return false;
             };
-            state.set(Some(count.saturating_add(1)));
+            if rejection.remaining == Some(0) {
+                return false;
+            }
+            rejection.count = rejection.count.saturating_add(1);
+            rejection.remaining = rejection.remaining.map(|count| count - 1);
+            state.set(Some(rejection));
             true
         })
         .unwrap_or(false)
@@ -73,11 +106,15 @@ fn rejecting_allocations<T>(operation: impl FnOnce() -> T) -> (T, usize) {
     }
     REJECTIONS.with(|state| {
         assert!(state.get().is_none());
-        state.set(Some(0));
+        state.set(Some(Rejections {
+            count: 0,
+            remaining: None,
+        }));
     });
     let reset = Reset;
     let result = operation();
-    let count = REJECTIONS.with(|state| state.get().expect("active allocator rejection scope"));
+    let count =
+        REJECTIONS.with(|state| state.get().expect("active allocator rejection scope").count);
     drop(reset);
     (result, count)
 }

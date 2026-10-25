@@ -104,6 +104,8 @@ pub(crate) fn boxed<T>(value: T) -> Result<Box<T>> {
     if layout.size() == 0 {
         return Ok(Box::new(value));
     }
+    #[cfg(feature = "test-support")]
+    crate::test_support::before_handle_allocation::<T>();
     // The allocation is checked before initialization; Box receives exactly its own layout.
     unsafe {
         let pointer = alloc(layout).cast::<T>();
