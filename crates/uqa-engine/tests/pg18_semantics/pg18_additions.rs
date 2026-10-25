@@ -346,48 +346,45 @@ fn assert_uuid_versions(eng: &Engine) {
 }
 
 fn assert_uuid_timestamps(eng: &Engine) {
+    // Timestamp text was captured from PostgreSQL 18.4; the native carrier uses the PostgreSQL epoch.
     assert_eq!(
         scalar(
             eng,
             "SELECT uuid_extract_timestamp('a8098c1a-f86e-11da-bd1a-00112444be1e')"
         ),
-        Value::Temporal(TemporalValue::TimestampTz {
-            postgres_micros: 1_149_936_511_013_993,
-        })
+        Value::Temporal(
+            TemporalValue::parse_timestamp_tz("2006-06-10 10:48:31.013993+00").unwrap()
+        )
     );
     assert_eq!(
         scalar(
             eng,
             "SELECT uuid_extract_timestamp('13813fff-1dd2-11b2-8000-000000000000')"
         ),
-        Value::Temporal(TemporalValue::TimestampTz {
-            postgres_micros: -1
-        })
+        Value::Temporal(
+            TemporalValue::parse_timestamp_tz("1969-12-31 23:59:59.999999+00").unwrap()
+        )
     );
     assert_eq!(
         scalar(
             eng,
             "SELECT uuid_extract_timestamp('13814009-1dd2-11b2-8000-000000000000')"
         ),
-        Value::Temporal(TemporalValue::TimestampTz { postgres_micros: 0 })
+        Value::Temporal(TemporalValue::parse_timestamp_tz("1970-01-01 00:00:00+00").unwrap())
     );
     assert_eq!(
         scalar(
             eng,
             "SELECT uuid_extract_timestamp('00000000-0001-7fff-8000-000000000000')"
         ),
-        Value::Temporal(TemporalValue::TimestampTz {
-            postgres_micros: 1_000
-        })
+        Value::Temporal(TemporalValue::parse_timestamp_tz("1970-01-01 00:00:00.001+00").unwrap())
     );
     assert_eq!(
         scalar(
             eng,
             "SELECT uuid_extract_timestamp('ffffffff-ffff-7fff-8000-000000000000')"
         ),
-        Value::Temporal(TemporalValue::TimestampTz {
-            postgres_micros: 281_474_976_710_655_000,
-        })
+        Value::Temporal(TemporalValue::parse_timestamp_tz("10889-08-02 05:31:50.655+00").unwrap())
     );
     assert_eq!(
         scalar(
@@ -443,9 +440,7 @@ fn assert_uuid_extraction_types_and_nulls(eng: &Engine) {
             eng,
             "SELECT uuid_extract_timestamp((SELECT '00000000-0001-7000-8000-000000000000'::uuid))"
         ),
-        Value::Temporal(TemporalValue::TimestampTz {
-            postgres_micros: 1_000
-        })
+        Value::Temporal(TemporalValue::parse_timestamp_tz("1970-01-01 00:00:00.001+00").unwrap())
     );
 }
 
