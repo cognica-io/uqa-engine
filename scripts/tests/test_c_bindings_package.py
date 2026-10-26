@@ -40,6 +40,7 @@ DEPENDENCIES = module("c_dependency_licenses", "c_bindings_licenses.py")
 VERIFY = module("c_verify", "verify-c-package.py")
 COMMIT = "a" * 40
 TARGET = "x86_64-unknown-linux-gnu"
+PKG_CONFIG = shutil.which(os.environ.get("PKG_CONFIG", "pkg-config"))
 
 
 def fixture(prefix: Path, target: str = TARGET):
@@ -83,13 +84,13 @@ class CPackageVerification(unittest.TestCase):
             # members model Rust import records; a separate runtime archive models
             # CRT startup and its unused fallback for the native cleanup entry.
             toolchain = ["-G", "Ninja", "-DCMAKE_SYSTEM_NAME=Windows",
-                         "-DCMAKE_C_COMPILER=" + shutil.which("clang-cl"),
-                         "-DCMAKE_RC_COMPILER=" + shutil.which("llvm-rc"),
-                         "-DCMAKE_MT=" + shutil.which("llvm-mt"),
+                         "-DCMAKE_C_COMPILER=" + Path(shutil.which("clang-cl")).as_posix(),
+                         "-DCMAKE_RC_COMPILER=" + Path(shutil.which("llvm-rc")).as_posix(),
+                         "-DCMAKE_MT=" + Path(shutil.which("llvm-mt")).as_posix(),
                          "-DCMAKE_C_COMPILER_TARGET=x86_64-pc-windows-msvc",
                          "-DCMAKE_C_COMPILER_WORKS=TRUE", "-DCMAKE_C_ABI_COMPILED=TRUE",
                          "-DCMAKE_SIZEOF_VOID_P=8", "-DCMAKE_BUILD_TYPE=Release",
-                         "-DCMAKE_LINKER=" + shutil.which("lld-link"),
+                         "-DCMAKE_LINKER=" + Path(shutil.which("lld-link")).as_posix(),
                          "-DCMAKE_C_FLAGS=/Zl /GS-",
                          "-DCMAKE_C_STANDARD_LIBRARIES=",
                          "-DCMAKE_SHARED_LINKER_FLAGS=/manifest:no /entry:CRTStartup "
@@ -170,8 +171,7 @@ class CPackageVerification(unittest.TestCase):
             self.assertNotIn("/INCLUDE:DllMain", static)
             self.assertNotIn("msvcrt.obj", static)
 
-            tool = os.environ.get("PKG_CONFIG", "pkg-config")
-            if shutil.which(tool):
+            if PKG_CONFIG:
                 directory = prefix / "lib/pkgconfig"
                 directory.mkdir()
                 for name in ("uqa", "uqa-static"):
@@ -181,9 +181,9 @@ class CPackageVerification(unittest.TestCase):
                 env = dict(os.environ, PKG_CONFIG_PATH=str(directory))
                 for package in ("uqa", "uqa-static"):
                     cflags = VERIFY.compiler_flags(subprocess.check_output(
-                        [tool, "--msvc-syntax", "--cflags", package], env=env, text=True))
+                        [PKG_CONFIG, "--msvc-syntax", "--cflags", package], env=env, text=True))
                     libraries = VERIFY.compiler_flags(subprocess.check_output(
-                        [tool, "--msvc-syntax", "--libs", package], env=env, text=True))
+                        [PKG_CONFIG, "--msvc-syntax", "--libs", package], env=env, text=True))
                     source, obj = work / (package + ".c"), work / (package + ".obj")
                     executable = work / (package + ".exe")
                     source.write_text('#include <uqa/uqa.h>\nint main(void) { uint32_t abi = 0; '
@@ -289,7 +289,7 @@ class CPackageVerification(unittest.TestCase):
             self.assertEqual({package["name"] for package in inventory},
                              {"openssl-sys", "openssl-src", "rust-standard-library"})
 
-    @unittest.skipUnless(shutil.which("pkg-config"), "pkg-config is required for this metadata check")
+    @unittest.skipUnless(PKG_CONFIG, "pkg-config is required for this metadata check")
     def test_static_pkg_config_escapes_a_relocated_archive_path_once(self):
         with tempfile.TemporaryDirectory(prefix="uqa pkg-config space ") as temporary:
             prefix = Path(temporary)
@@ -302,7 +302,7 @@ class CPackageVerification(unittest.TestCase):
                                 "UQA_VERSION": "0.6.1"}.items():
                 source = source.replace("@" + name + "@", value)
             (directory / "uqa-static.pc").write_text(source)
-            flags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "uqa-static"],
+            flags = shlex.split(subprocess.check_output([PKG_CONFIG, "--cflags", "--libs", "uqa-static"],
                                 env=dict(os.environ, PKG_CONFIG_PATH=str(directory)), text=True))
             archive = next(flag for flag in flags if flag.endswith(".a"))
             self.assertEqual(Path(archive).resolve(), (prefix / "lib/libuqa.a").resolve())

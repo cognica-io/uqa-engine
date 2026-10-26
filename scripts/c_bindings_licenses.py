@@ -59,7 +59,7 @@ def collect(metadata_path: Path, features: set[str]) -> tuple[dict[str, bytes], 
             declared = directory / package["license_file"]
             if declared not in paths:
                 paths.append(declared)
-        payloads = {str(path.relative_to(directory)): path.read_bytes() for path in paths}
+        payloads = {path.relative_to(directory).as_posix(): path.read_bytes() for path in paths}
         if not payloads:
             supplement = pinned.get((name, version))
             if supplement is None:
