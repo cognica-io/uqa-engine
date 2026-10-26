@@ -48,6 +48,37 @@ int main(int argc, char **argv) {
     return probe(&value) == 42 ? 0 : 2;
 }
 """
+FUNCTION = HEADER + """typedef int (*callback)(const void *);
+static int identity(const int *value) { return *value; }
+int main(void) {
+    int value = 42;
+    callback volatile function = (callback)identity;
+    return function(&value) == 42 ? 0 : 2;
+}
+"""
+OVERFLOW = HEADER + """#include <limits.h>
+int main(void) { volatile int maximum = INT_MAX; return maximum + 1; }
+"""
+BOUNDS = HEADER + """#include <stdlib.h>
+int main(void) {
+    volatile int offset = 1;
+    volatile char *data = (char *)malloc(1);
+    if (data == NULL) return 3;
+    data[offset] = 1;
+    free((void *)data);
+    return 0;
+}
+"""
+
+
+def verify(name: str, command: list[str], directory: Path, diagnostic: bytes | None) -> None:
+    result = subprocess.run(command, cwd=directory, capture_output=True)
+    valid = result.returncode == 0 if diagnostic is None else (
+        result.returncode != 0 and diagnostic in result.stderr)
+    if not valid:
+        sys.stderr.buffer.write(result.stdout + result.stderr)
+        raise RuntimeError(f"{name} failed (exit {result.returncode})")
+    print(f"Passed {name}", flush=True)
 
 
 def main() -> None:
@@ -78,13 +109,26 @@ def main() -> None:
                 ("native UBSan", ["overflow"], b"signed integer overflow"),
                 ("Rust ASan", ["overflow", "bounds"], b"AddressSanitizer: heap-buffer-overflow"),
             ):
-                result = subprocess.run([str(client), *args], cwd=directory, capture_output=True)
-                valid = result.returncode == 0 if diagnostic is None else (
-                    result.returncode != 0 and diagnostic in result.stderr)
-                if not valid:
-                    sys.stderr.buffer.write(result.stdout + result.stderr)
-                    raise RuntimeError(f"{standard} {name} failed (exit {result.returncode})")
-                print(f"Passed {standard}: {name}", flush=True)
+                verify(f"{standard}: {name}", [str(client), *args], directory, diagnostic)
+            function = directory / "function.c"
+            function.write_text(FUNCTION, encoding="utf-8")
+            subprocess.run([*compiler, *flags, "-O1", "-g", "-x", language,
+                            f"-std={standard}", str(function), "-o", str(client)], check=True)
+            verify(f"{standard}: function types outside OpenSSL", [str(client)], directory,
+                   b"incorrect function type")
+        openssl = directory / "openssl-build/build/src"
+        openssl.mkdir(parents=True)
+        for name, source, diagnostic in (
+            ("approved function exception", FUNCTION, None),
+            ("native UBSan inside OpenSSL", OVERFLOW, b"signed integer overflow"),
+            ("native ASan inside OpenSSL", BOUNDS, b"AddressSanitizer: heap-buffer-overflow"),
+        ):
+            control = openssl / "control.c"
+            control.write_text(source, encoding="utf-8")
+            client = openssl / "control"
+            subprocess.run([*cc, *cflags, "-O1", "-g", str(control), "-o", str(client)],
+                           cwd=openssl, check=True)
+            verify(name, [str(client)], openssl, diagnostic)
 
 
 if __name__ == "__main__":

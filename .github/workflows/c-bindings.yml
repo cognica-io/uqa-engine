@@ -14,6 +14,7 @@ on:
       - scripts/verify-c-clients.py
       - scripts/verify-c-xml-isolation.py
       - scripts/verify-c-sanitizer-link.py
+      - .github/scripts/c-sanitizer-cc.sh
       - .github/workflows/c-bindings.yml
   workflow_call:
 
@@ -104,10 +105,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-15]
         features: [minimal, arrow-export]
     env:
-      CC: clang
+      CC: ${{ github.workspace }}/.github/scripts/c-sanitizer-cc.sh
       CXX: clang++
       CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
       CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -132,11 +133,14 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          # The runner supplies LLVM 15 separately from Apple Clang, whose ASan ABI differs from Rust's.
-          llvm_bin="$(brew --prefix llvm@15)/bin"
+          # LLVM 22 supports C function-pointer checks on ARM64 and shares Rust's ASan ABI.
+          if ! brew list --versions llvm@22 >/dev/null 2>&1; then
+            brew install llvm@22
+          fi
+          llvm_bin="$(brew --prefix llvm@22)/bin"
           "$llvm_bin/clang" --version
           echo "$llvm_bin" >> "$GITHUB_PATH"
-          echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
+          echo 'MACOSX_DEPLOYMENT_TARGET=15.0' >> "$GITHUB_ENV"
       - name: Free Linux runner disk
         if: runner.os == 'Linux'
         run: bash .github/scripts/free-linux-runner-disk.sh
