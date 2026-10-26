@@ -138,7 +138,7 @@ static void builtins(uqa_engine engine, uqa_result result, uqa_buffer buffer) {
     assert(value == NULL);
     assert(uqa_value_create_typed_null(NULL, "integer", &value) == UQA_ERROR_INVALID_ARGUMENT);
     {
-        const char invalid[] = {(char)0xff};
+        const char invalid[] = "\xff";
         assert(uqa_value_create_typed_null_n(engine, invalid, 1, &value) == UQA_ERROR_INVALID_ARGUMENT);
         assert(value == NULL);
     }

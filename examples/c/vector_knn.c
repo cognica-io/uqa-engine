@@ -72,12 +72,14 @@ int main(int argc, char **argv) {
     neighbors exact = knn(engine, 3);
     REQUIRE(exact.count == 3 && exact.ids[0] == 1 && exact.ids[1] == 3 && exact.ids[2] == 2);
     example_execute(engine, "CREATE INDEX notes_embedding_hnsw ON notes USING hnsw (embedding)");
-    REQUIRE(knn(engine, 3).ids[0] == 1);
+    neighbors hnsw = knn(engine, 3);
+    REQUIRE(hnsw.ids[0] == 1);
     example_execute(engine, "DROP INDEX notes_embedding_hnsw");
     example_execute(engine,
         "CREATE INDEX notes_embedding_ivf ON notes USING ivf (embedding) "
         "WITH (lists = 2, probes = 2, train_threshold = 4)");
-    REQUIRE(knn(engine, 3).ids[0] == 1);
+    neighbors ivf = knn(engine, 3);
+    REQUIRE(ivf.ids[0] == 1);
     example_execute(engine, "DROP INDEX notes_embedding_ivf");
     example_execute(engine,
         "CREATE INDEX notes_embedding_diskann ON notes USING diskann (embedding) "

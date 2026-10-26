@@ -159,7 +159,7 @@ static void bits(uqa_engine engine, uqa_result result) {
             CHECK(varying ? uqa_value_get_varbit(value, &view) : uqa_value_get_bit(value, &view));
             assert(view.bit_length == cases[i].length && view.size == size);
             for (uint32_t j = 0; j < view.bit_length; ++j)
-                assert(((view.data[j / 8] >> (7 - j % 8)) & 1) == (unsigned)(cases[i].text[j] - '0'));
+                assert(((view.data[j / 8] >> (7 - j % 8)) & 1u) == (unsigned)(cases[i].text[j] - '0'));
             if (view.bit_length % 8 != 0)
                 assert((view.data[size - 1] & ((1u << (8 - view.bit_length % 8)) - 1)) == 0);
             assert((varying ? uqa_value_get_bit(value, &view) : uqa_value_get_varbit(value, &view)) == UQA_ERROR_TYPE);

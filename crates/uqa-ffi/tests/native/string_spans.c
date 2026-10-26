@@ -12,12 +12,12 @@ struct invalid_text {
     uqa_status status;
 };
 
-static const char invalid_utf8[] = {(char)0xff};
+static const char invalid_utf8[] = "\xff";
 static const char embedded_nul[] = {'x', '\0', 'y'};
 static const struct invalid_text invalid_inputs[] = {
     {NULL, 0, UQA_ERROR_INVALID_ARGUMENT},
     {NULL, 1, UQA_ERROR_INVALID_ARGUMENT},
-    {invalid_utf8, sizeof(invalid_utf8), UQA_ERROR_INVALID_ARGUMENT},
+    {invalid_utf8, sizeof(invalid_utf8) - 1, UQA_ERROR_INVALID_ARGUMENT},
     {embedded_nul, sizeof(embedded_nul), UQA_ERROR_INVALID_ARGUMENT},
     {"x", SIZE_MAX, UQA_ERROR_RANGE}
 };

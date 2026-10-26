@@ -125,10 +125,10 @@ int main(void) {
     for (size_t i = 0; i < sizeof(empty_queries) / sizeof(empty_queries[0]); ++i) {
         CHECK(uqa_engine_execute(engine, empty_queries[i], result));
         uint64_t rows = 1;
-        uint32_t columns = 0;
+        uint32_t column_count = 0;
         CHECK(uqa_result_get_row_count(result, &rows));
-        CHECK(uqa_result_get_column_count(result, &columns));
-        assert(rows == 0 && columns == 1 && data.created == untouched);
+        CHECK(uqa_result_get_column_count(result, &column_count));
+        assert(rows == 0 && column_count == 1 && data.created == untouched);
     }
     data.mode = ROWS;
     CHECK(uqa_engine_execute(engine, "SELECT sum(n) FROM c_rows(4)", result));
