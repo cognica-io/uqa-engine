@@ -55,30 +55,35 @@ crates/uqa-ffi/
   Cargo.toml
   src/
     lib.rs
-    handles.rs
+    abi.rs
     boundary.rs
     config.rs
-    engine.rs
+    session.rs
     error.rs
-    values.rs
-    results.rs
-    prepared.rs
+    library.rs
+    types.rs
+    value.rs
+    value/
+    result.rs
+    execute.rs
+    statement.rs
     cursor.rs
     copy.rs
-    notifications.rs
+    notification.rs
+    subscription.rs
+    notice.rs
     udf.rs
     arrow.rs
-    logging.rs
+    tests.rs
+    tests/
+    test_support.rs
   include/uqa/
     uqa_export.h
     uqa.h
     uqa_udf.h
     uqa_arrow.h
     uqa_log.h
-  tests/
-    integration.rs
-    cases/
-    c/
+  tests/native/
 examples/c/
   unified_search.c
   vector_knn.c
@@ -87,7 +92,7 @@ examples/c/
   extensibility.c
 ```
 
-The Rust package is `uqa-ffi`; the native library is `libuqa.so`, `libuqa.dylib`, or `uqa.dll`, with corresponding static libraries. An `rlib` supports internal Rust verification and is not an advertised stable Rust API. The installed headers do not require a Rust toolchain or Arrow runtime headers.
+The Rust package is `uqa-ffi`; its `uqa` library target emits `libuqa.so`, `libuqa.dylib`, or `uqa.dll`, with corresponding static libraries. The crate emits `cdylib` and `staticlib` artifacts and uses its library test harness for internal Rust verification. It does not emit an `rlib`, so it does not collide with the existing Rust facade's `uqa` target. The installed headers do not require a Rust toolchain or Arrow runtime headers.
 
 ## 4. ABI conventions
 
@@ -1414,7 +1419,7 @@ Implement in dependency order. Every row below is proposed work, not a completed
 | Optional Arrow | Shared conversion policy | Independent release order, moved structs, duplicate names, exact mapping or explicit rejection |
 | Packaging and parity | Completed implementation and focused checks | Actual target artifacts, five C scenarios, final-source CI results |
 
-Maintain one integration test target in `uqa-ffi` with `autotests = false`; register Rust test modules under `tests/integration.rs`. Keep C test translation units under `tests/native`; the single Rust harness compiles each as C11 and C++17 and executes both clients against the actual shared library. Run the same client fixtures separately against Memory, native SQLite, SQLite Key/Value and redb through the public C open flags, and verify durable session, failure recovery and close/reopen behavior on all three persistent providers. Header-only checks additionally verify inclusion, declarations and linkage modes. Examples remain the five public runnable scenarios.
+Maintain exactly one test executable in `uqa-ffi`: its library test harness, with `autotests = false`, registers Rust test modules through `src/tests.rs`. Keep C test translation units under `tests/native`; the native client runner compiles each as C11 and C++17 and executes both clients against the actual shared or static library. Run the same client fixtures separately against Memory, native SQLite, SQLite Key/Value and redb through the public C open flags, and verify durable session, failure recovery and close/reopen behavior on all three persistent providers. Header-only checks additionally verify inclusion, declarations and linkage modes. Examples remain the five public runnable scenarios.
 
 Required verification includes:
 
