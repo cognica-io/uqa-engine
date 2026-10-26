@@ -11,11 +11,114 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("usql_release", ROOT / "scripts/usql-release.py")
 CLI = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CLI)
+
+
+class InstallationCleanupTest(unittest.TestCase):
+    def test_smoke_failure_propagates_after_removing_the_installation(self):
+        with self.assertRaisesRegex(ValueError, "failed SQL assertion"):
+            with CLI.temporary_installation() as work:
+                (work / "usql.exe").write_bytes(b"installed executable")
+                raise ValueError("failed SQL assertion")
+        self.assertFalse(work.exists())
+
+    def test_released_sharing_violation_removes_the_complete_installation(self):
+        with tempfile.TemporaryDirectory() as parent:
+            temporary = tempfile.TemporaryDirectory(dir=parent)
+            cleanup = temporary.cleanup
+            error = PermissionError("executable image is still shared")
+            error.winerror = 32
+            attempts = []
+
+            def remove():
+                attempts.append(True)
+                if len(attempts) == 1:
+                    raise error
+                cleanup()
+
+            with mock.patch.object(CLI.tempfile, "TemporaryDirectory", return_value=temporary), \
+                    mock.patch.object(temporary, "cleanup", side_effect=remove), \
+                    mock.patch.object(CLI.time, "sleep"):
+                with CLI.temporary_installation() as work:
+                    (work / "installed bin").mkdir()
+                    (work / "installed bin/usql.exe").write_bytes(b"installed executable")
+            self.assertEqual(len(attempts), 2)
+            self.assertFalse(work.exists())
+
+    def test_persistent_sharing_violation_fails_at_the_cleanup_deadline(self):
+        with tempfile.TemporaryDirectory() as parent:
+            temporary = tempfile.TemporaryDirectory(dir=parent)
+            error = PermissionError("executable remains shared")
+            error.winerror = 32
+            with mock.patch.object(CLI.tempfile, "TemporaryDirectory", return_value=temporary), \
+                    mock.patch.object(temporary, "cleanup", side_effect=error) as cleanup, \
+                    mock.patch.object(CLI.time, "monotonic", side_effect=[0.0, 0.0, 5.0]), \
+                    mock.patch.object(CLI.time, "sleep") as sleep:
+                with self.assertRaises(PermissionError) as failure:
+                    with CLI.temporary_installation():
+                        pass
+                self.assertIs(failure.exception, error)
+                self.assertEqual(cleanup.call_count, 2)
+                sleep.assert_called_once()
+            temporary.cleanup()
+
+    def test_unrelated_cleanup_errors_fail_immediately(self):
+        for code in (None, 5):
+            with self.subTest(winerror=code), tempfile.TemporaryDirectory() as parent:
+                temporary = tempfile.TemporaryDirectory(dir=parent)
+                error = PermissionError("access denied")
+                if code is not None:
+                    error.winerror = code
+                with mock.patch.object(CLI.tempfile, "TemporaryDirectory", return_value=temporary), \
+                        mock.patch.object(temporary, "cleanup", side_effect=error) as cleanup, \
+                        mock.patch.object(CLI.time, "sleep") as sleep:
+                    with self.assertRaises(PermissionError) as failure:
+                        with CLI.temporary_installation():
+                            pass
+                    self.assertIs(failure.exception, error)
+                    cleanup.assert_called_once()
+                    sleep.assert_not_called()
+                temporary.cleanup()
+
+    @unittest.skipUnless(os.name == "nt", "native Windows file sharing")
+    def test_native_windows_handle_release_completes_cleanup(self):
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = None
+
+        def release(_delay):
+            nonlocal handle
+            self.assertTrue(kernel.CloseHandle(handle))
+            handle = None
+
+        try:
+            with mock.patch.object(CLI.time, "sleep", side_effect=release) as wait:
+                with CLI.temporary_installation() as work:
+                    binary = work / "usql.exe"
+                    binary.write_bytes(b"held installation")
+                    # Allow reads/writes but retain Windows' delete-sharing lock.
+                    handle = kernel.CreateFileW(str(binary), 0x80000000, 3, None, 3, 0, None)
+                    self.assertNotEqual(handle, ctypes.c_void_p(-1).value, ctypes.get_last_error())
+                    with self.assertRaises(OSError) as failure:
+                        binary.unlink()
+                    self.assertEqual(failure.exception.winerror, 32)
+                wait.assert_called_once()
+            self.assertFalse(work.exists())
+        finally:
+            if handle is not None:
+                kernel.CloseHandle(handle)
 
 
 class CLIReleaseTest(unittest.TestCase):

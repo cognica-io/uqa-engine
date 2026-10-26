@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import functools
 import hashlib
 import http.server
@@ -19,6 +20,7 @@ import subprocess
 import tarfile
 import tempfile
 import threading
+import time
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -159,11 +161,30 @@ def install_binstall(tool: str, target: str, directory: pathlib.Path, destinatio
             thread.join()
 
 
+@contextlib.contextmanager
+def temporary_installation():
+    temporary = tempfile.TemporaryDirectory(prefix="usql-installed-")
+    try:
+        yield pathlib.Path(temporary.name)
+    finally:
+        # Windows can retain an executable image after its process has exited.
+        # Wait only for a reported sharing violation; permanent locks still fail.
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                temporary.cleanup()
+                break
+            except OSError as error:
+                remaining = deadline - time.monotonic()
+                if getattr(error, "winerror", None) != 32 or remaining <= 0:
+                    raise
+                time.sleep(min(0.05, remaining))
+
+
 def smoke(target: str, directory: pathlib.Path, binstall: str | None = None) -> None:
     verify(target, directory)
     directory = directory.resolve()
-    with tempfile.TemporaryDirectory(prefix="usql-installed-") as temporary:
-        work = pathlib.Path(temporary)
+    with temporary_installation() as work:
         destination = work / "installed bin"
         if "windows" in target:
             command = ["pwsh", "-NoProfile", "-File", str(directory / "install-usql.ps1"),
