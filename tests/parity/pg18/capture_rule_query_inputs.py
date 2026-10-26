@@ -247,6 +247,59 @@ for name, sql in [
 ]:
     cases.append((name, base + '; ' + route + 'INSERT INTO rule_output(n) VALUES(NEW.n)', sql))
 
+# A single VALUES target list supplies one rule input before ProjectSet expansion.
+for action_name, action in [
+    ('also-values', 'DO ALSO INSERT INTO rule_output(n) VALUES(NEW.n)'),
+    ('also-select', 'DO ALSO INSERT INTO rule_output(n) SELECT NEW.n'),
+    ('conditional-also', 'WHERE NEW.n > 0 DO ALSO INSERT INTO rule_output(n) VALUES(NEW.n)'),
+    ('conditional-instead', 'WHERE NEW.n > 0 DO INSTEAD INSERT INTO rule_output(n) VALUES(NEW.n)'),
+    ('instead', 'DO INSTEAD INSERT INTO rule_output(n,m) VALUES(NEW.n,0) RETURNING n,m'),
+]:
+    for source_name, source in [
+        ('single-series', 'VALUES(5,generate_series(1,2))'),
+        ('single-unnest', 'VALUES(5,unnest(ARRAY[1,2,3]))'),
+        ('multiple', 'VALUES(5,1),(5,2)'),
+        ('query', 'SELECT 5,generate_series(1,2)'),
+    ]:
+        for returning in [False, True]:
+            name = f'values-srf-{action_name}-{source_name}' + ('-returning' if returning else '')
+            setup = values_base + '; CREATE RULE route AS ON INSERT TO rule_event ' + action
+            sql = 'INSERT INTO rule_event ' + source + (' RETURNING n,m' if returning else '')
+            cases.append((name, setup, sql))
+
+for name, action in [
+    ('action-reference', 'DO ALSO INSERT INTO rule_output(n) VALUES(NEW.m)'),
+    ('condition-reference', 'WHERE NEW.m > 0 DO ALSO INSERT INTO rule_output(n) VALUES(NEW.n)'),
+    ('update-action', 'DO ALSO UPDATE rule_output SET n=NEW.n'),
+]:
+    setup = values_base + '; INSERT INTO rule_output(n) VALUES(0); CREATE RULE route AS ON INSERT TO rule_event ' + action
+    cases.append(('values-srf-' + name, setup, 'INSERT INTO rule_event VALUES(5,generate_series(1,2))'))
+
+for name, source in [
+    ('empty', 'SELECT 5,generate_series(2,1)'),
+    ('nested', 'SELECT 5,generate_series(1,2)+1'),
+    ('custom', 'SELECT 5,pg_temp.rule_rows()'),
+    ('unused-scalar-error', 'SELECT 5,generate_series(1,2),1/0'),
+    ('single-unused-error', 'VALUES(5,generate_series(1/0,2))'),
+]:
+    setup = values_base + "; CREATE FUNCTION pg_temp.rule_rows() RETURNS SETOF integer LANGUAGE SQL IMMUTABLE AS 'SELECT 1 UNION ALL SELECT 2'; CREATE RULE route AS ON INSERT TO rule_event DO INSTEAD INSERT INTO rule_output(n) VALUES(NEW.n)"
+    if name == 'unused-scalar-error':
+        setup += '; ALTER TABLE rule_event ADD extra integer'
+    cases.append(('values-srf-' + name, setup, 'INSERT INTO rule_event ' + source))
+
+for name, action in [
+    ('nothing', 'DO INSTEAD NOTHING'),
+    ('also', 'DO ALSO INSERT INTO rule_output(n) VALUES(NEW.n)'),
+    ('conditional', 'WHERE NEW.n > 0 DO INSTEAD INSERT INTO rule_output(n) VALUES(NEW.n)'),
+    ('multiple', 'DO INSTEAD (INSERT INTO rule_output(n) VALUES(NEW.n); INSERT INTO rule_output(n) VALUES(NEW.n))'),
+]:
+    label = 'cte-write-rule-' + name
+    setup = values_base + '; CREATE RULE route AS ON INSERT TO rule_event ' + action
+    sql = "WITH input AS (INSERT INTO rule_output(n) VALUES(nextval('rule_ticks')) RETURNING n) INSERT INTO rule_event(n) SELECT n FROM input"
+    cases.append((label, setup, sql))
+    if name != 'nothing':
+        recoveries.add(label)
+
 query = "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(n ORDER BY n) FROM rule_event), 'next', nextval('rule_ticks'))"
 output = []
 for name, setup, sql in cases:

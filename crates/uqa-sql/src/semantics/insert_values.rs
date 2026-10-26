@@ -82,6 +82,13 @@ pub fn single_row_values_query(
             alias: None,
         });
     }
+    let values_input = crate::plan::RuleValuesInput {
+        width: projections.len(),
+        inline: true,
+        defaults: Vec::new(),
+        unresolved: uqa_core::memory::OwnedSet::new(),
+        written: (0..projections.len()).collect(),
+    };
     let source = QueryPlan {
         analyzed_output: None,
         analyzed_source: None,
@@ -116,6 +123,7 @@ pub fn single_row_values_query(
     expanded.rows = Vec::new();
     expanded.columns = columns;
     expanded.source = Some(Box::new(source));
+    expanded.rule_values_input = Some(values_input);
     Ok(Some(expanded))
 }
 

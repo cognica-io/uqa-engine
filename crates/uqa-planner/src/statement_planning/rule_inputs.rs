@@ -35,13 +35,14 @@ pub fn rewrite_plan(
     config: &crate::optimizer::OptimizerConfig<'_>,
 ) -> Result<(), SQLError> {
     view_projection::rewrite(context, plan, config)?;
-    prune_captured_inputs(context.volatility, plan)?;
+    prune_captured_inputs(context.volatility, context.views.routines, plan)?;
     plan.visit_scoped_mut(&mut Rules(context))
 }
 
 /// Internal producer slots have structural identities. Their unused projections can be removed before expression folding without changing the query's cardinality or visible namespace.
 fn prune_captured_inputs(
     volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    routines: &dyn uqa_sql::routines::RoutineResolution,
     plan: &mut UnifiedPlan,
 ) -> Result<(), SQLError> {
     let mut required = std::collections::BTreeMap::<_, BTreeSet<usize>>::new();
@@ -65,6 +66,7 @@ fn prune_captured_inputs(
     });
     plan.visit_scoped_mut(&mut CapturedInputs {
         volatility,
+        routines,
         required: &required,
     })
 }
@@ -89,6 +91,7 @@ impl ScopedPlanVisitor for Rules<'_, '_> {
 
 struct CapturedInputs<'a> {
     volatility: &'a dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    routines: &'a dyn uqa_sql::routines::RoutineResolution,
     required: &'a std::collections::BTreeMap<uqa_sql::ast::InternalRelationId, BTreeSet<usize>>,
 }
 impl ScopedPlanVisitor for CapturedInputs<'_> {
@@ -107,6 +110,7 @@ impl ScopedPlanVisitor for CapturedInputs<'_> {
                 let width = block.projections.len();
                 crate::mutation_outputs::prune_unused_query_outputs(
                     self.volatility,
+                    self.routines,
                     body,
                     self.required.get(relation).unwrap_or(&BTreeSet::new()),
                     width,
@@ -194,6 +198,7 @@ fn prune_rule_inputs(
             } else if let Some(source) = &mut plan.source {
                 crate::mutation_outputs::prune_unused_query_outputs(
                     context.volatility,
+                    context.views.routines,
                     source,
                     &positions,
                     columns.len(),

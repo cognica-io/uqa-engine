@@ -14,6 +14,7 @@ use uqa_sql::{
 
 pub fn prune_unused_query_outputs(
     volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    routines: &dyn uqa_sql::routines::RoutineResolution,
     query: &mut QueryPlan,
     required_positions: &BTreeSet<usize>,
     expected_width: usize,
@@ -41,6 +42,10 @@ pub fn prune_unused_query_outputs(
         |name: &str| query.ctes.iter().any(|cte| cte.name == name) || inherited_ctes(name);
     for (position, projection) in block.projections.iter_mut().enumerate() {
         if !required_positions.contains(&position)
+            && !uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically(
+                routines,
+                &projection.expr,
+            )
             && !uqa_sql::semantics::volatility::scalar_in_scope_contains_volatile_function(
                 volatility,
                 &projection.expr,
@@ -64,9 +69,30 @@ mod tests {
     };
 
     struct Catalog;
+    impl uqa_sql::FunctionTypeResolver for Catalog {
+        fn resolve_function_type(
+            &self,
+            _: &str,
+            _: Option<&FunctionBinding>,
+            _: &[Option<String>],
+            _: &[Option<uqa_sql::ColumnType>],
+            _: bool,
+        ) -> Result<Option<uqa_sql::ColumnType>, SQLError> {
+            Ok(None)
+        }
+    }
+    impl uqa_sql::routines::RoutineResolution for Catalog {
+        fn has_registered_table_function(&self, name: &str) -> bool {
+            name == "host_rows"
+        }
+    }
     impl uqa_sql::semantics::volatility::VolatilityCatalog for Catalog {
         fn host_function_volatility(&self, name: &str) -> Option<FunctionVolatility> {
-            (name == "host_effect").then_some(FunctionVolatility::Volatile)
+            match name {
+                "host_effect" => Some(FunctionVolatility::Volatile),
+                "host_rows" => Some(FunctionVolatility::Immutable),
+                _ => None,
+            }
         }
         fn routine_volatilities(
             &self,
@@ -99,8 +125,15 @@ mod tests {
             schema,
             children: None,
         }));
-        prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 2, &|_| false)
-            .unwrap();
+        prune_unused_query_outputs(
+            &Catalog,
+            &Catalog,
+            &mut query,
+            &BTreeSet::from([0]),
+            2,
+            &|_| false,
+        )
+        .unwrap();
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block");
         };
@@ -122,8 +155,15 @@ mod tests {
             panic!("query")
         };
         let before = query.clone();
-        prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 4, &|_| false)
-            .unwrap();
+        prune_unused_query_outputs(
+            &Catalog,
+            &Catalog,
+            &mut query,
+            &BTreeSet::from([0]),
+            4,
+            &|_| false,
+        )
+        .unwrap();
         let RelationalPlan::QueryBlock(block) = query.root else {
             panic!("block")
         };
@@ -149,9 +189,51 @@ mod tests {
                 panic!("query")
             };
             let before = serde_json::to_value(&query).unwrap();
-            prune_unused_query_outputs(&Catalog, &mut query, &BTreeSet::from([0]), 2, &|_| false)
-                .unwrap();
+            prune_unused_query_outputs(
+                &Catalog,
+                &Catalog,
+                &mut query,
+                &BTreeSet::from([0]),
+                2,
+                &|_| false,
+            )
+            .unwrap();
             assert_eq!(serde_json::to_value(&query).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn unused_set_outputs_retain_source_cardinality_without_retaining_scalar_errors() {
+        for expression in [
+            "generate_series(1,3)",
+            "unnest(ARRAY[1,2])",
+            "generate_series(1,2) + 1",
+            "host_rows()",
+        ] {
+            let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(
+                uqa_sql::compile(&format!("SELECT 7, {expression}, 1/0"))
+                    .unwrap()
+                    .remove(0),
+            ) else {
+                panic!("query")
+            };
+            let before = query.clone();
+            prune_unused_query_outputs(
+                &Catalog,
+                &Catalog,
+                &mut query,
+                &BTreeSet::from([0]),
+                3,
+                &|_| false,
+            )
+            .unwrap();
+            let (RelationalPlan::QueryBlock(block), RelationalPlan::QueryBlock(original)) =
+                (&query.root, &before.root)
+            else {
+                panic!("block")
+            };
+            assert_eq!(block.projections[1].expr, original.projections[1].expr);
+            assert_eq!(block.projections[2].expr, ScalarExpr::Literal(Value::Null));
         }
     }
 }

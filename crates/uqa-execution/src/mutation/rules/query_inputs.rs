@@ -81,19 +81,14 @@ fn execute_insert_query_rules<S: Clone + 'static>(
             let input = if matches!(action, Statement::Notify { .. }) {
                 None
             } else {
-                let mut query = insert.source.as_deref().expect("query input").clone();
-                if let Some((positions, width)) = resolver.input_columns(
+                let required = resolver.input_columns(
                     context.analysis,
                     insert,
                     action,
                     rule.definition.condition.as_ref(),
                     &target_columns,
-                )? {
-                    prune(context.volatility, &mut query, &positions, width, &|name| {
-                        insert.ctes.iter().any(|cte| cte.name == name)
-                            || scope.contains_cte_name(name)
-                    })?;
-                }
+                )?;
+                let query = copy_rule_input_query(context, insert, scope, required, prune)?;
                 Some(RuleQueryInput {
                     query,
                     inline: insert
@@ -127,6 +122,27 @@ fn execute_insert_query_rules<S: Clone + 'static>(
         }
     }
     Ok(outcome)
+}
+
+fn copy_rule_input_query<S: Clone + 'static>(
+    context: &RuleContext<'_, S>,
+    insert: &InsertPlan,
+    scope: &crate::query::CteScope<S>,
+    required: Option<(BTreeSet<usize>, usize)>,
+    prune: crate::mutation::views::commands::SourceOutputPruning,
+) -> Result<uqa_sql::plan::QueryPlan, SQLError> {
+    let mut query = insert.source.as_deref().expect("query input").clone();
+    if let Some((positions, width)) = required {
+        prune(
+            context.volatility,
+            context.returning.routines,
+            &mut query,
+            &positions,
+            width,
+            &|name| insert.ctes.iter().any(|cte| cte.name == name) || scope.contains_cte_name(name),
+        )?;
+    }
+    Ok(query)
 }
 
 pub(super) fn complete_action(

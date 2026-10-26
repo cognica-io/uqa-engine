@@ -8,6 +8,19 @@ use super::*;
 use crate::QueryPlan;
 use uqa_sql::ast::{FunctionBinding, FunctionVolatility, InternalRelationId};
 struct Catalog;
+impl uqa_sql::FunctionTypeResolver for Catalog {
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<uqa_sql::ColumnType>],
+        _: bool,
+    ) -> Result<Option<uqa_sql::ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+impl uqa_sql::routines::RoutineResolution for Catalog {}
 impl uqa_sql::semantics::volatility::VolatilityCatalog for Catalog {
     fn host_function_volatility(&self, name: &str) -> Option<FunctionVolatility> {
         (name == "host_effect").then_some(FunctionVolatility::Volatile)
@@ -45,6 +58,8 @@ fn captured_input_pruning_keeps_identity_cardinality_and_volatile_outputs() {
         ("SELECT 7 AS n,(VALUES ((SELECT 1/0))) AS unused", true),
         ("SELECT 7 AS n,(SELECT nextval('ticks')) AS unused", false),
         ("SELECT 7 AS n,host_effect() AS unused", false),
+        ("SELECT 7 AS n,generate_series(1,3) AS unused", false),
+        ("SELECT 7 AS n,unnest(ARRAY[1,2]) AS unused", false),
         ("SELECT DISTINCT 7 AS n,1/0 AS unused", false),
         ("SELECT 7 AS n,1/0 AS unused ORDER BY unused LIMIT 1", false),
     ] {
@@ -73,7 +88,7 @@ fn captured_input_pruning_keeps_identity_cardinality_and_volatile_outputs() {
         if pruned {
             expected_block.projections[1].expr = ScalarExpr::Literal(Value::Null);
         }
-        prune_captured_inputs(&Catalog, &mut plan).unwrap();
+        prune_captured_inputs(&Catalog, &Catalog, &mut plan).unwrap();
         let UnifiedPlan::Query(query) = &plan else {
             panic!("query")
         };
@@ -118,7 +133,7 @@ fn captured_rule_projections_use_the_enclosing_cte_namespace() {
             unreachable!()
         };
         *captured_output = Some(relation);
-        prune_captured_inputs(&Catalog, &mut plan).unwrap();
+        prune_captured_inputs(&Catalog, &Catalog, &mut plan).unwrap();
         let UnifiedPlan::Query(query) = &plan else {
             unreachable!()
         };

@@ -33,6 +33,7 @@ use uqa_storage::document_store::Document;
 
 pub type SourceOutputPruning = fn(
     &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    &dyn uqa_sql::routines::RoutineResolution,
     &mut QueryPlan,
     &BTreeSet<usize>,
     usize,
@@ -63,6 +64,7 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
             .collect::<BTreeSet<_>>();
         prune_source_outputs(
             context.source.volatility,
+            context.source.relational.catalog,
             &mut query,
             &required_positions,
             target.columns.len(),
