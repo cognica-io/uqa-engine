@@ -184,6 +184,13 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
     let ctes = inputs.queries.statement_scope(None);
     let schema = analyze_query_plan_schema(inputs.routines, query, params, &ctes, None)?;
     validate_query_row_locks(inputs.queries.row_lock_context(), query, params)?;
+    let query_context = inputs.queries.query_context();
+    let retained = query_context.source.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        query_context.source.ctes.runtime.cancellation,
+    );
     inputs
         .state
         .open_pending_session_portal(SessionPortalDeclaration {
@@ -199,6 +206,7 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
                     params,
                     &ctes,
                     scroll,
+                    control,
                 )?,
                 created_at_micros: inputs.created_at_micros,
             },
@@ -216,12 +224,13 @@ fn query_scrollable<S: Clone>(
     params: &[SQLParam],
     ctes: &crate::query::CteScope<S>,
     requested: Option<bool>,
+    control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
     if let Some(requested) = requested {
         return Ok(requested);
     }
     Ok(!query_has_row_locks(query)
-        && query_plan_backward_scan_support(routines, volatility, query, params, ctes)?
+        && query_plan_backward_scan_support(routines, volatility, query, params, ctes, control)?
             == BackwardScanSupport::Native)
 }
 

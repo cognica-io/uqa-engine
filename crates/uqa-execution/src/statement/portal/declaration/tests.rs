@@ -23,6 +23,7 @@ fn scrollable(query: &QueryPlan, requested: Option<bool>) -> bool {
         &[],
         &crate::catalog::test_support::empty_scope(),
         requested,
+        uqa_core::memory::ProductionControl::uncontrolled(),
     )
     .unwrap()
 }
@@ -117,7 +118,16 @@ fn inherited_deferred_sources_keep_their_query_traversal() {
         ("WITH a AS MATERIALIZED (SELECT 1) SELECT * FROM a", true),
     ] {
         assert_eq!(
-            query_scrollable(&NoRoutines, &NoRoutines, &query(sql), &[], &scope, None).unwrap(),
+            query_scrollable(
+                &NoRoutines,
+                &NoRoutines,
+                &query(sql),
+                &[],
+                &scope,
+                None,
+                uqa_core::memory::ProductionControl::uncontrolled()
+            )
+            .unwrap(),
             expected,
             "{sql}"
         );

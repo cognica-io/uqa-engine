@@ -99,3 +99,60 @@ fn mutual_recursion_reports_the_native_sqlstate_without_retaining_scratch() {
     assert_eq!(error.sqlstate(), Some("0A000"));
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn recursive_independent_definitions_keep_the_first_ready_declaration_order() {
+    let plan = lower_sql("WITH RECURSIVE a AS (SELECT * FROM c), b AS (VALUES(2)), c AS (VALUES(1)) SELECT * FROM a, b");
+    let selected = order(&plan, ProductionControl::uncontrolled()).unwrap();
+    assert_eq!(selected.as_slice(), &[1, 2, 0]);
+}
+
+#[test]
+fn nested_dependency_chains_use_bounded_work_lists_and_keep_unread_bodies_inert() {
+    let definitions = (0..512)
+        .map(|index| {
+            if index == 0 {
+                "q0 AS (SELECT * FROM outer_input)".to_owned()
+            } else {
+                format!("q{index} AS (SELECT * FROM q{})", index - 1)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let plan = lower_sql(&format!("WITH outer_input AS (VALUES(1)) SELECT * FROM (WITH {definitions}, unused AS (SELECT * FROM missing_source) SELECT * FROM q511) s"));
+    let memory = MemoryBudget::new(256 * 1024);
+    let token = CancellationToken::new();
+    let result = order(&plan, ProductionControl::new(&memory, &token, &token)).unwrap();
+    assert_eq!(result.as_slice(), &[0]);
+    drop(result);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn wide_recursive_order_returns_original_plans_under_one_bounded_allowance() {
+    let UnifiedPlan::Query(mut plan) = lower_sql("WITH RECURSIVE q AS (VALUES(1)) SELECT 7") else {
+        panic!("query");
+    };
+    let template = plan.ctes.remove(0);
+    let definitions = (0..2048)
+        .map(|index| {
+            let mut cte = template.clone();
+            cte.name = format!("q{index}");
+            cte
+        })
+        .collect::<Vec<_>>();
+    let memory = MemoryBudget::new(1024 * 1024);
+    let token = CancellationToken::new();
+    let ordered = order_cte_plans_with_control(
+        &definitions,
+        ProductionControl::new(&memory, &token, &token),
+    )
+    .unwrap();
+    assert_eq!(ordered.len(), definitions.len());
+    for (actual, original) in ordered.iter().zip(&definitions) {
+        assert!(std::ptr::eq(*actual, original));
+    }
+    assert!(memory.used() > 0);
+    drop(ordered);
+    assert_eq!(memory.used(), 0);
+}

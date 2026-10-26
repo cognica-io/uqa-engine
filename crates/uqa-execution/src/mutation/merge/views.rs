@@ -792,11 +792,12 @@ fn initialize_view_merge_scope<S: Clone>(
     crate::query::cte::materialize_command_ctes(
         context.query.source.ctes,
         &plan.ctes,
-        || {
-            uqa_sql::semantics::primary_command_cte_references(
+        |control| {
+            uqa_sql::semantics::primary_command_cte_references_with_control(
                 &plan.ctes,
                 plan.query_inputs(),
                 plan.source_input(),
+                control,
             )
         },
         params,

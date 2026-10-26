@@ -17,7 +17,7 @@ use crate::query::{
 use crate::{ColumnSelection, PhysicalOperator};
 use uqa_sql::{
     plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
-    semantics::primary_query_cte_references,
+    semantics::primary_query_cte_references_with_control,
     SQLError, SQLParam,
 };
 
@@ -49,13 +49,13 @@ fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
 ) -> Result<Option<Box<dyn PhysicalOperator + 'a>>, SQLError> {
     let mut scope = scope.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     if !plan.ctes.is_empty() {
-        let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;
+        let scheduled = schedule_plan_ctes(context.source.ctes, context.source.volatility, plan)?;
         let filters = context.cte_filters.output_filters(plan, &scope)?;
         install_statement_ctes(
             context.source.ctes,
             &plan.ctes,
-            scheduled,
-            || primary_query_cte_references(plan),
+            &scheduled,
+            |control| primary_query_cte_references_with_control(plan, control),
             params,
             &mut scope,
             &filters,

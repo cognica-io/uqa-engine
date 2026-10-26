@@ -29,7 +29,9 @@ use std::rc::Rc;
 use uqa_sql::{
     ast::SetOpKind,
     plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
-    semantics::{primary_query_cte_references, sets::validation::validate_values_set_contexts},
+    semantics::{
+        primary_query_cte_references_with_control, sets::validation::validate_values_set_contexts,
+    },
     SQLError, SQLParam, SQLResult,
 };
 
@@ -132,13 +134,13 @@ fn install_query_ctes<S: Clone + Send + Sync + 'static>(
     if plan.ctes.is_empty() {
         return Ok(());
     }
-    let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;
+    let scheduled = schedule_plan_ctes(context.source.ctes, context.source.volatility, plan)?;
     let filters = context.cte_filters.output_filters(plan, ctes)?;
     install_statement_ctes(
         context.source.ctes,
         &plan.ctes,
-        scheduled,
-        || primary_query_cte_references(plan),
+        &scheduled,
+        |control| primary_query_cte_references_with_control(plan, control),
         params,
         ctes,
         &filters,

@@ -126,11 +126,12 @@ fn run<S: Clone + Send + Sync + 'static>(
         crate::query::cte::materialize_command_ctes(
             context.query.source.ctes,
             input.ctes(),
-            || {
-                uqa_sql::semantics::primary_command_cte_references(
+            |control| {
+                uqa_sql::semantics::primary_command_cte_references_with_control(
                     input.ctes(),
                     input.subqueries().iter(),
                     input.source(),
+                    control,
                 )
             },
             params,

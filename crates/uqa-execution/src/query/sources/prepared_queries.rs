@@ -134,9 +134,16 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut restored_outputs = BTreeMap::new();
-    for cte in uqa_sql::semantics::ordered_plan_ctes(query)? {
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    let ordered = uqa_sql::semantics::order_cte_plans_with_control(&query.ctes, control)?;
+    for cte in ordered.iter().copied() {
         let mut definition = cte.clone();
-        if !uqa_sql::semantics::cte_references_own_name(cte) {
+        if !uqa_sql::semantics::cte_references_own_name_with_control(cte, control)? {
             if let Some(body) = definition
                 .body
                 .query_mut()
@@ -156,6 +163,7 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
         }
         scope.insert_preparation_cte(definition, folded.contains(&cte.name));
     }
+    drop(ordered);
     for cte in &mut query.ctes {
         if let Some(schema) = restored_outputs.remove(&cte.name) {
             cte.body
@@ -176,7 +184,8 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     let mut scope = parent.clone();
     let mut lookup = scope.enter_query_plan_scope(query)?;
-    let scheduled = crate::query::cte::strategy::schedule_plan_ctes(context.volatility, query)?;
+    let scheduled =
+        crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, query)?;
     let folded = scheduled
         .iter()
         .filter(|cte| cte.deferred)
@@ -187,6 +196,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
         .filter(|cte| !cte.deferred)
         .map(|cte| cte.plan.name.clone())
         .collect::<BTreeSet<_>>();
+    drop(scheduled);
     declare_ctes(context, query, params, &mut lookup, &folded, outer)?;
     let names = query
         .ctes

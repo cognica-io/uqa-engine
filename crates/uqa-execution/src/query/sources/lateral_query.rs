@@ -70,10 +70,11 @@ fn execute_lateral_query_scope<S: Clone + Send + Sync + 'static>(
     let mut lookup = scoped_ctes.enter_query_plan_scope(plan)?;
     let mut scoped_ctes = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     // Keep folded occurrences selected during initialization instead of materializing their original, unpruned definitions for each outer row.
-    let scheduled = crate::query::cte::strategy::schedule_plan_ctes(context.volatility, plan)?;
+    let scheduled =
+        crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, plan)?;
     crate::query::cte::install_scheduled_ctes(
         context.ctes,
-        scheduled,
+        scheduled.iter().copied(),
         params,
         &mut scoped_ctes,
         &std::collections::BTreeMap::new(),

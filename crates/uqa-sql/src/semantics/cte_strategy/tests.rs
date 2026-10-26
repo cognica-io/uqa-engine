@@ -8,6 +8,8 @@ use super::order_statement_ctes;
 use crate::plan::{CommandPlan, CtePlan, UnifiedPlan};
 use crate::semantics::{primary_command_cte_references, primary_query_cte_references};
 
+mod control;
+
 fn names(ctes: &[&CtePlan]) -> Vec<String> {
     ctes.iter().map(|cte| cte.name.clone()).collect()
 }

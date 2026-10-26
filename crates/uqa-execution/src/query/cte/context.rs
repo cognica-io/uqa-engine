@@ -18,6 +18,8 @@ use uqa_sql::{
 };
 
 pub trait CteBodyExecutor<S: Clone>: Sync {
+    /// Retain the active query allowance and its original cancellation owner for CTE analysis and scheduling.
+    fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
     /// Retain one read-only physical producer and its selected session inputs. A semantic materialization that cannot expose a pull operator returns None.
     fn retained_query(
         &self,

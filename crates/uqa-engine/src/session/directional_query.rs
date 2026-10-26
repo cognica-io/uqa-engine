@@ -55,7 +55,18 @@ impl Engine {
     ) -> Result<Box<dyn PhysicalOperator>, SQLError> {
         let engine = self.fork_session_portal_worker_engine()?;
         let control = engine.query_retention_control()?;
-        let support = query_plan_backward_scan_support(&engine, &engine, &plan, &params, &scope)?;
+        let support = query_plan_backward_scan_support(
+            &engine,
+            &engine,
+            &plan,
+            &params,
+            &scope,
+            uqa_core::memory::ProductionControl::new(
+                control.memory(),
+                control.cancellation(),
+                &engine.runtime.cancellation,
+            ),
+        )?;
         Ok(Box::new(
             DirectionalQueryPlanOperator::new(
                 Box::new(DirectionalSessionQuery {

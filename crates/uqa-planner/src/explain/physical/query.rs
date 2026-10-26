@@ -14,8 +14,8 @@ use uqa_sql::{
     catalog::resolution::RelationLookupMode,
     plan::{CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, UnifiedPlan},
     semantics::{
-        cte_references_own_name, cte_strategy::schedule_plan_ctes, ordered_cte_plans,
-        query_plan_output_columns,
+        cte_references_own_name_with_control, cte_strategy::schedule_plan_ctes_with_control,
+        order_cte_plans_with_control, query_plan_output_columns,
     },
     SQLError, ScalarExpr,
 };
@@ -51,7 +51,8 @@ impl Collector<'_, '_, '_> {
             );
         }
         let mut scope = outer.clone();
-        for cte in ordered_cte_plans(command.ctes())? {
+        let ordered = order_cte_plans_with_control(command.ctes(), self.control)?;
+        for cte in ordered.iter().copied() {
             if cte.recursive {
                 self.control.check()?;
                 scope.try_insert(cte.name.as_str(), None)?;
@@ -196,7 +197,9 @@ impl Collector<'_, '_, '_> {
                         .is_some_and(|name| plan.ctes.iter().any(|cte| cte.name == name))
             }),
         )?;
-        for scheduled in schedule_plan_ctes(self.context.filters.volatility, plan)? {
+        let scheduled =
+            schedule_plan_ctes_with_control(self.context.filters.volatility, plan, self.control)?;
+        for scheduled in scheduled.iter() {
             let cte = scheduled.plan;
             if scheduled.deferred {
                 let definition = DeferredCte {
@@ -290,7 +293,10 @@ impl Collector<'_, '_, '_> {
         cte: &CtePlan,
         filter: Option<&(String, ScalarExpr)>,
     ) -> Result<Option<QueryPlan>, SQLError> {
-        if !cte_references_own_name(cte) || cte.search.is_some() || cte.cycle.is_some() {
+        if !cte_references_own_name_with_control(cte, self.control)?
+            || cte.search.is_some()
+            || cte.cycle.is_some()
+        {
             return Ok(None);
         }
         let (Some(query), Some((qualifier, filter))) = (cte.body.query(), filter) else {

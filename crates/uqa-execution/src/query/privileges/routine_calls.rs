@@ -49,12 +49,21 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     let mut scope = ctes.clone();
     let mut lookup = scope.enter_query_plan_scope(plan)?;
-    for cte in uqa_sql::semantics::ordered_plan_ctes(plan)? {
-        lookup.insert_deferred(cte.clone());
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    let ordered = uqa_sql::semantics::order_cte_plans_with_control(&plan.ctes, control)?;
+    for cte in ordered.iter() {
+        lookup.insert_deferred((*cte).clone());
     }
     let mut visible = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &mut *visible;
-    for scheduled in crate::query::cte::strategy::schedule_plan_ctes(context.volatility, plan)? {
+    let scheduled =
+        crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, plan)?;
+    for scheduled in scheduled.iter() {
         if !scheduled.deferred {
             if let Some(query) = scheduled.plan.body.query() {
                 let definition = scope
@@ -64,7 +73,18 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
             }
         }
     }
-    match &plan.root {
+    initialize_root(context, permissions, &plan.root, params, scope, outer)
+}
+
+fn initialize_root<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    permissions: &BuiltinRoutinePermissions,
+    root: &RelationalPlan,
+    params: &[SQLParam],
+    scope: &mut CteScope<S>,
+    outer: Option<&RowSchema>,
+) -> Result<(), SQLError> {
+    match root {
         RelationalPlan::QueryBlock(block) => {
             let schema = block.from.as_ref().map_or_else(
                 || Ok(RowSchema::default()),
