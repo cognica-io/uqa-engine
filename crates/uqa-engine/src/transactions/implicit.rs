@@ -31,7 +31,7 @@ impl Engine {
         self.transaction_with_error(f, std::convert::identity)
     }
 
-    pub(crate) fn transaction_with_error<R, E: std::fmt::Display>(
+    pub(crate) fn transaction_with_error<R, E: super::TransactionError>(
         &self,
         f: impl FnOnce(&Self) -> Result<R, E>,
         map_transaction_error: impl Fn(SQLError) -> E,
@@ -41,7 +41,7 @@ impl Engine {
         self.run_transaction_scope(scope, f, map_transaction_error)
     }
 
-    pub(super) fn run_transaction_scope<R, E: std::fmt::Display>(
+    pub(super) fn run_transaction_scope<R, E: super::TransactionError>(
         &self,
         mut scope: TransactionScope<'_>,
         f: impl FnOnce(&Self) -> Result<R, E>,
@@ -55,9 +55,12 @@ impl Engine {
             }
             Ok(Err(err)) => {
                 if let Err(rollback_err) = scope.rollback() {
-                    return Err(map_transaction_error(Self::rollback_cleanup_error(&rollback_err, format!(
-                        "transaction rollback after error failed: {rollback_err}; original error: {err}"
-                    ))));
+                    return Err(super::error::attach(
+                        err,
+                        rollback_err,
+                        "transaction rollback after error failed",
+                        map_transaction_error,
+                    ));
                 }
                 Err(err)
             }
@@ -75,7 +78,7 @@ impl Engine {
     }
 
     /// Admit a public query through the active transaction or an owned implicit frame. Queries that can persist calibration or create a graph need a writable snapshot, including on memory engines. Attached physical readers retain their existing view and completion owner.
-    pub(crate) fn with_query_transaction_snapshot<R, E: std::fmt::Display>(
+    pub(crate) fn with_query_transaction_snapshot<R, E: super::TransactionError>(
         &self,
         select_snapshot: bool,
         read_only: bool,
@@ -212,7 +215,7 @@ impl Engine {
         map_transaction_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E>
     where
-        E: std::fmt::Display,
+        E: super::TransactionError,
     {
         let _statement = self.lock_statement_gate();
         let existing_transaction = self.transaction_depth() != 0;

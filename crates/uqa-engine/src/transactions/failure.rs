@@ -100,15 +100,17 @@ impl Engine {
         if cleanup_errors.is_empty() {
             error
         } else {
-            self.transaction_abort_cleanup_error(format!(
-                "{error}; transaction abort cleanup failed: {}",
-                cleanup_errors.join("; ")
-            ))
+            super::error::attach(
+                error,
+                self.transaction_abort_cleanup_error(cleanup_errors.join("; ")),
+                "transaction abort cleanup failed",
+                std::convert::identity,
+            )
         }
     }
 
     /// Own admission and completion of an operation in the current transaction. No callback runs in a failed or unresolved frame, and admitted failures restore the original transaction or savepoint before returning.
-    pub(crate) fn run_existing_transaction_operation<R, E: std::fmt::Display>(
+    pub(crate) fn run_existing_transaction_operation<R, E: super::TransactionError>(
         &self,
         operation: impl FnOnce() -> Result<R, E>,
         map_cleanup_error: impl Fn(SQLError) -> E,
@@ -134,7 +136,7 @@ impl Engine {
         )
     }
 
-    pub(super) fn finish_transaction_operation<R, E: std::fmt::Display>(
+    pub(super) fn finish_transaction_operation<R, E: super::TransactionError>(
         &self,
         result: std::thread::Result<Result<R, E>>,
         map_cleanup_error: impl Fn(SQLError) -> E,
@@ -146,12 +148,12 @@ impl Engine {
                 if cleanup_errors.is_empty() {
                     Err(error)
                 } else {
-                    Err(map_cleanup_error(self.transaction_abort_cleanup_error(
-                        format!(
-                            "{error}; transaction abort cleanup failed: {}",
-                            cleanup_errors.join("; ")
-                        ),
-                    )))
+                    Err(super::error::attach(
+                        error,
+                        self.transaction_abort_cleanup_error(cleanup_errors.join("; ")),
+                        "transaction abort cleanup failed",
+                        map_cleanup_error,
+                    ))
                 }
             }
             Err(payload) => {

@@ -215,9 +215,13 @@ fn statement_abort_retains_a_live_backend_until_rollback_succeeds() {
             .store(UNAVAILABLE, Ordering::Release);
 
         let error = root.sql("SELECT 1 / 0", &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22012"));
+        assert!(error.to_string().contains("division by zero"));
         assert!(error
-            .to_string()
+            .detail()
+            .unwrap()
             .contains("transaction abort cleanup failed"));
+        assert!(error.cleanup().is_some());
         assert!(store.in_transaction());
         assert_eq!(root.transaction_depth(), 1);
         assert_eq!(

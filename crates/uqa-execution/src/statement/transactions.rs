@@ -84,9 +84,7 @@ pub fn rollback_implicit_statement(
     action: &str,
 ) -> Result<(), SQLError> {
     transactions.rollback().map_err(|rollback_error| {
-        SQLError::Internal(format!(
-            "{action}: autocommit rollback failed: {rollback_error}"
-        ))
+        rollback_error.with_context(format!("{action}: autocommit rollback failed"))
     })
 }
 
@@ -99,9 +97,12 @@ pub fn rollback_after_statement_error<T>(
     }
     match transactions.rollback() {
         Ok(()) => Err(statement_error),
-        Err(rollback_error) => Err(SQLError::Internal(format!(
-            "statement failed: {statement_error}; autocommit rollback also failed: {rollback_error}"
-        ))),
+        Err(rollback_error) if rollback_error.sqlstate() == Some("08007") => {
+            Err(rollback_error.with_context(format!("original statement error: {statement_error}")))
+        }
+        Err(rollback_error) => {
+            Err(statement_error.with_cleanup(rollback_error, "autocommit rollback also failed"))
+        }
     }
 }
 

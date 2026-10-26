@@ -22,6 +22,8 @@ pub(crate) use completion::CompletionCounters;
 pub use completion::{ExecutionCompletion, ExecutionOutcome};
 mod control;
 mod coordinator;
+mod error;
+pub(crate) use error::TransactionError;
 mod failure;
 mod fixed_identities;
 use failure::{failed_transaction_error, panic_description};
