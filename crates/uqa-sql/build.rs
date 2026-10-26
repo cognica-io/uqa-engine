@@ -75,6 +75,24 @@ fn private_symbol_header(output: &Path) -> PathBuf {
     prefix_header
 }
 
+fn configure_runtime(build: &mut cmake::Config, target: &str) {
+    if target.contains("msvc") {
+        let static_crt = env::var("CARGO_CFG_TARGET_FEATURE")
+            .unwrap_or_default()
+            .split(',')
+            .any(|feature| feature == "crt-static");
+        // CMake's runtime property takes precedence over the compiler's /MT or /MD flags.
+        build.define(
+            "CMAKE_MSVC_RUNTIME_LIBRARY",
+            if static_crt {
+                "MultiThreaded"
+            } else {
+                "MultiThreadedDLL"
+            },
+        );
+    }
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=vendor/libxml2");
     println!("cargo:rerun-if-changed=src/xml/native.c");
@@ -90,6 +108,7 @@ fn main() {
         "-include"
     };
     let mut build = cmake::Config::new("vendor/libxml2");
+    configure_runtime(&mut build, &target);
     let quoted_header = if cfg!(windows) {
         prefix_header.to_string_lossy().replace('\\', "/")
     } else {

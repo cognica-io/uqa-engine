@@ -188,6 +188,12 @@ The Windows x86_64 package job for `2662f383fef9b089e39da82cb9bbf1d035beeccc` bu
 
 The seven package regressions and all 578 repository policy tests pass, with one platform-dependent skip in the complete suite. The new pipe-based test reproduces `UnicodeDecodeError` in the preceding implementation under a simulated Windows code page, then verifies exact UTF-8 metadata, log and console bytes in the corrected implementation. The dependency-license test also traverses non-ASCII source directories from UTF-8 Cargo metadata. The target cache is 91.99 GB, within the 100 GB limit. Actual Windows package qualification remains required; the earlier failed job is not passing evidence.
 
+### Windows static C runtime configuration
+
+Both Windows usql release jobs for `d6d2780f09070eda824d20cf256a7ddb9f59d1f2` failed to link the private XML parser because CMake selected the dynamic C runtime while Rust and the bridge selected the static runtime. The SQL crate's build adapter now derives `CMAKE_MSVC_RUNTIME_LIBRARY` from Cargo's `crt-static` target feature before configuring the unchanged vendored parser. This uses CMake's runtime property, which otherwise overrides the compiler flags under the parser's existing policy version. Dynamic-runtime builds continue selecting `MultiThreadedDLL`; static-runtime builds select `MultiThreaded`.
+
+Six cross-compiled ARM64/x86_64 Windows COFF controls reproduce the old `/MT` command being overridden by CMake's `/MD`, then verify the corrected static and dynamic runtime directives and imported symbols in real object files. No vendored source, Cargo dependency or version changes are involved. The native macOS build succeeds with the same adapter; actual final-source Windows installation and archive qualification remain required.
+
 ### Native sanitizer runtime linkage correction
 
 The macOS full-library sanitizer job for `2662f383fef9b089e39da82cb9bbf1d035beeccc` could not link the instrumented library: Rust disabled the default Clang runtime libraries, and Apple Clang's ASan version symbol differs from Rust's upstream LLVM ABI. Native sanitizer jobs now enable default linker libraries and select upstream LLVM 22 on macOS 15 for C, C++, Rust linking and consumers. LLVM 15 lacks C function-pointer instrumentation on ARM64; the macOS 15 runner supplies the supported binary-package platform for LLVM 22. The test-only macOS deployment target is shared by all three languages. Distribution package settings and external dependency source/version inputs remain unchanged.
