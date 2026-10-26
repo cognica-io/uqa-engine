@@ -166,7 +166,8 @@ cp "$ASSET_SOURCE/${url##*/}" "$destination"
     def test_release_builds_precede_publication_and_checks_do_not_run_on_each_push(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("include_cli: true", release)
-        self.assertIn("needs: [resolve, python, javascript, benchmarks]", release)
+        self.assertIn("needs: [resolve, python, javascript, c-packages, benchmarks]", release)
+        self.assertIn("needs: [resolve, python, javascript, c-packages, crates-io]", release)
         checks = (ROOT / ".github/workflows/usql-release-checks.yml").read_text()
         self.assertIn("types: [ready_for_review]", checks)
         self.assertNotIn("  push:", checks)

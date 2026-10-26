@@ -174,6 +174,14 @@ The following checklist records the live delivery state across all fourteen orig
 
 ## Verification record
 
+### Automatic qualification inventory correction
+
+The ready-for-review batch for `2662f383fef9b089e39da82cb9bbf1d035beeccc` exposed two verification maintenance omissions: the performance inventory still named removed or replaced rule-input tests, and the usql release test expected a dependency list without the C package build. The PR returned to draft. The failed Linux archive job and its skipped regression execution are not passing evidence; the failed repository and usql checks also remain recorded against that source. No workflow was manually dispatched, rerun or cancelled.
+
+The correction reconciles all 44 stale entries with the existing native query owners. Nine entries follow moved or replaced tests, 35 entries for retired eager event/input staging and selection machinery are removed, and seven entries cover the current native collation, pruning, query references, folded VALUES memory and source-analysis work. The [inventory rationale](../../benchmarks/regressions/README.md) identifies the earlier implementation changes. The retained image limits remain below 2MiB for 32MiB mutation and 64MiB RETURNING workloads; the existing folded VALUES test additionally bounds a 16MiB input and copied plan below 8MiB. No product algorithm, limit or failure-detection rule is changed by this correction. The inventory now names 1,841 owner tests and 2,586 exact parameter cases; 1,825 entries are byte-for-byte unchanged as parsed records.
+
+Local verification passes all 577 repository policy tests with one platform-dependent skip after enabling the process inspection required by subprocess-cleanup tests. Rebuilt owner executables list exactly the required cases for all sixteen changed entries, and all nineteen executions pass without ignored cases. The four Engine cases each replay the independent 188 INSERT and 77 UPDATE/DELETE references on Memory, native SQLite, SQLite KV and redb. Dependency direction, Engine ownership and the single integration-harness checks pass. Automatic platform, package, sanitizer, FDW and final Linux/macOS regression qualification remain required.
+
 ### Set-returning rule input correction and final local review
 
 Correction `6d97c4c38f1569117486d26a51ee92f7d39344ff` addresses the open-issue audit finding that removing an unused set-returning output from INSERT SELECT reduced the rows driving each rule action. Preserving that output also exposed lost single-VALUES provenance in the existing runtime expansion. SQL now retains its single target-list identity when producing the executable source; Planner consults SQL's existing routine classification before removing an output that determines cardinality. Execution passes the same routine catalog through its existing pruning adapter. No state repair, extra Engine algorithm or external dependency modification is introduced.
