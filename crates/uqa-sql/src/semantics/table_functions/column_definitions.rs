@@ -201,9 +201,8 @@ fn builtin_result_class(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> ResultClass {
-    let builtin =
-        crate::semantics::builtin_function_dispatch_name(&request.name.to_ascii_lowercase());
-    match builtin.as_str() {
+    let builtin = crate::semantics::builtin_function_dispatch_name(request.name);
+    match builtin.as_ref() {
         "json_each"
         | "jsonb_each"
         | "json_each_text"

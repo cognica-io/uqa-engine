@@ -8,7 +8,7 @@
 
 use crate::registry::FunctionKind;
 use crate::{SQLError, ScalarExpr};
-use std::sync::LazyLock;
+use std::{borrow::Cow, sync::LazyLock};
 use uqa_core::Value;
 
 /// Executor-only carrier for `PostgreSQL` 18's `merge_action()` value. The attribute has no SQL name and therefore cannot collide with a target or source column named `_merge_action`.
@@ -32,9 +32,9 @@ pub fn function_implicit_row_input(
 
 /// Resolve reserved system-schema aliases only when the local name belongs to
 /// that schema's built-in surface. Ordinary qualified names stay intact for
-/// runtime callbacks and user-defined routine lookup.
-pub fn builtin_function_dispatch_name(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
+/// runtime callbacks and user-defined routine lookup. Already normalized names borrow the original full name or local-name slice; ASCII case folding owns one buffer.
+pub fn builtin_function_dispatch_name(name: &str) -> Cow<'_, str> {
+    let lower = lowercase_function_name(name);
     let Some((schema, local)) = lower.split_once('.') else {
         return lower;
     };
@@ -43,15 +43,30 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
         "pg_catalog" => {
             crate::registry::is_registered(local)
                 || crate::type_resolution::is_fixed_builtin(local)
+                || crate::expr::variadic_any::is_variadic_any(local)
                 || crate::ast::is_builtin_aggregate_function(local)
                 || is_pg_catalog_function(local)
         }
         _ => false,
     };
-    if is_builtin {
-        local.to_string()
+    if !is_builtin {
+        return lower;
+    }
+    let offset = schema.len() + 1;
+    match lower {
+        Cow::Borrowed(lower) => Cow::Borrowed(&lower[offset..]),
+        Cow::Owned(mut lower) => {
+            lower.drain(..offset);
+            Cow::Owned(lower)
+        }
+    }
+}
+
+pub(crate) fn lowercase_function_name(name: &str) -> Cow<'_, str> {
+    if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Cow::Owned(name.to_ascii_lowercase())
     } else {
-        lower
+        Cow::Borrowed(name)
     }
 }
 
@@ -376,7 +391,7 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
 
 pub fn retrieval_function(name: &str) -> bool {
     matches!(
-        name.to_ascii_lowercase().as_str(),
+        lowercase_function_name(name).as_ref(),
         "text_match"
             | "bayesian_match"
             | "fts_match"
@@ -422,7 +437,7 @@ pub fn expect_column_name(expr: &ScalarExpr, label: &str) -> Result<String, SQLE
 
 #[cfg(test)]
 mod tests {
-    use super::builtin_function_dispatch_name;
+    use super::{builtin_function_dispatch_name, Cow};
 
     #[test]
     fn builtin_dispatch_preserves_schema_identity() {
@@ -436,6 +451,15 @@ mod tests {
             "sum",
             "array_agg",
             "percentile_cont",
+            "concat",
+            "concat_ws",
+            "format",
+            "json_build_object",
+            "json_build_array",
+            "jsonb_build_object",
+            "jsonb_build_array",
+            "num_nulls",
+            "num_nonnulls",
         ] {
             assert_eq!(builtin_function_dispatch_name(name), name);
             assert_eq!(
@@ -456,5 +480,95 @@ mod tests {
             builtin_function_dispatch_name("pg_catalog.custom_function"),
             "pg_catalog.custom_function"
         );
+    }
+
+    #[test]
+    fn normalized_dispatch_names_borrow_the_original_identifier() {
+        for (name, expected, offset) in [
+            ("length", "length", 0),
+            ("pg_catalog.length", "length", 11),
+            ("pg_catalog.count", "count", 11),
+            ("pg_catalog.concat", "concat", 11),
+            ("ag_catalog.cypher", "cypher", 11),
+            ("public.length", "public.length", 0),
+            ("pg_catalog.custom", "pg_catalog.custom", 0),
+            ("ag_catalog.length", "ag_catalog.length", 0),
+            ("\"pg_catalog\".length", "\"pg_catalog\".length", 0),
+            ("public.Éclair", "public.Éclair", 0),
+            ("", "", 0),
+        ] {
+            // Initialize immutable builtin metadata outside the per-call allocation measurement.
+            assert_eq!(builtin_function_dispatch_name(name), expected);
+            let allocations = allocation_counter::measure(|| {
+                let actual = builtin_function_dispatch_name(name);
+                assert!(matches!(actual, Cow::Borrowed(_)));
+                assert_eq!(actual, expected);
+                assert_eq!(actual.as_ptr(), name.as_bytes()[offset..].as_ptr());
+            });
+            assert_eq!(allocations.count_total, 0, "{name}: {allocations:?}");
+        }
+        let name = format!("public.{}", "x".repeat(4 * 1024 * 1024));
+        let allocations = allocation_counter::measure(|| {
+            assert!(matches!(
+                builtin_function_dispatch_name(&name),
+                Cow::Borrowed(_)
+            ));
+        });
+        assert_eq!(allocations.count_total, 0, "{allocations:?}");
+    }
+
+    #[test]
+    fn dispatch_case_folding_owns_one_buffer_and_preserves_schema_selection() {
+        for (name, expected) in [
+            ("LENGTH", "length"),
+            ("PG_CATALOG.COUNT", "count"),
+            ("AG_CATALOG.CYPHER", "cypher"),
+            ("PUBLIC.LENGTH", "public.length"),
+            ("PG_CATALOG.CUSTOM", "pg_catalog.custom"),
+            ("PUBLIC.ÉCLAIR", "public.Éclair"),
+        ] {
+            assert_eq!(builtin_function_dispatch_name(name), expected);
+            let allocations = allocation_counter::measure(|| {
+                let actual = builtin_function_dispatch_name(name);
+                assert!(matches!(actual, Cow::Owned(_)));
+                assert_eq!(actual, expected);
+            });
+            assert_eq!(allocations.count_total, 1, "{name}: {allocations:?}");
+            assert_eq!(allocations.bytes_total, name.len() as u64, "{name}");
+        }
+    }
+
+    #[test]
+    fn aggregate_classification_borrows_identifiers_in_every_case() {
+        let long = "x".repeat(4 * 1024 * 1024);
+        for (name, expected) in [
+            ("count", true),
+            ("CoUnT", true),
+            ("PERCENTILE_CONT", true),
+            ("jsonb_object_agg", true),
+            ("pg_catalog.count", false),
+            ("\"count\"", false),
+            ("coünt", false),
+            (long.as_str(), false),
+        ] {
+            let allocations = allocation_counter::measure(|| {
+                assert_eq!(crate::ast::is_builtin_aggregate_function(name), expected);
+            });
+            assert_eq!(allocations.count_total, 0, "{allocations:?}");
+        }
+    }
+
+    #[test]
+    fn retrieval_classification_borrows_normalized_function_names() {
+        for (name, expected) in [("text_match", true), ("knn_match", true), ("length", false)] {
+            let allocations = allocation_counter::measure(|| {
+                assert_eq!(super::retrieval_function(name), expected);
+            });
+            assert_eq!(allocations.count_total, 0, "{name}: {allocations:?}");
+            assert_eq!(
+                super::retrieval_function(&name.to_ascii_uppercase()),
+                expected
+            );
+        }
     }
 }

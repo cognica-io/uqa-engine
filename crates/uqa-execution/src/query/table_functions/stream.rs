@@ -94,13 +94,13 @@ fn ordinality_column(call: &TableFunctionCall<'_>, position: usize) -> String {
 }
 
 /// The dispatch name of a built-in set-returning function that this module streams.
-fn streaming_builtin(call: &TableFunctionCall<'_>) -> Option<String> {
+fn streaming_builtin<'a>(call: &TableFunctionCall<'a>) -> Option<std::borrow::Cow<'a, str>> {
     if call.binding.is_some_and(|binding| !binding.builtin) {
         return None;
     }
-    let lower = uqa_sql::semantics::builtin_function_dispatch_name(&call.name.to_ascii_lowercase());
+    let lower = uqa_sql::semantics::builtin_function_dispatch_name(call.name);
     matches!(
-        lower.as_str(),
+        lower.as_ref(),
         "generate_series"
             | "pg_listening_channels"
             | "unnest"

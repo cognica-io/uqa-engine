@@ -95,7 +95,7 @@ pub fn function_volatility_with_binding(
     if is_intrinsic_scalar_syntax(binding) || builtin == FunctionVolatility::Volatile {
         return builtin;
     }
-    let identity = name.to_ascii_lowercase();
+    let identity = super::functions::lowercase_function_name(name);
 
     // Registrations made through the original APIs retain the conservative
     // VOLATILE default. Explicit options let pure callbacks participate in
@@ -127,7 +127,7 @@ pub fn builtin_function_volatility(
     if is_intrinsic_scalar_syntax(binding) {
         return FunctionVolatility::Immutable;
     }
-    let lower = builtin_function_dispatch_name(&name.to_ascii_lowercase());
+    let lower = builtin_function_dispatch_name(name);
     if builtin_is_volatile(&lower) {
         return FunctionVolatility::Volatile;
     }
@@ -137,7 +137,7 @@ pub fn builtin_function_volatility(
     // statement-stable contract.  All remaining built-ins are value-pure.
     if crate::registry::is_registered(&lower)
         || matches!(
-            lower.as_str(),
+            lower.as_ref(),
             "current_schema"
                 | "concat"
                 | "concat_ws"

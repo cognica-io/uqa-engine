@@ -233,7 +233,7 @@ fn is_constant(
             && order_by.is_empty()
             && !uqa_sql::semantics::is_builtin_aggregate(expression)
             && !uqa_sql::semantics::sets::validation::builtin_returns_set(
-                &uqa_sql::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
+                &uqa_sql::semantics::builtin_function_dispatch_name(name),
             )
             && uqa_sql::semantics::volatility::builtin_function_volatility(
                 name,
@@ -557,7 +557,7 @@ fn strict_null_expression(expression: &ScalarExpr) -> Result<bool, SQLError> {
             uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
                 == Some(true)
                 && !uqa_sql::semantics::sets::validation::builtin_returns_set(
-                    &uqa_sql::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
+                    &uqa_sql::semantics::builtin_function_dispatch_name(name),
                 )
                 && args.iter().try_fold(false, |found, argument| {
                     Ok::<_, SQLError>(found || null(argument)?)

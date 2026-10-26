@@ -336,7 +336,7 @@ fn function_may_mutate_engine(
     };
     let mutates_database_directly = cypher_mutates
         || matches!(
-            dispatch_name.as_str(),
+            dispatch_name.as_ref(),
             "create_analyzer"
                 | "drop_analyzer"
                 | "set_table_analyzer"
@@ -355,13 +355,13 @@ fn function_may_mutate_engine(
         || context
             .catalog
             .registered_runtime_function_may_mutate_engine(&identity);
-    let temporary_sequence_call = matches!(dispatch_name.as_str(), "nextval" | "setval")
+    let temporary_sequence_call = matches!(dispatch_name.as_ref(), "nextval" | "setval")
         && sequence_function_targets_temporary(context, args)?;
     let builtin_requires_mutating_execution =
         matches!(
-            dispatch_name.as_str(),
+            dispatch_name.as_ref(),
             "random" | "setseed" | "pg_notify" | "fts_match" | "multi_field_match"
-        ) || (matches!(dispatch_name.as_str(), "nextval" | "setval") && !temporary_sequence_call);
+        ) || (matches!(dispatch_name.as_ref(), "nextval" | "setval") && !temporary_sequence_call);
     let sql_routine_mutates = classification.include_session_mutations
         && sql_routine_may_mutate_engine(
             context,
@@ -373,7 +373,7 @@ fn function_may_mutate_engine(
         )?;
     let sequence_lock_scope = classification.include_transaction_scopes
         && matches!(
-            dispatch_name.as_str(),
+            dispatch_name.as_ref(),
             "nextval" | "currval" | "lastval" | "setval"
         );
     Ok(mutates_database_directly

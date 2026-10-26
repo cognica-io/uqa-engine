@@ -601,3 +601,57 @@ fn borrowed_view_inspection_propagates_the_first_catalog_error() {
     assert_eq!(error.to_string(), "internal error: view catalog failure");
     assert_eq!(*catalog.reads.borrow(), ["broken"]);
 }
+
+#[test]
+fn builtin_volatility_inspection_borrows_normalized_names() {
+    for (name, expected) in [
+        ("length", FunctionVolatility::Immutable),
+        ("pg_catalog.length", FunctionVolatility::Immutable),
+        ("count", FunctionVolatility::Immutable),
+        ("pg_catalog.count", FunctionVolatility::Immutable),
+        ("random", FunctionVolatility::Volatile),
+        ("pg_catalog.nextval", FunctionVolatility::Volatile),
+        ("concat", FunctionVolatility::Stable),
+        ("pg_catalog.concat", FunctionVolatility::Stable),
+    ] {
+        assert_eq!(
+            super::function_volatility(&EmptyCatalog, name, 1),
+            expected,
+            "{name}"
+        );
+        let allocations = allocation_counter::measure(|| {
+            assert_eq!(super::function_volatility(&EmptyCatalog, name, 1), expected);
+        });
+        assert_eq!(allocations.count_total, 0, "{name}: {allocations:?}");
+    }
+}
+
+#[test]
+fn qualified_variadic_volatility_matches_postgresql_without_copying_names() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("variadic.pg18.json")).unwrap();
+    for case in reference["cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let expected = match case["volatility"].as_str().unwrap() {
+            "s" => FunctionVolatility::Stable,
+            "i" => FunctionVolatility::Immutable,
+            other => panic!("unexpected reference volatility {other}"),
+        };
+        for name in [name.to_string(), format!("pg_catalog.{name}")] {
+            assert_eq!(
+                super::function_volatility(&EmptyCatalog, &name, 2),
+                expected,
+                "{name}"
+            );
+            let allocations = allocation_counter::measure(|| {
+                assert_eq!(
+                    super::function_volatility(&EmptyCatalog, &name, 2),
+                    expected,
+                    "{name}"
+                );
+                assert!(crate::expr::variadic_any::is_variadic_any(&name));
+            });
+            assert_eq!(allocations.count_total, 0, "{name}: {allocations:?}");
+        }
+    }
+}

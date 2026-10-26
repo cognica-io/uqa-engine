@@ -450,7 +450,7 @@ pub fn table_function_empty_schema(
     output_width: usize,
     ordinality: bool,
 ) -> Vec<String> {
-    let lower = crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase());
+    let lower = crate::semantics::builtin_function_dispatch_name(name);
     let columns = if lower == "unnest" {
         let width = output_width.max(1);
         let default_column = if width == 1 {
@@ -460,7 +460,7 @@ pub fn table_function_empty_schema(
         };
         vec![default_column.to_string(); width]
     } else {
-        match lower.as_str() {
+        match lower.as_ref() {
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 vec!["key".into(), "value".into()]
             }
@@ -627,9 +627,8 @@ pub fn table_function_column_types(
             user_invocation,
         ))
     } else {
-        let normalized =
-            crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-        align(match normalized.as_str() {
+        let normalized = crate::semantics::builtin_function_dispatch_name(name);
+        align(match normalized.as_ref() {
             "pg_listening_channels" => vec![Some(ColumnType::Text)],
             "generate_series" => vec![resolve_table_function_binding(
                 routines,

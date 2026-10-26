@@ -134,7 +134,7 @@ pub(super) fn build_table_function_rows_with_row(
     if has_named_args {
         return Err(unknown_function_error(&lower, &call_args));
     }
-    match lower.as_str() {
+    match lower.as_ref() {
         "pg_get_sequence_data" => singleton_record_rows(
             context.session.sequence_data(&evaluated)?,
             &["last_value", "is_called"],

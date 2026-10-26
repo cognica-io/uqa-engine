@@ -235,7 +235,7 @@ fn inspect_call(
         properties.nonstrict |=
             crate::expr::bound_scalar_function_strictness(name, binding, arity) != Some(true);
         properties.set_returning |= crate::semantics::sets::validation::builtin_returns_set(
-            &crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
+            &crate::semantics::builtin_function_dispatch_name(name),
         );
         // Internal routines have the catalog's default cost of one
         // cpu_operator_cost. Unclassified host callbacks are expensive.

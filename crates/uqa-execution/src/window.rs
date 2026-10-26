@@ -518,12 +518,12 @@ fn window_function(
     };
     let required = |position: usize| {
         argument(position).ok_or_else(|| SQLError::BadArity {
-            name: name.clone(),
+            name: name.to_string(),
             expected: format!(">={}", position + 1),
             actual: slot.args.len(),
         })
     };
-    Ok(match name.as_str() {
+    Ok(match name.as_ref() {
         "row_number" => WindowFunction::RowNumber,
         "rank" => WindowFunction::Rank,
         "dense_rank" => WindowFunction::DenseRank,
