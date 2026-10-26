@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,19 +63,20 @@ def main() -> None:
     if args.profile == "release":
         command += ["--release"]
     command += ["--", "--print=native-static-libs"]
-    result = subprocess.run(command, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    (build / "native-build.log").write_text(result.stdout)
-    print(result.stdout, end="", flush=True)
+    result = subprocess.run(command, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    (build / "native-build.log").write_bytes(result.stdout)
+    sys.stdout.buffer.write(result.stdout)
+    sys.stdout.buffer.flush()
     result.check_returncode()
-    matches = re.findall(r"native-static-libs:\s*([^\r\n]+)", result.stdout)
+    matches = re.findall(rb"native-static-libs:\s*([^\r\n]+)", result.stdout)
     if not matches:
         raise ValueError("rustc did not report native static-library dependencies")
-    flags = matches[-1].strip()
+    flags = matches[-1].strip().decode("utf-8")
     metadata = subprocess.check_output(
         ["cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", args.target,
-         "--manifest-path", str(ROOT / "crates/uqa-ffi/Cargo.toml"), *feature_args], cwd=ROOT, env=env, text=True)
+         "--manifest-path", str(ROOT / "crates/uqa-ffi/Cargo.toml"), *feature_args], cwd=ROOT, env=env)
     metadata_path = build / "cargo-metadata.json"
-    metadata_path.write_text(metadata)
+    metadata_path.write_bytes(metadata)
     target_directory = Path(json.loads(metadata)["target_directory"])
     archive = target_directory / args.target / ("release" if args.profile == "release" else "debug")
     archive /= "uqa.lib" if "windows" in args.target else "libuqa.a"
@@ -90,9 +92,9 @@ def main() -> None:
     subprocess.run(["cmake", "--build", str(build / "cmake"), "--config", "Release"], check=True, env=env)
     subprocess.run(["cmake", "--install", str(build / "cmake"), "--config", "Release"], check=True, env=env)
     manifest_path = args.prefix / "share/uqa/uqa-build.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_bytes())
     manifest["native_dynamic_libraries"] = dynamic_dependencies(args.prefix, args.target)
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

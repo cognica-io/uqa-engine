@@ -234,7 +234,7 @@ def main() -> None:
     parser.add_argument("--symbols-only", action="store_true")
     args = parser.parse_args()
     prefix = args.prefix.resolve(strict=True)
-    manifest = json.loads((prefix / "share/uqa/uqa-build.json").read_text())
+    manifest = json.loads((prefix / "share/uqa/uqa-build.json").read_bytes())
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if manifest["source_revision"] != revision and not (args.allow_unknown_revision and manifest["source_revision"] == "unknown"):
         raise ValueError("Installed library source revision differs from the reviewed source")

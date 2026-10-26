@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import os
@@ -32,6 +33,7 @@ def module(name: str, filename: str):
 
 
 RELEASE = module("c_release", "c-bindings-release.py")
+BUILD = module("c_build", "build-c-bindings.py")
 METADATA = module("c_metadata", "c-bindings-metadata.py")
 LICENSES = module("c_licenses", "check-release-licenses.py")
 DEPENDENCIES = module("c_dependency_licenses", "c_bindings_licenses.py")
@@ -65,6 +67,49 @@ def fixture(prefix: Path, target: str = TARGET):
 
 
 class CPackageVerification(unittest.TestCase):
+    def test_cargo_metadata_and_logs_preserve_utf8_on_a_legacy_locale(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            prefix, build = work / "prefix", work / "build"
+            fixture(prefix, "x86_64-pc-windows-msvc")
+            metadata = json.dumps({"target_directory": str(work / "Łibrary target"),
+                                   "authors": ["Łucja"]}, ensure_ascii=False).encode("utf-8")
+            build_log = "Compiling Łibrary\nnative-static-libs: bcrypt.lib\n".encode("utf-8")
+            real_output = subprocess.check_output
+
+            def output(command, **options):
+                if command[:2] == ["git", "rev-parse"]:
+                    return COMMIT
+                self.assertEqual(command[:2], ["cargo", "metadata"])
+                # Exercise real pipe bytes with Windows' legacy text-decoding default.
+                if options.get("text") and "encoding" not in options:
+                    options["encoding"] = "cp1252"
+                return real_output([sys.executable, "-c",
+                                    "import sys;sys.stdout.buffer.write(" + repr(metadata) + ")"], **options)
+
+            def run(command, **options):
+                if command[:2] == ["cargo", "rustc"]:
+                    data = build_log.decode(options.get("encoding", "cp1252")) if options.get("text") else build_log
+                    return subprocess.CompletedProcess(command, 0, data)
+                if command[0] == sys.executable:
+                    return original_run(command, **options)
+                self.assertEqual(command[0], "cmake")
+                return subprocess.CompletedProcess(command, 0)
+
+            original_run = subprocess.run
+            console = mock.Mock(buffer=io.BytesIO())
+            arguments = ["build-c-bindings.py", "--target", "x86_64-pc-windows-msvc",
+                         "--prefix", str(prefix), "--build-directory", str(build)]
+            with mock.patch.object(sys, "argv", arguments), mock.patch.object(sys, "stdout", console), \
+                    mock.patch.object(BUILD.subprocess, "check_output", side_effect=output), \
+                    mock.patch.object(BUILD.subprocess, "run", side_effect=run), \
+                    mock.patch.object(BUILD, "dynamic_dependencies", return_value=["KERNEL32.dll"]):
+                BUILD.main()
+            self.assertEqual((build / "cargo-metadata.json").read_bytes(), metadata)
+            self.assertEqual((build / "native-build.log").read_bytes(), build_log)
+            self.assertEqual(console.buffer.getvalue(), build_log)
+            self.assertEqual(json.loads((build / "cargo-metadata.json").read_bytes())["authors"], ["Łucja"])
+
     def test_bundled_native_build_source_keeps_its_own_license(self):
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary)
@@ -74,7 +119,7 @@ class CPackageVerification(unittest.TestCase):
             (documentation / "COPYRIGHT-library.html").write_text("Rust runtime inventory")
             packages, nodes = [], []
             for name in ("uqa-ffi", "openssl-sys", "openssl-src", "cc"):
-                directory = work / name
+                directory = work / ("Łibrary-" + name)
                 directory.mkdir()
                 (directory / "LICENSE").write_text(name + " license")
                 packages.append({"id": name, "name": name, "version": "1.0.0",
@@ -86,10 +131,10 @@ class CPackageVerification(unittest.TestCase):
                                 for name in ("openssl-src", "cc")]
             # The source wrapper's root license does not replace the bundled C
             # library's own license, which is the actual distributed native code.
-            (work / "openssl-src/openssl").mkdir()
-            (work / "openssl-src/openssl/LICENSE.txt").write_text("OpenSSL native license")
+            (work / "Łibrary-openssl-src/openssl").mkdir()
+            (work / "Łibrary-openssl-src/openssl/LICENSE.txt").write_text("OpenSSL native license")
             metadata = work / "metadata.json"
-            metadata.write_text(json.dumps({"packages": packages, "resolve": {"nodes": nodes}}))
+            metadata.write_bytes(json.dumps({"packages": packages, "resolve": {"nodes": nodes}}, ensure_ascii=False).encode("utf-8"))
             with mock.patch.object(DEPENDENCIES.subprocess, "check_output", side_effect=[str(toolchain), "rustc fixture"]):
                 files, inventory = DEPENDENCIES.collect(metadata, set())
             self.assertEqual(files["THIRD-PARTY/crates/openssl-src-1.0.0/openssl/LICENSE.txt"], b"OpenSSL native license")

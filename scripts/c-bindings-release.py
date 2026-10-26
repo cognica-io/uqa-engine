@@ -108,7 +108,7 @@ def validate_inventory(entries: dict[str, dict], manifest: dict, target: str, re
 
 
 def package(prefix: Path, target: str, output: Path) -> None:
-    manifest = json.loads((prefix / "share/uqa/uqa-build.json").read_text())
+    manifest = json.loads((prefix / "share/uqa/uqa-build.json").read_bytes())
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     paths = sorted(path for path in prefix.rglob("*") if path.is_file() or path.is_symlink())
     entries = {}
