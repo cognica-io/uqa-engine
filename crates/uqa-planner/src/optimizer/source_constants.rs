@@ -6,13 +6,13 @@
 
 //! Propagate admitted constants from VALUES and source-free subqueries, preserving empty-input grouping.
 
-use std::{borrow::Cow, collections::BTreeMap};
+use std::collections::BTreeMap;
 
 use crate::{QueryBlockPlan, RelationalPlan, SourcePlan};
 use uqa_sql::routines::declaration::RoutineTypeCatalog;
 use uqa_sql::{ColumnType, SQLError, ScalarExpr};
 
-type ConstantRow<'a> = (Cow<'a, [ScalarExpr]>, Cow<'a, [String]>);
+type Constants = BTreeMap<String, Option<ScalarExpr>>;
 
 #[cfg(test)]
 mod tests;
@@ -25,37 +25,10 @@ pub(super) fn propagate_source_constants(
     let Some(source) = &block.from else {
         return Ok(());
     };
-    let view = constant_view_source(source, views)?;
-    let Some((row, columns)) = single_constant_row(view.as_ref().unwrap_or(source), types) else {
+    let Some(constants) = source_constants(source, types, views)? else {
         return Ok(());
     };
     let qualifier = source.visible_qualifier().map(str::to_string);
-    let mut constants = BTreeMap::<String, Option<ScalarExpr>>::new();
-    for (index, value) in row.iter().enumerate() {
-        let name = columns
-            .get(index)
-            .cloned()
-            .unwrap_or_else(|| format!("column{}", index + 1));
-        let value = constant_literal(value, types).then(|| match value {
-            // SELECT targets and one-row VALUES resolve unknown literals to text before an outer query can observe their type. Substitution must preserve that boundary.
-            ScalarExpr::Literal(value @ (uqa_core::Value::Null | uqa_core::Value::Str(_))) => {
-                ScalarExpr::TypedLiteral {
-                    collation_oid: None,
-                    composite_source: None,
-                    value: value.clone(),
-                    ty: "text".into(),
-                    bound_type: Some(ColumnType::Text),
-                    parameter_index: None,
-                }
-            }
-            ScalarExpr::Cast { expr, .. } => expr.as_ref().clone(),
-            value => value.clone(),
-        });
-        constants
-            .entry(name)
-            .and_modify(|value| *value = None)
-            .or_insert(value);
-    }
     let mut replace = |expression: &mut ScalarExpr| {
         let column = match expression {
             ScalarExpr::Column(column) => Some(column.as_str()),
@@ -102,92 +75,132 @@ pub(super) fn propagate_source_constants(
     Ok(())
 }
 
-fn constant_view_source(
+fn source_constants(
     source: &SourcePlan,
+    types: Option<&dyn RoutineTypeCatalog>,
     views: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
-) -> Result<Option<SourcePlan>, SQLError> {
-    let (
-        Some(views),
+) -> Result<Option<Constants>, SQLError> {
+    match source {
         SourcePlan::Table {
             name,
             bound_columns,
             column_aliases,
             ..
-        },
-    ) = (views, source)
-    else {
-        return Ok(None);
-    };
-    let Some(body) = views.view_query(name)? else {
-        return Ok(None);
-    };
-    let mut names = bound_columns.clone().unwrap_or_default();
-    for (index, alias) in column_aliases.iter().enumerate() {
-        if let Some(name) = names.get_mut(index) {
-            name.clone_from(alias);
-        } else {
-            names.push(alias.clone());
+        } => {
+            let Some(views) = views else {
+                return Ok(None);
+            };
+            let mut constants = None;
+            views.with_view_query(name, &mut |body| {
+                // Inspect outputs without replacing the view source: authorization, cardinality and dependency observations still execute normally.
+                constants = query_constants(
+                    body,
+                    |index| {
+                        column_aliases
+                            .get(index)
+                            .or_else(|| bound_columns.as_ref().and_then(|names| names.get(index)))
+                    },
+                    types,
+                );
+                Ok(constants.is_some())
+            })?;
+            Ok(constants)
         }
-    }
-    // Inspect literal outputs without removing the view source: its authorization, row count and dependency observations still execute normally.
-    Ok(Some(SourcePlan::Subquery {
-        captured_output: None,
-        lateral: false,
-        body: Box::new(body),
-        alias: None,
-        column_aliases: names,
-    }))
-}
-
-fn single_constant_row<'a>(
-    source: &'a SourcePlan,
-    types: Option<&dyn RoutineTypeCatalog>,
-) -> Option<ConstantRow<'a>> {
-    match source {
         SourcePlan::Values {
             rows,
             column_aliases,
             internal_relation: None,
             ..
-        } if rows.len() == 1 => Some((Cow::Borrowed(&rows[0]), Cow::Borrowed(column_aliases))),
+        } if rows.len() == 1 => Ok(Some(constants_from_values(
+            &rows[0],
+            |index| value_column_name(column_aliases.get(index), index),
+            types,
+        ))),
         SourcePlan::Subquery {
             captured_output: None,
             body,
             column_aliases,
             ..
-        } if body.ctes.is_empty() => match &body.root {
-            RelationalPlan::Values { rows, subqueries }
-                if rows.len() == 1 && subqueries.is_empty() =>
-            {
-                Some((Cow::Borrowed(&rows[0]), Cow::Borrowed(column_aliases)))
-            }
-            RelationalPlan::QueryBlock(inner)
-                if inner.from.is_none()
-                    && inner
-                        .projections
-                        .iter()
-                        .all(|p| constant_literal(&p.expr, types)) =>
-            {
-                let columns = inner
+        } => Ok(query_constants(
+            body,
+            |index| column_aliases.get(index),
+            types,
+        )),
+        _ => Ok(None),
+    }
+}
+
+fn query_constants<'a>(
+    body: &uqa_sql::plan::QueryPlan,
+    column_name: impl Fn(usize) -> Option<&'a String>,
+    types: Option<&dyn RoutineTypeCatalog>,
+) -> Option<Constants> {
+    if !body.ctes.is_empty() {
+        return None;
+    }
+    match &body.root {
+        RelationalPlan::Values { rows, subqueries } if rows.len() == 1 && subqueries.is_empty() => {
+            Some(constants_from_values(
+                &rows[0],
+                |index| value_column_name(column_name(index), index),
+                types,
+            ))
+        }
+        RelationalPlan::QueryBlock(inner)
+            if inner.from.is_none()
+                && inner
                     .projections
                     .iter()
-                    .enumerate()
-                    .map(|(i, projection)| {
-                        column_aliases
-                            .get(i)
-                            .cloned()
-                            .unwrap_or_else(|| uqa_sql::semantics::projection_label_at(projection))
+                    .all(|p| constant_literal(&p.expr, types)) =>
+        {
+            Some(constants_from_values(
+                inner.projections.iter().map(|projection| &projection.expr),
+                |index| {
+                    column_name(index).cloned().unwrap_or_else(|| {
+                        uqa_sql::semantics::projection_label_at(&inner.projections[index])
                     })
-                    .collect();
-                Some((
-                    Cow::Owned(inner.projections.iter().map(|p| p.expr.clone()).collect()),
-                    Cow::Owned(columns),
-                ))
-            }
-            _ => None,
-        },
+                },
+                types,
+            ))
+        }
         _ => None,
     }
+}
+
+fn value_column_name(name: Option<&String>, index: usize) -> String {
+    name.cloned()
+        .unwrap_or_else(|| format!("column{}", index + 1))
+}
+
+fn constants_from_values<'a>(
+    values: impl IntoIterator<Item = &'a ScalarExpr>,
+    column_name: impl Fn(usize) -> String,
+    types: Option<&dyn RoutineTypeCatalog>,
+) -> Constants {
+    let mut constants = Constants::new();
+    for (index, value) in values.into_iter().enumerate() {
+        let name = column_name(index);
+        let value = constant_literal(value, types).then(|| match value {
+            // SELECT targets and one-row VALUES resolve unknown literals to text before an outer query can observe their type. Substitution must preserve that boundary.
+            ScalarExpr::Literal(value @ (uqa_core::Value::Null | uqa_core::Value::Str(_))) => {
+                ScalarExpr::TypedLiteral {
+                    collation_oid: None,
+                    composite_source: None,
+                    value: value.clone(),
+                    ty: "text".into(),
+                    bound_type: Some(ColumnType::Text),
+                    parameter_index: None,
+                }
+            }
+            ScalarExpr::Cast { expr, .. } => expr.as_ref().clone(),
+            value => value.clone(),
+        });
+        constants
+            .entry(name)
+            .and_modify(|value| *value = None)
+            .or_insert(value);
+    }
+    constants
 }
 
 fn constant_literal(expr: &ScalarExpr, types: Option<&dyn RoutineTypeCatalog>) -> bool {

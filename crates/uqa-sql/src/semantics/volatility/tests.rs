@@ -486,3 +486,118 @@ fn borrowed_volatility_inspection_keeps_query_mutation_and_utility_children() {
         );
     }
 }
+
+struct BorrowedViews {
+    definitions: Vec<(&'static str, QueryPlan)>,
+    reads: std::cell::RefCell<Vec<&'static str>>,
+}
+
+impl BorrowedViews {
+    fn query(sql: &str) -> QueryPlan {
+        let crate::plan::UnifiedPlan::Query(query) =
+            crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query expected")
+        };
+        *query
+    }
+
+    fn new(payload_bytes: usize) -> Self {
+        let mut leaf = Self::query("SELECT 'payload'");
+        leaf.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::Literal(uqa_core::Value::Str(text)) = expression {
+                *text = "x".repeat(payload_bytes);
+            }
+        });
+        Self {
+            definitions: vec![
+                ("root", Self::query("SELECT * FROM leaf")),
+                ("leaf", leaf),
+                ("cycle_a", Self::query("SELECT * FROM cycle_b")),
+                ("cycle_b", Self::query("SELECT * FROM cycle_a")),
+                ("effect", Self::query("SELECT nextval('ticks')")),
+            ],
+            reads: std::cell::RefCell::new(Vec::with_capacity(32)),
+        }
+    }
+}
+
+impl VolatilityCatalog for BorrowedViews {
+    fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+        None
+    }
+
+    fn routine_volatilities(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+    ) -> Option<Vec<FunctionVolatility>> {
+        None
+    }
+
+    fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+        panic!("semantic inspection must borrow the retained definition")
+    }
+
+    fn with_view_query(
+        &self,
+        name: &str,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<bool, SQLError>,
+    ) -> Result<Option<bool>, SQLError> {
+        if name == "broken" {
+            self.reads.borrow_mut().push("broken");
+            return Err(SQLError::Internal("view catalog failure".into()));
+        }
+        self.definitions
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(key, definition)| {
+                self.reads.borrow_mut().push(key);
+                read(definition)
+            })
+            .transpose()
+    }
+}
+
+#[test]
+fn transitive_view_inspection_borrows_payloads_and_revisits_independent_branches() {
+    for (sql, expected, reads) in [
+        ("SELECT * FROM root", false, vec!["root", "leaf"]),
+        (
+            "SELECT * FROM root a CROSS JOIN root b",
+            false,
+            vec!["root", "leaf", "root", "leaf"],
+        ),
+        ("SELECT * FROM cycle_a", false, vec!["cycle_a", "cycle_b"]),
+        (
+            "SELECT * FROM effect CROSS JOIN broken",
+            true,
+            vec!["effect"],
+        ),
+    ] {
+        let query = BorrowedViews::query(sql);
+        let small = BorrowedViews::new(1);
+        let large = BorrowedViews::new(4 * 1024 * 1024);
+        let measure = |catalog: &BorrowedViews| {
+            let allocations = allocation_counter::measure(|| {
+                assert_eq!(
+                    super::query_contains_volatile_function(catalog, &query).unwrap(),
+                    expected,
+                    "{sql}"
+                );
+            });
+            assert_eq!(*catalog.reads.borrow(), reads, "{sql}");
+            (allocations.count_total, allocations.bytes_total)
+        };
+        assert_eq!(measure(&small), measure(&large), "{sql}");
+    }
+}
+
+#[test]
+fn borrowed_view_inspection_propagates_the_first_catalog_error() {
+    let catalog = BorrowedViews::new(1);
+    let query = BorrowedViews::query("SELECT * FROM broken CROSS JOIN effect");
+    let error = super::query_contains_volatile_function(&catalog, &query).unwrap_err();
+    assert_eq!(error.to_string(), "internal error: view catalog failure");
+    assert_eq!(*catalog.reads.borrow(), ["broken"]);
+}

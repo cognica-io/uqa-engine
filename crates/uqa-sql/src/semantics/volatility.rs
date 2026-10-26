@@ -28,6 +28,15 @@ pub trait VolatilityCatalog {
         binding: Option<&FunctionBinding>,
     ) -> Option<Vec<FunctionVolatility>>;
     fn view_query(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
+
+    /// Lend the selected view plan for one read. Catalogs retaining immutable definitions can override this adapter without constructing an owned plan.
+    fn with_view_query(
+        &self,
+        name: &str,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<bool, SQLError>,
+    ) -> Result<Option<bool>, SQLError> {
+        self.view_query(name)?.as_ref().map(read).transpose()
+    }
 }
 
 use super::builtin_function_dispatch_name;
@@ -574,14 +583,13 @@ fn source_contains_volatile_function(
             if !visiting_views.insert(key.clone()) {
                 return Ok(false);
             }
-            let result = match catalog.view_query(name)? {
-                Some(view) => {
-                    query_contains_volatile_function_inner(catalog, &view, visiting_views, &|_| {
+            let result = catalog
+                .with_view_query(name, &mut |view| {
+                    query_contains_volatile_function_inner(catalog, view, visiting_views, &|_| {
                         false
                     })
-                }
-                None => Ok(false),
-            };
+                })
+                .map(|result| result.unwrap_or(false));
             visiting_views.remove(&key);
             result
         }
