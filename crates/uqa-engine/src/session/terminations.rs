@@ -228,6 +228,7 @@ impl Engine {
             self.sql_function_depth_limit(),
             self.runtime.cancellation.clone(),
             self.session.state.client_level(),
+            self.session.state.io_timing(),
         );
         runtime.function_context = std::sync::Arc::clone(&self.runtime.function_context);
         runtime.diagnostics = self.runtime.diagnostics.fork();

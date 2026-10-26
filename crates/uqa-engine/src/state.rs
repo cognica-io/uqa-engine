@@ -586,11 +586,13 @@ impl QueryRuntime {
     pub(super) fn new(
         function_depth_limit: usize,
         client_level: Arc<std::sync::atomic::AtomicU8>,
+        io_timing: Arc<AtomicBool>,
     ) -> Self {
         Self::with_cancellation(
             function_depth_limit,
             uqa_core::CancellationToken::new(),
             client_level,
+            io_timing,
         )
     }
 
@@ -598,10 +600,11 @@ impl QueryRuntime {
         function_depth_limit: usize,
         cancellation: uqa_core::CancellationToken,
         client_level: Arc<std::sync::atomic::AtomicU8>,
+        io_timing: Arc<AtomicBool>,
     ) -> Self {
         Self {
             function_context: Arc::new(std::sync::OnceLock::new()),
-            diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics::default(),
+            diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics::new(io_timing),
             statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),
             cancellation,

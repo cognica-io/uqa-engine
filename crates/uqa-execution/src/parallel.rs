@@ -284,6 +284,7 @@ mod cancellation_tests {
         token.cancel();
         let statement = crate::statement::thread_context::StatementThreadContext {
             retained_rows: crate::query::sources::retained_source::RetainedRowContext::default(),
+            io: uqa_core::io_usage::IOContext::default(),
             regex_cache: None,
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: Some(123),
@@ -301,6 +302,7 @@ mod cancellation_tests {
             let _detached = crate::statement::thread_context::StatementThreadContext {
                 retained_rows: crate::query::sources::retained_source::RetainedRowContext::default(
                 ),
+                io: uqa_core::io_usage::IOContext::default(),
                 regex_cache: None,
                 temporal_input: uqa_sql::expr::TemporalInputContext {
                     transaction_clock_micros: None,

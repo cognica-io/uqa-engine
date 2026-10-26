@@ -3810,6 +3810,7 @@ dependencies = [
  "criterion",
  "num-bigint",
  "num-traits",
+ "parking_lot",
  "proptest",
  "serde",
  "serde_json",

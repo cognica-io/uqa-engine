@@ -9,6 +9,7 @@
 use parking_lot::Mutex;
 use std::sync::Arc;
 use uqa_core::{
+    io_usage::{IOContext, IOObservation, IOOptions, IOUsage},
     memory::{Budgeted, BudgetedString, BudgetedVec, MemoryError, MemoryReservation},
     vector_execution::VectorSearchOperation,
     VectorGeneration,
@@ -72,6 +73,7 @@ impl Failure {
 pub struct InvocationDiagnostics {
     control: StorageReadControl,
     parent: Option<CapturedDiagnostics>,
+    io: Option<IOObservation>,
     records: Mutex<Records>,
 }
 
@@ -80,8 +82,22 @@ impl InvocationDiagnostics {
         control: StorageReadControl,
         parent: Option<CapturedDiagnostics>,
         timing: Option<bool>,
+        io_options: IOOptions,
+        io_timing: Arc<std::sync::atomic::AtomicBool>,
     ) -> StorageBackendResult<CapturedDiagnostics> {
         control.check()?;
+        let parent_io =
+            IOContext::for_observation(parent.as_ref().and_then(|parent| parent.io.as_ref()));
+        let io = if io_options.buffers || io_options.wal || parent_io.observation().is_some() {
+            Some(IOObservation::new(
+                control.memory(),
+                io_options,
+                io_timing,
+                parent_io.observation().cloned(),
+            )?)
+        } else {
+            None
+        };
         let records = Mutex::new(Records {
             searches: BudgetedVec::new(control.memory()),
             failed: None,
@@ -93,6 +109,7 @@ impl InvocationDiagnostics {
             Self {
                 control,
                 parent,
+                io,
                 records,
             },
             memory,
@@ -202,6 +219,12 @@ impl InvocationDiagnostics {
             |nodes| nodes.snapshot(&self.control),
         )?;
         Ok(CapturedExecution {
+            io_timing: self.io.as_ref().is_some_and(IOObservation::timing_enabled),
+            io: self
+                .io
+                .as_ref()
+                .map_or(Ok(IOUsage::default()), IOObservation::finish)
+                .map_err(|_| Failure::Measurement.error())?,
             vector_searches: std::mem::replace(
                 &mut records.searches,
                 BudgetedVec::new(self.control.memory()),
@@ -233,6 +256,8 @@ impl VectorSearchObserver for BoundObserver {
 }
 
 pub struct CapturedExecution {
+    pub io: IOUsage,
+    pub io_timing: bool,
     pub vector_searches: ExplainVectorSearches,
     pub nodes: BudgetedVec<uqa_sql::result::explain::ExplainNodeExecution>,
 }
@@ -256,8 +281,13 @@ impl DiagnosticsScope {
 impl Drop for DiagnosticsScope {
     fn drop(&mut self) {
         self.collector.records.lock().closed = true;
+        if let Some(io) = &self.collector.io {
+            let _ = io.finish();
+        }
     }
 }
 
+#[cfg(test)]
+mod io_tests;
 #[cfg(test)]
 mod tests;

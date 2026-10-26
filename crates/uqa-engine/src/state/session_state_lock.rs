@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! The lock over a session's transactional values, which keeps the settings that run outside the lock, the notice threshold and the lock timeout, current through every change, rollback and restore of those values.
+//! The lock over transactional session values publishes settings needed outside the lock through every change, rollback and restore.
 
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use uqa_sql::semantics::parameters::catalog::{find_parameter, message_levels};
@@ -26,16 +26,25 @@ pub(crate) struct SessionStateLock {
     cancellation: OnceLock<uqa_core::CancellationToken>,
     /// The `lock_timeout` in milliseconds when no assignment in the values names it: the client's startup value or the default.
     reset_lock_timeout_ms: AtomicU64,
+    /// Physical I/O can run while session state is locked. Its clock reads the effective setting published with every completed state write.
+    io_timing: Arc<AtomicBool>,
+    reset_io_timing: AtomicBool,
 }
 
 impl SessionStateLock {
     pub(crate) fn new(state: SessionStateSnapshot) -> Self {
+        let io_timing = state
+            .session_vars
+            .get("track_io_timing")
+            .is_some_and(|value| value == "on");
         Self {
             state: RwLock::new(state),
             client_level: Arc::new(AtomicU8::new(message_levels::NOTICE)),
             reset_client_level: AtomicU8::new(message_levels::NOTICE),
             cancellation: OnceLock::new(),
             reset_lock_timeout_ms: AtomicU64::new(0),
+            io_timing: Arc::new(AtomicBool::new(io_timing)),
+            reset_io_timing: AtomicBool::new(false),
         }
     }
 
@@ -93,9 +102,18 @@ impl SessionStateLock {
             .store(milliseconds, Ordering::Release);
         drop(self.write());
     }
+
+    pub(crate) fn io_timing(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.io_timing)
+    }
+
+    pub(crate) fn set_reset_io_timing(&self, enabled: bool) {
+        self.reset_io_timing.store(enabled, Ordering::Release);
+        drop(self.write());
+    }
 }
 
-/// Exclusive access to the session's values; dropping it publishes the `client_min_messages` they hold.
+/// Exclusive access to the session's values; dropping it publishes the effective settings to consumers outside the lock.
 pub(crate) struct SessionStateWriteGuard<'a> {
     guard: RwLockWriteGuard<'a, SessionStateSnapshot>,
     lock: &'a SessionStateLock,
@@ -117,6 +135,11 @@ impl DerefMut for SessionStateWriteGuard<'_> {
 
 impl Drop for SessionStateWriteGuard<'_> {
     fn drop(&mut self) {
+        let io_timing = self.guard.session_vars.get("track_io_timing").map_or_else(
+            || self.lock.reset_io_timing.load(Ordering::Acquire),
+            |setting| setting == "on",
+        );
+        self.lock.io_timing.store(io_timing, Ordering::Release);
         let level = self
             .guard
             .session_vars

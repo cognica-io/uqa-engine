@@ -19,6 +19,7 @@ use uqa_sql::{
 pub use uqa_sql::result::ExplainAnalysis;
 use uqa_sql::result::ExplainPhysicalPlan;
 
+mod buffers;
 mod costs;
 mod estimates;
 mod executions;
@@ -225,6 +226,9 @@ fn plan_text(
     }
     if let Some(analysis) = analysis {
         vector::append_text(&mut text, analysis, control)?;
+        if settings.buffers {
+            buffers::append_text(&mut text, analysis.io.temporary)?;
+        }
         serialization::append_text(&mut text, settings, analysis)?;
         measurements::append_text(&mut text, analysis.root, settings.timing)?;
         let _ = write!(text, "\n  affected_rows={}", analysis.affected_rows);
@@ -265,6 +269,9 @@ fn structured_plan<'a>(
     }
     if let Some(analysis) = analysis {
         measurements::properties(&mut plan, analysis.root, settings.timing)?;
+        if settings.buffers {
+            buffers::properties(&mut plan, analysis.io.temporary, analysis.io_timing)?;
+        }
         plan.insert("Affected Rows", P::Unsigned(analysis.affected_rows))?;
     }
     let mut payload = Object::new(control);

@@ -252,6 +252,8 @@ pub mod vector;
 
 /// Execution measurements supplied to EXPLAIN rendering.
 pub struct ExplainAnalysis {
+    pub io: uqa_core::io_usage::IOUsage,
+    pub io_timing: bool,
     pub vector_searches: vector::ExplainVectorSearches,
     pub node_executions: uqa_core::memory::BudgetedVec<explain::ExplainNodeExecution>,
     pub elapsed: std::time::Duration,

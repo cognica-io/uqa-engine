@@ -466,6 +466,15 @@ static PARAMETERS: &[ParameterDefinition] = &[
         ParameterFlags::REPORT,
     ),
     define(
+        "track_io_timing",
+        boolean(false),
+        ParameterContext::Superuser,
+        "Statistics / Cumulative Query and Index Statistics",
+        "Collects timing statistics for database I/O activity.",
+        None,
+        ParameterFlags::NONE,
+    ),
+    define(
         "transaction_deferrable",
         boolean(false),
         ParameterContext::User,

@@ -8,6 +8,7 @@
 
 use super::{CapturedDiagnostics, DiagnosticsScope, InvocationDiagnostics};
 use std::{cell::RefCell, marker::PhantomData, rc::Rc, sync::Arc};
+use uqa_core::io_usage::{IOContext, IOOptions, IOScope};
 use uqa_core::memory::Budgeted;
 use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
 
@@ -16,6 +17,7 @@ type Binding = Arc<Budgeted<InvocationBinding>>;
 #[derive(Default)]
 struct SessionIdentity {
     next_instance: std::sync::atomic::AtomicU64,
+    io_timing: Arc<std::sync::atomic::AtomicBool>,
 }
 
 thread_local! {
@@ -35,15 +37,22 @@ pub struct InvocationRequest {
     identity: Arc<SessionIdentity>,
     collector: Option<CapturedDiagnostics>,
     control: Option<StorageReadControl>,
+    io: IOContext,
 }
 
 pub struct RequestScope {
     previous: Option<InvocationRequest>,
+    io: IOScope,
     _thread: PhantomData<Rc<()>>,
 }
 
 impl RequestScope {
     pub fn replace(&self, request: Option<InvocationRequest>) {
+        self.io.replace(
+            &request
+                .as_ref()
+                .map_or_else(IOContext::default, |request| request.io.clone()),
+        );
         REQUEST.with(|current| {
             *current.borrow_mut() = request;
         });
@@ -61,9 +70,67 @@ pub struct QueryDiagnostics {
     identity: Arc<SessionIdentity>,
     inherited: Option<CapturedDiagnostics>,
     retained_control: Option<StorageReadControl>,
+    inherited_io: IOContext,
 }
 
 impl QueryDiagnostics {
+    /// All invocation and retained-worker collectors read the setting published by the owning session's state transitions.
+    pub fn new(io_timing: Arc<std::sync::atomic::AtomicBool>) -> Self {
+        Self {
+            identity: Arc::new(SessionIdentity {
+                io_timing,
+                next_instance: std::sync::atomic::AtomicU64::new(0),
+            }),
+            inherited: None,
+            retained_control: None,
+            inherited_io: IOContext::default(),
+        }
+    }
+
+    pub fn io_timing(&self) -> bool {
+        self.identity
+            .io_timing
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Select this session's active operation, including an explicit worker request. A different session on the same thread never inherits its I/O counters.
+    pub fn io_context(&self) -> IOContext {
+        let collector = self.capture();
+        let Some(root) = collector
+            .as_ref()
+            .and_then(|collector| collector.io.as_ref())
+        else {
+            return IOContext::default();
+        };
+        let current = IOContext::current();
+        if current
+            .observation()
+            .is_some_and(|current| current.is_within(root))
+        {
+            return current;
+        }
+        if let Some(request) = REQUEST
+            .with(|request| {
+                request
+                    .borrow()
+                    .as_ref()
+                    .filter(|request| Arc::ptr_eq(&request.identity, &self.identity))
+                    .map(|request| request.io.clone())
+            })
+            .filter(|context| context.observation().is_some_and(|io| io.is_within(root)))
+        {
+            return request;
+        }
+        if self
+            .inherited_io
+            .observation()
+            .is_some_and(|io| io.is_within(root))
+        {
+            return self.inherited_io.clone();
+        }
+        IOContext::new(Some(root.clone()))
+    }
+
     pub fn capture(&self) -> Option<CapturedDiagnostics> {
         CURRENT.with(|current| {
             let current = current.borrow();
@@ -122,6 +189,7 @@ impl QueryDiagnostics {
             identity: Arc::clone(&self.identity),
             collector,
             control,
+            io: self.io_context(),
         }
     }
 
@@ -131,13 +199,19 @@ impl QueryDiagnostics {
             identity: Arc::clone(&self.identity),
             collector: self.capture(),
             control: Some(control),
+            io: self.io_context(),
         }
     }
 
     pub fn request_scope(request: Option<InvocationRequest>) -> RequestScope {
+        let io = request
+            .as_ref()
+            .map_or_else(IOContext::default, |request| request.io.clone())
+            .enter();
         let previous = REQUEST.with(|current| current.replace(request));
         RequestScope {
             previous,
+            io,
             _thread: PhantomData,
         }
     }
@@ -148,6 +222,7 @@ impl QueryDiagnostics {
             identity: Arc::clone(&self.identity),
             inherited: self.capture(),
             retained_control: self.retained_control.clone(),
+            inherited_io: self.io_context(),
         }
     }
 
@@ -157,19 +232,21 @@ impl QueryDiagnostics {
             identity: Arc::clone(&self.identity),
             inherited: self.capture(),
             retained_control: Some(control),
+            inherited_io: self.io_context(),
         }
     }
 
     pub fn enter(&self, control: StorageReadControl) -> StorageBackendResult<DiagnosticsScope> {
-        self.enter_selected(control, None)
+        self.enter_selected(control, None, IOOptions::default())
     }
 
     pub fn enter_measured(
         &self,
         control: StorageReadControl,
         timing: bool,
+        io: IOOptions,
     ) -> StorageBackendResult<DiagnosticsScope> {
-        self.enter_selected(control, Some(timing))
+        self.enter_selected(control, Some(timing), io)
     }
 
     pub(super) fn request_control(&self) -> Option<StorageReadControl> {
@@ -196,8 +273,15 @@ impl QueryDiagnostics {
         &self,
         control: StorageReadControl,
         timing: Option<bool>,
+        io: IOOptions,
     ) -> StorageBackendResult<DiagnosticsScope> {
-        let collector = InvocationDiagnostics::new(control, self.capture(), timing)?;
+        let collector = InvocationDiagnostics::new(
+            control,
+            self.capture(),
+            timing,
+            io,
+            Arc::clone(&self.identity.io_timing),
+        )?;
         let binding = self.bind(&collector)?;
         Ok(DiagnosticsScope {
             _binding: binding,
@@ -219,6 +303,7 @@ impl QueryDiagnostics {
             *current.borrow_mut() = Some(Arc::clone(&binding));
             Ok(CapturedScope {
                 binding,
+                _io: self.io_context().enter(),
                 _thread: PhantomData,
             })
         })
@@ -228,6 +313,7 @@ impl QueryDiagnostics {
 /// A dynamic binding must be restored on the thread that entered it.
 pub struct CapturedScope {
     binding: Binding,
+    _io: IOScope,
     _thread: PhantomData<Rc<()>>,
 }
 

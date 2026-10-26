@@ -148,7 +148,13 @@ impl PhysicalOperator for Source {
 fn physical_demand_direction_rewind_and_close_keep_their_native_protocol() {
     let diagnostics = QueryDiagnostics::default();
     let control = StorageReadControl::with_limit(65536);
-    let scope = diagnostics.enter_measured(control.clone(), true).unwrap();
+    let scope = diagnostics
+        .enter_measured(
+            control.clone(),
+            true,
+            uqa_core::io_usage::IOOptions::default(),
+        )
+        .unwrap();
     let (input, calls) = source(8);
     let mut input = diagnostics.observe(input, "Test Scan").unwrap();
     assert!(input.supports_batched_consumption());
@@ -192,7 +198,11 @@ fn physical_demand_direction_rewind_and_close_keep_their_native_protocol() {
 fn constructed_unpulled_and_empty_inputs_have_distinct_loop_counts() {
     let diagnostics = QueryDiagnostics::default();
     let scope = diagnostics
-        .enter_measured(StorageReadControl::with_limit(65536), false)
+        .enter_measured(
+            StorageReadControl::with_limit(65536),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
         .unwrap();
     let mut unused = diagnostics.observe(source(1).0, "Unused").unwrap();
     let mut opened = diagnostics.observe(source(1).0, "Opened").unwrap();
@@ -219,11 +229,23 @@ fn constructed_unpulled_and_empty_inputs_have_distinct_loop_counts() {
 fn nested_invocations_snapshot_open_cycles_without_freezing_the_parent() {
     let diagnostics = QueryDiagnostics::default();
     let control = StorageReadControl::with_limit(65536);
-    let outer = diagnostics.enter_measured(control.clone(), true).unwrap();
+    let outer = diagnostics
+        .enter_measured(
+            control.clone(),
+            true,
+            uqa_core::io_usage::IOOptions::default(),
+        )
+        .unwrap();
     let mut input = diagnostics.observe(source(8).0, "Retained Scan").unwrap();
     input.open().unwrap();
     input.next().unwrap().unwrap();
-    let inner = diagnostics.enter_measured(control.clone(), false).unwrap();
+    let inner = diagnostics
+        .enter_measured(
+            control.clone(),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
+        .unwrap();
     input.next().unwrap().unwrap();
     let child = inner.finish_execution().unwrap();
     input.next().unwrap().unwrap();
@@ -248,7 +270,13 @@ fn nested_invocations_snapshot_open_cycles_without_freezing_the_parent() {
 fn admission_failure_closes_the_original_input_and_keeps_cleanup_details() {
     let diagnostics = QueryDiagnostics::default();
     let control = StorageReadControl::with_limit(4096);
-    let scope = diagnostics.enter_measured(control.clone(), false).unwrap();
+    let scope = diagnostics
+        .enter_measured(
+            control.clone(),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
+        .unwrap();
     let occupied = control
         .memory()
         .reserve(control.memory().limit() - control.memory().used())
@@ -271,7 +299,11 @@ fn admission_failure_closes_the_original_input_and_keeps_cleanup_details() {
 fn nested_materialized_observers_preserve_borrowed_collection() {
     let diagnostics = QueryDiagnostics::default();
     let scope = diagnostics
-        .enter_measured(StorageReadControl::with_limit(65536), true)
+        .enter_measured(
+            StorageReadControl::with_limit(65536),
+            true,
+            uqa_core::io_usage::IOOptions::default(),
+        )
         .unwrap();
     let (input, calls) = source(5);
     let input = diagnostics.observe(input, "Native Scan").unwrap();
@@ -316,7 +348,13 @@ fn retained_worker_inputs_attach_to_each_fetch_request_without_inheriting_old_wo
     let retained = control.memory().used();
     assert!(retained > 0);
     for timing in [true, false] {
-        let scope = diagnostics.enter_measured(control.clone(), timing).unwrap();
+        let scope = diagnostics
+            .enter_measured(
+                control.clone(),
+                timing,
+                uqa_core::io_usage::IOOptions::default(),
+            )
+            .unwrap();
         let request = diagnostics.request();
         input = std::thread::scope(|threads| {
             threads
@@ -361,11 +399,19 @@ fn simultaneous_session_scopes_do_not_mix_physical_instance_identities() {
     let first = QueryDiagnostics::default();
     let second = QueryDiagnostics::default();
     let a = first
-        .enter_measured(StorageReadControl::with_limit(65536), false)
+        .enter_measured(
+            StorageReadControl::with_limit(65536),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
         .unwrap();
     let mut left = first.observe(source(5).0, "First Session").unwrap();
     let b = second
-        .enter_measured(StorageReadControl::with_limit(65536), false)
+        .enter_measured(
+            StorageReadControl::with_limit(65536),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
         .unwrap();
     let mut right = second.observe(source(5).0, "Second Session").unwrap();
     left.open().unwrap();
@@ -391,14 +437,24 @@ fn simultaneous_session_scopes_do_not_mix_physical_instance_identities() {
 fn a_caught_ancestor_admission_failure_cannot_publish_partial_child_diagnostics() {
     let diagnostics = QueryDiagnostics::default();
     let control = StorageReadControl::with_limit(4096);
-    let parent = diagnostics.enter_measured(control.clone(), false).unwrap();
+    let parent = diagnostics
+        .enter_measured(
+            control.clone(),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
+        .unwrap();
     let occupied = control
         .memory()
         .reserve(control.memory().limit() - control.memory().used())
         .unwrap();
     let child_control = StorageReadControl::with_limit(65536);
     let child = diagnostics
-        .enter_measured(child_control.clone(), false)
+        .enter_measured(
+            child_control.clone(),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
         .unwrap();
     let (input, calls) = source(3);
     assert!(diagnostics.observe(input, "Rejected Child").is_err());
@@ -414,7 +470,13 @@ fn a_caught_ancestor_admission_failure_cannot_publish_partial_child_diagnostics(
 fn cancelled_measurement_admission_preserves_physical_cleanup() {
     let diagnostics = QueryDiagnostics::default();
     let control = StorageReadControl::with_limit(65536);
-    let scope = diagnostics.enter_measured(control.clone(), false).unwrap();
+    let scope = diagnostics
+        .enter_measured(
+            control.clone(),
+            false,
+            uqa_core::io_usage::IOOptions::default(),
+        )
+        .unwrap();
     let (input, calls) = source(3);
     let mut input = diagnostics.observe(input, "Cancelled Scan").unwrap();
     control.cancellation().cancel();
@@ -451,7 +513,11 @@ fn native_projected_aggregation_preserves_borrowed_capabilities_and_row_counts()
     }
     let diagnostics = QueryDiagnostics::default();
     let scope = diagnostics
-        .enter_measured(StorageReadControl::with_limit(65536), true)
+        .enter_measured(
+            StorageReadControl::with_limit(65536),
+            true,
+            uqa_core::io_usage::IOOptions::default(),
+        )
         .unwrap();
     let (input, calls) = source(7);
     let input = diagnostics.observe(input, "Scan").unwrap();

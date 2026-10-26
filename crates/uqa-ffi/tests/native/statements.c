@@ -407,6 +407,53 @@ static void explained_costs(uqa_engine engine, uqa_result result) {
     CHECK(uqa_result_destroy(&inspected));
 }
 
+static void explained_temporary_io(uqa_engine engine, uqa_result result) {
+    CHECK(uqa_engine_execute(engine, "SET work_mem = '64kB'", result));
+    for (int buffers = 0; buffers < 2; buffers++) {
+        for (int timing = 0; timing < 2; timing++) {
+            uqa_statement statement = NULL;
+            uqa_value document = NULL;
+            uqa_value_view view = NULL;
+            char sql[320];
+            CHECK(uqa_engine_execute(engine, timing
+                ? "SET track_io_timing = on" : "SET track_io_timing = off", result));
+            int size = snprintf(sql, sizeof(sql),
+                "EXPLAIN (ANALYZE, BUFFERS %s, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) "
+                "SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+                buffers ? "TRUE" : "FALSE");
+            assert(size > 0 && (size_t)size < sizeof(sql));
+            CHECK(uqa_statement_prepare(engine, sql, &statement));
+            CHECK(uqa_statement_execute(statement, result));
+            CHECK(uqa_statement_finalize(&statement));
+            CHECK(uqa_result_get_value(result, 0, 0, &view));
+            CHECK(uqa_value_create_copy(view, &document));
+            view = document;
+            CHECK(uqa_engine_execute_params(engine,
+                "SELECT COALESCE(($1->0->'Plan'->>'Temp Read Blocks')::bigint,-1), "
+                "COALESCE(($1->0->'Plan'->>'Temp Written Blocks')::bigint,-1), "
+                "CASE WHEN $1->0->'Plan'->>'Temp I/O Read Time' IS NULL THEN 0 ELSE 1 END::bigint, "
+                "CASE WHEN $1->0->'Plan'->>'Actual Total Time' IS NULL THEN 0 ELSE 1 END::bigint, "
+                "($1->0->'Plan'->>'Actual Rows')::bigint",
+                &view, 1, result));
+            CHECK(uqa_value_destroy(&document));
+            assert(buffers ? integer(result, 0) > 0 : integer(result, 0) == -1);
+            assert(buffers ? integer(result, 1) > 0 : integer(result, 1) == -1);
+            assert(integer(result, 2) == (buffers && timing));
+            assert(integer(result, 3) == 0);
+            assert(integer(result, 4) == 4096);
+        }
+    }
+    CHECK(uqa_engine_execute(engine,
+        "BEGIN; SET LOCAL track_io_timing = off; SAVEPOINT timing_restore; "
+        "SET track_io_timing = on; ROLLBACK TO timing_restore; SHOW track_io_timing", result));
+    uqa_value_view value = NULL;
+    uqa_string_view setting = {NULL, 0};
+    CHECK(uqa_result_get_value(result, 0, 0, &value));
+    CHECK(uqa_value_get_text(value, &setting));
+    assert(equal(setting, "off"));
+    CHECK(uqa_engine_execute(engine, "ROLLBACK; RESET work_mem; RESET track_io_timing", result));
+}
+
 static void explained_named_inputs(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_value document = NULL;
@@ -1284,6 +1331,7 @@ int main(void) {
     explained_stream_and_settings(engine, result);
     explained_physical_metadata(engine, result);
     explained_costs(engine, result);
+    explained_temporary_io(engine, result);
     explained_named_inputs(engine, result);
     explained_node_estimates(engine, result);
     explained_node_executions(engine, result);

@@ -54,7 +54,11 @@ impl Engine {
         let session_id = row_locks.allocate_session();
         let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
         let client_level = session.state.client_level();
-        let runtime = super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT, client_level);
+        let runtime = super::QueryRuntime::new(
+            super::SQL_FUNCTION_DEPTH_LIMIT,
+            client_level,
+            session.state.io_timing(),
+        );
         session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::memory(),
@@ -409,6 +413,7 @@ impl Engine {
             super::SQL_FUNCTION_DEPTH_LIMIT,
             cancellation,
             client_level,
+            session.state.io_timing(),
         );
         session.state.attach_cancellation(&runtime.cancellation);
         Self {
