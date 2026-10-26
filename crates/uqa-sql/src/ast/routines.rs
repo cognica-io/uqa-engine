@@ -251,11 +251,10 @@ pub struct CreateFunction {
 
 impl CreateFunction {
     /// Parameters that define routine identity: `IN` + `INOUT` + `VARIADIC`, in declaration order.
-    pub fn identity_params(&self) -> Vec<&FunctionParam> {
+    pub fn identity_params(&self) -> impl DoubleEndedIterator<Item = &FunctionParam> + Clone {
         self.params
             .iter()
             .filter(|param| Self::is_identity_param(param))
-            .collect()
     }
 
     /// Number of parameters that define routine identity.
@@ -274,11 +273,10 @@ impl CreateFunction {
     }
 
     /// Parameters supplied by a call: identity parameters for functions and every non-`TABLE` parameter for procedures.
-    pub fn call_params(&self) -> Vec<&FunctionParam> {
+    pub fn call_params(&self) -> impl DoubleEndedIterator<Item = &FunctionParam> + Clone {
         self.params
             .iter()
-            .filter(|param| self.is_call_param(param))
-            .collect()
+            .filter(move |param| self.is_call_param(param))
     }
 
     /// Number of declared call parameters; a variadic parameter can consume multiple actual arguments.
@@ -310,23 +308,19 @@ impl CreateFunction {
     }
 
     /// The parameters a SQL-standard body refers to, as `interpret_AS_clause` gives them to its parser: the input parameters in order, the one at position `n` going by the name of the parameter declared at position `n` among all parameters. When an output parameter precedes an input, the body therefore names that input by the output parameter's name, as `PostgreSQL` does.
-    pub fn sql_body_parameters(&self) -> Vec<SQLBodyParameter<'_>> {
-        let call_params = self.call_params();
-        self.identity_params()
-            .into_iter()
+    pub fn sql_body_parameters(&self) -> impl Iterator<Item = SQLBodyParameter<'_>> + Clone {
+        self.call_params()
             .enumerate()
-            .map(|(index, parameter)| SQLBodyParameter {
+            .filter(|(_, parameter)| Self::is_identity_param(parameter))
+            .enumerate()
+            .map(move |(index, (call_index, parameter))| SQLBodyParameter {
                 name: self
                     .params
                     .get(index)
                     .map_or("", |declared| declared.name.as_str()),
                 parameter,
-                call_position: call_params
-                    .iter()
-                    .position(|call| std::ptr::eq(*call, parameter))
-                    .map_or(index + 1, |position| position + 1),
+                call_position: call_index + 1,
             })
-            .collect()
     }
 
     /// Backward-compatible alias for [`Self::call_arity`].
@@ -340,22 +334,24 @@ impl CreateFunction {
     }
 
     /// Backward-compatible alias for [`Self::call_params`].
-    pub fn signature_params(&self) -> Vec<&FunctionParam> {
+    pub fn signature_params(&self) -> impl DoubleEndedIterator<Item = &FunctionParam> + Clone {
         self.call_params()
     }
 
     /// Parameters that shape the result row: `OUT` + `INOUT` +
     /// `RETURNS TABLE` columns, in declaration order.
-    pub fn output_params(&self) -> Vec<&FunctionParam> {
-        self.params
-            .iter()
-            .filter(|p| {
-                matches!(
-                    p.mode,
-                    FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-                )
-            })
-            .collect()
+    pub fn output_params(&self) -> impl DoubleEndedIterator<Item = &FunctionParam> + Clone {
+        self.params.iter().filter(|p| {
+            matches!(
+                p.mode,
+                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
+            )
+        })
+    }
+
+    /// Number of declared output parameters, including RETURNS TABLE columns.
+    pub fn output_arity(&self) -> usize {
+        self.output_params().count()
     }
 
     /// True when the routine produces a row set (`RETURNS SETOF` /

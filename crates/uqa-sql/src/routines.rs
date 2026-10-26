@@ -249,18 +249,19 @@ pub fn selected_bound_function(
 
 pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
     def.identity_params()
-        .iter()
         .map(|parameter| canonical_routine_type_name(&parameter.type_name))
         .collect()
 }
 
 pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
-    let outputs = def.output_params();
-    match (outputs.as_slice(), &def.returns) {
-        ([output], _) => canonical_routine_type_name(&output.type_name) == "record",
-        ([], FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) => {
-            canonical_routine_type_name(type_name) == "record"
-        }
+    let mut outputs = def.output_params();
+    match (outputs.next(), outputs.next(), &def.returns) {
+        (Some(output), None, _) => canonical_routine_type_name(&output.type_name) == "record",
+        (
+            None,
+            None,
+            FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name },
+        ) => canonical_routine_type_name(type_name) == "record",
         _ => false,
     }
 }

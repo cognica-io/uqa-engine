@@ -205,16 +205,16 @@ pub(super) fn execute_resolved_scalar_function(
         }
         None => execute_routine(context, &function, bound, &invocation, false, None)?,
     };
-    let out_params = function.def.output_params();
-    if outcome.out_values.len() != out_params.len() {
+    let output_count = function.def.output_arity();
+    if outcome.out_values.len() != output_count {
         return Err(SQLError::Internal(format!(
             "routine `{}` produced {} OUT values for {} OUT parameters",
             function.def.name,
             outcome.out_values.len(),
-            out_params.len()
+            output_count
         )));
     }
-    let value = match out_params.len() {
+    let value = match output_count {
         0 => outcome.value,
         1 => match outcome.out_values.into_iter().next() {
             Some(value) => value,
@@ -365,7 +365,7 @@ pub(super) fn execute_resolved_table_function(
             message: format!("{} is a procedure", call_signature(name, args)),
         });
     }
-    let out_params = function.def.output_params();
+    let output_count = function.def.output_arity();
     let specialized =
         uqa_sql::routines::invocation::specialized_definition(&function.def, &invocation)?;
     let definition = specialized.as_ref().unwrap_or(&function.def);
@@ -389,7 +389,7 @@ pub(super) fn execute_resolved_table_function(
         columns.to_vec()
     } else if let Some(columns) = &composite_columns {
         columns.iter().map(|column| column.name.clone()).collect()
-    } else if out_params.is_empty() {
+    } else if output_count == 0 {
         vec![routine_local_name(&function.def.name)?]
     } else {
         output_column_names(&function.def)
@@ -450,7 +450,7 @@ pub(super) fn execute_resolved_table_function(
         context.runtime.expressions,
         outcome,
         function.def.returns_set(),
-        !out_params.is_empty(),
+        output_count != 0,
         columns,
         composite_columns.map(<[SQLFunctionResultColumn]>::len),
     )

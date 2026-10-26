@@ -18,7 +18,6 @@ use crate::{
 use uqa_core::Value;
 pub fn output_column_names(def: &CreateFunction) -> Vec<String> {
     def.output_params()
-        .iter()
         .enumerate()
         .map(|(idx, p)| {
             if p.name.is_empty() {

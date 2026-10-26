@@ -55,12 +55,9 @@ pub(crate) fn upgrade_legacy_table_function_binding(
 
 pub fn user_function_output_columns_for(function: &SQLUserFunction) -> Option<Vec<String>> {
     let outputs = function.def.output_params();
-    if outputs.is_empty() {
-        return None;
-    }
+    outputs.clone().next()?;
     Some(
         outputs
-            .iter()
             .enumerate()
             .map(|(position, parameter)| {
                 if parameter.name.is_empty() {
@@ -79,11 +76,11 @@ pub fn user_function_composite_result(
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Result<Option<Arc<crate::expr::composites::CompositeTypeDescriptor>>, SQLError> {
-    let outputs = function.def.output_params();
-    if outputs.len() > 1 {
+    let mut outputs = function.def.output_params();
+    if outputs.clone().nth(1).is_some() {
         return Ok(None);
     }
-    let declared = match (&function.def.returns, outputs.first()) {
+    let declared = match (&function.def.returns, outputs.next()) {
         (_, Some(output)) => Some(output.type_name.as_str()),
         (FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }, None) => {
             Some(type_name.as_str())

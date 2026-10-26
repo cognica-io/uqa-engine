@@ -157,7 +157,7 @@ pub(super) fn user_function_result_class(
     if routine_returns_anonymous_record(&function.def) {
         return Ok(ResultClass::Record);
     }
-    if function.def.output_params().len() > 1 {
+    if function.def.output_params().nth(1).is_some() {
         return Ok(ResultClass::OutParameters);
     }
     // A single OUT parameter, such as the one column of RETURNS TABLE, gives the result its type.

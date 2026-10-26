@@ -6,7 +6,7 @@
 
 use super::{
     AlterForeignTableAction, AlterForeignTableStmt, AlterSequence, ColumnType, CreateFunction,
-    CreateTrigger, FunctionBinding, FunctionBody, FunctionDispatch, FunctionParallel,
+    CreateTrigger, Expr, FunctionBinding, FunctionBody, FunctionDispatch, FunctionParallel,
     FunctionParam, FunctionParamMode, FunctionReturns, FunctionVolatility, RangeFunctionOperation,
     RangeSubtype, RelationPersistence, RoutineAclEntry, RoutineInvocationBinding,
     RoutineSecurityAttributes, RoutineVariadicMode, SequenceLifecycle, SequenceRestart, Statement,
@@ -528,14 +528,12 @@ fn routine_identity_and_call_parameters_are_distinct() {
 
     let identity_names = function
         .identity_params()
-        .into_iter()
         .map(|param| param.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(identity_names, ["input", "inout", "rest"]);
     assert_eq!(function.identity_arity(), 3);
     let function_call_names = function
         .call_params()
-        .into_iter()
         .map(|param| param.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(function_call_names, identity_names);
@@ -547,7 +545,6 @@ fn routine_identity_and_call_parameters_are_distinct() {
     procedure.is_procedure = true;
     let procedure_call_names = procedure
         .call_params()
-        .into_iter()
         .map(|param| param.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(procedure_call_names, ["input", "output", "inout", "rest"]);
@@ -678,4 +675,86 @@ fn multidimensional_arrays_expose_one_scalar_or_domain_element_identity() {
     assert_eq!(outer.array_element_type(), Some(&domain));
     assert_eq!(pg_type_element_oid(&outer), 19001);
     assert_eq!(domain.array_element_type(), None);
+}
+
+#[test]
+fn routine_parameter_readers_borrow_declarations_without_copying_payloads() {
+    let Statement::CreateFunction(mut definition) = crate::compile(
+        "CREATE FUNCTION inspected(IN x integer, OUT y text, INOUT z bigint, VARIADIC tail integer[]) RETURNS record LANGUAGE sql AS 'SELECT 1'",
+    ).unwrap().remove(0) else { panic!("routine definition") };
+    let mut table = definition.params[1].clone();
+    table.name = "table_column".into();
+    table.mode = FunctionParamMode::Table;
+    definition.params.push(table);
+    for size in [1, 4 * 1024 * 1024] {
+        definition.params[0].default = Some(Expr::Literal(uqa_core::Value::Str("x".repeat(size))));
+        for procedure in [false, true] {
+            definition.is_procedure = procedure;
+            let measured = allocation_counter::measure(|| {
+                assert_eq!(definition.identity_arity(), 3);
+                assert_eq!(definition.output_arity(), 3);
+                for (parameter, position) in
+                    crate::routines::body_parameters::sql_body_parameters(&definition)
+                        .zip([0, 2, 3])
+                {
+                    assert!(std::ptr::eq(
+                        parameter,
+                        &raw const definition.params[position]
+                    ));
+                }
+                for (parameter, position) in definition.identity_params().zip([0, 2, 3]) {
+                    assert!(std::ptr::eq(
+                        parameter,
+                        &raw const definition.params[position]
+                    ));
+                }
+                for (parameter, position) in definition.output_params().rev().zip([4, 2, 1]) {
+                    assert!(std::ptr::eq(
+                        parameter,
+                        &raw const definition.params[position]
+                    ));
+                }
+                let positions: &[usize] = if procedure { &[0, 1, 2, 3] } else { &[0, 2, 3] };
+                assert_eq!(definition.call_arity(), positions.len());
+                for (parameter, position) in definition.call_params().zip(positions) {
+                    assert!(std::ptr::eq(
+                        parameter,
+                        &raw const definition.params[*position]
+                    ));
+                }
+                let mut calls = definition.call_params();
+                calls.next();
+                assert_eq!(calls.clone().count(), positions.len() - 1);
+                assert_eq!(calls.count(), positions.len() - 1);
+                let call_positions = if procedure { [1, 3, 4] } else { [1, 2, 3] };
+                for (index, (parameter, (position, call_position))) in definition
+                    .sql_body_parameters()
+                    .zip([0, 2, 3].into_iter().zip(call_positions))
+                    .enumerate()
+                {
+                    assert!(std::ptr::eq(
+                        parameter.parameter,
+                        &raw const definition.params[position]
+                    ));
+                    assert_eq!(
+                        parameter.name.as_ptr(),
+                        definition.params[index].name.as_ptr()
+                    );
+                    assert_eq!(parameter.call_position, call_position);
+                }
+                assert_eq!(definition.sql_body_parameters().count(), 3);
+                assert_eq!(definition.signature_params().count(), positions.len());
+            });
+            assert_eq!(measured.count_total, 0, "{size}, {procedure}: {measured:?}");
+        }
+    }
+    definition.params.clear();
+    let measured = allocation_counter::measure(|| {
+        assert!(definition.identity_params().next().is_none());
+        assert!(definition.output_params().next().is_none());
+        assert!(definition.call_params().next().is_none());
+        assert!(definition.sql_body_parameters().next().is_none());
+        assert_eq!(definition.output_arity(), 0);
+    });
+    assert_eq!(measured.count_total, 0, "{measured:?}");
 }

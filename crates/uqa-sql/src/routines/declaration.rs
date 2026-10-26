@@ -52,15 +52,19 @@ pub trait RoutineTypeCatalog {
 /// Catalog result identity of a validated declaration, independent of whether `RETURNS` was written. Procedures expose `record` for any output parameters; functions use the declared or inferred scalar/record type.
 #[must_use]
 pub fn result_type_name(def: &CreateFunction) -> &str {
-    let outputs = def.output_params();
+    let mut outputs = def.output_params();
     if def.is_procedure {
-        return if outputs.is_empty() { "void" } else { "record" };
+        return if outputs.next().is_none() {
+            "void"
+        } else {
+            "record"
+        };
     }
     match &def.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => type_name,
-        FunctionReturns::Table | FunctionReturns::None => match outputs.as_slice() {
-            [output] => &output.type_name,
-            [] => "void",
+        FunctionReturns::Table | FunctionReturns::None => match (outputs.next(), outputs.next()) {
+            (Some(output), None) => &output.type_name,
+            (None, None) => "void",
             _ => "record",
         },
     }
@@ -568,16 +572,16 @@ fn validate_routine_output_types(
     def: &CreateFunction,
     inputs: &PolymorphicInputs,
 ) -> Result<(), SQLError> {
-    let mut output_types = def
+    let declared = match &def.returns {
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
+            Some(type_name.as_str())
+        }
+        _ => None,
+    };
+    let output_types = def
         .output_params()
-        .into_iter()
         .map(|parameter| parameter.type_name.as_str())
-        .collect::<Vec<_>>();
-    if let FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } =
-        &def.returns
-    {
-        output_types.push(type_name);
-    }
+        .chain(declared);
     for output_type in output_types {
         let type_name = canonical_routine_type_name(output_type);
         match polymorphic_family(&type_name) {

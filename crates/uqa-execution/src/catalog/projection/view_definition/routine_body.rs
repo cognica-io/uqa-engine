@@ -28,7 +28,7 @@ impl RoutineNamespace {
                 .iter()
                 .map(|parameter| (!parameter.name.is_empty()).then(|| parameter.name.clone()))
                 .collect(),
-            inputs: def.sql_body_parameters().len(),
+            inputs: def.identity_arity(),
         })
     }
 }

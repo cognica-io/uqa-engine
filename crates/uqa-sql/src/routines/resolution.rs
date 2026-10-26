@@ -670,7 +670,7 @@ pub(super) fn static_function_return_type(
             message: "trigger functions can only be called as triggers".into(),
         });
     }
-    if matches!(def.returns, FunctionReturns::Table) || def.output_params().len() > 1 {
+    if matches!(def.returns, FunctionReturns::Table) || def.output_params().nth(1).is_some() {
         return Ok(ColumnType::Record);
     }
     if let Some(type_name) = invocation_return {
@@ -687,12 +687,8 @@ pub(super) fn static_function_return_type(
     let type_name = match &def.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => type_name,
         FunctionReturns::None => {
-            let outputs = def.output_params();
-            if outputs.len() > 1 {
-                return Ok(ColumnType::Record);
-            }
-            &outputs
-                .first()
+            &def.output_params()
+                .next()
                 .ok_or_else(|| {
                     SQLError::TypeMismatch(format!("function `{name}` does not return a value"))
                 })?

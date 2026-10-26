@@ -151,10 +151,9 @@ pub fn declared_sql_function_result(
     types: &dyn RoutineTypeCatalog,
     def: &CreateFunction,
 ) -> Result<SQLFunctionResultLayout, SQLError> {
-    let outputs = def.output_params();
-    if def.is_procedure || outputs.len() > 1 {
+    let mut outputs = def.output_params();
+    if def.is_procedure || outputs.clone().nth(1).is_some() {
         let columns = outputs
-            .iter()
             .map(|parameter| {
                 Ok(SQLFunctionResultColumn {
                     name: parameter.name.clone(),
@@ -173,7 +172,7 @@ pub fn declared_sql_function_result(
             columns: Some(columns),
         });
     }
-    let type_name = match (outputs.first(), &def.returns) {
+    let type_name = match (outputs.next(), &def.returns) {
         (Some(parameter), _) => parameter.type_name.as_str(),
         (None, FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) => {
             type_name.as_str()

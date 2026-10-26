@@ -233,7 +233,6 @@ impl CompositeFieldRename<'_> {
 
     fn routine_params(&self, definition: &CreateFunction) -> Result<Vec<SQLParam>, SQLError> {
         crate::routines::body_parameters::sql_body_parameters(definition)
-            .into_iter()
             .map(|parameter| {
                 self.routines
                     .resolve_type_name(&parameter.type_name)

@@ -184,12 +184,13 @@ fn body_parameters(
     descriptions: Option<RoutineBodyDescriptions<'_>>,
 ) -> Result<Vec<SQLParam>, SQLError> {
     let call_params = def.call_params();
-    if call_params.len() != bound.len() {
+    let call_count = def.call_arity();
+    if call_count != bound.len() {
         return Err(SQLError::Internal(format!(
             "routine `{}` received {} values for {} concrete call parameters",
             def.name,
             bound.len(),
-            call_params.len()
+            call_count
         )));
     }
     let body_positions = def
@@ -231,7 +232,7 @@ fn shape_result(
     layout: &SQLFunctionResultLayout,
     descriptions: Option<RoutineBodyDescriptions<'_>>,
 ) -> Result<RoutineOutcome, SQLError> {
-    let outputs = def.output_params();
+    let output_count = def.output_arity();
     let anonymous = routine_returns_anonymous_record(def);
     let record_types = anonymous
         .then(|| {
@@ -250,11 +251,11 @@ fn shape_result(
         let mut rows = Vec::with_capacity(last.rows.len());
         for index in 0..last.rows.len() {
             let value = shape(result_row_values(last, index).unwrap_or_default())?;
-            rows.push(output_values(def, value, outputs.len(), Some(expressions))?);
+            rows.push(output_values(def, value, output_count, Some(expressions))?);
         }
         return Ok(RoutineOutcome {
             value: Value::Null,
-            out_values: vec![Value::Null; outputs.len()],
+            out_values: vec![Value::Null; output_count],
             set_rows: rows,
             anonymous_record_column_types: record_types,
             sql_result_kind: Some(layout.kind),
@@ -264,12 +265,12 @@ fn shape_result(
         .map(shape)
         .transpose()?
         .unwrap_or(Value::Null);
-    let (value, out_values) = if outputs.is_empty() {
+    let (value, out_values) = if output_count == 0 {
         (value, Vec::new())
     } else {
         (
             Value::Null,
-            output_values(def, value, outputs.len(), Some(expressions))?,
+            output_values(def, value, output_count, Some(expressions))?,
         )
     };
     Ok(RoutineOutcome {

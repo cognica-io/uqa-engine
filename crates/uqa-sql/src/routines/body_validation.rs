@@ -37,7 +37,6 @@ pub struct SQLBodyValidationContext<'a> {
 #[must_use]
 pub fn sql_body_is_analyzable(def: &CreateFunction) -> bool {
     !def.identity_params()
-        .iter()
         .any(|parameter| routine_polymorphic_type(&parameter.type_name).is_some())
 }
 
@@ -150,7 +149,7 @@ pub(super) fn analyze_body_statement(
                     )?;
                 }
             }
-            if reject_output_arguments && !resolved.function.def.output_params().is_empty() {
+            if reject_output_arguments && resolved.function.def.output_params().next().is_some() {
                 return Err(output_argument_call_error());
             }
             return Ok(AnalyzedResult::Command);
@@ -220,7 +219,6 @@ pub fn routine_parameter_values(
     def: &CreateFunction,
 ) -> Vec<SQLParam> {
     sql_body_parameters(def)
-        .iter()
         .map(|parameter| {
             match types
                 .resolve_catalog_column_type(&parameter.type_name)
