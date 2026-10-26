@@ -316,15 +316,6 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             definition.and_then(|column| column.collation_oid),
         )
     };
-    let predicate_schema = crate::RowSchema::with_column_metadata(
-        Some(qualifier),
-        source_schema.iter().map(column_metadata),
-    );
-    let predicate_schema = if open_document {
-        crate::RowSchema::with_wildcard_hidden_positions(&predicate_schema, 0..source_schema.len())
-    } else {
-        predicate_schema
-    };
     // A pushed predicate reads the stored fields alone. A column the scan attaches from row metadata is left to the residual filter, which sees the whole row.
     let stored_fields = source_schema
         .iter()
@@ -406,11 +397,13 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         .runtime
         .diagnostics
         .observe(source, "Relation Scan")?;
-    let columns = expand_from_star_columns(
-        projection_columns(&stmt.projections),
-        &stmt.projections,
-        &predicate_schema,
-    )?;
+    let (source, columns) = crate::physical::construction::OperatorBuild::run(source, |source| {
+        expand_from_star_columns(
+            projection_columns(&stmt.projections),
+            &stmt.projections,
+            source.row_schema(),
+        )
+    })?;
     execute_query_block_operator_output(
         context.relational,
         source,

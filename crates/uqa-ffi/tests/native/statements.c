@@ -95,6 +95,35 @@ static void pruned_rule_subqueries(uqa_engine engine, uqa_result result) {
         result));
 }
 
+static void scored_wildcard_columns(uqa_engine engine, uqa_result result) {
+    const char *queries[] = {
+        "SELECT _doc_id,_score,* FROM c_scored_star WHERE text_match(body,'graph')",
+        "SELECT _doc_id,_score,c_scored_star.* FROM c_scored_star WHERE text_match(body,'graph')",
+        "SELECT _doc_id,_score,* FROM c_scored_star WHERE text_match(body,'absent')",
+        "SELECT _doc_id,_score,c_scored_star.* FROM c_scored_star WHERE text_match(body,'absent')"
+    };
+    const char *names[] = {"_doc_id", "_score", "id", "body"};
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP TABLE c_scored_star(id integer,body text); "
+        "CREATE INDEX c_scored_star_body ON c_scored_star USING gin(body); "
+        "INSERT INTO c_scored_star VALUES(7,'graph data')", result));
+    for (size_t query = 0; query < 4; ++query) {
+        uint64_t rows = 99;
+        uint32_t columns = 99;
+        CHECK(uqa_engine_execute(engine, queries[query], result));
+        CHECK(uqa_result_get_column_count(result, &columns));
+        CHECK(uqa_result_get_row_count(result, &rows));
+        assert(columns == 4 && rows == (query < 2 ? 1 : 0));
+        for (uint32_t column = 0; column < 4; ++column) {
+            uqa_string_view name = {NULL, 0};
+            CHECK(uqa_result_get_column_name(result, column, &name));
+            assert(equal(name, names[column]));
+        }
+        if (rows != 0) assert(integer(result, 2) == 7);
+    }
+    CHECK(uqa_engine_execute(engine, "DROP TABLE c_scored_star", result));
+}
+
 static void prepared_recovery(uqa_engine engine, uqa_result result) {
     uqa_statement statement = NULL;
     uqa_statement typed_exit = NULL;
@@ -1375,6 +1404,7 @@ int main(void) {
     explained_node_estimates(engine, result);
     explained_node_executions(engine, result);
     pruned_rule_subqueries(engine, result);
+    scored_wildcard_columns(engine, result);
     explained_execution(engine, result);
     explained_serialization(engine, result);
     explained_rule_delivery(engine, result);
