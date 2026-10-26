@@ -21,6 +21,7 @@ use uqa_sql::result::ExplainPhysicalPlan;
 
 mod costs;
 mod estimates;
+mod executions;
 mod formats;
 mod measurements;
 pub use costs::estimate_plan;
@@ -234,6 +235,7 @@ fn plan_text(
                 analysis.elapsed.as_secs_f64() * 1_000.0
             );
         }
+        executions::append_text(&mut text, &analysis.node_executions, settings.timing)?;
     }
     Ok(text.finish()?)
 }
@@ -289,6 +291,10 @@ fn structured_plan<'a>(
         payload.insert("Planning Time", P::Float(elapsed.as_secs_f64() * 1_000.0))?;
     }
     if let Some(analysis) = analysis {
+        payload.insert(
+            "Node Executions",
+            executions::structured(&analysis.node_executions, settings.timing, control)?,
+        )?;
         if let Some(serialization) = serialization::properties(settings, analysis, control)? {
             payload.insert("Serialization", serialization)?;
         }

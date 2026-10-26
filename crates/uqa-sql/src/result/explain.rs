@@ -39,6 +39,13 @@ pub struct ExplainNodeMetrics {
     pub total: std::time::Duration,
 }
 
+/// One physical source or pipeline instance observed by the invocation. Its display index is independent of the cost tree.
+#[derive(Debug, Clone, Copy)]
+pub struct ExplainNodeExecution {
+    pub kind: &'static str,
+    pub metrics: ExplainNodeMetrics,
+}
+
 /// Actual `DataRow` payload construction, excluding transport headers and network I/O.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ExplainSerializationMetrics {

@@ -57,6 +57,11 @@ pub fn run_single_foreign_select_output<'a, S: Clone + Send + Sync + 'static>(
         _ => None,
     };
     let source = crate::query::source_projection::bound_source_operator(source, bound_columns)?;
+    let source = context
+        .scans
+        .runtime
+        .diagnostics
+        .observe(source, "Foreign Scan")?;
     let columns = expand_from_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,

@@ -401,6 +401,11 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         cutoff.filter(|_| score_bearing_filter),
         recheck_pins,
     )?;
+    let source = context
+        .scans
+        .runtime
+        .diagnostics
+        .observe(source, "Relation Scan")?;
     let columns = expand_from_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,

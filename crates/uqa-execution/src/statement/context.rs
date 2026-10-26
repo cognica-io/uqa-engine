@@ -52,7 +52,10 @@ pub trait StatementDiagnostics: Sync {
     fn diagnostics_control(
         &self,
     ) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
-    fn diagnostics_scope(&self) -> Result<crate::query::diagnostics::DiagnosticsScope, SQLError>;
+    fn diagnostics_scope(
+        &self,
+        timing: bool,
+    ) -> Result<crate::query::diagnostics::DiagnosticsScope, SQLError>;
 }
 
 pub trait StatementEffects {

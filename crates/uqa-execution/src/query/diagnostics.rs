@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Invocation scopes and bounded records for actual vector execution.
+//! Invocation scopes and bounded records for actual native execution.
 
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -23,15 +23,20 @@ use uqa_storage::{
     StorageBackendResult,
 };
 
+pub(crate) mod executions;
 mod scope;
 pub use scope::{CapturedScope, InvocationRequest, QueryDiagnostics, RequestScope};
 
-pub type CapturedDiagnostics = Arc<Budgeted<VectorDiagnostics>>;
+pub type CapturedDiagnostics = Arc<Budgeted<InvocationDiagnostics>>;
+
+/// Existing vector observers use the same invocation owner.
+pub type VectorDiagnostics = InvocationDiagnostics;
 
 struct Records {
     searches: ExplainVectorSearches,
     failed: Option<Failure>,
     closed: bool,
+    executions: Option<executions::Executions>,
 }
 
 #[derive(Clone, Copy)]
@@ -39,6 +44,8 @@ enum Failure {
     Memory,
     Cancelled,
     Closed,
+    ExecutionMemory,
+    Measurement,
 }
 
 impl Failure {
@@ -50,27 +57,36 @@ impl Failure {
                 message: "EXPLAIN could not retain complete vector execution diagnostics".into(),
             },
             Self::Closed => SQLError::Internal("vector diagnostics scope is closed".into()),
+            Self::ExecutionMemory => SQLError::Routine {
+                sqlstate: "53200".into(),
+                message: "EXPLAIN could not retain complete native execution diagnostics".into(),
+            },
+            Self::Measurement => SQLError::Internal(
+                "EXPLAIN native execution measurements could not be completed".into(),
+            ),
         }
     }
 }
 
 /// A captured invocation is shared by parallel work; it never samples a mutable current scope.
-pub struct VectorDiagnostics {
+pub struct InvocationDiagnostics {
     control: StorageReadControl,
     parent: Option<CapturedDiagnostics>,
     records: Mutex<Records>,
 }
 
-impl VectorDiagnostics {
+impl InvocationDiagnostics {
     fn new(
         control: StorageReadControl,
         parent: Option<CapturedDiagnostics>,
+        timing: Option<bool>,
     ) -> StorageBackendResult<CapturedDiagnostics> {
         control.check()?;
         let records = Mutex::new(Records {
             searches: BudgetedVec::new(control.memory()),
             failed: None,
             closed: false,
+            executions: timing.map(|timing| executions::Executions::new(&control, timing)),
         });
         let memory = control.memory().empty_reservation();
         Ok(Budgeted::new(
@@ -174,17 +190,24 @@ impl VectorDiagnostics {
         recorded
     }
 
-    fn finish(&self) -> Result<ExplainVectorSearches, SQLError> {
+    fn finish(&self) -> Result<CapturedExecution, SQLError> {
         self.control.cancellation().check()?;
         let mut records = self.records.lock();
         records.closed = true;
         if let Some(failure) = records.failed {
             return Err(failure.error());
         }
-        Ok(std::mem::replace(
-            &mut records.searches,
-            BudgetedVec::new(self.control.memory()),
-        ))
+        let nodes = records.executions.as_ref().map_or_else(
+            || Ok(BudgetedVec::new(self.control.memory())),
+            |nodes| nodes.snapshot(&self.control),
+        )?;
+        Ok(CapturedExecution {
+            vector_searches: std::mem::replace(
+                &mut records.searches,
+                BudgetedVec::new(self.control.memory()),
+            ),
+            nodes,
+        })
     }
 }
 
@@ -209,6 +232,11 @@ impl VectorSearchObserver for BoundObserver {
     }
 }
 
+pub struct CapturedExecution {
+    pub vector_searches: ExplainVectorSearches,
+    pub nodes: BudgetedVec<uqa_sql::result::explain::ExplainNodeExecution>,
+}
+
 /// The guard restores its caller's binding on success, SQL error and unwind.
 pub struct DiagnosticsScope {
     _binding: CapturedScope,
@@ -216,8 +244,12 @@ pub struct DiagnosticsScope {
 }
 
 impl DiagnosticsScope {
-    pub fn finish(self) -> Result<ExplainVectorSearches, SQLError> {
+    pub fn finish_execution(self) -> Result<CapturedExecution, SQLError> {
         self.collector.finish()
+    }
+
+    pub fn finish(self) -> Result<ExplainVectorSearches, SQLError> {
+        Ok(self.collector.finish()?.vector_searches)
     }
 }
 

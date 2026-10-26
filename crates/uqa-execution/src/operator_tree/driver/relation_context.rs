@@ -109,7 +109,7 @@ impl PhysicalRetrievalDriver<'_> {
             .diagnostics
             .as_ref()
             .map(|collector| {
-                crate::query::diagnostics::VectorDiagnostics::observer(collector, self.table)
+                crate::query::diagnostics::InvocationDiagnostics::observer(collector, self.table)
             })
             .transpose()
             .map_err(|error| {

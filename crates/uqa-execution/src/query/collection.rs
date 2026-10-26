@@ -24,9 +24,10 @@ mod tests;
 pub fn collect_query_operator<'a>(
     runtime: QueryRuntimeView<'_>,
     columns: Vec<String>,
-    mut operator: Box<dyn crate::PhysicalOperator + 'a>,
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
+    let mut operator = runtime.diagnostics.observe(operator, "Query Pipeline")?;
     let internal_schema = operator.row_schema().clone();
     let column_types = columns
         .iter()

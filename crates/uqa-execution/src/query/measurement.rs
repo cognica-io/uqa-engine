@@ -102,8 +102,8 @@ impl QueryMeasurement {
             Some(started) => self
                 .now()
                 .expect("timed invocation")
-                .duration_since(started)
-                .checked_sub(running.downstream)
+                .checked_duration_since(started)
+                .and_then(|elapsed| elapsed.checked_sub(running.downstream))
                 .ok_or_else(overflow),
             None => Ok(Duration::ZERO),
         }
@@ -117,7 +117,8 @@ impl QueryMeasurement {
                 .checked_add(
                     self.now()
                         .expect("timed destination")
-                        .duration_since(started),
+                        .checked_duration_since(started)
+                        .ok_or_else(overflow)?,
                 )
                 .ok_or_else(overflow)?;
             self.running.set(Some(running));

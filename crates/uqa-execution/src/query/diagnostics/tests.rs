@@ -26,7 +26,7 @@ fn result() -> VectorQueryResult {
     }
 }
 
-fn record(collector: &VectorDiagnostics, relation: &str) -> StorageBackendResult<()> {
+fn record(collector: &InvocationDiagnostics, relation: &str) -> StorageBackendResult<()> {
     collector.record(
         relation,
         "embedding",

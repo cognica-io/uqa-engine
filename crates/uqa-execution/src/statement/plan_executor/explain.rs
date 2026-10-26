@@ -219,7 +219,10 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         settings: &ExplainSettings,
         control: uqa_core::memory::ProductionControl<'_>,
     ) -> Result<uqa_sql::result::ExplainAnalysis, SQLError> {
-        let diagnostics = self.context.diagnostics.diagnostics_scope()?;
+        let diagnostics = self
+            .context
+            .diagnostics
+            .diagnostics_scope(settings.timing)?;
         let started = std::time::Instant::now();
         let measurement = crate::query::measurement::QueryMeasurement::new(settings.timing);
         let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
@@ -240,8 +243,10 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         } else {
             executor.consume_explained_output(body, settings, control, &measurement)?
         };
+        let diagnostics = diagnostics.finish_execution()?;
         Ok(uqa_sql::result::ExplainAnalysis {
-            vector_searches: diagnostics.finish()?,
+            vector_searches: diagnostics.vector_searches,
+            node_executions: diagnostics.nodes,
             elapsed: started.elapsed(),
             root: measurement.metrics(),
             affected_rows,

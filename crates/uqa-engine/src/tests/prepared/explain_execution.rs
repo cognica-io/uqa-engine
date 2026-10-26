@@ -69,6 +69,32 @@ fn root_execution_counts_and_timing_fields_match_postgresql(#[case] provider: Pr
                 assert_eq!(total, 0.0, "{name}");
             }
         }
+        let executions = document["Node Executions"]
+            .as_array()
+            .expect("native execution records");
+        for (index, execution) in executions.iter().enumerate() {
+            assert_eq!(execution["Execution ID"].as_u64(), Some(index as u64));
+            assert!(!execution["Node Type"].as_str().unwrap().is_empty());
+            assert_eq!(
+                execution.get("Actual Startup Time").is_some(),
+                case["startup"].as_bool().unwrap()
+            );
+            assert_eq!(
+                execution.get("Actual Total Time").is_some(),
+                case["total"].as_bool().unwrap()
+            );
+            if execution["Actual Loops"] == 0 {
+                assert_eq!(execution["Actual Rows"], 0);
+            }
+            if case["total"] == true {
+                let startup = execution["Actual Startup Time"].as_f64().unwrap();
+                let total = execution["Actual Total Time"].as_f64().unwrap();
+                assert!(
+                    startup.is_finite() && total.is_finite() && 0.0 <= startup && startup <= total,
+                    "{name}: {execution}"
+                );
+            }
+        }
         engine.sql("ROLLBACK", &[]).unwrap();
         engine.close().unwrap();
     }

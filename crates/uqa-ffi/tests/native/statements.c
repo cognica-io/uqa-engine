@@ -486,6 +486,45 @@ static void explained_node_estimates(uqa_engine engine, uqa_result result) {
     assert(integer(result, 2) == 9);
 }
 
+static void explained_node_executions(uqa_engine engine, uqa_result result) {
+    CHECK(uqa_engine_execute(engine,
+        "CREATE TEMP TABLE c_measured_source(v integer); "
+        "INSERT INTO c_measured_source VALUES (1),(2),(3),(4)", result));
+    for (int timing = 0; timing != 2; ++timing) {
+        uqa_statement statement = NULL;
+        uqa_value document = NULL;
+        uqa_value_view view = NULL;
+        CHECK(uqa_statement_prepare(engine, timing
+            ? "EXPLAIN (ANALYZE, TIMING TRUE, BUFFERS FALSE, FORMAT JSON) SELECT sum(v) FROM c_measured_source"
+            : "EXPLAIN (ANALYZE, TIMING FALSE, BUFFERS FALSE, FORMAT JSON) SELECT sum(v) FROM c_measured_source",
+            &statement));
+        CHECK(uqa_statement_execute(statement, result));
+        CHECK(uqa_statement_finalize(&statement));
+        CHECK(uqa_result_get_value(result, 0, 0, &view));
+        CHECK(uqa_value_create_copy(view, &document));
+        view = document;
+        CHECK(uqa_engine_execute_params(engine,
+            "SELECT count(*), "
+            "count(*) FILTER (WHERE node->>'Node Type'='Relation Scan' "
+            "AND (node->>'Actual Rows')::numeric=4 AND (node->>'Actual Loops')::numeric=1), "
+            "count(*) FILTER (WHERE node->>'Node Type'='Query Pipeline' "
+            "AND (node->>'Actual Rows')::numeric=1 AND (node->>'Actual Loops')::numeric=1), "
+            "count(*) FILTER (WHERE node->>'Actual Total Time' IS NOT NULL "
+            "AND (node->>'Actual Startup Time')::numeric <= (node->>'Actual Total Time')::numeric), "
+            "count(DISTINCT (node->>'Execution ID')::bigint) "
+            "FROM json_array_elements($1->0->'Node Executions') AS nodes(node)",
+            &view, 1, result));
+        CHECK(uqa_value_destroy(&document));
+        const int64_t nodes = integer(result, 0);
+        assert(nodes >= 2);
+        assert(integer(result, 1) == 1);
+        assert(integer(result, 2) >= 1);
+        assert(integer(result, 3) == (timing ? nodes : 0));
+        assert(integer(result, 4) == nodes);
+    }
+    CHECK(uqa_engine_execute(engine, "DROP TABLE c_measured_source", result));
+}
+
 static void explained_execution(uqa_engine engine, uqa_result result) {
     const struct {
         const char *sql;
@@ -1247,6 +1286,7 @@ int main(void) {
     explained_costs(engine, result);
     explained_named_inputs(engine, result);
     explained_node_estimates(engine, result);
+    explained_node_executions(engine, result);
     pruned_rule_subqueries(engine, result);
     explained_execution(engine, result);
     explained_serialization(engine, result);

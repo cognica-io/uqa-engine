@@ -19,6 +19,7 @@ pub struct MaterializedResultSink<'a> {
     rows: &'a mut ResultRows,
     cancellation: &'a uqa_core::CancellationToken,
     measurement: Option<&'a crate::query::measurement::QueryMeasurement>,
+    observation: Option<&'a crate::query::diagnostics::executions::MaterializedObservation<'a>>,
 }
 
 impl<'a> MaterializedResultSink<'a> {
@@ -32,6 +33,7 @@ impl<'a> MaterializedResultSink<'a> {
             rows,
             cancellation,
             measurement: None,
+            observation: None,
         }
     }
 
@@ -41,6 +43,25 @@ impl<'a> MaterializedResultSink<'a> {
     ) -> Self {
         self.measurement = measurement;
         self
+    }
+
+    pub(crate) fn observe<T>(
+        &mut self,
+        step: &std::cell::RefCell<crate::query::diagnostics::executions::Step>,
+        consume: impl FnOnce(&mut MaterializedResultSink<'_>) -> crate::ExecResult<T>,
+    ) -> crate::ExecResult<T> {
+        let observation = crate::query::diagnostics::executions::MaterializedObservation {
+            step,
+            parent: self.observation,
+        };
+        let mut sink = MaterializedResultSink {
+            schema: self.schema,
+            rows: &mut *self.rows,
+            cancellation: self.cancellation,
+            measurement: self.measurement,
+            observation: Some(&observation),
+        };
+        consume(&mut sink)
     }
 
     /// Check the original statement token between bounded input pages, including pages rejected by the predicate.
@@ -61,6 +82,14 @@ impl<'a> MaterializedResultSink<'a> {
                 "borrowed materialized row has an incompatible physical width".into(),
             ));
         }
+        if let Some(observation) = self.observation {
+            observation.output(|| self.append_measured(values))
+        } else {
+            self.append_measured(values)
+        }
+    }
+
+    fn append_measured(&mut self, values: &[&Value]) -> crate::ExecResult<()> {
         if let Some(measurement) = self.measurement {
             measurement.output(1, || {
                 self.append_row(values);

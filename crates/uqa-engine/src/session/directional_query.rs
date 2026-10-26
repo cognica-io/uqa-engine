@@ -54,6 +54,7 @@ impl Engine {
         schema: RowSchema,
     ) -> Result<Box<dyn PhysicalOperator>, SQLError> {
         let engine = self.fork_session_portal_worker_engine()?;
+        let control = engine.query_retention_control()?;
         let support = query_plan_backward_scan_support(&engine, &engine, &plan, &params, &scope)?;
         Ok(Box::new(
             DirectionalQueryPlanOperator::new(
@@ -66,7 +67,7 @@ impl Engine {
                 support,
                 schema,
             )
-            .with_diagnostics(self.runtime.diagnostics.fork()),
+            .with_diagnostics(self.runtime.diagnostics.fork_with_control(control)),
         ))
     }
 }

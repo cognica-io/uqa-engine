@@ -6,12 +6,17 @@
 
 //! Session identities isolate nested calls; worker bindings explicitly inherit their captured invocation.
 
-use super::{CapturedDiagnostics, DiagnosticsScope, VectorDiagnostics};
+use super::{CapturedDiagnostics, DiagnosticsScope, InvocationDiagnostics};
 use std::{cell::RefCell, marker::PhantomData, rc::Rc, sync::Arc};
 use uqa_core::memory::Budgeted;
 use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
 
 type Binding = Arc<Budgeted<InvocationBinding>>;
+
+#[derive(Default)]
+struct SessionIdentity {
+    next_instance: std::sync::atomic::AtomicU64,
+}
 
 thread_local! {
     static CURRENT: RefCell<Option<Binding>> = const { RefCell::new(None) };
@@ -19,7 +24,7 @@ thread_local! {
 }
 
 struct InvocationBinding {
-    identity: Arc<()>,
+    identity: Arc<SessionIdentity>,
     collector: CapturedDiagnostics,
     previous: Option<Binding>,
 }
@@ -27,8 +32,9 @@ struct InvocationBinding {
 /// A suspended worker receives the caller's scope on every step, including explicit absence.
 #[derive(Clone)]
 pub struct InvocationRequest {
-    identity: Arc<()>,
+    identity: Arc<SessionIdentity>,
     collector: Option<CapturedDiagnostics>,
+    control: Option<StorageReadControl>,
 }
 
 pub struct RequestScope {
@@ -52,8 +58,9 @@ impl Drop for RequestScope {
 
 #[derive(Default)]
 pub struct QueryDiagnostics {
-    identity: Arc<()>,
+    identity: Arc<SessionIdentity>,
     inherited: Option<CapturedDiagnostics>,
+    retained_control: Option<StorageReadControl>,
 }
 
 impl QueryDiagnostics {
@@ -106,9 +113,24 @@ impl QueryDiagnostics {
     }
 
     pub fn request(&self) -> InvocationRequest {
+        let collector = self.capture();
+        let control = collector
+            .as_ref()
+            .map(|collector| collector.control().clone())
+            .or_else(|| self.retained_control.clone());
+        InvocationRequest {
+            identity: Arc::clone(&self.identity),
+            collector,
+            control,
+        }
+    }
+
+    /// Retained physical inputs keep the invoking read allowance even before their first measured FETCH.
+    pub fn request_with_control(&self, control: StorageReadControl) -> InvocationRequest {
         InvocationRequest {
             identity: Arc::clone(&self.identity),
             collector: self.capture(),
+            control: Some(control),
         }
     }
 
@@ -125,11 +147,57 @@ impl QueryDiagnostics {
         Self {
             identity: Arc::clone(&self.identity),
             inherited: self.capture(),
+            retained_control: self.retained_control.clone(),
+        }
+    }
+
+    /// Capture a retained child worker's original read owner along with its session identity.
+    pub fn fork_with_control(&self, control: StorageReadControl) -> Self {
+        Self {
+            identity: Arc::clone(&self.identity),
+            inherited: self.capture(),
+            retained_control: Some(control),
         }
     }
 
     pub fn enter(&self, control: StorageReadControl) -> StorageBackendResult<DiagnosticsScope> {
-        let collector = VectorDiagnostics::new(control, self.capture())?;
+        self.enter_selected(control, None)
+    }
+
+    pub fn enter_measured(
+        &self,
+        control: StorageReadControl,
+        timing: bool,
+    ) -> StorageBackendResult<DiagnosticsScope> {
+        self.enter_selected(control, Some(timing))
+    }
+
+    pub(super) fn request_control(&self) -> Option<StorageReadControl> {
+        REQUEST.with(|request| {
+            request
+                .borrow()
+                .as_ref()
+                .filter(|request| Arc::ptr_eq(&request.identity, &self.identity))
+                .and_then(|request| request.control.clone())
+        })
+    }
+
+    pub(super) fn allocate_instance(&self) -> Result<u64, uqa_sql::SQLError> {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.identity
+            .next_instance
+            .fetch_update(Relaxed, Relaxed, |next| next.checked_add(1))
+            .map_err(|_| {
+                uqa_sql::SQLError::Internal("native execution instance identities exhausted".into())
+            })
+    }
+
+    fn enter_selected(
+        &self,
+        control: StorageReadControl,
+        timing: Option<bool>,
+    ) -> StorageBackendResult<DiagnosticsScope> {
+        let collector = InvocationDiagnostics::new(control, self.capture(), timing)?;
         let binding = self.bind(&collector)?;
         Ok(DiagnosticsScope {
             _binding: binding,

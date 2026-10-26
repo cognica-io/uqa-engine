@@ -218,3 +218,25 @@ fn rejected_reentry_and_unwinding_restore_the_invocation_owner() {
     measurement.run(|| Ok(())).unwrap();
     assert_eq!(measurement.metrics().loops, 2);
 }
+
+#[test]
+fn a_backwards_clock_keeps_the_original_error_and_releases_the_invocation() {
+    let measurement = measurement(true);
+    advance(10);
+    let error = measurement
+        .run::<()>(|| {
+            CLOCK.with(|clock| {
+                let (base, _, calls) = clock.get();
+                clock.set((base, Duration::from_millis(5), calls));
+            });
+            Err(SQLError::Routine {
+                sqlstate: "22012".into(),
+                message: "original producer error".into(),
+            })
+        })
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22012"));
+    assert!(error.detail().unwrap().contains("measurements overflowed"));
+    assert_eq!(measurement.metrics(), ExplainNodeMetrics::default());
+    assert!(measurement.running.get().is_none());
+}

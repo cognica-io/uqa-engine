@@ -281,7 +281,10 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                 .map(crate::SQLRowStream::from_source);
         }
         if let Some(row) = self.pinned_right.as_ref() {
-            return Ok(crate::SQLRowStream::new(std::iter::once(Ok(row.clone()))));
+            return Ok(self.context.scans.runtime.diagnostics.observe_rows(
+                crate::SQLRowStream::new(std::iter::once(Ok(row.clone()))),
+                "Lateral Retained Rows Scan",
+            )?);
         }
         let combined;
         let left_row = if let Some(outer) = self.ctes.row_lock_outer_row() {
@@ -294,20 +297,30 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
             left_row
         };
         if let Some(rows) = self.function_rows(left_row)? {
-            return Ok(rows);
+            return Ok(self
+                .context
+                .scans
+                .runtime
+                .diagnostics
+                .observe_rows(rows, "Lateral Function Scan")?);
         }
         let group_runtime = matches!(self.right, SourcePlan::FunctionGroup { .. })
             .then(|| self.expression_runtime())
             .filter(|runtime| runtime.routine_description_scope().is_some());
         let operator = if let Some(runtime) = group_runtime {
-            self.function_group.operator(
+            let input = self.function_group.operator(
                 &self.context,
                 &self.right,
                 self.params,
                 &self.ctes,
                 &runtime,
                 left_row,
-            )?
+            )?;
+            self.context
+                .scans
+                .runtime
+                .diagnostics
+                .observe(input, "Lateral Function Group Scan")?
         } else {
             let mut scoped_ctes = self.ctes.clone();
             scoped_ctes.set_row_lock_outer_row(left_row.clone());
