@@ -12,6 +12,8 @@ The root handle is `uqa_engine`. Each handle owns one SQL session and a referenc
 
 The C layer owns pointer validation, handles, C/Rust value adaptation, diagnostics, and callback trampolines. Analysis, planning, execution, storage, and scoring stay in their existing owning crates. Necessary native interface additions are explicit implementation dependencies, not algorithms hidden inside the wrapper.
 
+External dependencies retain their existing interfaces; this design does not authorize modifying dependency sources or adding private hooks. Page I/O instrumentation is limited to accurately observable project-owned operations and existing dependency APIs. The current EXPLAIN coverage measures UQA temporary block files across planning, root and node execution, and serialization. It does not measure SQLite or redb internal page caches or SQLite private temporary indexes. Unavailable counters are omitted, and reported temporary-file zeros apply only to the measured producers. See the [native EXPLAIN contract](../manual/sql/08-transactions-and-routines.md#prepared-statements).
+
 ```mermaid
 flowchart LR
     application["C / C++ application"] --> ffi["uqa-ffi: ABI and handles"]
