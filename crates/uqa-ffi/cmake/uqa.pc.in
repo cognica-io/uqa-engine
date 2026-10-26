@@ -7,5 +7,5 @@ Name: UQA
 Description: Unified Query Algebra embedded C shared library
 Version: @UQA_VERSION@
 Libs: -L${libdir} -luqa
-Libs.private: @UQA_NATIVE_LINK_FLAGS@
+Libs.private: @UQA_PKG_CONFIG_NATIVE_LIBRARIES@
 Cflags: -I${includedir} -DUQA_USE_SHARED

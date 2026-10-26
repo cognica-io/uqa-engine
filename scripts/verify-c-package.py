@@ -27,6 +27,9 @@ DECLARATION = re.compile(r"UQA_API\s+uqa_status\s+UQA_CALL\s+(uqa_\w+)\s*\(")
 
 
 def compiler_flags(text: str) -> list[str]:
+    # pkgconf writes a line terminator, which CommandLineToArgvW does not
+    # treat as the space/tab separators of a Windows command line.
+    text = text.rstrip("\r\n")
     if sys.platform != "win32":
         return shlex.split(text)
     # MSVC syntax uses Windows quoting. POSIX shlex would consume backslashes

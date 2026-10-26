@@ -71,6 +71,25 @@ def native_link_inputs(flags: str, target: str) -> tuple[list[str], list[str]]:
     return libraries, options
 
 
+def msvc_pkg_config_libraries(flags: str) -> str:
+    # pkgconf's MSVC renderer translates -l names but omits raw .lib paths
+    # and native options. Retain every Rust system-library dependency.
+    libraries = []
+    for flag in shlex.split(flags):
+        if flag.lower().startswith(("/defaultlib:", "-defaultlib:")):
+            library = flag.split(":", 1)[1]
+        elif flag.lower().endswith(".lib"):
+            library = flag
+        else:
+            raise ValueError(f"unsupported pkg-config MSVC linker token: {flag!r}")
+        if library.lower().endswith(".lib"):
+            library = library[:-4]
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", library):
+            raise ValueError(f"unsupported pkg-config MSVC library: {library!r}")
+        libraries.append("-l" + library)
+    return " ".join(libraries)
+
+
 def generate(output: Path, target: str, revision: str, features: set[str], flags: str,
              cargo_metadata: Path, minimum_os: str = "") -> None:
     if features - FEATURES:
@@ -85,6 +104,7 @@ def generate(output: Path, target: str, revision: str, features: set[str], flags
     version = versions[0]
     public, deferred = symbols()
     libraries, options = native_link_inputs(flags, target)
+    pkg_libraries = msvc_pkg_config_libraries(flags) if "windows-msvc" in target else ""
     dependency_licenses, inventory = collect(cargo_metadata, features)
     payloads = legal_payloads(features) | dependency_licenses
     output.mkdir(parents=True, exist_ok=True)
@@ -94,7 +114,8 @@ def generate(output: Path, target: str, revision: str, features: set[str], flags
     (output / "build.cmake").write_text(
         f'set(UQA_VERSION "{version}")\n'
         f'set(UQA_NATIVE_LIBRARIES "{";".join(libraries)}")\n'
-        f'set(UQA_NATIVE_LINK_OPTIONS "{";".join(options)}")\n')
+        f'set(UQA_NATIVE_LINK_OPTIONS "{";".join(options)}")\n'
+        f'set(UQA_PKG_CONFIG_NATIVE_LIBRARIES "{pkg_libraries}")\n')
     share = output / "share/uqa"
     # This directory is entirely generated. A successful feature/dependency
     # reconfiguration must not retain obsolete notices from the previous graph.

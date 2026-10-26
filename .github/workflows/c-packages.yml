@@ -81,6 +81,10 @@ jobs:
         with:
           msystem: MINGW64
           install: mingw-w64-x86_64-pkgconf
+      - name: Verify native package tooling
+        env:
+          PKG_CONFIG: ${{ runner.os == 'Windows' && format('{0}/mingw64/bin/pkgconf.exe', steps.pkgconf.outputs.msys2-location) || 'pkg-config' }}
+        run: python -m unittest discover -s scripts/tests -p test_c_bindings_package.py
       - name: Relocate and qualify installed C and C++ consumers
         env:
           PKG_CONFIG: ${{ runner.os == 'Windows' && format('{0}/mingw64/bin/pkgconf.exe', steps.pkgconf.outputs.msys2-location) || 'pkg-config' }}

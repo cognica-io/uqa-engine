@@ -6,5 +6,5 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: UQA static
 Description: Unified Query Algebra embedded C static library
 Version: @UQA_VERSION@
-Libs: ${libdir}/@UQA_STATIC_FILENAME@ @UQA_NATIVE_LINK_FLAGS@
+Libs: @UQA_PKG_CONFIG_STATIC_LIBRARY@ @UQA_PKG_CONFIG_NATIVE_LIBRARIES@
 Cflags: -I${includedir}

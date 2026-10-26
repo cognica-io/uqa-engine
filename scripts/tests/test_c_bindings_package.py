@@ -37,6 +37,7 @@ BUILD = module("c_build", "build-c-bindings.py")
 METADATA = module("c_metadata", "c-bindings-metadata.py")
 LICENSES = module("c_licenses", "check-release-licenses.py")
 DEPENDENCIES = module("c_dependency_licenses", "c_bindings_licenses.py")
+VERIFY = module("c_verify", "verify-c-package.py")
 COMMIT = "a" * 40
 TARGET = "x86_64-unknown-linux-gnu"
 
@@ -70,7 +71,7 @@ class CPackageVerification(unittest.TestCase):
     @unittest.skipUnless(all(shutil.which(tool) for tool in ("cmake", "ninja", "clang-cl", "llvm-rc", "llvm-mt", "llvm-lib", "llvm-readobj", "lld-link")),
                          "CMake, Ninja and LLVM's MSVC tools are required for COFF link verification")
     def test_msvc_runtime_directive_reaches_shared_and_installed_static_links(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(prefix="uqa MSVC package ") as temporary:
             work = Path(temporary)
             prefix, build = work / "prefix", work / "build"
             archive, metadata = work / "uqa.lib", work / "cargo-metadata.json"
@@ -110,10 +111,16 @@ class CPackageVerification(unittest.TestCase):
                 source.write_text(
                     "int DllMain(void *module, unsigned long reason, void *reserved) { return 1; }"
                     if name == "native_lifecycle" else
-                    "\n".join(f"int {symbol}(void) {{ return 0; }}" for symbol in definitions))
+                    "int system_dependency(void);\n" +
+                    "\n".join(f"int {symbol}(void) {{ return system_dependency(); }}" for symbol in definitions))
                 run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl", str(source), "/Fo" + str(obj))
                 objects.append(str(obj))
             run("llvm-lib", "/out:" + str(archive), *objects)
+            native_source, native_obj = work / "system.c", work / "system.obj"
+            native_source.write_text("int system_dependency(void) { return 0; }\n")
+            run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl",
+                str(native_source), "/Fo" + str(native_obj))
+            run("llvm-lib", "/out:" + str(work / "bcrypt.lib"), str(native_obj))
             runtime_objects = []
             for name, body in (
                     ("crt_entry", "int DllMain(void *, unsigned long, void *); "
@@ -127,7 +134,7 @@ class CPackageVerification(unittest.TestCase):
             run("llvm-lib", "/out:" + str(work / "msvcrt.lib"), *runtime_objects)
             run("cmake", "-S", str(ROOT / "crates/uqa-ffi"), "-B", str(build), *toolchain,
                 "-DUQA_RUST_STATIC_LIBRARY=" + str(archive),
-                "-DUQA_NATIVE_LINK_FLAGS=/defaultlib:msvcrt", "-DUQA_SOURCE_REVISION=" + COMMIT,
+                "-DUQA_NATIVE_LINK_FLAGS=bcrypt.lib /defaultlib:msvcrt", "-DUQA_SOURCE_REVISION=" + COMMIT,
                 "-DUQA_TARGET=x86_64-pc-windows-msvc", "-DUQA_CARGO_METADATA=" + str(metadata),
                 "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_INSTALL_PREFIX=" + str(prefix))
             shared = run("cmake", "--build", str(build), "--", "-n", "-v")
@@ -162,6 +169,51 @@ class CPackageVerification(unittest.TestCase):
             self.assertIn("/defaultlib:msvcrt", static)
             self.assertNotIn("/INCLUDE:DllMain", static)
             self.assertNotIn("msvcrt.obj", static)
+
+            tool = os.environ.get("PKG_CONFIG", "pkg-config")
+            if shutil.which(tool):
+                directory = prefix / "lib/pkgconfig"
+                directory.mkdir()
+                for name in ("uqa", "uqa-static"):
+                    shutil.copyfile(build / (name + ".pc"), directory / (name + ".pc"))
+                shutil.copyfile(build / "uqa.lib", prefix / "lib/uqa.lib")
+                shutil.copytree(ROOT / "crates/uqa-ffi/include/uqa", prefix / "include/uqa")
+                env = dict(os.environ, PKG_CONFIG_PATH=str(directory))
+                for package in ("uqa", "uqa-static"):
+                    cflags = VERIFY.compiler_flags(subprocess.check_output(
+                        [tool, "--msvc-syntax", "--cflags", package], env=env, text=True))
+                    libraries = VERIFY.compiler_flags(subprocess.check_output(
+                        [tool, "--msvc-syntax", "--libs", package], env=env, text=True))
+                    source, obj = work / (package + ".c"), work / (package + ".obj")
+                    executable = work / (package + ".exe")
+                    source.write_text('#include <uqa/uqa.h>\nint main(void) { uint32_t abi = 0; '
+                                      'return (int)uqa_library_get_abi_version(&abi); }\n')
+                    run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl",
+                        "/clang:-ffreestanding", *cflags, str(source), "/Fo" + str(obj))
+                    run("lld-link", "/entry:main", "/subsystem:console",
+                        "/out:" + str(executable), str(obj), *libraries, "/libpath:" + str(work))
+                    imports = run("llvm-readobj", "--coff-imports", str(executable))
+                    self.assertEqual("Name: uqa.dll" in imports, package == "uqa")
+                    if package == "uqa-static":
+                        self.assertIn("uqa_static.lib", libraries)
+                        self.assertIn("bcrypt.lib", libraries)
+                        self.assertIn("msvcrt.lib", libraries)
+
+    @unittest.skipUnless(sys.platform == "win32", "requires the native Windows argument parser")
+    def test_windows_pkgconf_output_terminators_do_not_become_arguments(self):
+        for flags in ([r'/IC:\Library path\include', "/DUQA_USE_SHARED"],
+                      [r'/libpath:C:\Library path\lib', "uqa.lib"],
+                      [r'/IC:\Library path\trailing\\'], []):
+            for ending in ("\n", "\r\n", " \n", "\t\r\n"):
+                with self.subTest(flags=flags, ending=ending):
+                    line = subprocess.list2cmdline(flags) + ending
+                    self.assertEqual(VERIFY.compiler_flags(line), flags)
+
+    def test_msvc_pkg_config_rejects_link_inputs_it_cannot_preserve(self):
+        for flags in ("bcrypt.lib /WHOLEARCHIVE:other.lib", "bcrypt.lib /DEBUG",
+                      '"C:/external library/other.lib"', "/defaultlib:"):
+            with self.subTest(flags=flags), self.assertRaisesRegex(ValueError, "pkg-config MSVC"):
+                METADATA.msvc_pkg_config_libraries(flags)
 
     def test_cargo_metadata_and_logs_preserve_utf8_on_a_legacy_locale(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -245,7 +297,8 @@ class CPackageVerification(unittest.TestCase):
             directory.mkdir(parents=True)
             source = (ROOT / "crates/uqa-ffi/cmake/uqa-static.pc.in").read_text()
             for name, value in {"CMAKE_INSTALL_LIBDIR": "lib", "CMAKE_INSTALL_INCLUDEDIR": "include",
-                                "UQA_STATIC_FILENAME": "libuqa.a", "UQA_NATIVE_LINK_FLAGS": "-lm",
+                                "UQA_PKG_CONFIG_STATIC_LIBRARY": "${libdir}/libuqa.a",
+                                "UQA_PKG_CONFIG_NATIVE_LIBRARIES": "-lm",
                                 "UQA_VERSION": "0.6.1"}.items():
                 source = source.replace("@" + name + "@", value)
             (directory / "uqa-static.pc").write_text(source)
