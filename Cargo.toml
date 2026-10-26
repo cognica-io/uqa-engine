@@ -108,7 +108,7 @@ unicode-normalization = "0.1"
 # Controlled decimal conversion audits this implementation's allocation strategy.
 num-bigint = "=0.4.6"
 num-traits = "0.2"
-rusqlite = { package = "uqa-rusqlite", version = "=0.39.1", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
+rusqlite = { package = "uqa-rusqlite", version = "=0.39.2", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tz-rs = { version = "=0.7.3", default-features = false }
 tzdb_data = "=0.2.5"
