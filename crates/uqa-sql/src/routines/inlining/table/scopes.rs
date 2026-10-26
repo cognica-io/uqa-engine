@@ -6,8 +6,6 @@
 
 //! Capture caller attributes structurally before entering a routine's lexical scopes.
 
-use std::collections::BTreeSet;
-
 use crate::{
     ast::{InternalRelationId, JoinKind},
     plan::{
@@ -160,7 +158,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
                 column_aliases: columns,
             }),
             windows: Vec::new(),
-            privilege_columns: BTreeSet::default(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             r#where: None,
             compute: ComputePlan::Project,
             group_by: Vec::new(),

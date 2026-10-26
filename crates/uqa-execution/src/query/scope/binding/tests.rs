@@ -55,14 +55,14 @@ fn source_metadata_does_not_cross_cte_definitions_or_recursive_descriptors() {
     ) else {
         panic!("query");
     };
-    scope.insert_deferred(query.ctes.remove(0));
+    scope.insert_deferred(query.ctes.remove(0).into());
     let inputs = SourceBindingScope::capture(&scope).unwrap();
     assert!(inputs.matches(&scope.clone()));
     let mut changed = scope.clone();
     let original = changed.deferred_ctes.get("input").unwrap();
     changed
         .deferred_ctes
-        .insert("input".into(), Arc::new((**original).clone()));
+        .insert("input".into(), (**original).clone().into());
     assert!(!inputs.matches(&changed));
     let mut changed = scope.clone();
     changed.recursive_control_widths.insert("input".into(), 1);

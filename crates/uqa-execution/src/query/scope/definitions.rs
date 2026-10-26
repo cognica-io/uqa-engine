@@ -14,7 +14,7 @@ use uqa_sql::plan::CtePlan;
 #[derive(Default)]
 pub(super) struct DefinitionBindings {
     rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
-    deferred: BTreeMap<String, Arc<CtePlan>>,
+    deferred: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
     definitions: BTreeMap<String, Arc<Self>>,
     non_returning: BTreeSet<String>,
     folded: BTreeSet<String>,
@@ -40,7 +40,7 @@ impl DefinitionBindings {
                 retained.rows.insert(name.clone(), rows.clone());
             }
             if let Some(plan) = scope.deferred_ctes.get(name) {
-                retained.deferred.insert(name.clone(), Arc::clone(plan));
+                retained.deferred.insert(name.clone(), plan.clone());
             }
             if let Some(definition) = scope.definition_scopes.get(name) {
                 retained
@@ -84,16 +84,18 @@ impl<S: Clone> CteScope<S> {
         scope.visible_cte_names.clone_from(&retained.names);
         if let Some(plan) = self.deferred_ctes.get(name) {
             if uqa_sql::semantics::cte_references_own_name(plan) {
-                scope
-                    .deferred_ctes
-                    .insert(name.to_owned(), Arc::clone(plan));
+                scope.deferred_ctes.insert(name.to_owned(), plan.clone());
                 scope.visible_cte_names.insert(name.to_owned());
             }
         }
         Some(scope)
     }
 
-    pub(crate) fn insert_preparation_cte(&mut self, plan: CtePlan, folded: bool) {
+    pub(crate) fn insert_preparation_cte(
+        &mut self,
+        plan: uqa_sql::plan::RetainedCtePlan,
+        folded: bool,
+    ) {
         let definition = Arc::new(DefinitionBindings::capture(self, &plan));
         self.rows.remove(&plan.name);
         if plan.body.returns_rows() {
@@ -107,7 +109,7 @@ impl<S: Clone> CteScope<S> {
             self.folded_ctes.remove(&plan.name);
         }
         self.definition_scopes.insert(plan.name.clone(), definition);
-        self.deferred_ctes.insert(plan.name.clone(), Arc::new(plan));
+        self.deferred_ctes.insert(plan.name.clone(), plan);
     }
 
     pub(crate) fn cte_is_folded(&self, name: &str) -> bool {

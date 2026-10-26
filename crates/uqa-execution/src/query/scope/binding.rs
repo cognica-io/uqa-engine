@@ -6,19 +6,16 @@
 
 //! Immutable namespace guard for immediate derived-source metadata transfer.
 
-use super::{CatalogReadView, CtePlan, CteScope, RelationNameResolution};
+use super::{CatalogReadView, CteScope, RelationNameResolution};
 use crate::RowSchema;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::collections::{BTreeMap, BTreeSet};
 use uqa_sql::SQLError;
 
 pub(crate) struct SourceBindingScope {
     catalog: CatalogReadView,
     resolution: RelationNameResolution,
     rows: BTreeMap<String, RowSchema>,
-    deferred: BTreeMap<String, Arc<CtePlan>>,
+    deferred: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
     non_returning: BTreeSet<String>,
     recursive_widths: BTreeMap<String, usize>,
 }
@@ -63,7 +60,7 @@ impl SourceBindingScope {
             && self.deferred.len() == ctes.deferred_ctes.len()
             && self.deferred.iter().zip(&ctes.deferred_ctes).all(
                 |((name, plan), (current_name, current))| {
-                    name == current_name && Arc::ptr_eq(plan, current)
+                    name == current_name && std::ptr::eq(plan.as_ref(), current.as_ref())
                 },
             )
     }

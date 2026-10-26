@@ -32,7 +32,7 @@ fn bound_projection_order_and_limit_build_with_explicit_runtime_view() {
     );
     let statement = QueryBlockPlan {
         deferred_outer_rewrites: Vec::new(),
-        privilege_columns: std::collections::BTreeSet::default(),
+        privilege_columns: uqa_core::memory::OwnedSet::new(),
         projections: vec![ProjectionPlan {
             expr: ScalarExpr::Column("id".into()),
             alias: None,

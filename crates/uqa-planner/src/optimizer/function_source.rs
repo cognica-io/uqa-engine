@@ -176,7 +176,7 @@ fn scalar_query(
                     alias: Some(name.clone()),
                 })
                 .collect(),
-            privilege_columns: std::collections::BTreeSet::new(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             from: None,
             r#where: None,
             compute: uqa_sql::plan::ComputePlan::Project,

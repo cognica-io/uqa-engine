@@ -30,8 +30,14 @@ pub fn merge_analysis_scope<S: Clone>(
     if let Some(parent) = inherited {
         scope.inherit_cte_bindings(parent);
     }
+    let retained = scopes.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        scopes.cancellation(),
+    );
     for cte in &stmt.ctes {
-        scope.insert_deferred(cte.clone());
+        scope.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
     scope.scalar_subqueries = stmt.subqueries.as_slice().into();
     Ok(scope)

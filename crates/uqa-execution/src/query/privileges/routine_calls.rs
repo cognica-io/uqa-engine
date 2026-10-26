@@ -57,7 +57,7 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     );
     let ordered = uqa_sql::semantics::order_cte_plans_with_control(&plan.ctes, control)?;
     for cte in ordered.iter() {
-        lookup.insert_deferred((*cte).clone());
+        lookup.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
     let mut visible = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &mut *visible;

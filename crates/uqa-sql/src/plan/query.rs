@@ -334,7 +334,7 @@ impl QueryBlockPlan {
             deferred_outer_rewrites: Vec::new(),
             windows,
             projections,
-            privilege_columns: std::collections::BTreeSet::default(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             from: statement
                 .from
                 .map(|source| SourcePlan::lower_with(source, aggregates, &mut subqueries)),

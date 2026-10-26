@@ -71,10 +71,16 @@ fn needs_preparation<S: Clone + Send + Sync + 'static>(
             _ => false,
         })
     }
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
     let mut scope = scope.clone();
     let mut lookup = scope.enter_query_plan_scope(query)?;
     for cte in &query.ctes {
-        lookup.insert_deferred(cte.clone());
+        lookup.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
     let scope = lookup.enter_visible_ctes(query.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &*scope;
@@ -142,7 +148,7 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
     );
     let ordered = uqa_sql::semantics::order_cte_plans_with_control(&query.ctes, control)?;
     for cte in ordered.iter().copied() {
-        let mut definition = cte.clone();
+        let (mut definition, definition_memory) = cte.clone_with_control(&control)?.into_parts();
         if !uqa_sql::semantics::cte_references_own_name_with_control(cte, control)? {
             if let Some(body) = definition
                 .body
@@ -161,7 +167,13 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
                 restored_outputs.insert(cte.name.clone(), schema);
             }
         }
-        scope.insert_preparation_cte(definition, folded.contains(&cte.name));
+        scope.insert_preparation_cte(
+            uqa_sql::plan::RetainedCtePlan::from_produced(
+                control.finish(definition, definition_memory)?,
+                &control,
+            )?,
+            folded.contains(&cte.name),
+        );
     }
     drop(ordered);
     for cte in &mut query.ctes {

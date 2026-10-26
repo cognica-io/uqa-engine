@@ -110,7 +110,6 @@ use crate::semantics::{
 };
 use crate::RowSchema;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 #[cfg(test)]
 thread_local! {
@@ -130,7 +129,7 @@ struct SchemaScope {
     catalog: CatalogReadView,
     resolution: RelationNameResolution,
     ctes: BTreeMap<String, RowSchema>,
-    deferred_ctes: BTreeMap<String, Arc<crate::plan::CtePlan>>,
+    deferred_ctes: BTreeMap<String, crate::plan::RetainedCtePlan>,
     non_returning_ctes: BTreeSet<String>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,

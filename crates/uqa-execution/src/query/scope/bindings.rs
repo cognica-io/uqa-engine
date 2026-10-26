@@ -9,7 +9,6 @@
 use crate::query::CteScope;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use uqa_sql::plan::CtePlan;
 
 pub fn save_and_remove_cte_names<S: Clone>(
     ctes: &mut CteScope<S>,
@@ -67,7 +66,7 @@ pub struct SavedCteBinding {
     name: String,
     non_returning: bool,
     rows: Option<crate::query::cte::rows::CteRows>,
-    deferred: Option<Arc<CtePlan>>,
+    deferred: Option<uqa_sql::plan::RetainedCtePlan>,
     definition: Option<Arc<super::definitions::DefinitionBindings>>,
     folded: bool,
 }

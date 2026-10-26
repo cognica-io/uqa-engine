@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{atomic::AtomicU64, Arc};
 use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::plan::{CtePlan, QueryPlan};
+use uqa_sql::plan::QueryPlan;
 use uqa_sql::SQLError;
 
 pub(crate) mod binding;
@@ -35,7 +35,7 @@ use subqueries::ScalarSubqueryCacheEntry;
 pub struct CteScope<S: Clone = ()> {
     producers: producers::CteProducers,
     pub rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
-    deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
+    deferred_ctes: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
     definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
     folded_ctes: BTreeSet<String>,
     pub non_returning_ctes: BTreeSet<String>,

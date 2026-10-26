@@ -95,7 +95,9 @@ impl Analysis<'_> {
         let mut scope = std::borrow::Cow::Borrowed(ctes);
         let ordered = uqa_sql::semantics::order_cte_plans_with_control(&query.ctes, self.control)?;
         for cte in ordered.iter() {
-            scope.to_mut().insert_deferred((*cte).clone());
+            scope
+                .to_mut()
+                .insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &self.control)?);
         }
         let output = output_expressions(self.routines, block, self.params, &scope)?;
         let mut found = false;

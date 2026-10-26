@@ -93,7 +93,7 @@ pub fn single_row_values_query(
             deferred_outer_rewrites: Vec::new(),
             windows: Vec::new(),
             projections,
-            privilege_columns: std::collections::BTreeSet::default(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             from: None,
             r#where: None,
             compute: ComputePlan::Project,

@@ -38,8 +38,8 @@ pub fn resolve_outer_expression_rewrites(
 pub struct DeferredOuterRewrite {
     outer_columns: Arc<BTreeMap<ColumnIdentity, crate::ast::InternalColumnRef>>,
     replacements: Arc<BTreeMap<ColumnIdentity, OuterReplacement>>,
-    pub(super) shadowed_qualifiers: BTreeSet<String>,
-    pub(super) shadowed_columns: BTreeSet<String>,
+    pub(super) shadowed_qualifiers: uqa_core::memory::OwnedSet<String>,
+    pub(super) shadowed_columns: uqa_core::memory::OwnedSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +84,21 @@ pub fn resolve_outer_rewrites<'a>(
 }
 
 impl DeferredOuterRewrite {
+    pub(crate) fn copy_with(
+        &self,
+        copying: &mut crate::plan::copy::Copying<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            outer_columns: Arc::clone(&self.outer_columns),
+            replacements: Arc::clone(&self.replacements),
+            shadowed_qualifiers: copying.set(&self.shadowed_qualifiers, |copying, name| {
+                copying.text(name)
+            })?,
+            shadowed_columns: copying
+                .set(&self.shadowed_columns, |copying, name| copying.text(name))?,
+        })
+    }
+
     /// Bind expressions whose original input attributes already have internal identities. Nested query namespaces resolve their own names before consulting these outer replacements.
     pub(crate) fn from_inputs(inputs: BTreeMap<ColumnIdentity, ExpressionPlan>) -> Self {
         Self {
@@ -102,8 +117,8 @@ impl DeferredOuterRewrite {
                     })
                     .collect(),
             ),
-            shadowed_qualifiers: BTreeSet::new(),
-            shadowed_columns: BTreeSet::new(),
+            shadowed_qualifiers: uqa_core::memory::OwnedSet::new(),
+            shadowed_columns: uqa_core::memory::OwnedSet::new(),
         }
     }
 
@@ -189,8 +204,8 @@ impl DeferredOuterRewrite {
         let mut rewrite = Self {
             outer_columns: Arc::new(BTreeMap::new()),
             replacements: Arc::new(replacements),
-            shadowed_qualifiers: shadowed_qualifiers.clone(),
-            shadowed_columns: shadowed_columns.clone(),
+            shadowed_qualifiers: shadowed_qualifiers.iter().cloned().collect(),
+            shadowed_columns: shadowed_columns.iter().cloned().collect(),
         };
         rewrite.capture_outer_columns();
         Ok(rewrite)

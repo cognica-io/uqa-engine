@@ -138,15 +138,15 @@ impl<S: Clone> CteScope<S> {
         self.rows.insert(name, rows);
     }
 
-    pub fn insert_deferred(&mut self, plan: CtePlan) {
+    pub fn insert_deferred(&mut self, plan: uqa_sql::plan::RetainedCtePlan) {
         self.insert_preparation_cte(plan, true);
     }
 
-    pub fn remove_deferred(&mut self, name: &str) -> Option<CtePlan> {
+    pub fn remove_deferred(&mut self, name: &str) -> Option<uqa_sql::plan::RetainedCtePlan> {
         self.non_returning_ctes.remove(name);
         self.definition_scopes.remove(name);
         self.folded_ctes.remove(name);
-        self.deferred_ctes.remove(name).map(Arc::unwrap_or_clone)
+        self.deferred_ctes.remove(name)
     }
 
     /// Return a folded definition without consuming its lexical binding. A single syntactic reference can be built again by a recursive working-table iteration or a correlated consumer. Materialized producers replace the definition explicitly when installed.
@@ -167,10 +167,10 @@ impl<S: Clone> CteScope<S> {
     pub fn deferred_reference(&self, reference: &str) -> Option<&CtePlan> {
         self.deferred_ctes
             .get(&uqa_sql::semantics::cte_reference_name(reference)?)
-            .map(Arc::as_ref)
+            .map(AsRef::as_ref)
     }
 
-    pub fn deferred_ctes(&self) -> &BTreeMap<String, Arc<CtePlan>> {
+    pub fn deferred_ctes(&self) -> &BTreeMap<String, uqa_sql::plan::RetainedCtePlan> {
         &self.deferred_ctes
     }
 

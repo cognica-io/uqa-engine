@@ -6,6 +6,7 @@
 
 //! Sets reuse exact owned map nodes without a second tree implementation.
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Borrow;
 
 use super::{BudgetedMapIter, OwnedMap, OwnedMapIntoIter};
@@ -47,6 +48,10 @@ impl<K> OwnedSet<K> {
         self.0.is_empty()
     }
 
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
     pub fn iter(&self) -> OwnedSetIter<'_, K> {
         OwnedSetIter(self.0.iter())
     }
@@ -55,6 +60,13 @@ impl<K> OwnedSet<K> {
 impl<K: Ord> OwnedSet<K> {
     pub fn insert(&mut self, key: K) -> bool {
         self.0.insert(key, ()).is_none()
+    }
+
+    pub fn remove<Q: Ord + ?Sized>(&mut self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+    {
+        self.0.remove(key).is_some()
     }
 
     pub fn contains<Q: Ord + ?Sized>(&self, key: &Q) -> bool
@@ -68,6 +80,51 @@ impl<K: Ord> OwnedSet<K> {
 impl<K: Ord> FromIterator<K> for OwnedSet<K> {
     fn from_iter<T: IntoIterator<Item = K>>(iter: T) -> Self {
         Self(iter.into_iter().map(|key| (key, ())).collect())
+    }
+}
+
+impl<K: Ord> Extend<K> for OwnedSet<K> {
+    fn extend<T: IntoIterator<Item = K>>(&mut self, iter: T) {
+        for key in iter {
+            self.insert(key);
+        }
+    }
+}
+
+impl<K: Ord, const N: usize> From<[K; N]> for OwnedSet<K> {
+    fn from(keys: [K; N]) -> Self {
+        keys.into_iter().collect()
+    }
+}
+
+impl<K: Serialize> Serialize for OwnedSet<K> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+
+impl<'de, K: Ord + Deserialize<'de>> Deserialize<'de> for OwnedSet<K> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor<K>(std::marker::PhantomData<K>);
+        impl<'de, K: Ord + Deserialize<'de>> serde::de::Visitor<'de> for Visitor<K> {
+            type Value = OwnedSet<K>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an ordered set")
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut sequence: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut result = OwnedSet::new();
+                while let Some(key) = sequence.next_element()? {
+                    result.insert(key);
+                }
+                Ok(result)
+            }
+        }
+        deserializer.deserialize_seq(Visitor(std::marker::PhantomData))
     }
 }
 

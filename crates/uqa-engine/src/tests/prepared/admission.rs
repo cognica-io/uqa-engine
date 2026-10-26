@@ -65,50 +65,52 @@ fn cte_preparation_uses_the_native_allowance_and_recovers_after_rejection(
 ) {
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("cte-admission.db"));
-    let prepared = engine
-        .prepare_statement(
-            "WITH q AS MATERIALIZED (VALUES ($1::integer)) SELECT * FROM q",
-            &[],
-        )
-        .unwrap();
+    let queries = [
+        "WITH q AS MATERIALIZED (VALUES ($1::integer)) SELECT * FROM q",
+        "WITH q AS NOT MATERIALIZED (VALUES ($1::integer)), r AS (SELECT * FROM q) SELECT * FROM r",
+        "WITH q AS (VALUES ($1::integer)) SELECT * FROM (WITH q AS (SELECT * FROM q) SELECT * FROM q) nested",
+    ];
     let params = [uqa_sql::SQLParam::Scalar(uqa_core::Value::Int(7))];
     let retained = engine.query_retention_control().unwrap();
     let memory = retained.memory();
-    for mode in ["force_custom_plan", "force_generic_plan"] {
-        engine
-            .sql(&format!("SET plan_cache_mode = {mode}"), &[])
-            .unwrap();
-        for explicit in [false, true] {
-            if explicit {
-                engine.sql("BEGIN; SAVEPOINT admission_retry", &[]).unwrap();
-            }
-            let full = memory.reserve(memory.limit() - memory.used()).unwrap();
-            let error = engine
-                .execute_prepared_statement(&prepared, &params)
-                .unwrap_err();
-            assert_eq!(
-                error.sqlstate(),
-                Some("53200"),
-                "{mode}, explicit={explicit}: {error}"
-            );
-            drop(full);
-            if explicit {
-                assert!(engine.transaction_failed());
-                engine.sql("ROLLBACK TO admission_retry", &[]).unwrap();
-            } else {
-                assert_eq!(engine.transaction_depth(), 0);
-            }
-            let result = engine
-                .execute_prepared_statement(&prepared, &params)
+    for query in queries {
+        let prepared = engine.prepare_statement(query, &[]).unwrap();
+        for mode in ["force_custom_plan", "force_generic_plan"] {
+            engine
+                .sql(&format!("SET plan_cache_mode = {mode}"), &[])
                 .unwrap();
-            assert_eq!(result.value_at(0, 0), Some(&uqa_core::Value::Int(7)));
-            drop(result);
-            if explicit {
-                engine.sql("ROLLBACK", &[]).unwrap();
+            for explicit in [false, true] {
+                if explicit {
+                    engine.sql("BEGIN; SAVEPOINT admission_retry", &[]).unwrap();
+                }
+                let full = memory.reserve(memory.limit() - memory.used()).unwrap();
+                let error = engine
+                    .execute_prepared_statement(&prepared, &params)
+                    .unwrap_err();
+                assert_eq!(
+                    error.sqlstate(),
+                    Some("53200"),
+                    "{mode}, explicit={explicit}: {error}"
+                );
+                drop(full);
+                if explicit {
+                    assert!(engine.transaction_failed());
+                    engine.sql("ROLLBACK TO admission_retry", &[]).unwrap();
+                } else {
+                    assert_eq!(engine.transaction_depth(), 0);
+                }
+                let result = engine
+                    .execute_prepared_statement(&prepared, &params)
+                    .unwrap();
+                assert_eq!(result.value_at(0, 0), Some(&uqa_core::Value::Int(7)));
+                drop(result);
+                if explicit {
+                    engine.sql("ROLLBACK", &[]).unwrap();
+                }
             }
         }
+        engine.finalize_prepared_statement(&prepared);
     }
-    engine.finalize_prepared_statement(&prepared);
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);

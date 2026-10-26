@@ -79,8 +79,8 @@ fn query(sql: &str) -> QueryPlan {
                 },
             ),
         ])),
-        shadowed_columns: BTreeSet::new(),
-        shadowed_qualifiers: BTreeSet::new(),
+        shadowed_columns: uqa_core::memory::OwnedSet::new(),
+        shadowed_qualifiers: uqa_core::memory::OwnedSet::new(),
     });
     *query
 }

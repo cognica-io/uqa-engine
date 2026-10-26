@@ -610,7 +610,7 @@ mod tests {
         assert_eq!(block.projections[1].alias.as_deref(), Some("second"));
         assert_eq!(
             block.privilege_columns,
-            BTreeSet::from([uqa_sql::ColumnIdentity::unqualified("b")])
+            uqa_core::memory::OwnedSet::from([uqa_sql::ColumnIdentity::unqualified("b")])
         );
     }
 
@@ -682,7 +682,7 @@ mod tests {
             if pruned {
                 assert_eq!(
                     inner.privilege_columns,
-                    BTreeSet::from([uqa_sql::ColumnIdentity::unqualified("v")])
+                    uqa_core::memory::OwnedSet::from([uqa_sql::ColumnIdentity::unqualified("v")])
                 );
                 assert_eq!(inner.projections[0].alias.as_deref(), Some("x"));
                 assert_eq!(

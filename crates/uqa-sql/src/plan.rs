@@ -24,12 +24,15 @@ use crate::ir::{ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, Sc
 
 mod command_children;
 mod command_expressions;
+pub(crate) mod copy;
 pub mod input_projection;
 mod model;
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
 mod query;
 mod query_visit;
+mod retained;
+pub use retained::RetainedCtePlan;
 mod rewrite;
 mod scalar;
 mod scoped_visit;

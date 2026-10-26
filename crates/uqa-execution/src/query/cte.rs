@@ -36,9 +36,18 @@ pub(crate) fn install_scheduled_ctes<'a, S: Clone>(
     ctes: &mut CteScope<S>,
     output_filters: &BTreeMap<String, (String, ScalarExpr)>,
 ) -> Result<(), SQLError> {
+    let retained = context.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.runtime.cancellation,
+    );
     for scheduled in plans {
         if scheduled.deferred {
-            ctes.insert_deferred(scheduled.plan.clone());
+            ctes.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(
+                scheduled.plan,
+                &control,
+            )?);
         } else {
             materialize_plan_ctes_with_filters(
                 context,

@@ -212,7 +212,7 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
         scope.inherit_cte_bindings(parent);
     }
     for cte in inputs.ctes {
-        scope.insert_deferred(cte.clone());
+        scope.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
     scope.scalar_subqueries = inputs.subqueries.into();
     let mut visible = scope.enter_visible_ctes(inputs.ctes.iter().map(|cte| cte.name.as_str()));

@@ -184,8 +184,8 @@ pub struct QueryBlockPlan {
     pub windows: Vec<crate::ast::WindowDefinition<crate::ir::ScalarWindowSpec>>,
     pub projections: Vec<ProjectionPlan>,
     /// Analyzed column reads retained when unused outputs are removed. These names authorize access but never evaluate the discarded values.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
-    pub privilege_columns: std::collections::BTreeSet<crate::ColumnIdentity>,
+    #[serde(default, skip_serializing_if = "uqa_core::memory::OwnedSet::is_empty")]
+    pub privilege_columns: uqa_core::memory::OwnedSet<crate::ColumnIdentity>,
     pub from: Option<SourcePlan>,
     pub r#where: Option<ScalarExpr>,
     pub compute: ComputePlan,
@@ -462,8 +462,8 @@ pub struct RuleValuesInput {
     pub(crate) width: usize,
     pub(crate) inline: bool,
     pub(crate) defaults: Vec<usize>,
-    pub(crate) unresolved: std::collections::BTreeSet<usize>,
-    pub(crate) written: std::collections::BTreeSet<usize>,
+    pub(crate) unresolved: uqa_core::memory::OwnedSet<usize>,
+    pub(crate) written: uqa_core::memory::OwnedSet<usize>,
 }
 
 impl RuleValuesInput {

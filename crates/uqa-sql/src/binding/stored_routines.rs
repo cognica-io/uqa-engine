@@ -244,7 +244,7 @@ fn command_statement_query(
         ctes: inputs.ctes,
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
             deferred_outer_rewrites: Vec::new(),
-            privilege_columns: std::collections::BTreeSet::default(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             windows: Vec::new(),
             projections,
             from: inputs.source,

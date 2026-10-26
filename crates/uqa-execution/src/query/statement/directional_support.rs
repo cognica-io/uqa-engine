@@ -72,7 +72,8 @@ impl TraversalAnalysis<'_> {
             };
             support.to_mut().insert(cte.name.clone(), traversal);
             // Retain declaration-order schemas without executing or materializing a CTE.
-            ctes.to_mut().insert_deferred(cte.clone());
+            ctes.to_mut()
+                .insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &self.control)?);
         }
         match &plan.root {
             RelationalPlan::Values { .. } => Ok(BackwardScanSupport::Native),

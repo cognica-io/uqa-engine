@@ -20,7 +20,7 @@ pub struct BindingSnapshot {
     pub catalog: CatalogReadView,
     pub resolution: RelationNameResolution,
     pub ctes: BTreeMap<String, RowSchema>,
-    pub deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
+    pub deferred_ctes: BTreeMap<String, crate::plan::RetainedCtePlan>,
     pub non_returning_ctes: BTreeSet<String>,
     pub scalar_subqueries: Arc<[QueryPlan]>,
 }
@@ -60,6 +60,6 @@ impl BindingSnapshot {
         } else {
             self.non_returning_ctes.insert(plan.name.clone());
         }
-        self.deferred_ctes.insert(plan.name.clone(), Arc::new(plan));
+        self.deferred_ctes.insert(plan.name.clone(), plan.into());
     }
 }

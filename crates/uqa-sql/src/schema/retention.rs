@@ -20,6 +20,7 @@ use crate::ast::{ColumnDef, ColumnType, Expr, FunctionBinding};
 mod columns;
 mod domains;
 mod expressions;
+mod identities;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogRetentionError {

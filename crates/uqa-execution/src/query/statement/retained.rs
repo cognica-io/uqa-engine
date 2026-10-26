@@ -156,7 +156,7 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
     }
     let statement = QueryBlockPlan {
         deferred_outer_rewrites: Vec::new(),
-        privilege_columns: std::collections::BTreeSet::default(),
+        privilege_columns: uqa_core::memory::OwnedSet::new(),
         projections: Vec::new(),
         from: None,
         r#where: None,
