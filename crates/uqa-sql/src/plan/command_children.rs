@@ -33,30 +33,28 @@ impl CommandPlan {
         }
     }
 
-    /// Query children evaluated in the command's WITH scope, including every `scalar_subqueries` entry. Source-plan subqueries are owned by `source_input`; visitors should not traverse `scalar_subqueries` separately.
-    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
-        match self {
-            Self::Insert(plan) => plan.query_inputs(),
-            Self::Update(plan) => plan.query_inputs(),
-            Self::Delete(plan) => plan.query_inputs(),
-            Self::Merge(plan) => plan.query_inputs(),
-            _ => Vec::new(),
-        }
+    /// Borrow query children evaluated in the command's WITH scope without collecting a child list. INSERT's source precedes the scalar-query arena. Source-plan subqueries are owned by `source_input`; visitors should not traverse either owner twice.
+    pub fn query_inputs(&self) -> impl Iterator<Item = &QueryPlan> {
+        let (source, subqueries): (Option<&QueryPlan>, &[QueryPlan]) = match self {
+            Self::Insert(plan) => (plan.source.as_deref(), &plan.subqueries),
+            Self::Update(plan) => (None, &plan.subqueries),
+            Self::Delete(plan) => (None, &plan.subqueries),
+            Self::Merge(plan) => (None, &plan.subqueries),
+            _ => (None, &[]),
+        };
+        source.into_iter().chain(subqueries)
     }
 
-    pub fn query_inputs_mut(&mut self) -> Vec<&mut QueryPlan> {
-        match self {
-            Self::Insert(plan) => plan
-                .source
-                .iter_mut()
-                .map(Box::as_mut)
-                .chain(plan.subqueries.iter_mut())
-                .collect(),
-            Self::Update(plan) => plan.subqueries.iter_mut().collect(),
-            Self::Delete(plan) => plan.subqueries.iter_mut().collect(),
-            Self::Merge(plan) => plan.subqueries.iter_mut().collect(),
-            _ => Vec::new(),
-        }
+    /// Borrow mutable query children in the same source-then-arena order, without allocating a reference vector.
+    pub fn query_inputs_mut(&mut self) -> impl Iterator<Item = &mut QueryPlan> {
+        let (source, subqueries): (Option<&mut QueryPlan>, &mut [QueryPlan]) = match self {
+            Self::Insert(plan) => (plan.source.as_deref_mut(), &mut plan.subqueries),
+            Self::Update(plan) => (None, &mut plan.subqueries),
+            Self::Delete(plan) => (None, &mut plan.subqueries),
+            Self::Merge(plan) => (None, &mut plan.subqueries),
+            _ => (None, &mut []),
+        };
+        source.into_iter().chain(subqueries)
     }
 
     pub fn source_input(&self) -> Option<&SourcePlan> {
@@ -326,12 +324,11 @@ impl InsertPlan {
     }
 
     /// Query children evaluated in the command's WITH scope: the source query and every `subqueries` entry.
-    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
+    pub fn query_inputs(&self) -> impl Iterator<Item = &QueryPlan> {
         self.source
             .iter()
             .map(Box::as_ref)
             .chain(self.subqueries.iter())
-            .collect()
     }
 }
 
@@ -352,8 +349,8 @@ impl UpdatePlan {
     }
 
     /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
-    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
-        self.subqueries.iter().collect()
+    pub fn query_inputs(&self) -> impl Iterator<Item = &QueryPlan> {
+        self.subqueries.iter()
     }
 
     /// The `FROM` relation the command joins to its target.
@@ -373,8 +370,8 @@ impl DeletePlan {
     }
 
     /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
-    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
-        self.subqueries.iter().collect()
+    pub fn query_inputs(&self) -> impl Iterator<Item = &QueryPlan> {
+        self.subqueries.iter()
     }
 
     /// The `USING` relation the command joins to its target.
@@ -437,8 +434,8 @@ impl MergePlan {
     }
 
     /// Query children evaluated in the command's WITH scope, which are its `subqueries` entries.
-    pub fn query_inputs(&self) -> Vec<&QueryPlan> {
-        self.subqueries.iter().collect()
+    pub fn query_inputs(&self) -> impl Iterator<Item = &QueryPlan> {
+        self.subqueries.iter()
     }
 
     /// The `USING` relation the command merges into its target.

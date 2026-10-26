@@ -129,7 +129,7 @@ fn run<S: Clone + Send + Sync + 'static>(
             || {
                 uqa_sql::semantics::primary_command_cte_references(
                     input.ctes(),
-                    &input.subqueries().iter().collect::<Vec<_>>(),
+                    input.subqueries().iter(),
                     input.source(),
                 )
             },

@@ -795,7 +795,7 @@ fn initialize_view_merge_scope<S: Clone>(
         || {
             uqa_sql::semantics::primary_command_cte_references(
                 &plan.ctes,
-                &plan.query_inputs(),
+                plan.query_inputs(),
                 plan.source_input(),
             )
         },

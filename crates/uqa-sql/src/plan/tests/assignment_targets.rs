@@ -125,7 +125,7 @@ fn subqueries_owned_by_assignment_bounds_remain_query_children() {
         let UnifiedPlan::Command(command) = one(sql) else {
             panic!("expected command");
         };
-        assert_eq!(command.query_inputs().len(), 2, "{sql}");
+        assert_eq!(command.query_inputs().count(), 2, "{sql}");
     }
 }
 
@@ -167,7 +167,7 @@ fn grouped_assignments_keep_one_source_through_rendering_serialization_and_visit
         let UnifiedPlan::Command(command) = plan else {
             panic!("mutation command")
         };
-        assert_eq!(command.query_inputs().len(), 1, "{sql}");
+        assert_eq!(command.query_inputs().count(), 1, "{sql}");
         let encoded = serde_json::to_value(&command).unwrap();
         let restored: Box<CommandPlan> = serde_json::from_value(encoded.clone()).unwrap();
         assert_eq!(serde_json::to_value(restored).unwrap(), encoded);
@@ -194,4 +194,57 @@ fn separate_query_assignment_groups_keep_distinct_source_identities() {
         ScalarExpr::ScalarSubquery(1)
     ));
     assert_eq!(update.assignments[0].target.targets().len(), 2);
+}
+
+#[test]
+fn command_query_children_borrow_their_original_order_for_reading_and_rewriting() {
+    for (sql, expected) in [
+        ("INSERT INTO t SELECT $1 RETURNING (SELECT $2), (SELECT $3)", &[1, 2, 3][..]),
+        ("UPDATE t SET v=(SELECT $1) FROM (SELECT $4) s WHERE v=(SELECT $2) RETURNING (SELECT $3)", &[1, 2, 3]),
+        ("DELETE FROM t USING (SELECT $3) s WHERE v=(SELECT $1) RETURNING (SELECT $2)", &[1, 2]),
+        ("MERGE INTO t USING (SELECT $4) s ON v=(SELECT $1) WHEN MATCHED THEN UPDATE SET v=(SELECT $2) RETURNING (SELECT $3)", &[1, 2, 3]),
+        ("SHOW work_mem", &[]),
+    ] {
+        let UnifiedPlan::Command(mut command) = one(sql) else {
+            panic!("expected command");
+        };
+        let mut seen = Vec::with_capacity(expected.len());
+        let allocations = allocation_counter::measure(|| {
+            for query in command.query_inputs() {
+                query.visit_scalar_expressions(&mut |expression| {
+                    expression.visit(&mut |expression| {
+                        if let ScalarExpr::Param(index) = expression {
+                            seen.push(*index);
+                        }
+                    });
+                });
+            }
+        });
+        assert_eq!(seen, expected, "{sql}");
+        assert_eq!(allocations.count_total, 0, "{sql}: {allocations:?}");
+        seen.clear();
+        let allocations = allocation_counter::measure(|| {
+            for query in command.query_inputs_mut() {
+                query.rewrite_scalar_expressions(&mut |expression| {
+                    if let ScalarExpr::Param(index) = expression {
+                        seen.push(*index);
+                        *index += 10;
+                    }
+                });
+            }
+        });
+        assert_eq!(seen, expected, "{sql}");
+        assert_eq!(allocations.count_total, 0, "{sql}: {allocations:?}");
+        seen.clear();
+        for query in command.query_inputs() {
+            query.visit_scalar_expressions(&mut |expression| {
+                expression.visit(&mut |expression| {
+                    if let ScalarExpr::Param(index) = expression {
+                        seen.push(*index);
+                    }
+                });
+            });
+        }
+        assert_eq!(seen, expected.iter().map(|index| index + 10).collect::<Vec<_>>(), "{sql}");
+    }
 }

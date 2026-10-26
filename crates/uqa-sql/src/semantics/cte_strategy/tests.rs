@@ -60,7 +60,7 @@ fn statement_order(sql: &str) -> (Vec<String>, Vec<String>) {
             let CommandPlan::Insert(plan) = command.as_ref() else {
                 panic!("expected an INSERT statement: {sql}");
             };
-            let references = primary_command_cte_references(&plan.ctes, &plan.query_inputs(), None);
+            let references = primary_command_cte_references(&plan.ctes, plan.query_inputs(), None);
             let order = order_statement_ctes(&plan.ctes, plan.ctes.iter().collect(), &references);
             (names(&order.primary), names(&order.postponed))
         }

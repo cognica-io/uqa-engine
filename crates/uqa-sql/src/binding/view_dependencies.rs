@@ -713,7 +713,6 @@ fn cte_plan_references_relation(
                     .is_some_and(|source| source_plan_references_relation(source, target, &visible))
                 || command
                     .query_inputs()
-                    .iter()
                     .any(|query| query_plan_references_relation(query, target, &visible))
         }
     }
@@ -731,7 +730,7 @@ fn cte_relational_inputs_any(
                 .ctes()
                 .iter()
                 .any(|cte| cte_relational_inputs_any(&cte.body, query, source))
-                || command.query_inputs().iter().any(|plan| query(plan))
+                || command.query_inputs().any(query)
                 || command.source_input().is_some_and(source)
         }
     }

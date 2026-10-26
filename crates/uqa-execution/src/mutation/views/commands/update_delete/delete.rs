@@ -88,7 +88,7 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 || {
                     uqa_sql::semantics::primary_command_cte_references(
                         &stmt.ctes,
-                        &stmt.query_inputs(),
+                        stmt.query_inputs(),
                         stmt.source_input(),
                     )
                 },

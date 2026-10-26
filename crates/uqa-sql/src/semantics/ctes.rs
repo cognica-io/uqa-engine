@@ -26,7 +26,7 @@ pub fn reachable_command_cte_names(command: &CommandPlan) -> BTreeSet<String> {
         command.ctes(),
         primary_command_cte_references(
             command.ctes(),
-            &command.query_inputs(),
+            command.query_inputs(),
             command.source_input(),
         ),
     )
@@ -117,9 +117,9 @@ pub fn primary_query_cte_references(plan: &QueryPlan) -> BTreeSet<String> {
 }
 
 /// The WITH items of a data-modifying statement that its own clauses name: the queries and the source relation it evaluates in the scope of `ctes`.
-pub fn primary_command_cte_references(
+pub fn primary_command_cte_references<'a>(
     ctes: &[CtePlan],
-    queries: &[&QueryPlan],
+    queries: impl IntoIterator<Item = &'a QueryPlan>,
     source: Option<&SourcePlan>,
 ) -> BTreeSet<String> {
     let targets = ctes

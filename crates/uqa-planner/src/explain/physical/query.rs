@@ -66,7 +66,7 @@ impl Collector<'_, '_, '_> {
             self.control.check()?;
             scope.try_insert(cte.name.as_str(), None)?;
         }
-        for (index, query) in command.query_inputs().iter().enumerate() {
+        for (index, query) in command.query_inputs().enumerate() {
             self.query(
                 query,
                 &scope,
