@@ -169,34 +169,46 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
             execute_set_operation(context, plan, params, ctes, output_mode)
         }
         RelationalPlan::Values { rows, subqueries } => {
-            {
-                let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
-                let type_resolver = context
-                    .source
-                    .relational
-                    .expression_scope((*scoped_ctes).clone());
-                validate_values_set_contexts(
-                    context.source.relational.catalog,
-                    type_resolver.as_ref(),
-                    rows,
-                    &crate::RowSchema::default(),
-                    params,
-                )?;
-            }
-            execute_plan_values_output(
-                context.source.relational,
-                rows,
-                subqueries,
-                params,
-                ctes,
-                bind_output_mode(
-                    context.generation,
-                    output_mode,
-                    context.source.types.enum_labels(),
-                )?,
-            )
+            execute_values_root(context, rows, subqueries, params, ctes, output_mode)
         }
     }
+}
+
+/// VALUES validation owns its scalar-query scope; ordinary SELECT dispatch retains none of this preparation scratch while evaluating rows.
+fn execute_values_root<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    rows: &[Vec<uqa_sql::ScalarExpr>],
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+    output_mode: QueryOutputMode<S>,
+) -> Result<QueryOutput, SQLError> {
+    {
+        let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+        let type_resolver = context
+            .source
+            .relational
+            .expression_scope((*scoped_ctes).clone());
+        validate_values_set_contexts(
+            context.source.relational.catalog,
+            type_resolver.as_ref(),
+            rows,
+            &crate::RowSchema::default(),
+            params,
+        )?;
+    }
+    execute_plan_values_output(
+        context.source.relational,
+        rows,
+        subqueries,
+        params,
+        ctes,
+        bind_output_mode(
+            context.generation,
+            output_mode,
+            context.source.types.enum_labels(),
+        )?,
+    )
 }
 
 #[expect(

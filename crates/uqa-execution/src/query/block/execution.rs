@@ -17,7 +17,7 @@ use super::{
     SingleRelation, SourceContext, SourcePlan,
 };
 use crate::query::binding::sources::{
-    bind_query_block_with_sources, ensure_select_with_sources, SourceBindings,
+    bind_query_block_with_sources, ensure_select_with_sources, BoundQueryBlock, SourceBindings,
 };
 
 #[expect(
@@ -441,24 +441,7 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
         !block.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
-    if let Some(outer) = scoped_ctes.row_lock_outer_row() {
-        if let std::borrow::Cow::Owned(outer) =
-            crate::query::binding::bind_outer_rewrite_row(block, outer)
-        {
-            scoped_ctes.set_row_lock_outer_row(outer);
-        }
-    }
-    let defer_distinct_limit = uqa_sql::semantics::should_defer_distinct_limit(block);
-    let outer = scoped_ctes.row_lock_outer_row().map(|row| &row.schema);
-    let bound = bind_query_block_with_sources(
-        context.ctes.routines,
-        block,
-        params,
-        &scoped_ctes,
-        outer,
-        defer_distinct_limit,
-        None,
-    )?;
+    let bound = prepare_query_block(context, block, params, &mut scoped_ctes)?;
     let mut rewritten_scope;
     let scoped_ctes = if block.deferred_outer_rewrites.is_empty() {
         &mut *scoped_ctes
@@ -475,5 +458,32 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
         output_mode,
         &bound.schema,
         bound.sources.as_ref(),
+    )
+}
+
+/// Finish outer-row rebinding and source analysis before row evaluation can recurse. Only the selected block and source descriptors remain live in the execution frame.
+fn prepare_query_block<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    block: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope<S>,
+) -> Result<BoundQueryBlock<'a>, SQLError> {
+    if let Some(outer) = ctes.row_lock_outer_row() {
+        if let std::borrow::Cow::Owned(outer) =
+            crate::query::binding::bind_outer_rewrite_row(block, outer)
+        {
+            ctes.set_row_lock_outer_row(outer);
+        }
+    }
+    let defer_distinct_limit = uqa_sql::semantics::should_defer_distinct_limit(block);
+    let outer = ctes.row_lock_outer_row().map(|row| &row.schema);
+    bind_query_block_with_sources(
+        context.ctes.routines,
+        block,
+        params,
+        ctes,
+        outer,
+        defer_distinct_limit,
+        None,
     )
 }
