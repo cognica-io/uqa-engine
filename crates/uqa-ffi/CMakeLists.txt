@@ -55,6 +55,9 @@ if(WIN32)
   # exports.def selects every public ABI entry point. Normal archive resolution
   # coalesces Rust's repeated import records and excludes native DLL resources.
   target_link_libraries(uqa PRIVATE "${UQA_RUST_STATIC_LIBRARY}" ${UQA_NATIVE_LIBRARIES})
+  # Resolve the archive's native cleanup entry point before the CRT can select
+  # its fallback DllMain while resolving references introduced by a library.
+  target_link_options(uqa PRIVATE "LINKER:/INCLUDE:DllMain")
 else()
   target_link_libraries(uqa PRIVATE
     "$<LINK_LIBRARY:WHOLE_ARCHIVE,${UQA_RUST_STATIC_LIBRARY}>" ${UQA_NATIVE_LIBRARIES})

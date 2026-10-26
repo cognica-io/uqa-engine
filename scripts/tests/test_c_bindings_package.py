@@ -79,7 +79,8 @@ class CPackageVerification(unittest.TestCase):
                               "manifest_path": str(ROOT / "crates/uqa-ffi/Cargo.toml")}],
                 "resolve": {"nodes": [{"id": "ffi", "features": [], "deps": []}]}}))
             # A freestanding COFF archive needs no Windows SDK. Duplicate private
-            # members model the import records bundled into Rust static libraries.
+            # members model Rust import records; a separate runtime archive models
+            # CRT startup and its unused fallback for the native cleanup entry.
             toolchain = ["-G", "Ninja", "-DCMAKE_SYSTEM_NAME=Windows",
                          "-DCMAKE_C_COMPILER=" + shutil.which("clang-cl"),
                          "-DCMAKE_RC_COMPILER=" + shutil.which("llvm-rc"),
@@ -88,9 +89,10 @@ class CPackageVerification(unittest.TestCase):
                          "-DCMAKE_C_COMPILER_WORKS=TRUE", "-DCMAKE_C_ABI_COMPILED=TRUE",
                          "-DCMAKE_SIZEOF_VOID_P=8", "-DCMAKE_BUILD_TYPE=Release",
                          "-DCMAKE_LINKER=" + shutil.which("lld-link"),
-                         "-DCMAKE_C_FLAGS=",
+                         "-DCMAKE_C_FLAGS=/Zl /GS-",
                          "-DCMAKE_C_STANDARD_LIBRARIES=",
-                         "-DCMAKE_SHARED_LINKER_FLAGS=/nodefaultlib /noentry /manifest:no"]
+                         "-DCMAKE_SHARED_LINKER_FLAGS=/manifest:no /entry:CRTStartup "
+                         + '/libpath:"' + str(work) + '" /map:"' + str(work / "linked.map") + '"']
 
             def run(*arguments):
                 result = subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8")
@@ -101,13 +103,28 @@ class CPackageVerification(unittest.TestCase):
             objects = []
             for name, definitions in (
                     ("api_first", public[::2]), ("api_second", public[1::2]),
+                    ("native_lifecycle", ["DllMain"]),
                     ("private_first", ["private_import_record"]),
                     ("private_second", ["private_import_record"])):
                 source, obj = work / (name + ".c"), work / (name + ".obj")
-                source.write_text("\n".join(f"int {symbol}(void) {{ return 0; }}" for symbol in definitions))
+                source.write_text(
+                    "int DllMain(void *module, unsigned long reason, void *reserved) { return 1; }"
+                    if name == "native_lifecycle" else
+                    "\n".join(f"int {symbol}(void) {{ return 0; }}" for symbol in definitions))
                 run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl", str(source), "/Fo" + str(obj))
                 objects.append(str(obj))
             run("llvm-lib", "/out:" + str(archive), *objects)
+            runtime_objects = []
+            for name, body in (
+                    ("crt_entry", "int DllMain(void *, unsigned long, void *); "
+                     "int CRTStartup(void *module, unsigned long reason, void *reserved) { "
+                     "return DllMain(module, reason, reserved); }"),
+                    ("crt_fallback", "int DllMain(void *module, unsigned long reason, void *reserved) { return 1; }")):
+                source, obj = work / (name + ".c"), work / (name + ".obj")
+                source.write_text(body)
+                run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl", str(source), "/Fo" + str(obj))
+                runtime_objects.append(str(obj))
+            run("llvm-lib", "/out:" + str(work / "msvcrt.lib"), *runtime_objects)
             run("cmake", "-S", str(ROOT / "crates/uqa-ffi"), "-B", str(build), *toolchain,
                 "-DUQA_RUST_STATIC_LIBRARY=" + str(archive),
                 "-DUQA_NATIVE_LINK_FLAGS=/defaultlib:msvcrt", "-DUQA_SOURCE_REVISION=" + COMMIT,
@@ -115,8 +132,13 @@ class CPackageVerification(unittest.TestCase):
                 "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_INSTALL_PREFIX=" + str(prefix))
             shared = run("cmake", "--build", str(build), "--", "-n", "-v")
             self.assertIn("/defaultlib:msvcrt", shared)
+            self.assertIn("/INCLUDE:DllMain", shared)
             self.assertNotIn("msvcrt.obj", shared)
             run("cmake", "--build", str(build))
+            linked = (work / "linked.map").read_text()
+            self.assertIn("uqa:native_lifecycle.obj", linked)
+            self.assertIn("msvcrt:crt_entry.obj", linked)
+            self.assertNotIn("crt_fallback", linked)
             exports = run("llvm-readobj", "--coff-exports", str(build / "uqa.dll"))
             names = [line.strip().removeprefix("Name: ") for line in exports.splitlines()
                      if line.strip().startswith("Name: ")]
@@ -138,6 +160,7 @@ class CPackageVerification(unittest.TestCase):
                 "-DCMAKE_PREFIX_PATH=" + str(prefix))
             static = run("cmake", "--build", str(consumer / "build"), "--", "-n", "-v")
             self.assertIn("/defaultlib:msvcrt", static)
+            self.assertNotIn("/INCLUDE:DllMain", static)
             self.assertNotIn("msvcrt.obj", static)
 
     def test_cargo_metadata_and_logs_preserve_utf8_on_a_legacy_locale(self):
