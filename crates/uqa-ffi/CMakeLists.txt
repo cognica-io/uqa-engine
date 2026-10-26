@@ -53,6 +53,7 @@ target_include_directories(uqa PUBLIC
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_link_libraries(uqa PRIVATE
   "$<LINK_LIBRARY:WHOLE_ARCHIVE,${UQA_RUST_STATIC_LIBRARY}>" ${UQA_NATIVE_LIBRARIES})
+target_link_options(uqa PRIVATE ${UQA_NATIVE_LINK_OPTIONS})
 if(APPLE)
   target_link_options(uqa PRIVATE
     "LINKER:-exported_symbols_list,${CMAKE_CURRENT_BINARY_DIR}/metadata/exports.macho")

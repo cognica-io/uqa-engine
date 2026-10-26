@@ -67,6 +67,60 @@ def fixture(prefix: Path, target: str = TARGET):
 
 
 class CPackageVerification(unittest.TestCase):
+    @unittest.skipUnless(all(shutil.which(tool) for tool in ("cmake", "ninja", "clang-cl", "llvm-rc", "llvm-mt")),
+                         "CMake, Ninja and LLVM's MSVC tools are required for link command verification")
+    def test_msvc_runtime_directive_reaches_shared_and_installed_static_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            prefix, build = work / "prefix", work / "build"
+            archive, metadata = work / "uqa.lib", work / "cargo-metadata.json"
+            archive.write_bytes(b"link command fixture")
+            metadata.write_text(json.dumps({
+                "packages": [{"id": "ffi", "name": "uqa-ffi", "version": RELEASE.version(),
+                              "manifest_path": str(ROOT / "crates/uqa-ffi/Cargo.toml")}],
+                "resolve": {"nodes": [{"id": "ffi", "features": [], "deps": []}]}}))
+            # Cross generation needs no Windows SDK: only inspect the generated
+            # commands, leaving real Windows link and execution to package CI.
+            toolchain = ["-G", "Ninja", "-DCMAKE_SYSTEM_NAME=Windows",
+                         "-DCMAKE_C_COMPILER=" + shutil.which("clang-cl"),
+                         "-DCMAKE_RC_COMPILER=" + shutil.which("llvm-rc"),
+                         "-DCMAKE_MT=" + shutil.which("llvm-mt"),
+                         "-DCMAKE_C_COMPILER_TARGET=x86_64-pc-windows-msvc",
+                         "-DCMAKE_C_COMPILER_WORKS=TRUE", "-DCMAKE_C_ABI_COMPILED=TRUE",
+                         "-DCMAKE_SIZEOF_VOID_P=8", "-DCMAKE_BUILD_TYPE=Release"]
+
+            def run(*arguments):
+                result = subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8")
+                self.assertEqual(result.returncode, 0, result.stdout)
+                return result.stdout
+
+            run("cmake", "-S", str(ROOT / "crates/uqa-ffi"), "-B", str(build), *toolchain,
+                "-DUQA_RUST_STATIC_LIBRARY=" + str(archive),
+                "-DUQA_NATIVE_LINK_FLAGS=/defaultlib:msvcrt", "-DUQA_SOURCE_REVISION=" + COMMIT,
+                "-DUQA_TARGET=x86_64-pc-windows-msvc", "-DUQA_CARGO_METADATA=" + str(metadata),
+                "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_INSTALL_PREFIX=" + str(prefix))
+            shared = run("cmake", "--build", str(build), "--", "-n", "-v")
+            self.assertIn("/defaultlib:msvcrt", shared)
+            self.assertNotIn("msvcrt.obj", shared)
+            installed = prefix / "lib/cmake/UQA"
+            installed.mkdir(parents=True)
+            shutil.copyfile(build / "UQAConfig.cmake", installed / "UQAConfig.cmake")
+            (installed / "UQATargets.cmake").write_text("add_library(UQA::uqa INTERFACE IMPORTED)\n")
+            shutil.copyfile(archive, prefix / "lib/uqa_static.lib")
+            (prefix / "include").mkdir()
+            consumer = work / "consumer"
+            consumer.mkdir()
+            (consumer / "main.c").write_text("int main(void) { return 0; }\n")
+            (consumer / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.24)\nproject(Consumer C)\n"
+                "find_package(UQA REQUIRED CONFIG)\nadd_executable(client main.c)\n"
+                "target_link_libraries(client PRIVATE UQA::uqa_static)\n")
+            run("cmake", "-S", str(consumer), "-B", str(consumer / "build"), *toolchain,
+                "-DCMAKE_PREFIX_PATH=" + str(prefix))
+            static = run("cmake", "--build", str(consumer / "build"), "--", "-n", "-v")
+            self.assertIn("/defaultlib:msvcrt", static)
+            self.assertNotIn("msvcrt.obj", static)
+
     def test_cargo_metadata_and_logs_preserve_utf8_on_a_legacy_locale(self):
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary)

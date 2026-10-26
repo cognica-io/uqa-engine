@@ -54,16 +54,21 @@ def legal_payloads(features: set[str]) -> dict[str, bytes]:
     return files
 
 
-def native_libraries(flags: str) -> list[str]:
+def native_link_inputs(flags: str, target: str) -> tuple[list[str], list[str]]:
     parts = iter(shlex.split(flags))
-    result = []
+    libraries, options = [], []
     for flag in parts:
         if flag == "-framework":
             flag += " " + next(parts)
         if any(character in flag for character in (';', '"', '\n', '\r', '$', '\\')):
             raise ValueError(f"unsupported native linker token: {flag!r}")
-        result.append(flag)
-    return result
+        # MSVC's /defaultlib:... is a linker directive. CMake interprets a
+        # leading slash in target_link_libraries as an absolute file path.
+        if "windows-msvc" in target and flag.startswith(("/", "-")):
+            options.append("LINKER:" + flag)
+        else:
+            libraries.append(flag)
+    return libraries, options
 
 
 def generate(output: Path, target: str, revision: str, features: set[str], flags: str,
@@ -79,14 +84,17 @@ def generate(output: Path, target: str, revision: str, features: set[str], flags
         raise ValueError("Expected one workspace package version")
     version = versions[0]
     public, deferred = symbols()
-    libraries = native_libraries(flags)
+    libraries, options = native_link_inputs(flags, target)
     dependency_licenses, inventory = collect(cargo_metadata, features)
     payloads = legal_payloads(features) | dependency_licenses
     output.mkdir(parents=True, exist_ok=True)
     (output / "exports.macho").write_text("".join(f"_{name}\n" for name in public))
     (output / "exports.elf").write_text("{\n  global:\n" + "".join(f"    {name};\n" for name in public) + "  local: *;\n};\n")
     (output / "exports.def").write_text("LIBRARY uqa\nEXPORTS\n" + "".join(f"  {name}\n" for name in public))
-    (output / "build.cmake").write_text(f'set(UQA_VERSION "{version}")\nset(UQA_NATIVE_LIBRARIES "{";".join(libraries)}")\n')
+    (output / "build.cmake").write_text(
+        f'set(UQA_VERSION "{version}")\n'
+        f'set(UQA_NATIVE_LIBRARIES "{";".join(libraries)}")\n'
+        f'set(UQA_NATIVE_LINK_OPTIONS "{";".join(options)}")\n')
     share = output / "share/uqa"
     # This directory is entirely generated. A successful feature/dependency
     # reconfiguration must not retain obsolete notices from the previous graph.
