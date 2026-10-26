@@ -17,13 +17,21 @@ use uqa_sql::{
     SQLError, SQLParam,
 };
 
+mod inspection;
+
 pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     query: &'a QueryPlan,
     params: &[SQLParam],
     scope: &CteScope<S>,
 ) -> Result<Cow<'a, QueryPlan>, SQLError> {
-    if !needs_preparation(context, query, scope)? {
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    if !inspection::needed(query, scope, control)? {
         return Ok(Cow::Borrowed(query));
     }
     let mut query = query.clone();
@@ -35,100 +43,6 @@ pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
         scope.row_lock_outer_row().map(|row| &row.schema),
     )?;
     Ok(Cow::Owned(query))
-}
-
-fn needs_preparation<S: Clone + Send + Sync + 'static>(
-    context: &SourceContext<'_, S>,
-    query: &QueryPlan,
-    scope: &CteScope<S>,
-) -> Result<bool, SQLError> {
-    fn source<S: Clone + Send + Sync + 'static>(
-        context: &SourceContext<'_, S>,
-        from: &SourcePlan,
-        scope: &CteScope<S>,
-    ) -> Result<bool, SQLError> {
-        Ok(match from {
-            SourcePlan::Table {
-                name,
-                executable_query: None,
-                ..
-            } => {
-                if scope.is_visible_cte(name) {
-                    scope.deferred_reference(name).is_some()
-                } else {
-                    scope
-                        .catalog_read_view()?
-                        .view_resolved(&scope.relation_name_resolution()?, name)?
-                        .is_some_and(|view| {
-                            view.kind == uqa_sql::catalog::view::StoredViewKind::View
-                        })
-                }
-            }
-            SourcePlan::Join { left, right, .. } => {
-                source(context, left, scope)? || source(context, right, scope)?
-            }
-            SourcePlan::Subquery { body, .. } => needs_preparation(context, body, scope)?,
-            _ => false,
-        })
-    }
-    let retained = context.ctes.queries.read_control()?;
-    let control = uqa_core::memory::ProductionControl::new(
-        retained.memory(),
-        retained.cancellation(),
-        context.ctes.runtime.cancellation,
-    );
-    let mut scope = scope.clone();
-    let mut lookup = scope.enter_query_plan_scope(query)?;
-    for cte in &query.ctes {
-        lookup.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
-    }
-    let scope = lookup.enter_visible_ctes(query.ctes.iter().map(|cte| cte.name.as_str()));
-    let scope = &*scope;
-    for cte in &query.ctes {
-        if let Some(query) = cte.body.query() {
-            if needs_preparation(context, query, scope)? {
-                return Ok(true);
-            }
-        }
-    }
-    match &query.root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(from) = &block.from {
-                if source(context, from, scope)? {
-                    return Ok(true);
-                }
-            }
-            for query in &block.subqueries {
-                if needs_preparation(context, query, scope)? {
-                    return Ok(true);
-                }
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            if needs_preparation(context, left, scope)? || needs_preparation(context, right, scope)?
-            {
-                return Ok(true);
-            }
-            for query in subqueries {
-                if needs_preparation(context, query, scope)? {
-                    return Ok(true);
-                }
-            }
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for query in subqueries {
-                if needs_preparation(context, query, scope)? {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-    Ok(false)
 }
 
 fn declare_ctes<S: Clone + Send + Sync + 'static>(
