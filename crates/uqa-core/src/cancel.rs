@@ -31,7 +31,7 @@
 //! the token before the cancellation.
 
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 mod cancelled;
@@ -56,6 +56,8 @@ struct TokenState {
     deferrals: deferral::CancellationDeferrals,
     sleepers: Mutex<()>,
     wake: Condvar,
+    /// Reuse the shared timer across this token's successive statements.
+    deadlines: OnceLock<Arc<deadlines::DeadlineService>>,
 }
 
 impl TokenState {
@@ -166,6 +168,18 @@ impl CancellationToken {
     /// Cancel the token with `reason` once `after` has passed, unless the returned deadline is dropped first.
     pub fn deadline(&self, after: Duration, reason: CancellationReason) -> CancellationDeadline {
         CancellationDeadline::arm(&self.state, after, reason)
+    }
+
+    /// Run an action after a delay unless its handle is dropped first. Retain the shared timer for this token's lifetime, so successive session timeouts reuse it. The action runs on the timer thread and must return promptly.
+    pub fn schedule(
+        &self,
+        after: Duration,
+        action: impl FnOnce() + Send + 'static,
+    ) -> ScheduledAction {
+        self.state
+            .deadlines
+            .get_or_init(deadlines::service)
+            .schedule(after, action)
     }
 
     /// Set the `lock_timeout` that lock waits under this token honor; `None` lets a wait last until the lock is granted.

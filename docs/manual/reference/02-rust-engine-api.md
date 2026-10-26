@@ -469,6 +469,8 @@ SQL `work_mem` has PostgreSQL's 64 kB minimum. The host memory override can forc
 
 Each session has its own cancellation token. `cancel()` requests cancellation, `is_cancelled()` observes it, and `cancellation_token()` returns the token for host coordination. Long-running execution paths poll the token at safe boundaries. `uqa_core::QueryCancelled` carries a `CancellationReason`; `QueryCancelled::USER_REQUEST` represents an explicit client request.
 
+Tokens retain the shared deadline timer lazily after their first deadline or scheduled action. Successive deadlines reuse that worker. Dropping the final token and scheduled handle stops the worker and joins its thread cleanup; an action that releases the final owner on the timer thread finishes through the stopped queue itself. `CancellationToken::schedule` retains this ownership while the free `uqa_core::cancel::schedule` function retains it through the returned action handle. Scheduled actions run on the timer thread and must return promptly.
+
 User cancellation is cooperative. Clear an explicit request with `reset_cancellation()`, inspect `transaction_failed()` and recover an aborted explicit transaction through rollback or an available savepoint before continuing. Statement and lock timeouts are consumed at their statement or exception-handler boundary; resetting cancellation does not undo a failed transaction.
 
 | Cause | SQLSTATE | Session behavior |

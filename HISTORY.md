@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Release the shared deadline timer when its last token or scheduled action ends, joining thread cleanup instead of leaving a detached process-lifetime worker. Reuse the timer across a session's successive deadlines and release captured actions outside the deadline queue lock.
 - Apply the invoking allocation allowance and cancellation to the private native XML parser and domain base input. Retain constraint metadata before callbacks, borrow the admitted domain value during checks, release failed input allocations and preserve native transaction recovery. Private parser symbols and allocator state remain separate from a host application's XML library.
 - Preserve analyzed OID and XID identities during assignment, including the full unsigned 32-bit range, without interpreting their carriers as signed SQL integers.
 - Implement PostgreSQL integer bitwise AND, OR, XOR, complement and shifts with selected 16/32/64-bit widths, mixed-input coercions and strict NULL behavior; preserve smallint shift promotion, stored expression identities and PostgreSQL parentheses when nested numeric expressions are rendered and reparsed.

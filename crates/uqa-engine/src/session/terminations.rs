@@ -143,7 +143,7 @@ impl Engine {
         let action =
             self.termination_action(reason, TerminationScope::IdlePeriod { epoch, expected });
         *self.runtime.terminations.scheduled.idle.lock() =
-            Some(uqa_core::cancel::schedule(after, action));
+            Some(self.runtime.cancellation.schedule(after, action));
     }
 
     /// Schedule the termination of the transaction that began at `started` (microseconds since the epoch) once it outlasts `transaction_timeout`, unless one is already scheduled for it.
@@ -168,7 +168,9 @@ impl Engine {
         );
         *scheduled = Some((
             started,
-            uqa_core::cancel::schedule(limit.saturating_sub(elapsed), action),
+            self.runtime
+                .cancellation
+                .schedule(limit.saturating_sub(elapsed), action),
         ));
     }
 
