@@ -68,6 +68,8 @@
 
 #include "postgres.h"
 
+#include "pg_query_thread.h"
+
 #include "port/pg_bitutils.h"
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
@@ -275,16 +277,93 @@ typedef struct AllocSetFreeList
 	AllocSetContext *first_free;	/* list header */
 } AllocSetFreeList;
 
-/* context_freelists[0] is for default params, [1] for small params */
-static __thread AllocSetFreeList context_freelists[2] =
+/* The two pools hold default and small allocation contexts, respectively. */
+#define ALLOCSET_FREELIST_COUNT 2
+
+static void
+AllocSetFreeListClear(AllocSetFreeList *freelists)
 {
+	for (int i = 0; i < ALLOCSET_FREELIST_COUNT; i++)
 	{
-		0, NULL
-	},
-	{
-		0, NULL
+		AllocSetFreeList *freelist = &freelists[i];
+		while (freelist->first_free != NULL)
+		{
+			AllocSetContext *oldset = freelist->first_free;
+			freelist->first_free = (AllocSetContext *) oldset->header.nextchild;
+			freelist->num_free--;
+			free(oldset);
+		}
+		Assert(freelist->num_free == 0);
 	}
-};
+}
+
+#ifdef PG_QUERY_HAVE_THREAD_CLEANUP
+/*
+ * Compiler TLS can be destroyed before pthread key destructors on macOS.
+ * Own the cached contexts through a native thread key so either destructor order
+ * with the parser's top context releases every pool and retained block.
+ * Once the cache is destroyed, deleting remaining contexts frees them directly
+ * and never allocates another cache during thread teardown.
+ */
+typedef struct AllocSetFreeListKey
+{
+	PgQueryThreadKey key;
+	PgQueryThreadOnce once;
+	int error;
+} AllocSetFreeListKey;
+
+static AllocSetFreeListKey *
+AllocSetFreeListKeyState(void)
+{
+	static AllocSetFreeListKey state = {0, PG_QUERY_THREAD_ONCE_INIT, 0};
+	return &state;
+}
+
+static void PG_QUERY_THREAD_CALLBACK
+AllocSetFreeListDestroy(void *value)
+{
+	AllocSetFreeListClear(value);
+	free(value);
+}
+
+static void
+AllocSetFreeListKeyCreate(void)
+{
+	AllocSetFreeListKey *state = AllocSetFreeListKeyState();
+	state->error = pg_query_thread_key_create(&state->key, AllocSetFreeListDestroy);
+}
+
+static AllocSetFreeList *
+AllocSetGetFreeLists(bool create)
+{
+	AllocSetFreeList *freelists;
+	AllocSetFreeListKey *state = AllocSetFreeListKeyState();
+	int error = pg_query_thread_once(&state->once, AllocSetFreeListKeyCreate);
+	if (error != 0 || state->error != 0)
+		elog(ERROR, "could not create allocation context cache key");
+	freelists = pg_query_thread_getspecific(state->key);
+	if (freelists == NULL && create)
+	{
+		freelists = calloc(ALLOCSET_FREELIST_COUNT, sizeof(AllocSetFreeList));
+		if (freelists == NULL)
+			ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+		if (pg_query_thread_setspecific(state->key, freelists) != 0)
+		{
+			free(freelists);
+			elog(ERROR, "could not retain allocation context cache");
+		}
+	}
+	return freelists;
+}
+#else
+static __thread AllocSetFreeList context_freelists[ALLOCSET_FREELIST_COUNT];
+
+static AllocSetFreeList *
+AllocSetGetFreeLists(bool create)
+{
+	return context_freelists;
+}
+#endif
 
 
 
@@ -426,7 +505,7 @@ AllocSetContextCreateInternal(MemoryContext parent,
 	 */
 	if (freeListIndex >= 0)
 	{
-		AllocSetFreeList *freelist = &context_freelists[freeListIndex];
+		AllocSetFreeList *freelist = &AllocSetGetFreeLists(true)[freeListIndex];
 
 		if (freelist->first_free != NULL)
 		{
@@ -631,6 +710,7 @@ AllocSetDelete(MemoryContext context)
 {
 	AllocSet	set = (AllocSet) context;
 	AllocBlock	block = set->blocks;
+	AllocSetFreeList *freelists = AllocSetGetFreeLists(false);
 	Size		keepersize PG_USED_FOR_ASSERTS_ONLY;
 
 	Assert(AllocSetIsValid(set));
@@ -647,9 +727,9 @@ AllocSetDelete(MemoryContext context)
 	 * If the context is a candidate for a freelist, put it into that freelist
 	 * instead of destroying it.
 	 */
-	if (set->freeListIndex >= 0)
+	if (set->freeListIndex >= 0 && freelists != NULL)
 	{
-		AllocSetFreeList *freelist = &context_freelists[set->freeListIndex];
+		AllocSetFreeList *freelist = &freelists[set->freeListIndex];
 
 		/*
 		 * Reset the context, if it needs it, so that we aren't hanging on to
@@ -1773,20 +1853,14 @@ AllocSetCheck(MemoryContext context)
 void
 AllocSetDeleteFreeList(void)
 {
-	for (int i = 0; i < lengthof(context_freelists); i++)
-	{
-		AllocSetFreeList *freelist = &context_freelists[i];
-
-		while (freelist->first_free != NULL)
-		{
-			AllocSetContext *oldset = freelist->first_free;
-
-			freelist->first_free = (AllocSetContext *) oldset->header.nextchild;
-			freelist->num_free--;
-
-			/* All that remains is to free the header/initial block */
-			free(oldset);
-		}
-		Assert(freelist->num_free == 0);
-	}
+	AllocSetFreeList *freelists = AllocSetGetFreeLists(false);
+	if (freelists == NULL)
+		return;
+#ifdef PG_QUERY_HAVE_THREAD_CLEANUP
+	/* Explicit parser shutdown ends the cache owner, including on main. */
+	pg_query_thread_setspecific(AllocSetFreeListKeyState()->key, NULL);
+	AllocSetFreeListDestroy(freelists);
+#else
+	AllocSetFreeListClear(freelists);
+#endif
 }

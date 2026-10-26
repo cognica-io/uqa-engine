@@ -1053,10 +1053,17 @@ list_copy_deep(const List *oldlist)
  *
  * This is based on qsort(), so it likewise has O(N log N) runtime.
  */
+#define ST_SORT pg_list_sort
+#define ST_ELEMENT_TYPE ListCell
+#define ST_COMPARE_RUNTIME_POINTER
+#define ST_SCOPE static
+#define ST_DECLARE
+#define ST_DEFINE
+#include "lib/sort_template.h"
+
 void
 list_sort(List *list, list_sort_comparator cmp)
 {
-	typedef int (*qsort_comparator) (const void *a, const void *b);
 	int			len;
 
 	check_list_invariants(list);
@@ -1064,7 +1071,7 @@ list_sort(List *list, list_sort_comparator cmp)
 	/* Nothing to do if there's less than two elements */
 	len = list_length(list);
 	if (len > 1)
-		qsort(list->elements, len, sizeof(ListCell), (qsort_comparator) cmp);
+		pg_list_sort(list->elements, len, cmp);
 }
 
 /*

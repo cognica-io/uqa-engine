@@ -125,8 +125,9 @@ add_function(List *funcname, ContextType context, WalkState * state)
 }
 
 bool
-pg_query_summary_walk_impl(Node *node, WalkState * state)
+pg_query_summary_walk_impl(Node *node, void *context)
 {
+	WalkState *state = context;
 	if (node == NULL)
 		return false;
 

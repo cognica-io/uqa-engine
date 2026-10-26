@@ -30,7 +30,7 @@ typedef struct
 	int32_t		length;
 }			PossibleTruncation;
 
-static bool generate_possible_truncations(Node *tree, TruncationState * state);
+static bool generate_possible_truncations(Node *tree, void *context);
 static void apply_truncations(Summary * summary, Node *tree, TruncationState * state, int truncate_limit);
 static int	cmp_possible_truncations(const ListCell *a, const ListCell *b);
 
@@ -119,8 +119,9 @@ add_truncation_where_clause(TruncationState * state, Node *node, Node *whereClau
 }
 
 static bool
-generate_possible_truncations(Node *node, TruncationState * state)
+generate_possible_truncations(Node *node, void *context)
 {
+	TruncationState *state = context;
 	if (node == NULL)
 		return false;
 

@@ -131,6 +131,8 @@ $(PGDIR):
 	cd $(PGDIR); patch -p1 < $(root_dir)/patches/11_ifndef_namedatalen.patch
 	cd $(PGDIR); patch -p1 < $(root_dir)/patches/12_remove_acl_check.patch
 	cd $(PGDIR); patch -p1 < $(root_dir)/patches/13_plpgsql_catalog_context.patch
+	cd $(PGDIR); patch -p1 < $(root_dir)/patches/14_native_callback_types.patch
+	cp src/include/pg_query_thread.h $(PGDIR)/src/include/pg_query_thread.h
 	cd $(PGDIR); ./configure $(PG_CONFIGURE_FLAGS)
 	cd $(PGDIR); make -C src/pl/plpgsql/src pl_gram.h plerrcodes.h pl_reserved_kwlist_d.h pl_unreserved_kwlist_d.h
 	cd $(PGDIR); make -C src/port pg_config_paths.h
@@ -198,6 +200,7 @@ $(SOLIB): $(OBJ_FILES) Makefile
 protobuf/pg_query.pb-c.c protobuf/pg_query.pb-c.h: protobuf/pg_query.proto
 ifneq ($(shell which protoc-gen-c), )
 	protoc --c_out=. protobuf/pg_query.proto
+	python3 scripts/adapt_protobuf_callbacks.py protobuf/pg_query.pb-c.c
 else
 	@echo 'Warning: protoc-gen-c not found, skipping protocol buffer regeneration'
 endif
@@ -240,7 +243,15 @@ examples/simple_plpgsql: examples/simple_plpgsql.c $(ARLIB)
 	$(CC) $(TEST_CFLAGS) -o $@ -g examples/simple_plpgsql.c $(ARLIB) $(TEST_LDFLAGS)
 
 TESTS = test/complex test/concurrency test/deparse test/fingerprint test/fingerprint_opts test/is_utility_stmt test/normalize test/normalize_utility test/parse test/parse_opts test/parse_protobuf test/parse_protobuf_opts test/parse_plpgsql test/scan test/split test/summary test/summary_truncate
+ifeq ($(OS),Windows_NT)
+TESTS += test/windows_thread_lifetime
+test/windows_thread_lifetime: test/windows_thread_lifetime.c $(ARLIB)
+	$(CC) $(TEST_CFLAGS) -o $@ test/windows_thread_lifetime.c $(ARLIB) $(TEST_LDFLAGS)
+endif
 test: $(TESTS)
+ifeq ($(OS),Windows_NT)
+	test/windows_thread_lifetime
+endif
 ifeq ($(VALGRIND),1)
 	$(VALGRIND_MEMCHECK) test/complex || (cat test/valgrind.log && false)
 	$(VALGRIND_MEMCHECK) test/concurrency || (cat test/valgrind.log && false)

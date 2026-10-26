@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Correct PostgreSQL 18.4 parser callback types and allocator cleanup through the maintained parser forks. Preserve the parser schema and public API while releasing thread-local caches on POSIX and Windows and supporting explicit parser exit followed by reuse.
 - Release the shared deadline timer when its last token or scheduled action ends, joining thread cleanup instead of leaving a detached process-lifetime worker. Reuse the timer across a session's successive deadlines and release captured actions outside the deadline queue lock.
 - Apply the invoking allocation allowance and cancellation to the private native XML parser and domain base input. Retain constraint metadata before callbacks, borrow the admitted domain value during checks, release failed input allocations and preserve native transaction recovery. Private parser symbols and allocator state remain separate from a host application's XML library.
 - Preserve analyzed OID and XID identities during assignment, including the full unsigned 32-bit range, without interpreting their carriers as signed SQL integers.
