@@ -94,15 +94,22 @@ fn surviving_source_arguments_keep_order_without_initializing_removed_inputs() {
         (false, true, vec!["abs"]),
         (true, false, vec![]),
     ] {
-        let mut expressions = Vec::new();
-        collect(
-            &Decisions {
-                remove_all,
-                remove_right,
-            },
-            source,
-            &mut expressions,
-        );
+        let mut expressions = Vec::with_capacity(3);
+        let allocations = allocation_counter::measure(|| {
+            visit(
+                &Decisions {
+                    remove_all,
+                    remove_right,
+                },
+                source,
+                &mut |expression| {
+                    expressions.push(expression);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        });
+        assert_eq!(allocations.count_total, 0, "{allocations:?}");
         let calls = expressions
             .iter()
             .filter_map(|expr| match expr {

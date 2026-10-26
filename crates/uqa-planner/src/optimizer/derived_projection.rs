@@ -49,7 +49,7 @@ pub(super) fn prune(
     }
     let mut required = BTreeSet::new();
     let mut all = false;
-    for expression in block.expressions() {
+    block.visit_expressions(&mut |expression| {
         super::output_demand::visit(expression, &mut |part| match part {
             ScalarExpr::Column(name) => {
                 if alias.as_deref() == Some(name.as_str())
@@ -73,7 +73,7 @@ pub(super) fn prune(
             ScalarExpr::Star | ScalarExpr::Position(_) => all = true,
             _ => {}
         });
-    }
+    });
     if all {
         return Ok(());
     }

@@ -232,13 +232,13 @@ pub(super) fn simplify_constant_group(
         return;
     }
     let mut grouping = false;
-    for expression in block.expressions() {
+    block.visit_expressions(&mut |expression| {
         expression.visit(&mut |node| {
             if let ScalarExpr::Func { name, .. } = node {
                 grouping |= name.eq_ignore_ascii_case("grouping");
             }
         });
-    }
+    });
     if !grouping {
         block.group_by = vec![ScalarExpr::Literal(uqa_core::Value::Bool(true))];
     }

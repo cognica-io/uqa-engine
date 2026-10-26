@@ -100,10 +100,7 @@ fn independent_query(
             }) && block.subqueries.is_empty()
                 && block.windows.is_empty()
                 && block.locking.is_empty()
-                && block
-                    .expressions()
-                    .iter()
-                    .all(|expression| admitted(expression))
+                && block.query_expressions().all(admitted)
         }
         RelationalPlan::SetOp {
             left,

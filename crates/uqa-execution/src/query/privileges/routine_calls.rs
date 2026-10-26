@@ -98,14 +98,7 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
                 super::ensure_select_privileges_for_query_block(block, from, scope)?;
             }
             generated_calls(context, permissions, block, params, scope)?;
-            let mut expressions = Vec::new();
-            if !context.planning.block_input_is_empty(block) {
-                if let Some(from) = &block.from {
-                    inputs::collect(context.planning, from, &mut expressions);
-                }
-            }
-            expressions.extend(block.query_expressions());
-            for expression in expressions {
+            let mut initialize_expression = |expression: &ScalarExpr| {
                 expression_calls(
                     context,
                     permissions,
@@ -114,7 +107,15 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
                     &block.subqueries,
                     params,
                     scope,
-                )?;
+                )
+            };
+            if !context.planning.block_input_is_empty(block) {
+                if let Some(from) = &block.from {
+                    inputs::visit(context.planning, from, &mut initialize_expression)?;
+                }
+            }
+            for expression in block.query_expressions() {
+                initialize_expression(expression)?;
             }
             if let Some(from) = block
                 .from

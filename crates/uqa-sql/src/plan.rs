@@ -23,6 +23,7 @@ use crate::ast::{
 use crate::ir::{ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec};
 
 mod command_children;
+mod command_expressions;
 pub mod input_projection;
 mod model;
 mod optimization;

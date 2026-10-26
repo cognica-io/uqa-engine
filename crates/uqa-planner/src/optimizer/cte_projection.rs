@@ -160,7 +160,7 @@ fn collect_source(
             if !block.subqueries.is_empty() {
                 *all = true;
             }
-            for expression in block.expressions() {
+            block.visit_expressions(&mut |expression| {
                 super::output_demand::visit(expression, &mut |part| {
                     let column = match part {
                         ScalarExpr::Column(column) => Some(column),
@@ -194,7 +194,7 @@ fn collect_source(
                         }
                     }
                 });
-            }
+            });
         }
         SourcePlan::Join {
             left,

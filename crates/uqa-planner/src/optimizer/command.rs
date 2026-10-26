@@ -65,11 +65,10 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            let mut expressions = plan.expressions();
-            if let Some(source) = &plan.source {
-                source.push_expressions(&mut expressions);
-            }
-            let live = super::subqueries::live_slots(expressions)?;
+            let live = super::subqueries::live_slots_with_source(
+                plan.expressions(),
+                plan.source.as_deref(),
+            )?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Delete(plan) => {
@@ -83,11 +82,10 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            let mut expressions = plan.expressions();
-            if let Some(source) = &plan.source {
-                source.push_expressions(&mut expressions);
-            }
-            let live = super::subqueries::live_slots(expressions)?;
+            let live = super::subqueries::live_slots_with_source(
+                plan.expressions(),
+                plan.source.as_deref(),
+            )?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Merge(plan) => {
@@ -130,9 +128,8 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            let mut expressions = plan.expressions();
-            plan.source.push_expressions(&mut expressions);
-            let live = super::subqueries::live_slots(expressions)?;
+            let live =
+                super::subqueries::live_slots_with_source(plan.expressions(), Some(&plan.source))?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::DeclareCursor { query, .. } => {

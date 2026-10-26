@@ -219,7 +219,7 @@ pub(super) fn optimize_query_block(
             .as_ref()
             .map(|context| context.types),
     );
-    let live_subqueries = super::subqueries::live_slots(block.expressions())?;
+    let live_subqueries = super::subqueries::live_slots_for_block(block)?;
     super::subqueries::optimize_live(&mut block.subqueries, &live_subqueries, config, aggregates)?;
 
     // Removing an unused aggregate's value does not remove its implicit group on empty input.

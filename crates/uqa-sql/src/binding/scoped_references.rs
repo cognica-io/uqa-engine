@@ -213,7 +213,7 @@ fn locally_resolved(expression: &ScalarExpr, schema: &RowSchema) -> bool {
 
 /// SQL92 ORDER BY and DISTINCT ON names and positions observe an output already included in projection demand; expressions inside those clauses still resolve against the input namespace.
 pub fn query_inputs(block: &crate::plan::QueryBlockPlan) -> impl Iterator<Item = &ScalarExpr> {
-    block.query_expressions().into_iter().filter(|expression| {
+    block.query_expressions().filter(|expression| {
         let ordering = block
             .order_by
             .iter()

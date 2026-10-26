@@ -356,20 +356,18 @@ fn query_references_outer(
                 },
             };
             scopes.push(scope);
-            let result = (|| {
-                for expression in block.expressions() {
-                    if expression_references_outer(
+            let result = block
+                .try_visit_expressions(&mut |expression| {
+                    expression_references_outer(
                         context,
                         expression,
                         &block.subqueries,
                         scopes,
                         &ctes,
-                    )? {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            })();
+                    )
+                    .map(|references_outer| !references_outer)
+                })
+                .map(|completed| !completed);
             scopes.pop();
             result
         }
