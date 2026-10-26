@@ -46,6 +46,9 @@ pub(super) fn append_text(
         "output={}kB  format={format}",
         analysis.serialization.bytes.div_ceil(1024)
     );
+    if settings.buffers {
+        super::buffers::append_text(text, analysis.serialization.io.temporary, "  ")?;
+    }
     Ok(())
 }
 
@@ -67,6 +70,13 @@ pub(super) fn properties(
         output.insert(
             "Time",
             Property::Float(analysis.serialization.elapsed.as_secs_f64() * 1000.0),
+        )?;
+    }
+    if settings.buffers {
+        super::buffers::properties(
+            &mut output,
+            analysis.serialization.io.temporary,
+            analysis.io_timing,
         )?;
     }
     Ok(Some(output.finish()?))

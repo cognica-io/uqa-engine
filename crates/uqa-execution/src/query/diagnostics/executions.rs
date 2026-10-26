@@ -6,7 +6,7 @@
 
 //! Invocation-owned observations of actual native physical instances.
 
-use super::{CapturedDiagnostics, Failure, InvocationDiagnostics};
+use super::{io, CapturedDiagnostics, Failure, InvocationDiagnostics};
 use crate::{physical::physical_exec_error, ExecResult};
 use uqa_core::{
     io_usage::IOUsage,
@@ -17,7 +17,6 @@ use uqa_storage::read_control::StorageReadControl;
 
 mod cycle;
 mod instance;
-mod io;
 #[cfg(test)]
 mod io_tests;
 mod operator;

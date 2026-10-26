@@ -18,7 +18,8 @@ fn measured_public_rows_keep_borrowed_scans_and_ordinary_projection_fallbacks() 
         ] {
             for count in [0, 32, 2048] {
                 let (source, counts) = input(ReadMode::Borrowed, count, 0, projection, Fault::None);
-                let measurement = QueryMeasurement::new(timing);
+                let measurement =
+                    QueryMeasurement::new(timing, &uqa_core::memory::MemoryBudget::new(65_536));
                 let result =
                     super::super::super::collect_measured::<()>(Some(&measurement), |mode| {
                         collect_input(source, bind_output_mode(None, mode, None)?)
@@ -53,7 +54,8 @@ fn measured_borrowed_predicate_errors_keep_partial_output_and_release_the_source
             Projection::Plain,
             Fault::Divide,
         );
-        let measurement = QueryMeasurement::new(timing);
+        let measurement =
+            QueryMeasurement::new(timing, &uqa_core::memory::MemoryBudget::new(65_536));
         let error = super::super::super::collect_measured::<()>(Some(&measurement), |mode| {
             collect_input(source, bind_output_mode(None, mode, None)?)
         })
@@ -72,7 +74,7 @@ fn measured_batch_failure_counts_only_batches_delivered_before_the_error() {
     source.fail_after = Some(3);
     let closes = std::sync::Arc::clone(&source.closes);
     let emitted = std::sync::Arc::clone(&source.emitted);
-    let measurement = QueryMeasurement::new(true);
+    let measurement = QueryMeasurement::new(true, &uqa_core::memory::MemoryBudget::new(65_536));
     let error = super::super::super::collect_measured::<()>(Some(&measurement), |mode| {
         collect_input(Box::new(source), bind_output_mode(None, mode, None)?)
     })

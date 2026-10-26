@@ -273,4 +273,5 @@ pub struct ExplainPhysicalPlan {
     pub settings: Vec<(&'static str, String)>,
     /// Time spent producing this invocation's optimized plan and physical metadata.
     pub planning_elapsed: Option<std::time::Duration>,
+    pub planning: Option<explain::ExplainPlanningMetrics>,
 }

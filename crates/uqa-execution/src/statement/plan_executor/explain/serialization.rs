@@ -6,13 +6,17 @@
 
 //! Measure actual typed output conversion without retaining a second query result.
 
+use crate::query::diagnostics::io::Operation;
 use crate::{RowSchema, RowSchemaExecution};
 use std::{
     cell::{Cell, RefCell},
     sync::Arc,
     time::Instant,
 };
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::{
+    io_usage::{IOContext, IOUsage},
+    memory::{Produced, ProductionControl},
+};
 use uqa_sql::{
     explain::ExplainSerialization,
     result::{
@@ -24,8 +28,9 @@ use uqa_sql::{
 pub(super) struct RowSerialization<'a> {
     format: ResultFormat,
     timing: bool,
-    engine: Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
-    control: ProductionControl<'a>,
+    engine: Arc<dyn uqa_sql::expr::EngineHook + 'a>,
+    retained: &'a uqa_storage::read_control::StorageReadControl,
+    invoking: &'a uqa_core::CancellationToken,
     positions: RefCell<Option<Produced<Vec<Option<usize>>>>>,
     metrics: Cell<ExplainSerializationMetrics>,
 }
@@ -34,8 +39,9 @@ impl<'a> RowSerialization<'a> {
     pub(super) fn new(
         format: ExplainSerialization,
         timing: bool,
-        engine: Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
-        control: ProductionControl<'a>,
+        engine: Arc<dyn uqa_sql::expr::EngineHook + 'a>,
+        retained: &'a uqa_storage::read_control::StorageReadControl,
+        invoking: &'a uqa_core::CancellationToken,
     ) -> Option<Self> {
         let format = match format {
             ExplainSerialization::None => return None,
@@ -46,7 +52,8 @@ impl<'a> RowSerialization<'a> {
             format,
             timing,
             engine,
-            control,
+            retained,
+            invoking,
             positions: RefCell::new(None),
             metrics: Cell::new(ExplainSerializationMetrics::default()),
         })
@@ -56,7 +63,7 @@ impl<'a> RowSerialization<'a> {
         let positions = crate::columnar_batch::result_column_positions_with_control(
             schema,
             columns,
-            &self.control,
+            &self.control(),
         )?;
         self.positions.replace(Some(positions));
         Ok(())
@@ -67,7 +74,9 @@ impl<'a> RowSerialization<'a> {
         schema: &RowSchema,
         row: &crate::PhysicalRow,
     ) -> Result<(), SQLError> {
-        self.control.check()?;
+        let control = self.control();
+        control.check()?;
+        let io = Operation::enter(&IOContext::current(), self.retained.memory())?;
         let started = self.timing.then(Instant::now);
         let positions = self.positions.borrow();
         let positions = positions.as_ref().ok_or_else(|| {
@@ -85,7 +94,7 @@ impl<'a> RowSerialization<'a> {
             }),
             self.format,
             Some(self.engine.as_ref()),
-            &self.control,
+            &control,
         )?;
         let mut metrics = self.metrics.get();
         metrics.bytes = metrics
@@ -94,14 +103,32 @@ impl<'a> RowSerialization<'a> {
             .ok_or_else(overflow)?;
         drop(encoded);
         if let Some(started) = started {
-            metrics.elapsed += started.elapsed();
+            metrics.elapsed = metrics
+                .elapsed
+                .checked_add(started.elapsed())
+                .ok_or_else(measurement_overflow)?;
         }
+        metrics.io = metrics
+            .io
+            .checked_add(
+                io.as_ref()
+                    .map_or(Ok(IOUsage::default()), Operation::finish)?,
+            )
+            .ok_or_else(measurement_overflow)?;
         self.metrics.set(metrics);
         Ok(())
     }
 
     pub(super) fn metrics(&self) -> ExplainSerializationMetrics {
         self.metrics.get()
+    }
+
+    fn control(&self) -> ProductionControl<'a> {
+        ProductionControl::new(
+            self.retained.memory(),
+            self.retained.cancellation(),
+            self.invoking,
+        )
     }
 }
 
@@ -111,3 +138,10 @@ fn overflow() -> SQLError {
         message: "serialized result volume exceeds u64".into(),
     }
 }
+
+fn measurement_overflow() -> SQLError {
+    SQLError::Internal("EXPLAIN serialization measurements overflowed".into())
+}
+
+#[cfg(test)]
+mod tests;

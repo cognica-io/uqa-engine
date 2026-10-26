@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! One physical call owns an admitted observation under its current invocation.
+//! One measured operation owns an admitted observation under its current invocation.
 
 use uqa_core::{
     io_usage::{IOContext, IOObservation, IOScope, IOUsage},
@@ -12,13 +12,13 @@ use uqa_core::{
 };
 use uqa_sql::SQLError;
 
-pub(super) struct Operation {
+pub(crate) struct Operation {
     observation: IOObservation,
     _scope: IOScope,
 }
 
 impl Operation {
-    pub(super) fn enter(
+    pub(crate) fn enter(
         parent: &IOContext,
         budget: &MemoryBudget,
     ) -> Result<Option<Self>, SQLError> {
@@ -33,7 +33,7 @@ impl Operation {
         }))
     }
 
-    pub(super) fn finish(&self) -> Result<IOUsage, SQLError> {
+    pub(crate) fn finish(&self) -> Result<IOUsage, SQLError> {
         self.observation.finish().map_err(|_| {
             SQLError::Internal("EXPLAIN native I/O measurements could not be completed".into())
         })

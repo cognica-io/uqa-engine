@@ -1,7 +1,7 @@
 {
   "provenance": {
     "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
-    "collector_sha256": "77eb32763bdbcb67e2a38a4081c974d091bf552b94ab38ca51c345198db3251f",
+    "collector_sha256": "71a87b4ec3f88514a9ab7bd636d9534d5d51414f71899524a3b07480e1124649",
     "image_id": "sha256:bc8a94e4a938576533c0f0e8ad6f2e8c67d5c5facef05005a5e5cf9adce2fe25"
   },
   "settings": [
@@ -459,6 +459,805 @@
       "io_time": true,
       "operator_time": false,
       "function": true
+    }
+  ],
+  "partitioning": [
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (BUFFERS false, SUMMARY FALSE, FORMAT JSON) SELECT 1",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": null
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (BUFFERS true, SUMMARY FALSE, FORMAT JSON) SELECT 1",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": null
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS false, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (BUFFERS false, SUMMARY FALSE, FORMAT JSON) SELECT 1",
+      "planning": null,
+      "plan": {
+        "read": null,
+        "written": null,
+        "io_time": false
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": null
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE NONE, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, BUFFERS true, SERIALIZE BINARY, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) CREATE TEMP TABLE io_destination AS SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC WITH NO DATA",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 0
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (BUFFERS true, SUMMARY FALSE, FORMAT JSON) SELECT 1",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": null
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT change_io_timing('false')",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT change_io_timing('true')",
+      "planning": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "plan": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) EXECUTE io_parameter(change_io_timing('false'))",
+      "planning": {
+        "read": true,
+        "written": true,
+        "io_time": false
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": false
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = false",
+      "sql": "EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) EXECUTE io_parameter(change_io_timing('true'))",
+      "planning": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "serialization": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "planning_time": false,
+      "loops": 1
+    },
+    {
+      "setup": "SET track_io_timing = true",
+      "sql": "EXPLAIN (BUFFERS, SUMMARY FALSE, FORMAT JSON) EXECUTE io_parameter(change_io_timing('true'))",
+      "planning": {
+        "read": true,
+        "written": true,
+        "io_time": true
+      },
+      "plan": {
+        "read": false,
+        "written": false,
+        "io_time": true
+      },
+      "serialization": null,
+      "planning_time": false,
+      "loops": null
     }
   ]
 }

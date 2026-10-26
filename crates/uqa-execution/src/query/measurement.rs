@@ -6,12 +6,19 @@
 
 //! Measure actual output production without including the receiving sink's work.
 
+use super::diagnostics::io::Operation;
 use std::{
     cell::Cell,
     time::{Duration, Instant},
 };
+use uqa_core::{
+    io_usage::{IOContext, IOUsage},
+    memory::MemoryBudget,
+};
 use uqa_sql::{result::explain::ExplainNodeMetrics, SQLError};
 
+#[cfg(test)]
+mod io_tests;
 #[cfg(test)]
 mod tests;
 
@@ -19,6 +26,9 @@ pub struct QueryMeasurement {
     clock: Option<fn() -> Instant>,
     running: Cell<Option<Running>>,
     completed: Cell<ExplainNodeMetrics>,
+    io: Cell<IOUsage>,
+    parent: IOContext,
+    memory: MemoryBudget,
 }
 
 /// A relation destination executes EXPLAIN's selected query with its original measurement owner, while retaining its separate declared definition.
@@ -37,16 +47,23 @@ struct Running {
 }
 
 impl QueryMeasurement {
-    pub(crate) fn new(timing: bool) -> Self {
+    pub(crate) fn new(timing: bool, memory: &MemoryBudget) -> Self {
         Self {
             clock: timing.then_some(Instant::now),
             running: Cell::new(None),
             completed: Cell::new(ExplainNodeMetrics::default()),
+            io: Cell::new(IOUsage::default()),
+            parent: IOContext::current(),
+            memory: memory.clone(),
         }
     }
 
     pub(crate) fn metrics(&self) -> ExplainNodeMetrics {
         self.completed.get()
+    }
+
+    pub(crate) fn io(&self) -> IOUsage {
+        self.io.get()
     }
 
     /// The execution owner starts and finishes one invocation; constructing or describing a destination does not count as execution.
@@ -59,6 +76,7 @@ impl QueryMeasurement {
                 "query measurement already executing".into(),
             ));
         }
+        let io = Operation::enter(&self.parent, &self.memory)?;
         self.running.set(Some(Running {
             started: self.now(),
             downstream: Duration::ZERO,
@@ -67,7 +85,7 @@ impl QueryMeasurement {
         }));
         let guard = Invocation(self);
         let result = execute();
-        let completed = self.finish();
+        let completed = self.finish(io.as_ref());
         drop(guard);
         combine(result, completed)
     }
@@ -88,6 +106,7 @@ impl QueryMeasurement {
         }
         self.running.set(Some(running));
         let started = self.now();
+        let _parent = self.parent.enter();
         let result = consume();
         let paused = self.pause(started);
         combine(result, paused)
@@ -126,11 +145,16 @@ impl QueryMeasurement {
         Ok(())
     }
 
-    fn finish(&self) -> Result<(), SQLError> {
+    fn finish(&self, operation: Option<&Operation>) -> Result<(), SQLError> {
         let running = self.running.get().ok_or_else(inactive)?;
         let elapsed = self.elapsed(running)?;
         let completed = self.completed.get();
-        self.completed.set(ExplainNodeMetrics {
+        let io = self
+            .io
+            .get()
+            .checked_add(operation.map_or(Ok(IOUsage::default()), Operation::finish)?)
+            .ok_or_else(overflow)?;
+        let completed = ExplainNodeMetrics {
             rows: completed
                 .rows
                 .checked_add(running.rows)
@@ -141,7 +165,9 @@ impl QueryMeasurement {
                 .checked_add(running.first_output.unwrap_or(elapsed))
                 .ok_or_else(overflow)?,
             total: completed.total.checked_add(elapsed).ok_or_else(overflow)?,
-        });
+        };
+        self.completed.set(completed);
+        self.io.set(io);
         Ok(())
     }
 }

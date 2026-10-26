@@ -64,6 +64,78 @@ fn node_buffers(document: &Json, buffers: bool, io_timing: bool) {
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
+fn planning_plan_and_serialization_io_visibility_match_postgresql(#[case] provider: Provider) {
+    let reference: Json = serde_json::from_str(include_str!(
+        "../../../../../tests/parity/pg18/io_timing.expected.json"
+    ))
+    .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("explain-io-partition.db"));
+    engine.sql("SET work_mem = '64kB'; CREATE FUNCTION change_io_timing(enabled text) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN PERFORM n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC; PERFORM set_config('track_io_timing', enabled, false); RETURN 1; END $$", &[]).unwrap();
+    engine
+        .sql("PREPARE io_parameter(integer) AS SELECT $1", &[])
+        .unwrap();
+    for case in reference["partitioning"].as_array().unwrap() {
+        engine
+            .sql("DROP TABLE IF EXISTS io_destination", &[])
+            .unwrap();
+        engine.sql(case["setup"].as_str().unwrap(), &[]).unwrap();
+        let doc = document(&engine, case["sql"].as_str().unwrap());
+        for (expected, section) in [
+            ("planning", "Planning"),
+            ("plan", "Plan"),
+            ("serialization", "Serialization"),
+        ] {
+            if case[expected].is_null() {
+                assert!(doc.get(section).is_none(), "{case}: {doc}");
+                continue;
+            }
+            let observed = doc
+                .get(section)
+                .unwrap_or_else(|| panic!("missing {section}: {case}: {doc}"));
+            for (expected_field, field) in [
+                ("read", "Temp Read Blocks"),
+                ("written", "Temp Written Blocks"),
+            ] {
+                assert_eq!(
+                    observed.get(field).map(|value| value.as_u64().unwrap() > 0),
+                    case[expected][expected_field].as_bool(),
+                    "{section}: {case}: {doc}"
+                );
+            }
+            for field in ["Temp I/O Read Time", "Temp I/O Write Time"] {
+                assert_eq!(
+                    observed.get(field).is_some(),
+                    case[expected]["io_time"].as_bool().unwrap(),
+                    "{section}: {case}: {doc}"
+                );
+                if let Some(value) = observed.get(field) {
+                    assert!(
+                        value.as_f64().unwrap().is_finite() && value.as_f64().unwrap() >= 0.0,
+                        "{case}: {doc}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            doc.get("Planning Time").is_some(),
+            case["planning_time"].as_bool().unwrap(),
+            "{case}: {doc}"
+        );
+        assert_eq!(
+            doc["Plan"].get("Actual Loops").and_then(Json::as_u64),
+            case["loops"].as_u64(),
+            "{case}: {doc}"
+        );
+    }
+    engine.close().unwrap();
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
 fn temporary_io_fields_and_live_clock_match_postgresql(#[case] provider: Provider) {
     let reference: Json = serde_json::from_str(include_str!(
         "../../../../../tests/parity/pg18/io_timing.expected.json"

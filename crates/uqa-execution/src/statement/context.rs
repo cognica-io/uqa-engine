@@ -54,7 +54,8 @@ pub trait StatementDiagnostics: Sync {
     ) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
     fn diagnostics_scope(
         &self,
-        settings: &uqa_sql::explain::ExplainSettings,
+        timing: Option<bool>,
+        io: uqa_core::io_usage::IOOptions,
     ) -> Result<crate::query::diagnostics::DiagnosticsScope, SQLError>;
 }
 

@@ -237,7 +237,7 @@ impl QueryDiagnostics {
     }
 
     pub fn enter(&self, control: StorageReadControl) -> StorageBackendResult<DiagnosticsScope> {
-        self.enter_selected(control, None, IOOptions::default())
+        self.enter_with_options(control, None, IOOptions::default())
     }
 
     pub fn enter_measured(
@@ -246,7 +246,7 @@ impl QueryDiagnostics {
         timing: bool,
         io: IOOptions,
     ) -> StorageBackendResult<DiagnosticsScope> {
-        self.enter_selected(control, Some(timing), io)
+        self.enter_with_options(control, Some(timing), io)
     }
 
     pub(super) fn request_control(&self) -> Option<StorageReadControl> {
@@ -269,7 +269,8 @@ impl QueryDiagnostics {
             })
     }
 
-    fn enter_selected(
+    /// Admit one invocation's requested I/O and optional physical execution measurements.
+    pub fn enter_with_options(
         &self,
         control: StorageReadControl,
         timing: Option<bool>,

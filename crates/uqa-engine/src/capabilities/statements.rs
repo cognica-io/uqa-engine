@@ -217,18 +217,12 @@ impl context::StatementDiagnostics for Engine {
 
     fn diagnostics_scope(
         &self,
-        settings: &uqa_sql::explain::ExplainSettings,
+        timing: Option<bool>,
+        io: uqa_core::io_usage::IOOptions,
     ) -> Result<uqa_execution::query::diagnostics::DiagnosticsScope, uqa_sql::SQLError> {
         self.runtime
             .diagnostics
-            .enter_measured(
-                self.query_retention_control()?,
-                settings.timing,
-                uqa_core::io_usage::IOOptions {
-                    buffers: settings.buffers,
-                    wal: settings.wal,
-                },
-            )
+            .enter_with_options(self.query_retention_control()?, timing, io)
             .map_err(|error| {
                 uqa_execution::storage_errors::storage_error("retain EXPLAIN diagnostics", &error)
             })

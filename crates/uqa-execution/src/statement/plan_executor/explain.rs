@@ -10,6 +10,11 @@ use uqa_sql::explain::ExplainSettings;
 mod consumer;
 mod serialization;
 
+struct Planning {
+    scope: crate::query::diagnostics::DiagnosticsScope,
+    started: std::time::Instant,
+}
+
 impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
     pub(super) fn execute_explain(
         &self,
@@ -18,14 +23,24 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         unbound_parameters: Option<&[uqa_sql::SQLParam]>,
     ) -> Result<SQLResult, SQLError> {
         let settings = options.interpret()?;
+        let planning = Planning {
+            scope: self.context.diagnostics.diagnostics_scope(
+                None,
+                uqa_core::io_usage::IOOptions {
+                    buffers: settings.buffers,
+                    wal: false,
+                },
+            )?,
+            started: std::time::Instant::now(),
+        };
         if let Some(parameters) = unbound_parameters {
             let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), parameters);
             executor
                 .privilege_subject
                 .clone_from(&self.privilege_subject);
-            executor.explain_statement(body, &settings)
+            executor.explain_statement(body, &settings, planning)
         } else {
-            self.explain_statement(body, &settings)
+            self.explain_statement(body, &settings, planning)
         }
     }
 
@@ -34,6 +49,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         &self,
         body: &UnifiedPlan,
         settings: &ExplainSettings,
+        planning: Planning,
     ) -> Result<SQLResult, SQLError> {
         let source;
         let destination;
@@ -67,7 +83,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                         *if_not_exists,
                         *persistence,
                     )? {
-                        return self.explain_utility(body, settings);
+                        return self.explain_utility(body, settings, planning);
                     }
                     destination = Some(command.as_ref());
                     source = UnifiedPlan::Query(query.clone());
@@ -85,7 +101,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                         .views
                         .explain_existing_target(name, *if_not_exists)?
                     {
-                        return self.explain_utility(body, settings);
+                        return self.explain_utility(body, settings, planning);
                     }
                     destination = Some(command.as_ref());
                     source = UnifiedPlan::Query(query.clone());
@@ -111,12 +127,12 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                     executor
                         .privilege_subject
                         .clone_from(&self.privilege_subject);
-                    return executor.explain_statement(&plan, settings);
+                    return executor.explain_statement(&plan, settings, planning);
                 }
-                _ => return self.explain_utility(body, settings),
+                _ => return self.explain_utility(body, settings, planning),
             },
         };
-        self.explain_query(query, destination, settings)
+        self.explain_query(query, destination, settings, planning)
     }
 
     fn explain_query(
@@ -124,8 +140,8 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         query: &UnifiedPlan,
         destination: Option<&CommandPlan>,
         settings: &ExplainSettings,
+        planning: Planning,
     ) -> Result<SQLResult, SQLError> {
-        let planning_started = std::time::Instant::now();
         let mut planned = self
             .context
             .physical_explain
@@ -196,7 +212,14 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         let (estimates, estimate_memory) = estimates.into_parts();
         physical.estimate = estimates.first().map(|node| node.estimate);
         physical.estimates = estimates;
-        physical.planning_elapsed = Some(planning_started.elapsed());
+        physical.planning_elapsed = Some(planning.started.elapsed());
+        physical.planning = Some({
+            let captured = planning.scope.finish_execution()?;
+            uqa_sql::result::explain::ExplainPlanningMetrics {
+                io: captured.io,
+                io_timing: captured.io_timing,
+            }
+        });
         let physical = control.finish(
             physical,
             control.combine(
@@ -205,7 +228,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             ),
         )?;
         let analysis = if settings.analyze {
-            Some(self.analyze_explained(body, destination, settings, control)?)
+            Some(self.analyze_explained(body, destination, settings, &retained)?)
         } else {
             None
         };
@@ -217,11 +240,18 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         body: &UnifiedPlan,
         destination: Option<&CommandPlan>,
         settings: &ExplainSettings,
-        control: uqa_core::memory::ProductionControl<'_>,
+        retained: &uqa_storage::read_control::StorageReadControl,
     ) -> Result<uqa_sql::result::ExplainAnalysis, SQLError> {
-        let diagnostics = self.context.diagnostics.diagnostics_scope(settings)?;
+        let diagnostics = self.context.diagnostics.diagnostics_scope(
+            Some(settings.timing),
+            uqa_core::io_usage::IOOptions {
+                buffers: settings.buffers,
+                wal: settings.wal,
+            },
+        )?;
         let started = std::time::Instant::now();
-        let measurement = crate::query::measurement::QueryMeasurement::new(settings.timing);
+        let measurement =
+            crate::query::measurement::QueryMeasurement::new(settings.timing, retained.memory());
         let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
         executor
             .privilege_subject
@@ -238,11 +268,11 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 uqa_sql::result::explain::ExplainSerializationMetrics::default(),
             )
         } else {
-            executor.consume_explained_output(body, settings, control, &measurement)?
+            executor.consume_explained_output(body, settings, retained, &measurement)?
         };
         let diagnostics = diagnostics.finish_execution()?;
         Ok(uqa_sql::result::ExplainAnalysis {
-            io: diagnostics.io,
+            io: measurement.io(),
             io_timing: diagnostics.io_timing,
             vector_searches: diagnostics.vector_searches,
             node_executions: diagnostics.nodes,
@@ -257,7 +287,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         &mut self,
         body: &UnifiedPlan,
         settings: &ExplainSettings,
-        control: uqa_core::memory::ProductionControl<'_>,
+        retained: &uqa_storage::read_control::StorageReadControl,
         measurement: &crate::query::measurement::QueryMeasurement,
     ) -> Result<(u64, uqa_sql::result::explain::ExplainSerializationMetrics), SQLError> {
         let serialization = if settings.serialize == uqa_sql::explain::ExplainSerialization::None {
@@ -274,7 +304,13 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 .source
                 .relational
                 .expression_scope(scope);
-            serialization::RowSerialization::new(settings.serialize, settings.timing, hook, control)
+            serialization::RowSerialization::new(
+                settings.serialize,
+                settings.timing,
+                hook,
+                retained,
+                self.context.runtime.cancellation,
+            )
         };
         let consumer = std::rc::Rc::new(
             consumer::ExplainConsumer::new(self.context.runtime.cancellation, measurement)
@@ -302,7 +338,9 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         &self,
         body: &UnifiedPlan,
         settings: &ExplainSettings,
+        planning: Planning,
     ) -> Result<SQLResult, SQLError> {
+        drop(planning);
         self.render_explanation(
             body,
             settings,

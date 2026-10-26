@@ -25,6 +25,7 @@ use uqa_storage::{
 };
 
 pub(crate) mod executions;
+pub(crate) mod io;
 mod scope;
 pub use scope::{CapturedScope, InvocationRequest, QueryDiagnostics, RequestScope};
 

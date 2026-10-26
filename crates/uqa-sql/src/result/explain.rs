@@ -52,6 +52,14 @@ pub struct ExplainNodeExecution {
 pub struct ExplainSerializationMetrics {
     pub bytes: u64,
     pub elapsed: std::time::Duration,
+    pub io: uqa_core::io_usage::IOUsage,
+}
+
+/// Native planning work captured before execution, with the session clock policy at its completion boundary.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExplainPlanningMetrics {
+    pub io: uqa_core::io_usage::IOUsage,
+    pub io_timing: bool,
 }
 
 /// Physical diagnostic values keep numeric primitives inline and retain only admitted containers and copied text. Field names and fixed labels borrow static definitions.

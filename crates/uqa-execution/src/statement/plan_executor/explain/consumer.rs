@@ -93,7 +93,10 @@ mod tests {
     #[test]
     fn batches_and_rows_contribute_once_without_retaining_their_values() {
         let cancellation = CancellationToken::new();
-        let measurement = crate::query::measurement::QueryMeasurement::new(false);
+        let measurement = crate::query::measurement::QueryMeasurement::new(
+            false,
+            &uqa_core::memory::MemoryBudget::new(65_536),
+        );
         let consumer = ExplainConsumer::new(&cancellation, &measurement);
         measurement
             .run(|| {
@@ -127,7 +130,10 @@ mod tests {
     #[test]
     fn cancellation_preserves_the_last_produced_count() {
         let cancellation = CancellationToken::new();
-        let measurement = crate::query::measurement::QueryMeasurement::new(false);
+        let measurement = crate::query::measurement::QueryMeasurement::new(
+            false,
+            &uqa_core::memory::MemoryBudget::new(65_536),
+        );
         let consumer = ExplainConsumer::new(&cancellation, &measurement);
         let row = || {
             crate::OwnedPhysicalRow::new(

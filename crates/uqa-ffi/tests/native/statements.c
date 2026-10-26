@@ -418,7 +418,7 @@ static void explained_temporary_io(uqa_engine engine, uqa_result result) {
             CHECK(uqa_engine_execute(engine, timing
                 ? "SET track_io_timing = on" : "SET track_io_timing = off", result));
             int size = snprintf(sql, sizeof(sql),
-                "EXPLAIN (ANALYZE, BUFFERS %s, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) "
+                "EXPLAIN (ANALYZE, BUFFERS %s, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) "
                 "SELECT n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC",
                 buffers ? "TRUE" : "FALSE");
             assert(size > 0 && (size_t)size < sizeof(sql));
@@ -435,7 +435,13 @@ static void explained_temporary_io(uqa_engine engine, uqa_result result) {
                 "CASE WHEN $1->0->'Plan'->>'Actual Total Time' IS NULL THEN 0 ELSE 1 END::bigint, "
                 "($1->0->'Plan'->>'Actual Rows')::bigint, "
                 "(SELECT count(*) FROM jsonb_array_elements(($1::jsonb)->0->'Node Executions') AS io_nodes(node) "
-                "WHERE COALESCE((node->>'Temp Read Blocks')::bigint,0)>0)",
+                "WHERE COALESCE((node->>'Temp Read Blocks')::bigint,0)>0), "
+                "COALESCE(($1->0->'Planning'->>'Temp Read Blocks')::bigint,-1), "
+                "COALESCE(($1->0->'Planning'->>'Temp Written Blocks')::bigint,-1), "
+                "COALESCE(($1->0->'Serialization'->>'Temp Read Blocks')::bigint,-1), "
+                "COALESCE(($1->0->'Serialization'->>'Temp Written Blocks')::bigint,-1), "
+                "CASE WHEN $1->0->'Planning'->>'Temp I/O Read Time' IS NULL THEN 0 ELSE 1 END::bigint, "
+                "CASE WHEN $1->0->'Serialization'->>'Temp I/O Read Time' IS NULL THEN 0 ELSE 1 END::bigint",
                 &view, 1, result));
             CHECK(uqa_value_destroy(&document));
             assert(buffers ? integer(result, 0) > 0 : integer(result, 0) == -1);
@@ -444,9 +450,39 @@ static void explained_temporary_io(uqa_engine engine, uqa_result result) {
             assert(integer(result, 3) == 0);
             assert(integer(result, 4) == 4096);
             assert(buffers ? integer(result, 5) > 0 : integer(result, 5) == 0);
+            for (uint32_t column = 6; column < 10; column++) {
+                assert(integer(result, column) == (buffers ? 0 : -1));
+            }
+            assert(integer(result, 10) == (buffers && timing));
+            assert(integer(result, 11) == (buffers && timing));
         }
     }
     CHECK(uqa_engine_execute(engine,
+        "CREATE FUNCTION c_io_argument() RETURNS integer LANGUAGE plpgsql AS $$ "
+        "BEGIN PERFORM n FROM generate_series(1,4096) AS input(n) ORDER BY n DESC; RETURN 1; END $$; "
+        "PREPARE c_io_parameter(integer) AS SELECT $1; "
+        "EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) "
+        "EXECUTE c_io_parameter(c_io_argument())", result));
+    uqa_value planning_document = NULL;
+    uqa_value_view planning_view = NULL;
+    CHECK(uqa_result_get_value(result, 0, 0, &planning_view));
+    CHECK(uqa_value_create_copy(planning_view, &planning_document));
+    planning_view = planning_document;
+    CHECK(uqa_engine_execute_params(engine,
+        "SELECT ($1->0->'Planning'->>'Temp Read Blocks')::bigint, "
+        "($1->0->'Planning'->>'Temp Written Blocks')::bigint, "
+        "($1->0->'Plan'->>'Temp Read Blocks')::bigint, "
+        "($1->0->'Plan'->>'Temp Written Blocks')::bigint, "
+        "($1->0->'Serialization'->>'Temp Read Blocks')::bigint, "
+        "($1->0->'Serialization'->>'Temp Written Blocks')::bigint",
+        &planning_view, 1, result));
+    CHECK(uqa_value_destroy(&planning_document));
+    assert(integer(result, 0) > 0 && integer(result, 1) > 0);
+    for (uint32_t column = 2; column < 6; column++) {
+        assert(integer(result, column) == 0);
+    }
+    CHECK(uqa_engine_execute(engine,
+        "DEALLOCATE c_io_parameter; DROP FUNCTION c_io_argument(); "
         "BEGIN; SET LOCAL track_io_timing = off; SAVEPOINT timing_restore; "
         "SET track_io_timing = on; ROLLBACK TO timing_restore; SHOW track_io_timing", result));
     uqa_value_view value = NULL;

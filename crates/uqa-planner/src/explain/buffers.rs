@@ -11,6 +11,13 @@ use std::fmt::Write as _;
 use uqa_core::{io_usage::BlockUsage, memory::ProductionString};
 use uqa_sql::SQLError;
 
+pub(super) fn has_usage(temporary: BlockUsage) -> bool {
+    temporary.reads != 0
+        || temporary.written != 0
+        || !temporary.read_time.is_zero()
+        || !temporary.write_time.is_zero()
+}
+
 pub(super) fn properties(
     plan: &mut Object<'_, '_>,
     temporary: BlockUsage,

@@ -27,6 +27,7 @@ mod formats;
 mod measurements;
 pub use costs::estimate_plan;
 mod physical;
+mod planning;
 mod properties;
 mod serialization;
 #[cfg(test)]
@@ -217,6 +218,7 @@ fn plan_text(
             text.push_str(&uqa_sql::expr::quote_literal_with_control(value, &control)?)?;
         }
     }
+    planning::append_text(&mut text, settings, physical)?;
     if let Some(elapsed) = physical.planning_elapsed.filter(|_| settings.summary) {
         let _ = write!(
             text,
@@ -269,13 +271,28 @@ fn structured_plan<'a>(
     }
     if let Some(analysis) = analysis {
         measurements::properties(&mut plan, analysis.root, settings.timing)?;
-        if settings.buffers {
-            buffers::properties(&mut plan, analysis.io.temporary, analysis.io_timing)?;
-        }
         plan.insert("Affected Rows", P::Unsigned(analysis.affected_rows))?;
+    }
+    if settings.buffers {
+        let observation = analysis
+            .map(|analysis| (analysis.io.temporary, analysis.io_timing))
+            .or_else(|| {
+                physical.planning.map(|planning| {
+                    (
+                        uqa_core::io_usage::BlockUsage::default(),
+                        planning.io_timing,
+                    )
+                })
+            });
+        if let Some((temporary, io_timing)) = observation {
+            buffers::properties(&mut plan, temporary, io_timing)?;
+        }
     }
     let mut payload = Object::new(control);
     payload.insert("Plan", plan.finish()?)?;
+    if let Some(planning) = planning::properties(settings, physical, analysis, control)? {
+        payload.insert("Planning", planning)?;
+    }
     if settings.costs && !physical.estimates.is_empty() {
         payload.insert(
             "Node Estimates",

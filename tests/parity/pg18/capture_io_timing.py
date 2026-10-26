@@ -140,7 +140,49 @@ def capture():
                 "operator_time": "Actual Total Time" in plan,
                 "function": True,
             })
-        return {"provenance": {"version": version}, "settings": settings, "explanations": explanations}
+        partitioning = []
+
+        def fields(value):
+            if value is None:
+                return None
+            return {
+                "read": None if "Temp Read Blocks" not in value else value["Temp Read Blocks"] > 0,
+                "written": None if "Temp Written Blocks" not in value else value["Temp Written Blocks"] > 0,
+                "io_time": "Temp I/O Read Time" in value,
+            }
+
+        def partition(sql, setup):
+            success("DROP TABLE IF EXISTS io_destination")
+            success(setup)
+            document = json.loads(success(sql)[0][0])[0]
+            partitioning.append({
+                "setup": setup, "sql": sql,
+                "planning": fields(document.get("Planning")),
+                "plan": fields(document["Plan"]),
+                "serialization": fields(document.get("Serialization")),
+                "planning_time": "Planning Time" in document,
+                "loops": document["Plan"].get("Actual Loops"),
+            })
+
+        for enabled in (False, True):
+            for buffers in (False, True):
+                setup = f"SET track_io_timing = {str(enabled).lower()}"
+                for serialize in ("NONE", "TEXT", "BINARY"):
+                    for body in (
+                        SPILL,
+                        f"CREATE TEMP TABLE io_destination AS {SPILL}",
+                        f"CREATE TEMP TABLE io_destination AS {SPILL} WITH NO DATA",
+                    ):
+                        partition(f"EXPLAIN (ANALYZE, BUFFERS {str(buffers).lower()}, SERIALIZE {serialize}, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) {body}", setup)
+                partition(f"EXPLAIN (BUFFERS {str(buffers).lower()}, SUMMARY FALSE, FORMAT JSON) SELECT 1", setup)
+        for before, after in ((True, False), (False, True)):
+            partition(f"EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) SELECT change_io_timing('{str(after).lower()}')", f"SET track_io_timing = {str(before).lower()}")
+        success("PREPARE io_parameter(integer) AS SELECT $1")
+        for before, after in ((True, False), (False, True)):
+            partition(f"EXPLAIN (ANALYZE, SERIALIZE TEXT, TIMING FALSE, SUMMARY FALSE, FORMAT JSON) EXECUTE io_parameter(change_io_timing('{str(after).lower()}'))", f"SET track_io_timing = {str(before).lower()}")
+        partition("EXPLAIN (BUFFERS, SUMMARY FALSE, FORMAT JSON) EXECUTE io_parameter(change_io_timing('true'))", "SET track_io_timing = true")
+        success("DEALLOCATE io_parameter")
+        return {"provenance": {"version": version}, "settings": settings, "explanations": explanations, "partitioning": partitioning}
     finally:
         query("ROLLBACK")
         finish(connection)
@@ -162,7 +204,7 @@ def main():
     })
     destination = Path(__file__).with_name("io_timing.expected.json")
     destination.write_text(json.dumps(reference, indent=2) + "\n")
-    print(f"Captured {len(reference['settings'])} setting operations and {len(reference['explanations'])} explanations in {destination.name}")
+    print(f"Captured {len(reference['settings'])} setting operations, {len(reference['explanations'])} explanations and {len(reference['partitioning'])} partition cases in {destination.name}")
 
 
 if __name__ == "__main__":

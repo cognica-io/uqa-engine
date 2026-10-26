@@ -27,7 +27,8 @@ fn advance(millis: u64) {
 
 fn measurement(timing: bool) -> QueryMeasurement {
     CLOCK.with(|clock| clock.set((Instant::now(), Duration::ZERO, 0)));
-    let mut measurement = QueryMeasurement::new(timing);
+    let mut measurement =
+        QueryMeasurement::new(timing, &uqa_core::memory::MemoryBudget::new(65_536));
     if timing {
         measurement.clock = Some(now);
     }
