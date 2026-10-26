@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 
@@ -17,6 +18,26 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("usql_release", ROOT / "scripts/usql-release.py")
 CLI = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CLI)
+
+
+class BinstallTransportTest(unittest.TestCase):
+    def test_local_origin_preserves_the_release_manifest_and_workspace(self):
+        original = ROOT / "crates/uqa-cli/Cargo.toml"
+        source = original.read_bytes()
+        expected = tomllib.loads(source.decode())
+        with tempfile.TemporaryDirectory(prefix="usql manifest space ") as temporary:
+            manifest = pathlib.Path(temporary) / "Cargo.toml"
+            CLI.local_binstall_manifest(manifest, "http://127.0.0.1:12345")
+            actual = tomllib.loads(manifest.read_text())
+        self.assertEqual(original.read_bytes(), source)
+        self.assertEqual(actual["package"].pop("repository"), "http://127.0.0.1:12345")
+        workspace = pathlib.Path(actual["package"].pop("workspace"))
+        self.assertEqual(workspace, ROOT)
+        self.assertEqual(expected["package"].pop("repository"), {"workspace": True})
+        self.assertEqual(actual, expected)
+        inherited = tomllib.loads((workspace / "Cargo.toml").read_text())["workspace"]["package"]
+        self.assertEqual(inherited["version"], CLI.version())
+        self.assertEqual([binary["name"] for binary in actual["bin"]], ["usql"])
 
 
 class InstallationCleanupTest(unittest.TestCase):
