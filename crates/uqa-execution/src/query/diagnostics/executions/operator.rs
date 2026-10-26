@@ -142,7 +142,7 @@ impl PhysicalOperator for ObservedOperator<'_> {
                 let Some(step) = step else {
                     return input.collect_materialized(sink);
                 };
-                let observed = RefCell::new(*step);
+                let observed = RefCell::new(step.clone());
                 let result = sink.observe(&observed, |sink| input.collect_materialized(sink));
                 *step = observed.into_inner();
                 result

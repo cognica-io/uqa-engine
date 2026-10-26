@@ -58,6 +58,25 @@ fn diskann_diagnostics_nested_invocations_are_inclusive_and_release_their_allowa
 }
 
 #[test]
+fn closed_vector_capture_does_not_poison_its_still_running_parent() {
+    let owner = QueryDiagnostics::default();
+    let control = StorageReadControl::with_limit(65_536);
+    let outer = owner.enter(control.clone()).unwrap();
+    let inner = owner.enter(control.clone()).unwrap();
+    let retained = owner.capture().unwrap();
+    record(&retained, "before").unwrap();
+    drop(inner.finish().unwrap());
+    assert!(record(&retained, "late").is_err());
+    record(&outer.collector, "after").unwrap();
+    let parent = outer.finish().unwrap();
+    assert_eq!(parent.len(), 2);
+    assert_eq!(&*parent[0].relation, "before");
+    assert_eq!(&*parent[1].relation, "after");
+    drop((parent, retained));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn diskann_diagnostics_parallel_callbacks_keep_their_captured_parent_and_session_identity() {
     let owner = QueryDiagnostics::default();
     let independent = QueryDiagnostics::default();

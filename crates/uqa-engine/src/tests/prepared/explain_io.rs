@@ -32,6 +32,33 @@ fn reads(plan: &Json) -> u64 {
     plan["Temp Read Blocks"].as_u64().unwrap()
 }
 
+fn node_buffers(document: &Json, buffers: bool, io_timing: bool) {
+    let nodes = document["Node Executions"].as_array().unwrap();
+    for node in nodes {
+        for key in ["Temp Read Blocks", "Temp Written Blocks"] {
+            assert_eq!(node.get(key).is_some(), buffers, "{document}");
+            if buffers {
+                assert!(
+                    node[key].as_u64().unwrap() <= document["Plan"][key].as_u64().unwrap(),
+                    "{document}"
+                );
+            }
+        }
+        for key in ["Temp I/O Read Time", "Temp I/O Write Time"] {
+            assert_eq!(node.get(key).is_some(), buffers && io_timing, "{document}");
+            if let Some(value) = node.get(key) {
+                assert!(
+                    value.as_f64().unwrap().is_finite() && value.as_f64().unwrap() >= 0.0,
+                    "{document}"
+                );
+            }
+        }
+    }
+    if buffers && reads(&document["Plan"]) > 0 {
+        assert!(nodes.iter().any(|node| reads(node) > 0), "{document}");
+    }
+}
+
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]
 #[case::sqlite_native(Provider::SQLiteNative)]
@@ -48,6 +75,11 @@ fn temporary_io_fields_and_live_clock_match_postgresql(#[case] provider: Provide
     for case in reference["explanations"].as_array().unwrap() {
         engine.sql(case["setup"].as_str().unwrap(), &[]).unwrap();
         let doc = document(&engine, case["sql"].as_str().unwrap());
+        node_buffers(
+            &doc,
+            !case["read"].is_null(),
+            case["io_time"].as_bool().unwrap(),
+        );
         let plan = &doc["Plan"];
         for (expected, key) in [
             ("read", "Temp Read Blocks"),
@@ -150,6 +182,8 @@ fn nested_explanations_include_their_own_io_and_exclude_another_session(
         .unwrap();
     let outer = explain(&engine, "SELECT measure_spill(), other_spill()");
     let inner = saved.lock().unwrap().take().unwrap();
+    node_buffers(&outer, true, false);
+    node_buffers(&inner, true, false);
     assert!(reads(&inner["Plan"]) > 0);
     assert_eq!(
         reads(&outer["Plan"]),
@@ -188,6 +222,7 @@ fn cursor_spill_reads_follow_the_fetching_invocation(#[case] provider: Provider)
             .unwrap();
         for _ in 0..2 {
             let measured = explain(&engine, "SELECT fetch_io()");
+            node_buffers(&measured, true, false);
             assert!(reads(&measured["Plan"]) > 0, "{scroll}: {measured}");
             engine.sql("FETCH 1000 FROM measured_io", &[]).unwrap();
             assert_eq!(reads(&explain(&engine, "SELECT 1")["Plan"]), 0);

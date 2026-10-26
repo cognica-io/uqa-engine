@@ -433,7 +433,9 @@ static void explained_temporary_io(uqa_engine engine, uqa_result result) {
                 "COALESCE(($1->0->'Plan'->>'Temp Written Blocks')::bigint,-1), "
                 "CASE WHEN $1->0->'Plan'->>'Temp I/O Read Time' IS NULL THEN 0 ELSE 1 END::bigint, "
                 "CASE WHEN $1->0->'Plan'->>'Actual Total Time' IS NULL THEN 0 ELSE 1 END::bigint, "
-                "($1->0->'Plan'->>'Actual Rows')::bigint",
+                "($1->0->'Plan'->>'Actual Rows')::bigint, "
+                "(SELECT count(*) FROM jsonb_array_elements(($1::jsonb)->0->'Node Executions') AS io_nodes(node) "
+                "WHERE COALESCE((node->>'Temp Read Blocks')::bigint,0)>0)",
                 &view, 1, result));
             CHECK(uqa_value_destroy(&document));
             assert(buffers ? integer(result, 0) > 0 : integer(result, 0) == -1);
@@ -441,6 +443,7 @@ static void explained_temporary_io(uqa_engine engine, uqa_result result) {
             assert(integer(result, 2) == (buffers && timing));
             assert(integer(result, 3) == 0);
             assert(integer(result, 4) == 4096);
+            assert(buffers ? integer(result, 5) > 0 : integer(result, 5) == 0);
         }
     }
     CHECK(uqa_engine_execute(engine,

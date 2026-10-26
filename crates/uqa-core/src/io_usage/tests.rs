@@ -13,6 +13,110 @@ fn options() -> IOOptions {
     }
 }
 
+#[test]
+fn replaced_request_owns_restoration_across_suspended_operation_unwind() {
+    let budget = MemoryBudget::new(8192);
+    let create =
+        || IOObservation::new(&budget, options(), Arc::new(AtomicBool::new(false)), None).unwrap();
+    let outer = create();
+    let first = create();
+    let second = create();
+    let context = |owner: &IOObservation| IOContext::new(Some(owner.clone()));
+    let _outer = context(&outer).enter();
+    let request = context(&first).enter();
+    let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _operation = context(&first.child(&budget).unwrap()).enter();
+        request.replace(&context(&second));
+        panic!("finish the suspended operation after request replacement");
+    }));
+    assert!(failed.is_err());
+    IOContext::record(blocks(BlockClass::Temporary, BlockOperation::Read, 2));
+    {
+        let _operation = context(&second.child(&budget).unwrap()).enter();
+        request.replace(&IOContext::default());
+    }
+    assert!(IOContext::current().observation().is_none());
+    IOContext::record(blocks(BlockClass::Temporary, BlockOperation::Read, 100));
+    drop(request);
+    IOContext::record(blocks(BlockClass::Temporary, BlockOperation::Read, 1));
+    assert_eq!(outer.snapshot().unwrap().temporary.reads, 1);
+    assert_eq!(first.snapshot().unwrap(), IOUsage::default());
+    assert_eq!(second.snapshot().unwrap().temporary.reads, 2);
+}
+
+#[test]
+fn operation_collects_effective_ancestor_options_without_changing_invocation_options() {
+    let budget = MemoryBudget::new(8192);
+    let timing = Arc::new(AtomicBool::new(false));
+    let outer = IOObservation::new(&budget, options(), Arc::clone(&timing), None).unwrap();
+    let invocation =
+        IOObservation::new(&budget, IOOptions::default(), timing, Some(outer.clone())).unwrap();
+    let operation = invocation.child(&budget).unwrap();
+    operation.record(blocks(BlockClass::Shared, BlockOperation::Read, 3));
+    assert_eq!(operation.finish().unwrap().shared.reads, 3);
+    assert_eq!(invocation.finish().unwrap(), IOUsage::default());
+    assert_eq!(outer.finish().unwrap().shared.reads, 3);
+}
+
+#[test]
+fn disjoint_totals_preserve_every_field_and_reject_overflow() {
+    for class in [BlockClass::Shared, BlockClass::Local, BlockClass::Temporary] {
+        for operation in [
+            BlockOperation::Hit,
+            BlockOperation::Read,
+            BlockOperation::Dirty,
+            BlockOperation::Write,
+        ] {
+            let value = IOUsage::default().add(blocks(class, operation, 7)).unwrap();
+            assert_eq!(value.checked_add(IOUsage::default()), Some(value));
+            assert_eq!(
+                value.checked_add(value),
+                value.add(blocks(class, operation, 7))
+            );
+            let full = IOUsage::default()
+                .add(blocks(class, operation, u64::MAX))
+                .unwrap();
+            assert!(full.checked_add(value).is_none());
+        }
+        for operation in [BlockOperation::Read, BlockOperation::Write] {
+            let value = IOUsage::default()
+                .add(IOEvent::Blocks {
+                    class,
+                    operation,
+                    count: 0,
+                    elapsed: Duration::MAX,
+                })
+                .unwrap();
+            assert!(value.checked_add(value).is_none());
+        }
+    }
+    for wal in [
+        WALUsage {
+            records: u64::MAX,
+            ..WALUsage::default()
+        },
+        WALUsage {
+            full_page_images: u64::MAX,
+            ..WALUsage::default()
+        },
+        WALUsage {
+            bytes: u64::MAX,
+            ..WALUsage::default()
+        },
+        WALUsage {
+            buffers_full: u64::MAX,
+            ..WALUsage::default()
+        },
+    ] {
+        let value = IOUsage {
+            wal,
+            ..IOUsage::default()
+        };
+        assert_eq!(value.checked_add(IOUsage::default()), Some(value));
+        assert!(value.checked_add(value).is_none());
+    }
+}
+
 fn blocks(class: BlockClass, operation: BlockOperation, count: u64) -> IOEvent {
     IOEvent::Blocks {
         class,

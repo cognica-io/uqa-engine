@@ -43,6 +43,7 @@ pub struct ExplainNodeMetrics {
 #[derive(Debug, Clone, Copy)]
 pub struct ExplainNodeExecution {
     pub kind: &'static str,
+    pub io: uqa_core::io_usage::IOUsage,
     pub metrics: ExplainNodeMetrics,
 }
 

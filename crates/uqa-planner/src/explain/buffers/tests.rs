@@ -55,7 +55,7 @@ fn temporary_fields_keep_totals_and_effective_timing_in_structured_formats() {
 fn text_omits_zero_values_and_keeps_already_measured_times() {
     let control = ProductionControl::uncontrolled();
     let mut text = ProductionString::new(control);
-    append_text(&mut text, BlockUsage::default()).unwrap();
+    append_text(&mut text, BlockUsage::default(), "  ").unwrap();
     assert!(text.finish().unwrap().is_empty());
     let mut text = ProductionString::new(control);
     append_text(
@@ -65,6 +65,7 @@ fn text_omits_zero_values_and_keeps_already_measured_times() {
             write_time: Duration::from_micros(1234),
             ..BlockUsage::default()
         },
+        "  ",
     )
     .unwrap();
     assert_eq!(

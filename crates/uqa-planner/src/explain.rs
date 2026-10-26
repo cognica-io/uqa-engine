@@ -227,7 +227,7 @@ fn plan_text(
     if let Some(analysis) = analysis {
         vector::append_text(&mut text, analysis, control)?;
         if settings.buffers {
-            buffers::append_text(&mut text, analysis.io.temporary)?;
+            buffers::append_text(&mut text, analysis.io.temporary, "  ")?;
         }
         serialization::append_text(&mut text, settings, analysis)?;
         measurements::append_text(&mut text, analysis.root, settings.timing)?;
@@ -239,7 +239,7 @@ fn plan_text(
                 analysis.elapsed.as_secs_f64() * 1_000.0
             );
         }
-        executions::append_text(&mut text, &analysis.node_executions, settings.timing)?;
+        executions::append_text(&mut text, &analysis.node_executions, settings)?;
     }
     Ok(text.finish()?)
 }
@@ -300,7 +300,12 @@ fn structured_plan<'a>(
     if let Some(analysis) = analysis {
         payload.insert(
             "Node Executions",
-            executions::structured(&analysis.node_executions, settings.timing, control)?,
+            executions::structured(
+                &analysis.node_executions,
+                settings,
+                analysis.io_timing,
+                control,
+            )?,
         )?;
         if let Some(serialization) = serialization::properties(settings, analysis, control)? {
             payload.insert("Serialization", serialization)?;

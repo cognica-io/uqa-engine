@@ -200,7 +200,11 @@ impl InvocationDiagnostics {
             };
             let mut current = Some(self);
             while let Some(collector) = current {
-                collector.records.lock().failed.get_or_insert(failure);
+                let mut records = collector.records.lock();
+                if records.closed {
+                    break;
+                }
+                records.failed.get_or_insert(failure);
                 current = collector.parent.as_ref().map(|parent| &***parent);
             }
         }
@@ -208,9 +212,8 @@ impl InvocationDiagnostics {
     }
 
     fn finish(&self) -> Result<CapturedExecution, SQLError> {
+        let records = self.close();
         self.control.cancellation().check()?;
-        let mut records = self.records.lock();
-        records.closed = true;
         if let Some(failure) = records.failed {
             return Err(failure.error());
         }
@@ -225,12 +228,26 @@ impl InvocationDiagnostics {
                 .as_ref()
                 .map_or(Ok(IOUsage::default()), IOObservation::finish)
                 .map_err(|_| Failure::Measurement.error())?,
-            vector_searches: std::mem::replace(
-                &mut records.searches,
-                BudgetedVec::new(self.control.memory()),
-            ),
+            vector_searches: records.searches,
             nodes,
         })
+    }
+
+    /// Closing transfers all retained records out of the collector. Worker captures keep only a closed owner, on success, error and unwind alike.
+    fn close(&self) -> Records {
+        let records = std::mem::replace(
+            &mut *self.records.lock(),
+            Records {
+                searches: BudgetedVec::new(self.control.memory()),
+                failed: None,
+                closed: true,
+                executions: None,
+            },
+        );
+        if let Some(io) = &self.io {
+            let _ = io.finish();
+        }
+        records
     }
 }
 
@@ -280,10 +297,7 @@ impl DiagnosticsScope {
 
 impl Drop for DiagnosticsScope {
     fn drop(&mut self) {
-        self.collector.records.lock().closed = true;
-        if let Some(io) = &self.collector.io {
-            let _ = io.finish();
-        }
+        drop(self.collector.close());
     }
 }
 

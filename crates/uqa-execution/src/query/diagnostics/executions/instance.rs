@@ -6,7 +6,7 @@
 
 //! A retained instance records only the request that is currently executing it.
 
-use super::{account, Event, Step};
+use super::{account, io::Operation, Event, Step};
 use crate::{
     physical::with_cleanup,
     query::diagnostics::{Failure, QueryDiagnostics},
@@ -80,9 +80,20 @@ impl Instance<'_> {
         else {
             return call(input, None);
         };
-        let timing = match collector.register_execution(self.id, self.kind) {
-            Ok(timing) => timing,
+        let admission = (|| {
+            let timing = collector.register_execution(self.id, self.kind)?;
+            let parent = self.diagnostics.io_context();
+            let io = Operation::enter(&parent, collector.control().memory())?;
+            Ok::<_, SQLError>((timing, io.as_ref().map(|_| parent), io))
+        })();
+        let (timing, parent, io) = match admission {
+            Ok(admitted) => admitted,
             Err(error) => {
+                collector.fail_execution(match error.sqlstate() {
+                    Some("53200") => Failure::ExecutionMemory,
+                    Some("57014") => Failure::Cancelled,
+                    _ => Failure::Measurement,
+                });
                 return match cleanup {
                     Some(close) => with_cleanup(
                         Err(error.into()),
@@ -93,10 +104,10 @@ impl Instance<'_> {
                 };
             }
         };
-        let mut step = Step::new(timing.then_some(std::time::Instant::now));
+        let mut step = Step::new(timing.then_some(std::time::Instant::now)).with_io_parent(parent);
         let result = call(input, Some(&mut step));
         let accounting = match step.finish() {
-            Ok(step) => account(&collector, self.id, event(&result, step)),
+            Ok(step) => account(&collector, self.id, event(&result, step), io.as_ref()),
             Err(error) => {
                 collector.fail_execution(Failure::Measurement);
                 Err(error)

@@ -142,10 +142,11 @@ impl IOObservation {
         self.0.timing.load(std::sync::atomic::Ordering::Acquire)
     }
 
+    /// An operation captures every measurement requested by its invocation or an enclosing invocation.
     pub fn child(&self, budget: &MemoryBudget) -> Result<Self, MemoryError> {
         Self::new(
             budget,
-            self.0.options,
+            self.0.requested,
             Arc::clone(&self.0.timing),
             Some(self.clone()),
         )
@@ -204,6 +205,24 @@ impl IOObservation {
 }
 
 impl IOUsage {
+    /// Combine disjoint operation totals. Inclusive parent/child observations must not be added together.
+    pub fn checked_add(self, other: Self) -> Option<Self> {
+        Some(Self {
+            shared: self.shared.checked_add(other.shared)?,
+            local: self.local.checked_add(other.local)?,
+            temporary: self.temporary.checked_add(other.temporary)?,
+            wal: WALUsage {
+                records: self.wal.records.checked_add(other.wal.records)?,
+                full_page_images: self
+                    .wal
+                    .full_page_images
+                    .checked_add(other.wal.full_page_images)?,
+                bytes: self.wal.bytes.checked_add(other.wal.bytes)?,
+                buffers_full: self.wal.buffers_full.checked_add(other.wal.buffers_full)?,
+            },
+        })
+    }
+
     fn add(mut self, event: IOEvent) -> Option<Self> {
         match event {
             IOEvent::Blocks {
@@ -245,5 +264,18 @@ impl IOUsage {
             }
         }
         Some(self)
+    }
+}
+
+impl BlockUsage {
+    fn checked_add(self, other: Self) -> Option<Self> {
+        Some(Self {
+            hits: self.hits.checked_add(other.hits)?,
+            reads: self.reads.checked_add(other.reads)?,
+            dirtied: self.dirtied.checked_add(other.dirtied)?,
+            written: self.written.checked_add(other.written)?,
+            read_time: self.read_time.checked_add(other.read_time)?,
+            write_time: self.write_time.checked_add(other.write_time)?,
+        })
     }
 }

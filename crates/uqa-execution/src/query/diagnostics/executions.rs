@@ -8,12 +8,18 @@
 
 use super::{CapturedDiagnostics, Failure, InvocationDiagnostics};
 use crate::{physical::physical_exec_error, ExecResult};
-use uqa_core::memory::{BudgetedMap, BudgetedVec};
+use uqa_core::{
+    io_usage::IOUsage,
+    memory::{BudgetedMap, BudgetedVec},
+};
 use uqa_sql::{result::explain::ExplainNodeExecution, SQLError};
 use uqa_storage::read_control::StorageReadControl;
 
 mod cycle;
 mod instance;
+mod io;
+#[cfg(test)]
+mod io_tests;
 mod operator;
 mod receivers;
 mod rows;
@@ -28,11 +34,12 @@ pub(super) struct Executions {
 
 struct Record {
     kind: &'static str,
+    io: IOUsage,
     completed: NodeMetrics,
     running: Cycle,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum Event {
     Initialize(Step),
     Consume(Step),
@@ -54,6 +61,7 @@ impl Executions {
                 id,
                 Record {
                     kind,
+                    io: IOUsage::default(),
                     completed: NodeMetrics::default(),
                     running: Cycle::default(),
                 },
@@ -62,25 +70,28 @@ impl Executions {
         Ok(())
     }
 
-    fn record(&mut self, id: u64, event: Event) -> ExecResult<()> {
+    fn record(&mut self, id: u64, event: &Event, io: IOUsage) -> ExecResult<()> {
         let record = self
             .nodes
             .get_mut(&id)
             .expect("operator was admitted before execution");
-        let elapsed = |step: Step| {
+        let io = record.io.checked_add(io).ok_or_else(|| {
+            crate::ExecError::Other("EXPLAIN operator I/O measurements overflowed".into())
+        })?;
+        let elapsed = |step: &Step| {
             if self.timing {
                 step.elapsed()
             } else {
                 std::time::Duration::ZERO
             }
         };
-        match event {
+        let measured = match event {
             Event::Initialize(step) => record.running.initialize(elapsed(step)),
-            Event::Consume(step) => {
-                record
-                    .running
-                    .consume(if self.timing { step } else { step.untimed() })
-            }
+            Event::Consume(step) => record.running.consume(if self.timing {
+                step.clone()
+            } else {
+                step.clone().untimed()
+            }),
             Event::Close(step) => {
                 record.running.initialize(elapsed(step))?;
                 accumulate(&mut record.completed, record.running.finish())
@@ -89,7 +100,10 @@ impl Executions {
                 accumulate(&mut record.completed, record.running.finish())?;
                 record.running.initialize(elapsed(step))
             }
-        }
+        };
+        measured?;
+        record.io = io;
+        Ok(())
     }
 
     pub(super) fn snapshot(
@@ -103,6 +117,7 @@ impl Executions {
             accumulate(&mut metrics, record.running.snapshot()).map_err(physical_exec_error)?;
             nodes.push(ExplainNodeExecution {
                 kind: record.kind,
+                io: record.io,
                 metrics,
             })?;
         }
@@ -115,7 +130,10 @@ impl InvocationDiagnostics {
         let mut current = Some(self);
         while let Some(collector) = current {
             let records = collector.records.lock();
-            if !records.closed && records.executions.is_some() {
+            if records.closed {
+                return false;
+            }
+            if records.executions.is_some() {
                 return true;
             }
             current = collector.parent.as_ref().map(|parent| &***parent);
@@ -133,8 +151,8 @@ impl InvocationDiagnostics {
         Ok(timing)
     }
 
-    pub(super) fn record_execution(&self, id: u64, event: Event) -> ExecResult<()> {
-        self.visit_executions(|nodes| nodes.record(id, event).map_err(physical_exec_error))?;
+    pub(super) fn record_execution(&self, id: u64, event: Event, io: IOUsage) -> ExecResult<()> {
+        self.visit_executions(|nodes| nodes.record(id, &event, io).map_err(physical_exec_error))?;
         Ok(())
     }
 
@@ -146,11 +164,12 @@ impl InvocationDiagnostics {
             let mut current = Some(self);
             while let Some(collector) = current {
                 let mut records = collector.records.lock();
-                if !records.closed {
-                    if let Some(nodes) = &mut records.executions {
-                        collector.control.cancellation().check()?;
-                        apply(nodes)?;
-                    }
+                if records.closed {
+                    break;
+                }
+                if let Some(nodes) = &mut records.executions {
+                    collector.control.cancellation().check()?;
+                    apply(nodes)?;
                 }
                 current = collector.parent.as_ref().map(|parent| &***parent);
             }
@@ -171,14 +190,23 @@ impl InvocationDiagnostics {
         let mut current = Some(self);
         while let Some(collector) = current {
             let mut records = collector.records.lock();
-            if !records.closed {
-                records.failed.get_or_insert(failure);
+            if records.closed {
+                break;
             }
+            records.failed.get_or_insert(failure);
             current = collector.parent.as_ref().map(|parent| &***parent);
         }
     }
 }
 
-fn account(collector: &CapturedDiagnostics, id: u64, event: Event) -> ExecResult<()> {
-    collector.record_execution(id, event)
+fn account(
+    collector: &CapturedDiagnostics,
+    id: u64,
+    event: Event,
+    io: Option<&io::Operation>,
+) -> ExecResult<()> {
+    let usage = io
+        .map_or(Ok(IOUsage::default()), io::Operation::finish)
+        .inspect_err(|_| collector.fail_execution(Failure::Measurement))?;
+    collector.record_execution(id, event, usage)
 }

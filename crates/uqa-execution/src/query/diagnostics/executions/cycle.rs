@@ -8,6 +8,7 @@
 
 use crate::{ExecError, ExecResult};
 use std::time::{Duration, Instant};
+use uqa_core::io_usage::IOContext;
 
 #[cfg(test)]
 mod tests;
@@ -84,7 +85,7 @@ impl Cycle {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct Step {
     clock: Clock,
     started: Option<Instant>,
@@ -93,6 +94,7 @@ pub(crate) struct Step {
     first_output: Option<Duration>,
     rows: u64,
     failed: bool,
+    io_parent: Option<IOContext>,
 }
 
 impl Step {
@@ -105,7 +107,13 @@ impl Step {
             first_output: None,
             rows: 0,
             failed: false,
+            io_parent: None,
         }
+    }
+
+    pub(super) fn with_io_parent(mut self, parent: Option<IOContext>) -> Self {
+        self.io_parent = parent;
+        self
     }
 
     pub(super) fn ready(&mut self, rows: usize) -> ExecResult<()> {
@@ -128,6 +136,7 @@ impl Step {
     }
 
     pub(super) fn downstream<T>(&mut self, call: impl FnOnce() -> ExecResult<T>) -> ExecResult<T> {
+        let _io = self.io_parent.as_ref().map(IOContext::enter);
         let started = self.clock.map(|now| now());
         let result = call();
         let accounting = (|| {
@@ -148,6 +157,7 @@ impl Step {
             return Err(overflow());
         }
         self.elapsed = self.elapsed_now()?;
+        self.io_parent = None;
         Ok(self)
     }
 

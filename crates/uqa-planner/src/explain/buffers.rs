@@ -34,9 +34,12 @@ pub(super) fn properties(
 pub(super) fn append_text(
     text: &mut ProductionString<'_>,
     temporary: BlockUsage,
+    indent: &str,
 ) -> Result<(), SQLError> {
     if temporary.reads != 0 || temporary.written != 0 {
-        text.push_str("\n  Buffers: temp")?;
+        text.push_str("\n")?;
+        text.push_str(indent)?;
+        text.push_str("Buffers: temp")?;
         if temporary.reads != 0 {
             let _ = write!(text, " read={}", temporary.reads);
         }
@@ -45,7 +48,9 @@ pub(super) fn append_text(
         }
     }
     if !temporary.read_time.is_zero() || !temporary.write_time.is_zero() {
-        text.push_str("\n  I/O Timings: temp")?;
+        text.push_str("\n")?;
+        text.push_str(indent)?;
+        text.push_str("I/O Timings: temp")?;
         if !temporary.read_time.is_zero() {
             let _ = write!(
                 text,
