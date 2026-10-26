@@ -134,12 +134,14 @@ writeable = { version = "=0.6.3", default-features = false }
 icu_properties = "=2.0.2"
 libm = "0.2"
 redb = "4.1"
-zstd = "0.13"
+zstd = "0.14.3"
 arrow-array = "58"
 arrow-ipc = "58"
 arrow-schema = "58"
 duckdb = { package = "uqa-duckdb", version = "=1.10505.1", features = ["bundled", "parquet"] }
-parquet = { version = "58", features = ["arrow"] }
+# QueryBuilder writes uncompressed Parquet. Retain the existing feature set
+# without the unused Zstd codec, whose 58.x dependency requires vulnerable 0.13.
+parquet = { version = "58", default-features = false, features = ["arrow", "snap", "brotli", "flate2-zlib-rs", "lz4", "base64", "simdutf8"] }
 pyo3 = "0.29"
 napi = { version = "3.10", default-features = false, features = ["napi8", "tokio_rt"] }
 napi-derive = "3.5"

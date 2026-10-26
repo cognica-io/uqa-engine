@@ -702,6 +702,14 @@ fn execute_parquet_basic() {
     let file = std::fs::File::open(path).unwrap();
     let builder =
         parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
+    for group in builder.metadata().row_groups() {
+        for column in group.columns() {
+            assert_eq!(
+                column.compression(),
+                parquet::basic::Compression::UNCOMPRESSED
+            );
+        }
+    }
     let schema = builder.schema().clone();
     let batches: Vec<_> = builder.build().unwrap().collect::<Result<_, _>>().unwrap();
     let rows: usize = batches.iter().map(arrow_array::RecordBatch::num_rows).sum();
