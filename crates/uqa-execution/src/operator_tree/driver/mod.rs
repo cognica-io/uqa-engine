@@ -128,7 +128,7 @@ impl<'a> PhysicalRetrievalDriver<'a> {
             table,
             signal_table,
             params,
-            parallel: ParallelExecutor::default(),
+            parallel: context.parallel.clone(),
         }
     }
 

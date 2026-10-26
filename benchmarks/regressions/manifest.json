@@ -24743,6 +24743,58 @@
       "capability": "Bounded automatic-view source analysis",
       "workload": "One, eight and thirty-two joined table-function inputs with counted overload analysis.",
       "invariant": "Previously analyzed child descriptors are reused so analysis work grows with input count rather than repeated join subtree traversal."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "the_last_executor_clone_joins_every_worker_through_tls_cleanup",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Two native workers retain destructor probes while an executor clone keeps the pool alive.",
+      "invariant": "Dropping the final clone completes both thread-local destructors; no worker remains after external ownership ends."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "configured_workers_bound_concurrency_and_preserve_branch_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Eight synchronized branches execute through a two-worker pool.",
+      "invariant": "Exactly two native worker identities execute all eight branches and results retain their input order."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "repeated_and_nested_work_reuses_the_owned_pool",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Three repeated dispatches include nested eight-part chunk work inside a two-worker executor.",
+      "invariant": "Every nested branch stays in the existing two-worker pool and returns the original ordered values."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failed_pool_construction_joins_workers_already_started",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Worker startup fails after the first native worker has initialized its destructor probe.",
+      "invariant": "Construction returns an error only after the started worker and its thread-local resources finish cleanup."
     }
   ]
 }

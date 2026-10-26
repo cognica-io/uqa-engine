@@ -155,6 +155,7 @@ pub trait RetrievalModels: Sync {
 #[derive(Clone, Copy)]
 pub struct PhysicalDriverContext<'a> {
     pub runtime: crate::query::runtime::QueryRuntimeView<'a>,
+    pub parallel: &'a crate::parallel::ParallelExecutor,
     pub relations: &'a dyn RetrievalRelations,
     pub snapshots: &'a dyn RetrievalSnapshots,
     pub indexes: &'a dyn RetrievalIndexes,

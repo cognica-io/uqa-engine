@@ -226,6 +226,7 @@ impl Engine {
     pub(crate) fn physical_driver_context(&self) -> PhysicalDriverContext<'_> {
         PhysicalDriverContext {
             runtime: self.query_runtime_view(),
+            parallel: &self.extensions.parallel,
             relations: self,
             snapshots: self,
             indexes: self,

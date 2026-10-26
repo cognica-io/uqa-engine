@@ -452,6 +452,7 @@ impl Drop for SessionContext {
 }
 
 pub(super) struct RuntimeExtensions {
+    pub(super) parallel: uqa_execution::parallel::ParallelExecutor,
     pub(super) foreign_memory_tables:
         Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>>>,
     pub(super) functions: Arc<crate::sql_registry::Registry>,
@@ -460,6 +461,7 @@ pub(super) struct RuntimeExtensions {
 impl RuntimeExtensions {
     pub(super) fn new(session: &Arc<SessionContext>, gate: &Arc<StatementGate>) -> Self {
         Self {
+            parallel: uqa_execution::parallel::ParallelExecutor::default(),
             foreign_memory_tables: Arc::new(RwLock::new(BTreeMap::new())),
             functions: Arc::new(crate::sql_registry::Registry::new(session, gate)),
         }
@@ -467,6 +469,7 @@ impl RuntimeExtensions {
 
     pub(super) fn shared_from(source: &Self) -> Self {
         Self {
+            parallel: source.parallel.clone(),
             foreign_memory_tables: source.foreign_memory_tables.clone(),
             functions: Arc::clone(&source.functions),
         }
