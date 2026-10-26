@@ -51,8 +51,14 @@ target_compile_definitions(uqa PRIVATE UQA_BUILD_SHARED INTERFACE UQA_USE_SHARED
 target_include_directories(uqa PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
-target_link_libraries(uqa PRIVATE
-  "$<LINK_LIBRARY:WHOLE_ARCHIVE,${UQA_RUST_STATIC_LIBRARY}>" ${UQA_NATIVE_LIBRARIES})
+if(WIN32)
+  # exports.def selects every public ABI entry point. Normal archive resolution
+  # coalesces Rust's repeated import records and excludes native DLL resources.
+  target_link_libraries(uqa PRIVATE "${UQA_RUST_STATIC_LIBRARY}" ${UQA_NATIVE_LIBRARIES})
+else()
+  target_link_libraries(uqa PRIVATE
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,${UQA_RUST_STATIC_LIBRARY}>" ${UQA_NATIVE_LIBRARIES})
+endif()
 target_link_options(uqa PRIVATE ${UQA_NATIVE_LINK_OPTIONS})
 if(APPLE)
   target_link_options(uqa PRIVATE

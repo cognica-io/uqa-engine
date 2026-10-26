@@ -67,33 +67,47 @@ def fixture(prefix: Path, target: str = TARGET):
 
 
 class CPackageVerification(unittest.TestCase):
-    @unittest.skipUnless(all(shutil.which(tool) for tool in ("cmake", "ninja", "clang-cl", "llvm-rc", "llvm-mt")),
-                         "CMake, Ninja and LLVM's MSVC tools are required for link command verification")
+    @unittest.skipUnless(all(shutil.which(tool) for tool in ("cmake", "ninja", "clang-cl", "llvm-rc", "llvm-mt", "llvm-lib", "llvm-readobj", "lld-link")),
+                         "CMake, Ninja and LLVM's MSVC tools are required for COFF link verification")
     def test_msvc_runtime_directive_reaches_shared_and_installed_static_links(self):
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary)
             prefix, build = work / "prefix", work / "build"
             archive, metadata = work / "uqa.lib", work / "cargo-metadata.json"
-            archive.write_bytes(b"link command fixture")
             metadata.write_text(json.dumps({
                 "packages": [{"id": "ffi", "name": "uqa-ffi", "version": RELEASE.version(),
                               "manifest_path": str(ROOT / "crates/uqa-ffi/Cargo.toml")}],
                 "resolve": {"nodes": [{"id": "ffi", "features": [], "deps": []}]}}))
-            # Cross generation needs no Windows SDK: only inspect the generated
-            # commands, leaving real Windows link and execution to package CI.
+            # A freestanding COFF archive needs no Windows SDK. Duplicate private
+            # members model the import records bundled into Rust static libraries.
             toolchain = ["-G", "Ninja", "-DCMAKE_SYSTEM_NAME=Windows",
                          "-DCMAKE_C_COMPILER=" + shutil.which("clang-cl"),
                          "-DCMAKE_RC_COMPILER=" + shutil.which("llvm-rc"),
                          "-DCMAKE_MT=" + shutil.which("llvm-mt"),
                          "-DCMAKE_C_COMPILER_TARGET=x86_64-pc-windows-msvc",
                          "-DCMAKE_C_COMPILER_WORKS=TRUE", "-DCMAKE_C_ABI_COMPILED=TRUE",
-                         "-DCMAKE_SIZEOF_VOID_P=8", "-DCMAKE_BUILD_TYPE=Release"]
+                         "-DCMAKE_SIZEOF_VOID_P=8", "-DCMAKE_BUILD_TYPE=Release",
+                         "-DCMAKE_LINKER=" + shutil.which("lld-link"),
+                         "-DCMAKE_C_FLAGS=",
+                         "-DCMAKE_C_STANDARD_LIBRARIES=",
+                         "-DCMAKE_SHARED_LINKER_FLAGS=/nodefaultlib /noentry /manifest:no"]
 
             def run(*arguments):
                 result = subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8")
                 self.assertEqual(result.returncode, 0, result.stdout)
                 return result.stdout
 
+            public, _ = METADATA.symbols()
+            objects = []
+            for name, definitions in (
+                    ("api_first", public[::2]), ("api_second", public[1::2]),
+                    ("private_first", ["private_import_record"]),
+                    ("private_second", ["private_import_record"])):
+                source, obj = work / (name + ".c"), work / (name + ".obj")
+                source.write_text("\n".join(f"int {symbol}(void) {{ return 0; }}" for symbol in definitions))
+                run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl", str(source), "/Fo" + str(obj))
+                objects.append(str(obj))
+            run("llvm-lib", "/out:" + str(archive), *objects)
             run("cmake", "-S", str(ROOT / "crates/uqa-ffi"), "-B", str(build), *toolchain,
                 "-DUQA_RUST_STATIC_LIBRARY=" + str(archive),
                 "-DUQA_NATIVE_LINK_FLAGS=/defaultlib:msvcrt", "-DUQA_SOURCE_REVISION=" + COMMIT,
@@ -102,6 +116,11 @@ class CPackageVerification(unittest.TestCase):
             shared = run("cmake", "--build", str(build), "--", "-n", "-v")
             self.assertIn("/defaultlib:msvcrt", shared)
             self.assertNotIn("msvcrt.obj", shared)
+            run("cmake", "--build", str(build))
+            exports = run("llvm-readobj", "--coff-exports", str(build / "uqa.dll"))
+            names = [line.strip().removeprefix("Name: ") for line in exports.splitlines()
+                     if line.strip().startswith("Name: ")]
+            self.assertEqual(sorted(names), public)
             installed = prefix / "lib/cmake/UQA"
             installed.mkdir(parents=True)
             shutil.copyfile(build / "UQAConfig.cmake", installed / "UQAConfig.cmake")
