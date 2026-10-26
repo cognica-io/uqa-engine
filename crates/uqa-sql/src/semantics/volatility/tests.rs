@@ -401,3 +401,88 @@ fn scalar_subquery_volatility_propagates_catalog_failures() {
     .unwrap_err();
     assert!(error.to_string().contains("volatility catalog failure"));
 }
+
+#[test]
+fn unified_plan_volatility_borrows_large_payloads_without_allocating_plan_scratch() {
+    for sql in [
+        "SELECT 'payload'",
+        "INSERT INTO t VALUES ('payload')",
+        "UPDATE t SET v='payload' RETURNING v",
+        "DELETE FROM t WHERE v='payload' RETURNING v",
+        "CREATE TABLE t AS SELECT 'payload'",
+        "EXPLAIN SELECT 'payload'",
+        "PREPARE p AS SELECT 'payload'",
+    ] {
+        let mut plan = crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let mut replaced = 0;
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::Literal(uqa_core::Value::Str(text)) = expression {
+                if text == "payload" {
+                    *text = "x".repeat(4 * 1024 * 1024);
+                    replaced += 1;
+                }
+            }
+        });
+        assert_eq!(replaced, 1, "{sql}");
+        let allocated = allocation_counter::measure(|| {
+            assert!(!super::unified_plan_contains_volatile_function(
+                &EmptyCatalog,
+                &plan
+            ));
+        });
+        assert_eq!(allocated.count_total, 0, "{sql}: {allocated:?}");
+    }
+    let rows = std::iter::repeat_n("(1)", 4096)
+        .collect::<Vec<_>>()
+        .join(",");
+    for sql in [
+        format!("VALUES {rows}"),
+        format!("INSERT INTO t VALUES {rows}"),
+    ] {
+        let plan = crate::plan::UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0));
+        let allocated = allocation_counter::measure(|| {
+            assert!(!super::unified_plan_contains_volatile_function(
+                &EmptyCatalog,
+                &plan
+            ));
+        });
+        assert_eq!(allocated.count_total, 0, "{allocated:?}");
+    }
+}
+
+#[test]
+fn borrowed_volatility_inspection_keeps_query_mutation_and_utility_children() {
+    for sql in [
+        "SELECT nextval('s')",
+        "SELECT 1 FROM (SELECT nextval('s')) x",
+        "WITH x AS (SELECT nextval('s')) SELECT 1",
+        "SELECT (SELECT nextval('s'))",
+        "SELECT sum(1) OVER (ORDER BY 1 ROWS nextval('s') PRECEDING)",
+        "INSERT INTO t VALUES (nextval('s'))",
+        "INSERT INTO t VALUES (1) ON CONFLICT (v) DO UPDATE SET v=nextval('s')",
+        "UPDATE t SET v=1 FROM (SELECT nextval('s')) x",
+        "UPDATE t SET a[nextval('s')]=1",
+        "DELETE FROM t RETURNING nextval('s')",
+        "MERGE INTO t USING (VALUES (1)) s(v) ON true WHEN MATCHED THEN UPDATE SET v=nextval('s')",
+        "CREATE VIEW v AS SELECT nextval('s')",
+        "CREATE MATERIALIZED VIEW v AS SELECT nextval('s')",
+        "CREATE TABLE t AS SELECT nextval('s')",
+        "DECLARE c CURSOR FOR SELECT nextval('s')",
+        "EXPLAIN SELECT nextval('s')",
+        "PREPARE p AS SELECT nextval('s')",
+        "EXECUTE p(nextval('s'))",
+        "CALL p(nextval('s'))",
+    ] {
+        let plan = crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        assert!(
+            super::unified_plan_contains_volatile_function(&EmptyCatalog, &plan),
+            "{sql}"
+        );
+        let pure = sql.replace("nextval('s')", "1");
+        let plan = crate::plan::UnifiedPlan::lower(crate::compile(&pure).unwrap().remove(0));
+        assert!(
+            !super::unified_plan_contains_volatile_function(&EmptyCatalog, &plan),
+            "{pure}"
+        );
+    }
+}

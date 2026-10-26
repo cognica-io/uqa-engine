@@ -15,6 +15,30 @@ const COMMANDS: [(&str, usize); 4] = [
 ];
 
 #[test]
+fn borrowed_command_inspection_preserves_analysis_order_without_child_vectors() {
+    for (sql, expected) in [
+        ("WITH c AS (SELECT $1) INSERT INTO t (a[$2]) SELECT $5 RETURNING $3, (SELECT $4)", &[1, 2, 3, 5, 4][..]),
+        ("WITH c AS (SELECT $1) UPDATE t SET a[$2]=$3 FROM (SELECT $6) s WHERE v=$4 RETURNING (SELECT $5)", &[1, 2, 3, 4, 5, 6]),
+        ("WITH c AS (SELECT $1) DELETE FROM t USING (SELECT $4) s WHERE v=$2 RETURNING (SELECT $3)", &[1, 2, 3, 4]),
+        ("WITH c AS (SELECT $1) MERGE INTO t USING (SELECT $5) s ON v=$2 WHEN MATCHED THEN UPDATE SET v=$3 RETURNING (SELECT $4)", &[1, 2, 3, 4, 5]),
+    ] {
+        let plan = one(sql);
+        let mut seen = Vec::with_capacity(expected.len());
+        let allocated = allocation_counter::measure(|| {
+            plan.visit_scalar_expressions(&mut |expression| {
+                expression.visit(&mut |expression| {
+                    if let ScalarExpr::Param(index) = expression {
+                        seen.push(*index);
+                    }
+                });
+            });
+        });
+        assert_eq!(seen, expected, "{sql}");
+        assert_eq!(allocated.count_total, 0, "{sql}: {allocated:?}");
+    }
+}
+
+#[test]
 fn assignment_boundaries_survive_rendering_and_both_scalar_visitors() {
     for (sql, count) in COMMANDS {
         let mut statement = crate::compile(sql).unwrap().remove(0);

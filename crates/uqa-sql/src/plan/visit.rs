@@ -139,18 +139,4 @@ impl SourcePlan {
     }
 }
 
-impl CommandPlan {
-    /// Visit every scalar expression this command owns, each root once, including those of its CTEs, query inputs and source.
-    pub fn visit_scalar_expressions(&self, visit: &mut dyn FnMut(&ScalarExpr)) {
-        visit_ctes(self.ctes(), visit);
-        for expression in self.expressions() {
-            visit(expression);
-        }
-        for query in self.query_inputs() {
-            query.visit_scalar_expressions(visit);
-        }
-        if let Some(source) = self.source_input() {
-            source.visit_scalar_expressions(visit);
-        }
-    }
-}
+mod command;

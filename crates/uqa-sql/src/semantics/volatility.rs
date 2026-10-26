@@ -633,35 +633,15 @@ fn source_contains_volatile_function(
     }
 }
 
-/// Whether scalar optimizer rewrites or `DPccp` join enumeration must be kept
-/// away from a plan.  `rewrite_scalar_expressions` is exhaustive over query,
-/// mutation, CTE, prepared/explained, and expression-plan children.
+/// Whether scalar optimizer rewrites or `DPccp` join enumeration must preserve volatile call scheduling. Borrow the plan and its expression roots; inspecting constants must not copy their retained payloads or allocate command child lists.
 pub fn unified_plan_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     plan: &UnifiedPlan,
 ) -> bool {
-    let mut inspected = plan.clone();
     let mut volatile = false;
-    inspected.rewrite_scalar_expressions(&mut |expr| {
-        if volatile {
-            return;
-        }
-        match expr {
-            ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                ..
-            } => {
-                volatile =
-                    function_volatility_with_binding(catalog, name, binding.as_ref(), args.len())
-                        == FunctionVolatility::Volatile;
-            }
-            ScalarExpr::WindowCall { name, args, .. } => {
-                volatile =
-                    function_volatility(catalog, name, args.len()) == FunctionVolatility::Volatile;
-            }
-            _ => {}
+    plan.visit_scalar_expressions(&mut |expression| {
+        if !volatile {
+            volatile = scalar_calls_are_volatile(catalog, expression);
         }
     });
     volatile
