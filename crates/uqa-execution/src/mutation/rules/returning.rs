@@ -108,7 +108,7 @@ fn coerce_image(
 ) -> Result<OwnedPhysicalRow, SQLError> {
     let width = columns.len();
     let image_width = width.saturating_mul(3);
-    let expected_width = image_width + context_schema.map_or(0, RowSchema::len);
+    let expected_width = image_width + context_schema.map_or(0, RowSchema::physical_width);
     let row = input.view();
     let mut values = Vec::with_capacity(expected_width);
     for offset in [0, width, width * 2] {
@@ -144,7 +144,7 @@ fn source_context(
         .map(|schema| {
             let context = values
                 .get(image_width..)
-                .filter(|values| values.len() == schema.len())
+                .filter(|values| values.len() == schema.physical_width())
                 .ok_or_else(|| {
                     SQLError::Internal(
                         "rewrite-rule RETURNING provider lost its source context".into(),

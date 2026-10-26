@@ -237,6 +237,102 @@ fn mutation_inputs_keep_native_namespaces_and_event_collations() {
     }
 }
 
+#[test]
+fn mutation_rule_inputs_rebind_captured_attributes_in_assignments_and_predicates() {
+    let context = RuleAnalysisContext {
+        rules: &Catalog,
+        sources: &Catalog,
+        returning: &Catalog,
+        domains: &Catalog,
+        composites: None,
+    };
+    let mut binding = crate::binding::fixture::empty_binding_context();
+    binding.catalog = crate::binding::fixture::catalog(BTreeMap::from([(
+        crate::RelationIdentity::new("public", "input"),
+        crate::binding::fixture::table_definition(
+            Catalog.rule_relation_definitions("input").unwrap(),
+        ),
+    )]));
+    for expression in ["source.n", "(SELECT source.n)"] {
+        let mut plan = UnifiedPlan::lower(
+            crate::compile(&format!("UPDATE input SET n={expression} FROM (SELECT n FROM input) source WHERE source.n=input.n"))
+                .unwrap()
+                .remove(0),
+        );
+        let relation = InternalRelationId::allocate();
+        plan.rewrite_scalar_expressions(&mut |node| {
+            if matches!(node, ScalarExpr::QualifiedColumn { qualifier, column } if qualifier.as_str() == "source" && column.as_str() == "n") {
+                *node = ScalarExpr::InternalColumn(relation.column(0));
+            }
+        });
+        let UnifiedPlan::Command(command) = &mut plan else {
+            panic!("command");
+        };
+        let CommandPlan::Update(statement) = command.as_mut() else {
+            panic!("UPDATE");
+        };
+        let Some(SourcePlan::Subquery {
+            captured_output, ..
+        }) = statement.source.as_deref_mut()
+        else {
+            panic!("captured source");
+        };
+        *captured_output = Some(relation);
+        let mutation = mutation::RuleMutation::Update(statement);
+        let schema = crate::binding::analyze_source_plan_schema(
+            &Catalog,
+            &mutation.target_source(),
+            &[],
+            &binding,
+            None,
+        )
+        .unwrap();
+        let source_schema = crate::binding::analyze_source_plan_schema(
+            &Catalog,
+            mutation.source().unwrap(),
+            &[],
+            &binding,
+            None,
+        )
+        .unwrap();
+        let mut input = mutation::MutationRuleInput::bind(
+            context,
+            crate::binding::correlation::CorrelationContext {
+                routines: &Catalog,
+                catalog: binding.catalog.as_ref(),
+                resolution: &binding.resolution,
+                scoped_relations: None,
+            },
+            mutation,
+            (&schema, Some(&source_schema)),
+            true,
+            &"caller".into(),
+            &"owner".into(),
+        )
+        .unwrap();
+        let action = crate::compile("SELECT OLD.n, NEW.n, (SELECT NEW.n)")
+            .unwrap()
+            .remove(0);
+        let bound = crate::semantics::rules::action_binding::bind_rule_action(
+            &Catalog,
+            &action,
+            &BTreeSet::new(),
+            &mut input.resolver,
+        )
+        .unwrap();
+        let action =
+            RuleAction::bind(context, &|_: &str| false, bound, Some(input.finish(None))).unwrap();
+        let UnifiedPlan::Query(query) = action.lower(&|_: &str| false).unwrap() else {
+            panic!("query");
+        };
+        let output =
+            crate::binding::analyze_query_plan_schema(&Catalog, &query, &[], &binding, None)
+                .unwrap_or_else(|error| panic!("{expression}: {error}"));
+        assert_eq!(output.len(), 3);
+        assert!((0..3).all(|position| output.column_collation(position) == Some(950)));
+    }
+}
+
 impl RuleCatalog for RuleContracts {
     fn relation_has_rules(&self, table: &str) -> Result<bool, SQLError> {
         Ok(self.0.iter().any(|rule| rule.definition.table == table))

@@ -168,6 +168,28 @@ setup = candidate_base + "; CREATE FUNCTION pg_temp.skip_candidate() RETURNS tri
 setup += 'CREATE TRIGGER skip_candidate BEFORE UPDATE ON rule_event FOR EACH ROW EXECUTE FUNCTION pg_temp.skip_candidate()'
 cases.append(('update-joined-assignment-before-skipped-trigger', setup, "UPDATE rule_event SET m=nextval('rule_ticks') FROM generate_series(1,2) g(k)"))
 
+# Native input captures must remain available when an action fires another rule.
+for event, expression, mutation in [
+    ('update', 'NEW.m', 'UPDATE rule_event SET m=7 WHERE n=1'),
+    ('delete', 'OLD.m+1', 'DELETE FROM rule_event WHERE n=1'),
+]:
+    setup = base + '; CREATE TEMP TABLE rule_middle(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); '
+    setup += 'CREATE RULE middle_action AS ON UPDATE TO rule_middle DO ALSO INSERT INTO rule_output(n,m) VALUES(OLD.n,NEW.m); '
+    setup += f'CREATE RULE event_action AS ON {event.upper()} TO rule_event DO ALSO UPDATE rule_middle SET m={expression} WHERE n=OLD.n'
+    cases.append((f'{event}-nested-mutation-input',setup,mutation))
+
+for event in ['update', 'delete']:
+    for nested in [False, True]:
+        expression = '(SELECT NEW.m)' if nested else 'NEW.m'
+        setup = base + '; CREATE TEMP TABLE rule_middle(n bigint,m bigint); CREATE TEMP TABLE rule_sink(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); INSERT INTO rule_sink VALUES(1,10); '
+        for source, target in [('rule_middle', 'rule_sink'), ('rule_event', 'rule_middle')]:
+            action = f'UPDATE {target} SET m={expression} WHERE n=OLD.n' if event == 'update' else f'DELETE FROM {target} WHERE n=OLD.n'
+            setup += f'CREATE RULE nested_action AS ON {event.upper()} TO {source} DO INSTEAD {action} RETURNING n,m; '
+        mutation = 'UPDATE rule_event SET m=7 WHERE n=1' if event == 'update' else 'DELETE FROM rule_event WHERE n=1'
+        returned = mutation + ' RETURNING WITH (OLD AS o, NEW AS changed) o.m AS previous,changed.m AS following,m AS current'
+        sql = f'WITH changed AS ({returned}) INSERT INTO rule_output(payload) SELECT row_to_json(changed)::text FROM changed'
+        cases.append((f'{event}-nested-mutation-returning-{nested}',setup,sql))
+
 recoveries = set()
 query = "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m FROM rule_event ORDER BY n,m) r), 'next', nextval('rule_ticks'))"
 output = []

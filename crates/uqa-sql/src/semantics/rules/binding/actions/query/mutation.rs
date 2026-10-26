@@ -138,6 +138,7 @@ pub struct MutationRuleInput {
     pub resolver: RuleQueryResolver,
     pub input: RuleQueryInput,
     pub source_context: Vec<Expr>,
+    pub source_context_schema: Option<RowSchema>,
 }
 
 impl MutationRuleInput {
@@ -199,6 +200,16 @@ impl MutationRuleInput {
         let (target_schema, source_schema) = schemas;
         let relation = InternalRelationId::allocate();
         let source_relation = InternalRelationId::allocate();
+        let captured = statement
+            .source()
+            .zip(source_schema)
+            .map(|(source, schema)| {
+                capture_source(statement, source, schema, source_relation, input_subject)
+            });
+        let empty_columns = BTreeMap::new();
+        let source_columns = captured
+            .as_ref()
+            .map_or(&empty_columns, |source| &source.columns);
         let definitions =
             crate::semantics::rules::analysis::rule_returning_columns(context, statement.table())?;
         let target_width = definitions.len();
@@ -213,6 +224,10 @@ impl MutationRuleInput {
         let mut resolver = resolver(context, statement, Some(relation), Some(&rewrite))?;
         for expression in resolver.expressions.values_mut() {
             bind_positions(expression, relation, source_relation, target_width);
+            crate::plan::input_projection::substitute_expression_inputs(
+                expression,
+                source_columns,
+            )?;
             super::values::retain_authority(&mut expression.subqueries, Some(input_subject));
         }
         let mut predicate = statement.predicate().map(|scalar| ExpressionPlan {
@@ -242,6 +257,10 @@ impl MutationRuleInput {
         if let Some(expression) = &mut predicate {
             bind_positions(expression, relation, source_relation, target_width);
             rewrite.bind_expression(expression);
+            crate::plan::input_projection::substitute_expression_inputs(
+                expression,
+                source_columns,
+            )?;
             crate::plan::subqueries::prune_expression(expression);
             super::values::retain_authority(&mut expression.subqueries, Some(input_subject));
         }
@@ -254,34 +273,12 @@ impl MutationRuleInput {
                 rule_subject,
             )
         });
-        let source = statement
-            .source()
-            .zip(source_schema)
-            .map(|(source, schema)| {
-                let mut block = projection_block(
-                    (0..schema.len())
-                        .map(|position| ProjectionPlan {
-                            expr: ScalarExpr::Position(position),
-                            alias: Some(schema.columns()[position].clone()),
-                        })
-                        .collect(),
-                );
-                block.from = Some(source.clone());
-                block
-                    .projections
-                    .extend(source_whole_rows(schema).map(|qualifier| ProjectionPlan {
-                        expr: ScalarExpr::Column(qualifier.into()),
-                        alias: None,
-                    }));
-                block.projections.extend(virtual_projections(schema));
-                block.subqueries = statement.subqueries().to_vec();
-                capture(
-                    query(block, statement.relations_bound(), input_subject),
-                    source_relation,
-                )
-            });
         let mut block = projection_block(Vec::new());
         // FROM/USING is the outer side of the event relation cross product, before mutation de-duplication.
+        let (source, source_context, source_context_schema) = captured.map_or_else(
+            || (None, Vec::new(), None),
+            |source| (Some(source.source), source.context, Some(source.schema)),
+        );
         block.from = prepend(target, source);
         super::add_native_condition(&mut block.r#where, &mut block.subqueries, predicate);
         Ok(Self {
@@ -293,9 +290,8 @@ impl MutationRuleInput {
                 condition: None,
                 expressions: BTreeMap::new(),
             },
-            source_context: (0..source_schema.map_or(0, RowSchema::len))
-                .map(|position| Expr::InternalColumn(source_relation.column(position)))
-                .collect(),
+            source_context,
+            source_context_schema,
         })
     }
 
@@ -303,6 +299,80 @@ impl MutationRuleInput {
         self.input.condition = condition;
         self.input.expressions = self.resolver.expressions;
         self.input
+    }
+}
+
+struct CapturedMutationSource {
+    source: SourcePlan,
+    columns: BTreeMap<crate::ast::InternalColumnRef, ExpressionPlan>,
+    context: Vec<Expr>,
+    schema: RowSchema,
+}
+
+fn capture_source(
+    statement: RuleMutation<'_>,
+    source: &SourcePlan,
+    schema: &RowSchema,
+    relation: InternalRelationId,
+    subject: &RoleReference,
+) -> CapturedMutationSource {
+    let mut block = projection_block(
+        (0..schema.len())
+            .map(|position| ProjectionPlan {
+                expr: ScalarExpr::Position(position),
+                alias: Some(schema.columns()[position].clone()),
+            })
+            .collect(),
+    );
+    block.from = Some(source.clone());
+    block
+        .projections
+        .extend(source_whole_rows(schema).map(|qualifier| ProjectionPlan {
+            expr: ScalarExpr::Column(qualifier.into()),
+            alias: None,
+        }));
+    block.projections.extend(virtual_projections(schema));
+    let mut slots: BTreeMap<_, _> = (0..schema.len())
+        .filter_map(|position| schema.physical_slot(position).map(|slot| (slot, position)))
+        .collect();
+    for (identity, slot) in schema.lookup_aliases() {
+        if let Some(slot) = slot {
+            slots.entry(slot).or_insert_with(|| {
+                let position = block.projections.len();
+                block.projections.push(ProjectionPlan {
+                    expr: identity.qualifier().map_or_else(
+                        || ScalarExpr::Column(identity.column().into()),
+                        |qualifier| ScalarExpr::qualified_column(qualifier, identity.column()),
+                    ),
+                    alias: None,
+                });
+                position
+            });
+        }
+    }
+    let mut columns = BTreeMap::new();
+    for (column, slot) in schema.internal_identities() {
+        let position = *slots.entry(slot).or_insert_with(|| {
+            let position = block.projections.len();
+            block.projections.push(ProjectionPlan {
+                expr: ScalarExpr::InternalColumn(column),
+                alias: None,
+            });
+            position
+        });
+        columns.insert(column, input_expression(relation, position));
+    }
+    block.subqueries = statement.subqueries().to_vec();
+    let (schema, context_slots) = schema.canonical_projection();
+    let context = context_slots
+        .into_iter()
+        .map(|slot| Expr::InternalColumn(relation.column(slots[&slot])))
+        .collect();
+    CapturedMutationSource {
+        source: capture(query(block, statement.relations_bound(), subject), relation),
+        columns,
+        context,
+        schema,
     }
 }
 

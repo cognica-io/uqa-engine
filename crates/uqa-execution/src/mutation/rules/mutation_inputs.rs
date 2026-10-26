@@ -101,7 +101,6 @@ pub fn execute_mutation_query_rules<S: Clone + 'static>(
                     request,
                     &target_columns,
                     &input,
-                    source_schema.clone(),
                 )?)
             } else {
                 clear_statement_returning(&mut bound);
@@ -146,7 +145,6 @@ fn returning_consumer<'a, S: Clone + 'static>(
     request: RuleReturningRequest,
     target_columns: &BTreeSet<String>,
     input: &MutationRuleInput,
-    source_schema: Option<crate::RowSchema>,
 ) -> Result<Rc<super::returning::RuleReturningConsumer<'a>>, SQLError> {
     let provider = uqa_sql::semantics::rules::returning::rule_action_returning_schema(
         context.analysis.sources,
@@ -170,7 +168,7 @@ fn returning_consumer<'a, S: Clone + 'static>(
                 .cloned()
                 .map(|expr| Projection { expr, alias: None }),
         );
-        source_schema
+        input.source_context_schema.clone()
     } else {
         None
     };

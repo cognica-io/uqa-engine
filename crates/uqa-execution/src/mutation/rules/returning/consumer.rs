@@ -73,7 +73,11 @@ impl QueryRowConsumer for RuleReturningConsumer<'_> {
             .len()
             .checked_mul(3)
             .and_then(|width| {
-                width.checked_add(self.context_schema.as_ref().map_or(0, RowSchema::len))
+                width.checked_add(
+                    self.context_schema
+                        .as_ref()
+                        .map_or(0, RowSchema::physical_width),
+                )
             })
             .ok_or_else(|| SQLError::Internal("rewrite-rule RETURNING width overflow".into()))?;
         if schema.len() != expected {

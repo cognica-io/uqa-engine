@@ -1,5 +1,5 @@
 {
-  "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
   "cases": [
     {
       "name": "update-repeated-new",
@@ -2639,6 +2639,182 @@
           }
         ],
         "next": 3
+      }
+    },
+    {
+      "name": "update-nested-mutation-input",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint,m bigint DEFAULT nextval('rule_ticks')); INSERT INTO rule_event VALUES(1,10),(2,20),(3,30); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_middle(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); CREATE RULE middle_action AS ON UPDATE TO rule_middle DO ALSO INSERT INTO rule_output(n,m) VALUES(OLD.n,NEW.m); CREATE RULE event_action AS ON UPDATE TO rule_event DO ALSO UPDATE rule_middle SET m=NEW.m WHERE n=OLD.n",
+      "sql": "UPDATE rule_event SET m=7 WHERE n=1",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m FROM rule_event ORDER BY n,m) r), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 7,
+            "payload": null
+          }
+        ],
+        "event": [
+          {
+            "n": 1,
+            "m": 7
+          },
+          {
+            "n": 2,
+            "m": 20
+          },
+          {
+            "n": 3,
+            "m": 30
+          }
+        ],
+        "next": 1
+      }
+    },
+    {
+      "name": "delete-nested-mutation-input",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint,m bigint DEFAULT nextval('rule_ticks')); INSERT INTO rule_event VALUES(1,10),(2,20),(3,30); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_middle(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); CREATE RULE middle_action AS ON UPDATE TO rule_middle DO ALSO INSERT INTO rule_output(n,m) VALUES(OLD.n,NEW.m); CREATE RULE event_action AS ON DELETE TO rule_event DO ALSO UPDATE rule_middle SET m=OLD.m+1 WHERE n=OLD.n",
+      "sql": "DELETE FROM rule_event WHERE n=1",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m FROM rule_event ORDER BY n,m) r), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": 1,
+            "m": 11,
+            "payload": null
+          }
+        ],
+        "event": [
+          {
+            "n": 2,
+            "m": 20
+          },
+          {
+            "n": 3,
+            "m": 30
+          }
+        ],
+        "next": 1
+      }
+    },
+    {
+      "name": "update-nested-mutation-returning-False",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint,m bigint DEFAULT nextval('rule_ticks')); INSERT INTO rule_event VALUES(1,10),(2,20),(3,30); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_middle(n bigint,m bigint); CREATE TEMP TABLE rule_sink(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); INSERT INTO rule_sink VALUES(1,10); CREATE RULE nested_action AS ON UPDATE TO rule_middle DO INSTEAD UPDATE rule_sink SET m=NEW.m WHERE n=OLD.n RETURNING n,m; CREATE RULE nested_action AS ON UPDATE TO rule_event DO INSTEAD UPDATE rule_middle SET m=NEW.m WHERE n=OLD.n RETURNING n,m; ",
+      "sql": "WITH changed AS (UPDATE rule_event SET m=7 WHERE n=1 RETURNING WITH (OLD AS o, NEW AS changed) o.m AS previous,changed.m AS following,m AS current) INSERT INTO rule_output(payload) SELECT row_to_json(changed)::text FROM changed",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m FROM rule_event ORDER BY n,m) r), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": null,
+            "m": null,
+            "payload": "{\"previous\":10,\"following\":7,\"current\":7}"
+          }
+        ],
+        "event": [
+          {
+            "n": 1,
+            "m": 10
+          },
+          {
+            "n": 2,
+            "m": 20
+          },
+          {
+            "n": 3,
+            "m": 30
+          }
+        ],
+        "next": 1
+      }
+    },
+    {
+      "name": "update-nested-mutation-returning-True",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint,m bigint DEFAULT nextval('rule_ticks')); INSERT INTO rule_event VALUES(1,10),(2,20),(3,30); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_middle(n bigint,m bigint); CREATE TEMP TABLE rule_sink(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); INSERT INTO rule_sink VALUES(1,10); CREATE RULE nested_action AS ON UPDATE TO rule_middle DO INSTEAD UPDATE rule_sink SET m=(SELECT NEW.m) WHERE n=OLD.n RETURNING n,m; CREATE RULE nested_action AS ON UPDATE TO rule_event DO INSTEAD UPDATE rule_middle SET m=(SELECT NEW.m) WHERE n=OLD.n RETURNING n,m; ",
+      "sql": "WITH changed AS (UPDATE rule_event SET m=7 WHERE n=1 RETURNING WITH (OLD AS o, NEW AS changed) o.m AS previous,changed.m AS following,m AS current) INSERT INTO rule_output(payload) SELECT row_to_json(changed)::text FROM changed",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m FROM rule_event ORDER BY n,m) r), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": null,
+            "m": null,
+            "payload": "{\"previous\":10,\"following\":7,\"current\":7}"
+          }
+        ],
+        "event": [
+          {
+            "n": 1,
+            "m": 10
+          },
+          {
+            "n": 2,
+            "m": 20
+          },
+          {
+            "n": 3,
+            "m": 30
+          }
+        ],
+        "next": 1
+      }
+    },
+    {
+      "name": "delete-nested-mutation-returning-False",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint,m bigint DEFAULT nextval('rule_ticks')); INSERT INTO rule_event VALUES(1,10),(2,20),(3,30); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_middle(n bigint,m bigint); CREATE TEMP TABLE rule_sink(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); INSERT INTO rule_sink VALUES(1,10); CREATE RULE nested_action AS ON DELETE TO rule_middle DO INSTEAD DELETE FROM rule_sink WHERE n=OLD.n RETURNING n,m; CREATE RULE nested_action AS ON DELETE TO rule_event DO INSTEAD DELETE FROM rule_middle WHERE n=OLD.n RETURNING n,m; ",
+      "sql": "WITH changed AS (DELETE FROM rule_event WHERE n=1 RETURNING WITH (OLD AS o, NEW AS changed) o.m AS previous,changed.m AS following,m AS current) INSERT INTO rule_output(payload) SELECT row_to_json(changed)::text FROM changed",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m FROM rule_event ORDER BY n,m) r), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": null,
+            "m": null,
+            "payload": "{\"previous\":10,\"following\":null,\"current\":10}"
+          }
+        ],
+        "event": [
+          {
+            "n": 1,
+            "m": 10
+          },
+          {
+            "n": 2,
+            "m": 20
+          },
+          {
+            "n": 3,
+            "m": 30
+          }
+        ],
+        "next": 1
+      }
+    },
+    {
+      "name": "delete-nested-mutation-returning-True",
+      "setup": "CREATE TEMP SEQUENCE rule_ticks; CREATE TEMP TABLE rule_event(n bigint,m bigint DEFAULT nextval('rule_ticks')); INSERT INTO rule_event VALUES(1,10),(2,20),(3,30); CREATE TEMP TABLE rule_output(ordinal bigserial,n bigint,m bigint,payload text); CREATE TEMP TABLE rule_middle(n bigint,m bigint); CREATE TEMP TABLE rule_sink(n bigint,m bigint); INSERT INTO rule_middle VALUES(1,10); INSERT INTO rule_sink VALUES(1,10); CREATE RULE nested_action AS ON DELETE TO rule_middle DO INSTEAD DELETE FROM rule_sink WHERE n=OLD.n RETURNING n,m; CREATE RULE nested_action AS ON DELETE TO rule_event DO INSTEAD DELETE FROM rule_middle WHERE n=OLD.n RETURNING n,m; ",
+      "sql": "WITH changed AS (DELETE FROM rule_event WHERE n=1 RETURNING WITH (OLD AS o, NEW AS changed) o.m AS previous,changed.m AS following,m AS current) INSERT INTO rule_output(payload) SELECT row_to_json(changed)::text FROM changed",
+      "query": "RESET ROLE; SELECT json_build_object('rows', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m,payload FROM rule_output ORDER BY ordinal) r), 'event', (SELECT json_agg(row_to_json(r)) FROM (SELECT n,m FROM rule_event ORDER BY n,m) r), 'next', nextval('rule_ticks'))",
+      "result": {
+        "rows": [
+          {
+            "n": null,
+            "m": null,
+            "payload": "{\"previous\":10,\"following\":null,\"current\":10}"
+          }
+        ],
+        "event": [
+          {
+            "n": 1,
+            "m": 10
+          },
+          {
+            "n": 2,
+            "m": 20
+          },
+          {
+            "n": 3,
+            "m": 30
+          }
+        ],
+        "next": 1
       }
     }
   ]

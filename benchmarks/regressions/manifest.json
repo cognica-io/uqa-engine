@@ -15820,6 +15820,32 @@
     {
       "package": "uqa-engine",
       "kind": "test",
+      "test": "event_definitions_match_postgresql_sqlite_key_value",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
+      "capability": "Native nested rule input identity",
+      "workload": "The 43 PostgreSQL rule and trigger references, including a rule UPDATE that fires another UPDATE rule, on sqlite_key_value.",
+      "invariant": "Definitions, mutation results and diagnostics match PostgreSQL after nested input capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "event_definitions_match_postgresql_redb",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
+      "capability": "Native nested rule input identity",
+      "workload": "The 43 PostgreSQL rule and trigger references, including a rule UPDATE that fires another UPDATE rule, on redb.",
+      "invariant": "Definitions, mutation results and diagnostics match PostgreSQL after nested input capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
       "test": "notification_policy_api_batch_rejection_keeps_the_callers_transaction",
       "cases": 1,
       "source": "crates/uqa-engine/tests/catalog/sql_notifications/session_policy.rs",
@@ -17654,6 +17680,19 @@
       "capability": "Bounded rewrite-rule output",
       "workload": "Two action rows with numeric typmods, NULL images and distinct source context values under one-byte work memory.",
       "invariant": "Positional assignment values and each original context value survive spill.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_rule_images_keep_private_and_aliased_physical_context",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "Private captured source attributes and repeated logical names share one physical RETURNING context slot through encrypted spill.",
+      "invariant": "RETURNING context retains its complete schema and physical values without equating logical column count with row width.",
       "case_names": [
         ""
       ]
@@ -24623,6 +24662,19 @@
       "capability": "Native rewrite-rule input identity",
       "workload": "VALUES, SELECT and mutation expressions in direct, nested and qualified scopes with C and POSIX collations.",
       "invariant": "Rewritten native expressions retain event type, namespace and collation instead of materializing a separate event relation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_rule_inputs_rebind_captured_attributes_in_assignments_and_predicates",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/query/tests.rs",
+      "capability": "Native rewrite-rule input identity",
+      "workload": "Direct and scalar-subquery UPDATE assignments plus predicates referencing an earlier captured source.",
+      "invariant": "Each original internal source attribute binds through the next capture and retains its declared collation."
     },
     {
       "package": "uqa-planner",

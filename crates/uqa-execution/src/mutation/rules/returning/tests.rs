@@ -204,6 +204,52 @@ fn native_rule_images_keep_positional_assignment_nulls_and_context_values() {
 }
 
 #[test]
+fn native_rule_images_keep_private_and_aliased_physical_context() {
+    let definitions = columns("integer");
+    let original = RowSchema::with_types(vec!["n".into()], vec![Some(ColumnType::Integer)]);
+    let relation = uqa_sql::ast::InternalRelationId::allocate();
+    let private = RowSchema::capture_output(&original, relation);
+    let duplicated =
+        RowSchema::remap_positions(&original, &[("first".into(), 0), ("second".into(), 0)], &[]);
+    for context in [private, duplicated] {
+        assert_eq!(context.physical_width(), 1);
+        assert_ne!(context.len(), context.physical_width());
+        with_runtime(1, |runtime| {
+            let captured = capture(
+                runtime,
+                &definitions,
+                vec![Some(ColumnType::Integer); 4],
+                Some(context.clone()),
+                [vec![
+                    Value::Int(1),
+                    Value::Int(2),
+                    Value::Int(3),
+                    Value::Int(91),
+                ]],
+            )
+            .unwrap();
+            let image = captured
+                .images
+                .into_rows()
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap();
+            let values = image.row.into_physical_values();
+            let source = source_context(&values, 3, Some(&context)).unwrap().unwrap();
+            assert!(source.schema.shares_index(&context));
+            assert_eq!(source.row.value(0), Some(&Value::Int(91)));
+            if context.is_empty() {
+                assert_eq!(source.schema.internal_slot(relation.column(0)), Some(0));
+            } else {
+                assert_eq!(source.schema.physical_slot(0), Some(0));
+                assert_eq!(source.schema.physical_slot(1), Some(0));
+            }
+        });
+    }
+}
+
+#[test]
 fn native_rule_images_reject_incomplete_descriptors_and_observe_cancellation() {
     let definitions = columns("integer");
     let context = RowSchema::new(vec!["source".into()]);
