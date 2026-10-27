@@ -608,13 +608,24 @@ function decodeHTTPValue(value) {
   }
   if (kind === "time_tz"
       && exactHTTPObject(value, ["$uqa_type", "micros", "offset_minutes"])
-      && Number.isSafeInteger(value.micros) && isHTTPInt32(value.offset_minutes)) {
-    return `${formatHTTPTime(value.micros)}${formatHTTPOffset(value.offset_minutes)}`;
+      && Number.isSafeInteger(value.micros) && isHTTPInt32(value.offset_minutes)
+      && isHTTPInt32(value.offset_minutes * 60)) {
+    return `${formatHTTPTime(value.micros)}${formatHTTPOffset(value.offset_minutes * 60)}`;
+  }
+  if (kind === "time_tz_seconds"
+      && exactHTTPObject(value, ["$uqa_type", "micros", "offset_seconds"])
+      && Number.isSafeInteger(value.micros) && isHTTPInt32(value.offset_seconds)) {
+    return `${formatHTTPTime(value.micros)}${formatHTTPOffset(value.offset_seconds)}`;
   }
   if ((kind === "timestamp" || kind === "timestamp_tz")
       && exactHTTPObject(value, ["$uqa_type", "micros"])
       && Number.isSafeInteger(value.micros)) {
     return formatHTTPTimestamp(value.micros, kind === "timestamp_tz");
+  }
+  if ((kind === "postgres_timestamp" || kind === "postgres_timestamp_tz")
+      && exactHTTPObject(value, ["$uqa_type", "postgres_micros"])
+      && Number.isSafeInteger(value.postgres_micros)) {
+    return formatHTTPTimestamp(value.postgres_micros, kind === "postgres_timestamp_tz", true);
   }
   if (kind === "interval"
       && exactHTTPObject(value, ["$uqa_type", "months", "days", "micros"])
@@ -761,18 +772,21 @@ function formatHTTPTime(source) {
 }
 
 function formatHTTPOffset(source) {
-  const minutes = requireSafeHTTPInteger(source);
-  const sign = minutes < 0 ? "-" : "+";
-  const absolute = Math.abs(minutes);
-  const hours = `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}`;
-  return absolute % 60 === 0 ? hours : `${hours}:${String(absolute % 60).padStart(2, "0")}`;
+  const seconds = requireSafeHTTPInteger(source);
+  const sign = seconds < 0 ? "-" : "+";
+  const absolute = Math.abs(seconds);
+  const hours = `${sign}${String(Math.floor(absolute / 3600)).padStart(2, "0")}`;
+  const minutes = `${hours}:${String(Math.floor(absolute / 60) % 60).padStart(2, "0")}`;
+  if (absolute % 60 !== 0) return `${minutes}:${String(absolute % 60).padStart(2, "0")}`;
+  return absolute % 3600 === 0 ? hours : minutes;
 }
 
-function formatHTTPTimestamp(source, utc) {
+function formatHTTPTimestamp(source, utc, postgres = false) {
   const micros = requireSafeHTTPInteger(source);
   const day = 86_400_000_000;
   const remainder = ((micros % day) + day) % day;
-  const date = formatHTTPDate(Math.floor(micros / day));
+  // Shift whole days so a safe PostgreSQL timestamp never overflows Number precision during epoch conversion.
+  const date = formatHTTPDate(Math.floor(micros / day) + (postgres ? 10_957 : 0));
   const era = date.endsWith(" BC") ? " BC" : "";
   const calendar = era ? date.slice(0, -3) : date;
   return calendar + " " + formatHTTPTime(remainder) + (utc ? "+00" : "") + era;
