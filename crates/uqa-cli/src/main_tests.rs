@@ -372,13 +372,29 @@ fn command_text_applies_each_discard_targets_transaction_contract() {
             false,
         )
         .unwrap();
-    assert!(session.engine.lastval().is_err());
     let error = session
         .execute_command_text_with_history("DISCARD ALL;", &mut out, false)
         .unwrap_err();
     assert!(error.starts_with("25001:"), "{error}");
     session.engine.sql("ROLLBACK", &[]).unwrap();
     assert!(session.engine.lastval().is_err());
+
+    session
+        .execute_command_text_with_history(
+            "BEGIN; SELECT nextval('command_discard_sequence'); DISCARD SEQUENCES;",
+            &mut out,
+            false,
+        )
+        .unwrap();
+    assert_eq!(
+        session.engine.lastval().unwrap_err().sqlstate(),
+        Some("55000")
+    );
+    let error = session
+        .execute_command_text_with_history("DISCARD ALL;", &mut out, false)
+        .unwrap_err();
+    assert!(error.starts_with("25P02:"), "{error}");
+    session.engine.sql("ROLLBACK", &[]).unwrap();
 }
 
 #[test]

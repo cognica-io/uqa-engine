@@ -22,15 +22,14 @@ fn empty_phrase_graph_still_uses_current_session_budget_for_complete_analysis() 
             &[],
         )
         .unwrap();
-    let parameters = [SQLParam::Scalar(Value::Str(format!(
-        "\"{}\"",
-        "red ".repeat(4096)
-    )))];
+    let phrase = format!("\"{}\"", "red ".repeat(4096));
+    let execute = format!("EXECUTE ignored_phrase('{phrase}')");
+    let parameters = [SQLParam::Scalar(Value::Str(phrase))];
     for limit in ["64kB", "16MB", "64kB"] {
         engine
             .sql(&format!("SET work_mem = '{limit}'"), &[])
             .unwrap();
-        let result = engine.sql("EXECUTE ignored_phrase($1)", &parameters);
+        let result = engine.sql(&execute, &[]);
         if limit == "64kB" {
             assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
         } else {
