@@ -382,7 +382,10 @@ fn nested_instead_rules_stop_privilege_descent_with_the_original_mutation() {
         "DELETE FROM nested_rule_acl.top",
     ] {
         assert_eq!(
-            engine.sql(sql, &[]).unwrap().affected_rows,
+            engine
+                .sql(sql, &[])
+                .unwrap_or_else(|error| panic!("{sql}: {error}"))
+                .affected_rows,
             0,
             "{sql} should stop at the nested INSTEAD rule"
         );
