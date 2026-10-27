@@ -387,8 +387,8 @@ fn command_text_applies_each_discard_targets_transaction_contract() {
         )
         .unwrap();
     assert_eq!(
-        session.engine.lastval().unwrap_err().sqlstate(),
-        Some("55000")
+        session.engine.lastval().unwrap_err(),
+        "lastval is not yet defined in this session"
     );
     let error = session
         .execute_command_text_with_history("DISCARD ALL;", &mut out, false)
