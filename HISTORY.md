@@ -31,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Decode PostgreSQL-epoch timestamps and second-resolution TIMETZ offsets in browser HTTP results. Preserve exact microseconds through epoch conversion at JavaScript's safe-integer boundaries and continue rejecting unsafe wire integers.
 - Retain native parallel workers through Execution-owned pools shared by an engine family, honor the configured worker limit, and complete worker cleanup when the last external owner is dropped. Host callbacks retain their statement context, and nested work reuses the selected pool.
 - Correct PostgreSQL 18.4 parser callback types and allocator cleanup through the maintained parser forks. Preserve the parser schema and public API while releasing thread-local caches on POSIX and Windows and supporting explicit parser exit followed by reuse.
 - Release the shared deadline timer when its last token or scheduled action ends, joining thread cleanup instead of leaving a detached process-lifetime worker. Reuse the timer across a session's successive deadlines and release captured actions outside the deadline queue lock.

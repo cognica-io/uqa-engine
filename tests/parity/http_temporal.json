@@ -6,7 +6,8 @@
     "intervalstyle": "postgres",
     "source": "Independent psql capture; carrier units are Unix days/microseconds and TemporalInfinity endpoints.",
     "wide_calendar_source": "PostgreSQL 18.4 SQL text plus timestamp_send/timestamptz_send network-order integers, translated exactly from the PostgreSQL epoch to Unix microseconds; DATE uses integer day subtraction. No floating-point epoch extraction.",
-    "postgres_epoch_source": "PostgreSQL 18.4 timestamp_send/timestamptz_send integers and timetz_send seconds; explicit wire tags distinguish these from retained Unix epoch and minute-offset fixtures."
+    "postgres_epoch_source": "PostgreSQL 18.4 timestamp_send/timestamptz_send integers and timetz_send seconds; explicit wire tags distinguish these from retained Unix epoch and minute-offset fixtures.",
+    "browser_boundary_source": "PostgreSQL 18.4 (Alpine 15.2.0, aarch64) with UTC and ISO/YMD: timestamp/timestamptz text and timestamp_send/timestamptz_send bytes for PostgreSQL-epoch microseconds at the signed JavaScript safe-integer boundaries."
   },
   "cases": [
     {
@@ -524,6 +525,66 @@
       "wire": "{\"$uqa_type\":\"time_tz_seconds\",\"micros\":0,\"offset_seconds\":1}",
       "expected": "00:00:00+00:00:01",
       "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01 00:00:00' + interval '9007199254740990 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9007199254740990}",
+      "expected": "2285-06-04 23:47:34.74099",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01 00:00:00' + interval '9007199254740991 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9007199254740991}",
+      "expected": "2285-06-04 23:47:34.740991",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01 00:00:00' + interval '9007199254740992 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":9007199254740992}",
+      "expected": "2285-06-04 23:47:34.740992",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01 00:00:00' + interval '-9007199254740991 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-9007199254740991}",
+      "expected": "1714-07-29 00:12:25.259009",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamp '2000-01-01 00:00:00' + interval '-9007199254740992 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp\",\"postgres_micros\":-9007199254740992}",
+      "expected": "1714-07-29 00:12:25.259008",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '2000-01-01 00:00:00 +00' + interval '9007199254740990 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":9007199254740990}",
+      "expected": "2285-06-04 23:47:34.74099+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamptz '2000-01-01 00:00:00 +00' + interval '9007199254740991 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":9007199254740991}",
+      "expected": "2285-06-04 23:47:34.740991+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamptz '2000-01-01 00:00:00 +00' + interval '9007199254740992 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":9007199254740992}",
+      "expected": "2285-06-04 23:47:34.740992+00",
+      "browser_safe": false
+    },
+    {
+      "sql": "SELECT timestamptz '2000-01-01 00:00:00 +00' + interval '-9007199254740991 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-9007199254740991}",
+      "expected": "1714-07-29 00:12:25.259009+00",
+      "browser_safe": true
+    },
+    {
+      "sql": "SELECT timestamptz '2000-01-01 00:00:00 +00' + interval '-9007199254740992 microseconds'",
+      "wire": "{\"$uqa_type\":\"postgres_timestamp_tz\",\"postgres_micros\":-9007199254740992}",
+      "expected": "1714-07-29 00:12:25.259008+00",
+      "browser_safe": false
     }
   ]
 }

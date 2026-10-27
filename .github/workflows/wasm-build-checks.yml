@@ -5,10 +5,12 @@ on:
     types: [ready_for_review]
     paths:
       - rust-toolchain.toml
-      - crates/uqa-wasm/build.rs
+      - crates/uqa-wasm/**
+      - crates/uqa-core/src/types/**
       - scripts/build-wasm.sh
       - scripts/emscripten-flags.py
       - tests/wasm/**
+      - tests/parity/http_temporal.*
       - .github/workflows/wasm-build-checks.yml
 
 permissions:
