@@ -1,8 +1,8 @@
 {
   "name": "@cognica-io/uqa-wasm",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Browser bindings for embedded UQA WASM and local or Cloud HTTP SQL",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "author": "Jaepil Jeong <jaepil@cognica.io>",
   "repository": {
     "type": "git",
@@ -23,8 +23,6 @@
     "LICENSE-NOTICE.md",
     "LICENSE",
     "LICENSING.md",
-    "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
-    "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
     "uqa.js",
     "uqa.wasm",
     "THIRD-PARTY/JDK-UNICODE.md",

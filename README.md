@@ -5,9 +5,9 @@ UQA Engine is an embeddable database engine that lets one application use a Post
 It is designed for applications that need more than a relational table but do not want to assemble a separate database, search server, vector store, and graph engine for every query path.
 
 > [!IMPORTANT]
-> **Open source with broad application exceptions**
+> **Apache 2.0 beginning with 0.6.2**
 >
-> UQA Engine uses AGPL-3.0-only as its base license, with FOSS and noncommercial application exceptions. Qualifying open-source applications, including commercial ones, and qualifying personal, educational, academic, or charitable applications may keep their independent code under their own licenses or chosen terms. In practice, separate commercial terms are mainly needed for proprietary commercial products or services that must keep their application or UQA Engine changes closed. UQA Engine and modifications to UQA Engine remain under the AGPL when using the public paths. See the [licensing policy](LICENSING.md) for the exact conditions.
+> UQA Engine development sources and releases beginning with 0.6.2 use the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0). Commercial and proprietary applications can use UQA Engine under its terms. Already published releases retain their original licenses and exceptions; see the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md) for the transition boundary.
 
 > [!TIP]
 > **Using an LLM or coding agent?**
@@ -21,15 +21,15 @@ It is designed for applications that need more than a relational table but do no
 - Store named graphs, execute Cypher and regular path queries, and call graph traversal or centrality functions from SQL.
 - Start in memory for experiments, then choose the default SQLite backend or the pure-Rust redb backend without changing the query API.
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
-- Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
+- Embed the engine in Rust or C/C++, or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.6.1
+## New in 0.6.2
 
-Version 0.6.1 fixes UPDATE and DELETE statements that silently ignored inputs after the first comma-separated FROM or USING relation. It also corrects date/timestamp comparison, SQL diagnostics and nested SQL/Cypher stack handling. See the [release history](HISTORY.md#061---2026-10-22).
+Version 0.6.2 introduces the embedded C ABI and C11/C++17 shared/static library packages for Linux, macOS and Windows. It also moves project-owned code to Apache 2.0. See the [C API](docs/manual/reference/08-bindings-and-extensions.md#c-source-api), [installed-consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers) and [release history](HISTORY.md#062---2026-10-27).
 
-Mutation, referential-action, graph, sorting and persistent-restore paths retain large intermediate inputs under their memory allowances and spill when needed. Execution reuses selected type metadata and avoids repeated row materialization; bundled SQLite builds remove the global page-cache memory-management mutex.
+SQL execution preserves PostgreSQL demand and diagnostics through cursors, CTEs, LATERAL inputs, aggregates and rewrite rules. Retained metadata and result ownership avoid repeated analysis and unnecessary payload copies, while native parallel workers and deadline timers retire with their owners. Native SQLite packages use SQLCipher 4.19.0 through the maintained driver packages.
 
-Custom Rust execution and storage adapters need interface updates, and SQLite integrations now use the maintained `uqa-rusqlite` package family. Newly stored `pg_typeof` bindings cannot be read by 0.6.0. Update all database owners together and retain a pre-upgrade backup; the [0.6.1 upgrade guide](docs/manual/reference/10-upgrading.md#061) covers these changes and earlier format migrations.
+Native temporal values preserve the PostgreSQL timestamp range and second-resolution TIMETZ offsets. These encodings require SQLite record format 67 and redb record format 63. Update all database owners together and retain a pre-upgrade backup; the [0.6.2 upgrade guide](docs/manual/reference/10-upgrading.md#062) describes storage compatibility and required Rust adapter changes.
 
 ## Mathematical foundation
 
@@ -42,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.6.1
+python -m pip install uqa==0.6.2
 usql
 ```
 
@@ -94,10 +94,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.6.1
+cargo add uqa@0.6.2
 ```
 
-Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.6.1 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.6.2 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
@@ -293,7 +293,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Performance](docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
 | [Citation metadata](CITATION.cff) | Software citation and DOI metadata for the underlying research papers |
-| [Licensing policy](LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
+| [Licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md) | Apache 2.0, earlier releases, third-party attribution, and contributions |
 | [History](HISTORY.md) | Release-by-release changes |
 
 ## Project layout
@@ -316,11 +316,6 @@ AI-assisted contributions follow [AI_POLICY.md](https://github.com/cognica-io/uq
 
 ## License
 
-UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](LICENSE).
+This source tree uses the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0). The change applies beginning with 0.6.2; already published packages retain their distributed terms, including the [0.6.1 policy](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/LICENSING.md). Third-party components retain their own licenses and notices. See the included `LICENSE` and `LICENSING.md` files for the complete terms and release boundary.
 
-Two optional additional permissions are available:
-
-- the [FOSS exception](LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
-- the [noncommercial application exception](LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
-
-Separate [commercial licensing](COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](LICENSING.md).
+Optional support, warranties, and other negotiated terms are described in the [commercial agreements guide](https://github.com/cognica-io/uqa-engine/blob/main/COMMERCIAL.md). A separate commercial license is not required solely for proprietary or commercial use of Apache-licensed releases.

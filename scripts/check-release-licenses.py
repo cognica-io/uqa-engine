@@ -30,11 +30,9 @@ WASM_SPEC.loader.exec_module(wasm_data)
 LEGAL_FILES = (
     "LICENSE",
     "LICENSING.md",
-    "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
-    "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
 )
-AGPL_NOTICE = "LICENSE-NOTICE.md"
-# Imported crates that keep their upstream licenses instead of the AGPL legal files, with the license files each must ship.
+PROJECT_NOTICE = "LICENSE-NOTICE.md"
+# Imported crates keep their upstream licenses and the license files each must ship.
 SEPARATELY_LICENSED_CRATES = {
     "uqa-pg-query": (
         "LICENSE",
@@ -314,7 +312,7 @@ def check_dictionary_payloads(language: str, files: tuple[str, ...], manifest_by
 
 
 def check_cargo_sources(payloads: dict[str, bytes]) -> None:
-    notice = (ROOT / "crates" / "uqa-node" / AGPL_NOTICE).read_bytes()
+    notice = (ROOT / "crates" / "uqa-node" / PROJECT_NOTICE).read_bytes()
     for package in workspace_packages():
         name = str(package["name"])
         if not is_publishable(package):
@@ -327,9 +325,9 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
                     path.read_bytes()
                 except OSError as error:
                     raise RuntimeError(f"cannot read {path}: {error}") from error
-            agpl_license = payloads["LICENSE"]
+            project_license = payloads["LICENSE"]
             crate_license = (crate_root / "LICENSE").read_bytes()
-            if crate_license == agpl_license:
+            if crate_license == project_license:
                 raise RuntimeError(f"{crate_root / 'LICENSE'} must remain the crate's own upstream-compatible license")
             continue
         for relative, expected in payloads.items():
@@ -340,7 +338,7 @@ def check_cargo_sources(payloads: dict[str, bytes]) -> None:
                 raise RuntimeError(f"cannot read {path}: {error}") from error
             if actual != expected:
                 raise RuntimeError(f"crate legal copy differs from canonical file: {path}")
-        notice_path = crate_root / AGPL_NOTICE
+        notice_path = crate_root / PROJECT_NOTICE
         try:
             actual_notice = notice_path.read_bytes()
         except OSError as error:
@@ -371,10 +369,10 @@ def check_maturin_sources() -> None:
     if match is None:
         raise RuntimeError("Python package must declare a [project] table")
     project = source[match.start(1) : match.end(1)]
-    if project_assignment(project, "license") != "AGPL-3.0-only":
-        raise RuntimeError("Python package must declare the AGPL-3.0-only SPDX license")
+    if project_assignment(project, "license") != "Apache-2.0":
+        raise RuntimeError("Python package must declare the Apache-2.0 SPDX license")
     declared = project_assignment(project, "license-files")
-    required = {"LICENSE", "LICENSING.md", "LICENSES/*.txt", "python/uqa/THIRD-PARTY/*"}
+    required = {"LICENSE", "LICENSING.md", "python/uqa/THIRD-PARTY/*"}
     declared_paths = (
         {value for value in declared if isinstance(value, str)}
         if isinstance(declared, list)
@@ -427,7 +425,7 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
             if not matching_members(members, relative):
                 raise RuntimeError(f"{path} omits {relative}")
         if matching_members(members, "LICENSING.md"):
-            raise RuntimeError(f"{path} must not ship the AGPL licensing policy as its own license")
+            raise RuntimeError(f"{path} must not ship the project licensing policy as its own license")
         return
     for relative, expected in payloads.items():
         matches = matching_members(members, relative)
@@ -437,9 +435,9 @@ def check_archive(path: pathlib.Path, payloads: dict[str, bytes], require_nori: 
             names = [name for name, _ in matches]
             raise RuntimeError(f"{path} contains a noncanonical {relative}: {names}")
     if path.name.endswith((".tgz", ".crate")) and not matching_members(
-        members, AGPL_NOTICE
+        members, PROJECT_NOTICE
     ):
-        raise RuntimeError(f"{path} omits {AGPL_NOTICE}")
+        raise RuntimeError(f"{path} omits {PROJECT_NOTICE}")
     if path.name.endswith((".whl", ".tgz", ".tar.gz", ".zip")):
         for relative, expected in binding_dictionary_payloads().items():
             matches = matching_members(members, relative)

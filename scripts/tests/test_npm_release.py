@@ -68,6 +68,60 @@ class NPMReleaseArchiveTest(unittest.TestCase):
         return Namespace(source_dir=self.source, archive=self.archive,
                          version=self.version, result_file=self.directory / "repair.json", npm="npm")
 
+    def use_legacy_source(self) -> None:
+        self.source = self.directory / "legacy-source"
+        self.manifest = json.loads(json.dumps(self.manifest))
+        self.manifest["license"] = "AGPL-3.0-only"
+        for relative in ("LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
+                         "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt"):
+            self.manifest["files"].append(relative)
+            self.members[relative] = f"Original release permission: {relative}\n".encode()
+        for relative in ("LICENSE", "LICENSING.md", "LICENSE-NOTICE.md"):
+            self.members[relative] = f"Original AGPL release fixture: {relative}\n".encode()
+        self.packed_manifest = {**self.packed_manifest, **self.manifest}
+        self.members["package.json"] = json.dumps(self.packed_manifest).encode()
+        for relative, payload in self.members.items():
+            path = self.source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        NPM_RELEASE.write_json(self.source / "package.json", self.manifest)
+
+    def test_archive_validation_uses_the_selected_release_license(self) -> None:
+        self.write_archive(self.archive, self.members)
+        expected = {NPM_RELEASE.ROOT_PACKAGE: self.archive}
+        self.assertEqual(NPM_RELEASE.validate_archives(
+            [self.archive], self.version, (NPM_RELEASE.ROOT_PACKAGE,)), expected)
+        self.use_legacy_source()
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, "license"):
+            NPM_RELEASE.validate_archives(
+                [self.archive], self.version, (NPM_RELEASE.ROOT_PACKAGE,), self.source)
+        self.write_archive(self.archive, self.members)
+        self.assertEqual(NPM_RELEASE.validate_archives(
+            [self.archive], self.version, (NPM_RELEASE.ROOT_PACKAGE,), self.source), expected)
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, "license"):
+            NPM_RELEASE.validate_archives(
+                [self.archive], self.version, (NPM_RELEASE.ROOT_PACKAGE,))
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, "npm source version"):
+            NPM_RELEASE.validate_archives(
+                [self.archive], "99.0.0", (NPM_RELEASE.ROOT_PACKAGE,), self.source)
+
+    def test_legacy_archives_require_original_license_and_exception_bytes(self) -> None:
+        self.use_legacy_source()
+        for relative in ("LICENSE", "LICENSING.md", "LICENSE-NOTICE.md",
+                         "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
+                         "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt"):
+            for replacement in (None, b"changed legal terms"):
+                with self.subTest(relative=relative, replacement=replacement):
+                    members = dict(self.members)
+                    if replacement is None:
+                        del members[relative]
+                    else:
+                        members[relative] = replacement
+                    self.write_archive(self.archive, members)
+                    with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, relative):
+                        NPM_RELEASE.validate_archives(
+                            [self.archive], self.version, (NPM_RELEASE.ROOT_PACKAGE,), self.source)
+
     def test_staging_includes_every_declared_file_and_exact_dependencies(self) -> None:
         stage = self.directory / "stage"
         stage.mkdir()
@@ -143,9 +197,17 @@ class NPMReleaseArchiveTest(unittest.TestCase):
         pack.assert_not_called()
 
     def test_unpublished_repair_restores_only_original_tagged_files(self) -> None:
+        self.assert_unpublished_repair_restores_tagged_files()
+
+    def test_unpublished_legacy_repair_retains_original_legal_terms(self) -> None:
+        self.use_legacy_source()
+        self.assert_unpublished_repair_restores_tagged_files()
+
+    def assert_unpublished_repair_restores_tagged_files(self) -> None:
         members = dict(self.members)
         omitted = [relative for relative in self.manifest["files"]
-                   if relative.startswith("notification") or relative == "http-diagnostic.js"]
+                   if relative.startswith(("notification", "LICENSES/"))
+                   or relative == "http-diagnostic.js"]
         for relative in omitted:
             del members[relative]
         self.write_archive(self.archive, members)

@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Copy canonical AGPL legal files into every publishable workspace crate."""
+"""Copy canonical project legal files into every publishable workspace crate."""
 
 from __future__ import annotations
 
@@ -28,10 +28,8 @@ LEGAL_FILES = (
     "LICENSE",
     "LICENSING.md",
     "LICENSE-NOTICE.md",
-    "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
-    "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
 )
-# Imported crates keep their upstream licenses instead of the AGPL legal files.
+# Imported crates keep their upstream licenses instead of the project legal files.
 SKIP_PACKAGES = set(licenses.SEPARATELY_LICENSED_CRATES)
 USER_FACING = {"uqa", "uqa-engine", "uqa-client", "uqa-cli", "uqa-api"}
 CRATE_ROLES = {

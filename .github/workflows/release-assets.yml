@@ -193,7 +193,7 @@ jobs:
           python3 release-tools/scripts/npm-release.py repair-root \
             --source-dir crates/uqa-node --version "$version" \
             --archive "dist/cognica-io-uqa-${version}.tgz" --result-file "$result"
-          python3 release-tools/scripts/npm-release.py check --version "$version" dist/cognica-io-uqa-*.tgz
+          python3 release-tools/scripts/npm-release.py check --source-dir crates/uqa-node --version "$version" dist/cognica-io-uqa-*.tgz
           UQA_NPM_RELEASE_ARCHIVE="$GITHUB_WORKSPACE/dist/cognica-io-uqa-${version}.tgz" \
             node --test --test-name-pattern="installed npm package loads both entry points" \
             release-tools/tests/node/test_http_engine.mjs
@@ -212,6 +212,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - "$TAG" <<'PY' > release-notes.md
+          import json
           import os
           import pathlib
           import re
@@ -262,7 +263,10 @@ jobs:
                   print(f"- `{name}`")
 
           print()
-          print("Licensing: AGPL-3.0-only with optional FOSS and noncommercial application exceptions. See LICENSING.md.")
+          license_identifier = json.loads(pathlib.Path("crates/uqa-node/package.json").read_text()).get("license")
+          if not isinstance(license_identifier, str) or not license_identifier:
+              raise SystemExit("Tagged package has no license identifier")
+          print(f"Licensing: {license_identifier} for project code; third-party components retain their own licenses. See LICENSING.md from this release for its terms and any additional permissions.")
           print()
           print(f"<!-- uqa-release-publication:{os.environ['GITHUB_RUN_ID']}:{tag}:{os.environ['SOURCE_RUN_ID']} -->")
           PY

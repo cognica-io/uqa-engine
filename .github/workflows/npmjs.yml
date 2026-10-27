@@ -138,7 +138,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          python3 release-tools/scripts/npm-release.py check --version "$version" dist/*.tgz
+          python3 release-tools/scripts/npm-release.py check --source-dir crates/uqa-node --version "$version" dist/*.tgz
           UQA_NPM_RELEASE_ARCHIVE="$GITHUB_WORKSPACE/dist/cognica-io-uqa-${version}.tgz" \
             node --test --test-name-pattern="installed npm package loads both entry points" \
             release-tools/tests/node/test_http_engine.mjs
@@ -175,7 +175,7 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           pending="$RUNNER_TEMP/npm-pending.txt"
-          python3 release-tools/scripts/npm-release.py check \
+          python3 release-tools/scripts/npm-release.py check --source-dir crates/uqa-node \
             --version "$version" \
             --check-registry \
             --pending-file "$pending" \
@@ -282,7 +282,7 @@ jobs:
           version="${{ inputs.tag }}"
           version="${version#v}"
           pending="$RUNNER_TEMP/npm-pending.txt"
-          python3 release-tools/scripts/npm-release.py check \
+          python3 release-tools/scripts/npm-release.py check --source-dir crates/uqa-node \
             --version "$version" \
             --check-registry \
             --pending-file "$pending" \
@@ -316,7 +316,7 @@ jobs:
           # processing queue for more than ten minutes after accepting them.
           deadline=$((SECONDS + 1800))
           while :; do
-            if python3 release-tools/scripts/npm-release.py check \
+            if python3 release-tools/scripts/npm-release.py check --source-dir crates/uqa-node \
               --version "$version" \
               --require-published \
               dist/*.tgz; then

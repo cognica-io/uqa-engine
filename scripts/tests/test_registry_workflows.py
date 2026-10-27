@@ -317,5 +317,34 @@ class NpmPublicationSelectionTest(unittest.TestCase):
             )
 
 
+class ReleaseNotesLicensingTest(unittest.TestCase):
+    def test_release_notes_use_the_tagged_license(self):
+        source = (ROOT / ".github/workflows/release-assets.yml").read_text()
+        step = source.split("      - name: Build release notes from HISTORY.md\n", 1)[1]
+        step = step.split("\n      - ", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        for license_identifier in ("Apache-2.0", "AGPL-3.0-only", "", None):
+            with self.subTest(license=license_identifier), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                (root / "HISTORY.md").write_text("## [0.0.1]\n\nOriginal release changes.\n")
+                package = root / "crates/uqa-node"
+                package.mkdir(parents=True)
+                (package / "package.json").write_text(json.dumps({"license": license_identifier}))
+                result = subprocess.run(
+                    ["bash", "-e"], input=script, text=True, capture_output=True,
+                    cwd=root, check=False,
+                    env={**os.environ, "TAG": "v0.0.1", "GITHUB_RUN_ID": "42",
+                         "SOURCE_RUN_ID": "41", "GITHUB_REPOSITORY": "cognica-io/uqa-engine"},
+                )
+                if license_identifier:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(f"Licensing: {license_identifier} for project code", result.stdout)
+                    self.assertIn("Original release changes.", result.stdout)
+                    self.assertIn("LICENSING.md from this release", result.stdout)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Tagged package has no license identifier", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

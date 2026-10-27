@@ -1,11 +1,7 @@
 # UQA Engine License Notice
 
-This package is part of UQA Engine and is licensed under AGPL-3.0-only.
+Copyright (c) 2023-2026 Cognica, Inc.
 
-- Base license: https://github.com/cognica-io/uqa-engine/blob/main/LICENSE
-- Licensing policy: https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md
-- FOSS exception: https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt
-- Noncommercial exception: https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt
-- Commercial terms: https://github.com/cognica-io/uqa-engine/blob/main/COMMERCIAL.md
+This package is part of UQA Engine and is licensed under the Apache License, Version 2.0. See the included `LICENSE` for the complete terms and `LICENSING.md` for the release boundary and project policy.
 
-The exceptions are additional permissions and do not relicense UQA Engine. A redistributor relying on an exception must include the applicable exception text as required by that exception. Third-party components remain under their respective licenses.
+Third-party components retain their respective licenses, copyright notices, and attribution. Their notices are included with the applicable package.

@@ -6,11 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-27
+
+### Added
+
+- Add the embedded C ABI with `uqa_*` symbols, opaque handles, status returns and library-owned diagnostics. C11/C++17 applications can execute SQL messages, prepared statements, cursors and batches, bind typed values, register scalar/table/aggregate UDFs and use notices, notifications, backup and cancellation on memory, native SQLite, SQLite Key/Value and redb. Native shared/static packages provide installed headers, CMake and pkg-config targets on Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. Host logging remains declaration-only. See the [C API](docs/manual/reference/08-bindings-and-extensions.md#c-source-api) and [installed-consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers).
+
 ### Changed
 
+- License project-owned code under Apache 2.0 beginning with 0.6.2. Replace the AGPL base license and optional FOSS/noncommercial application exceptions in future distributions, retain third-party licenses and attribution, and preserve the terms of already published releases.
 - Update the maintained SQLite driver to `uqa-rusqlite` 0.39.3 and `uqa-libsqlite3-sys` 0.37.3, bundling SQLCipher 4.19.0 / SQLite 3.53.4 with the official extension callback correction and subsequent upstream fixes. Complete crypto initialization before concurrent connections can open and register export through SQLite's existing connection initialization hook. Retain the Rust wrapper API, plain SQLite bundle, connection-local cache reclamation and existing UQA format requirements.
-- Preserve the full PostgreSQL timestamp range with native microseconds since 2000-01-01 and retain TIMETZ offsets in seconds. Readers convert predecessor encodings; SQLite record format 67 and redb record format 63 exclude incompatible writers. See the [upgrade requirements](docs/manual/reference/10-upgrading.md#unreleased).
+- Preserve the full PostgreSQL timestamp range with native microseconds since 2000-01-01 and retain TIMETZ offsets in seconds. Readers convert predecessor encodings; SQLite record format 67 and redb record format 63 exclude incompatible writers. See the [upgrade requirements](docs/manual/reference/10-upgrading.md#062).
 - Share immutable named and anonymous composite metadata through SQL construction, controlled copies and result conversion. Rust `RecordValue` callers now use explicit positional values and borrowed field iteration instead of a mutable pair-vector dereference; see the [Rust API migration](docs/manual/reference/02-rust-engine-api.md#composite-value-metadata). SQL observations and persistent formats are preserved.
+
+- Move owned cursor and columnar output values into their result columns without copying exclusive strings or compound payloads. Preserve shared scan owners, duplicate output positions, fragment projections and zero-column row counts while avoiding unused payload copies.
+
+- Custom Rust `QueryPlan` constructors initialize `analyzed_output: None` and `analyzed_source: None`. Executable plans share positional output and input descriptors from statement analysis; serialized definitions omit them and resolve their next catalog scope normally. Custom `prune_query_outputs` callers also pass optional selected-routine and volatility catalogs for UNION-member boundaries.
+
+- Custom Rust correlation and subquery adapters now supply the invoking routine catalog so declared TABLE and composite results preserve the selected function identity and full output schema.
+
+- Rust constructors for `FromClause::Values`, `FromClause::Subquery`, `SourcePlan::Values` and `SourcePlan::Subquery` now supply a `lateral` flag belonging to that range item. Existing serialized nodes without the field still decode; legacy right-side permission on `Join::lateral` remains supported. `FromClause::Join` and `SourcePlan::Join` also supply `comma` to distinguish source lists from explicit joins.
+
+- Rust column and qualified-wildcard AST/IR names use `ReferenceName`, retaining transient source positions while keeping name equality, hashing and serialized strings unchanged. Custom routine constructors supply `body_origin: None`; protocol diagnostic constructors also expose internal query and position fields.
 
 ### Fixed
 
@@ -83,18 +100,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Retain builtin and selected user table-function output columns, WITH ORDINALITY, wildcard-derived fields, CTE and USING namespaces, stored view columns and positional alias tails during correlation analysis, so independent derived inputs do not repeat unmatched rows or volatile calls.
 
 - Preserve PostgreSQL LATERAL reference error positions through SQL lowering, plan copies and stored-definition binding, including Unicode and multiple-statement requests. SQL function source errors retain creation-statement positions or the separate internal-query cursor when PostgreSQL cannot transpose them.
-
-### Changed
-
-- Move owned cursor and columnar output values into their result columns without copying exclusive strings or compound payloads. Preserve shared scan owners, duplicate output positions, fragment projections and zero-column row counts while avoiding unused payload copies.
-
-- Custom Rust `QueryPlan` constructors initialize `analyzed_output: None` and `analyzed_source: None`. Executable plans share positional output and input descriptors from statement analysis; serialized definitions omit them and resolve their next catalog scope normally. Custom `prune_query_outputs` callers also pass optional selected-routine and volatility catalogs for UNION-member boundaries.
-
-- Custom Rust correlation and subquery adapters now supply the invoking routine catalog so declared TABLE and composite results preserve the selected function identity and full output schema.
-
-- Rust constructors for `FromClause::Values`, `FromClause::Subquery`, `SourcePlan::Values` and `SourcePlan::Subquery` now supply a `lateral` flag belonging to that range item. Existing serialized nodes without the field still decode; legacy right-side permission on `Join::lateral` remains supported. `FromClause::Join` and `SourcePlan::Join` also supply `comma` to distinguish source lists from explicit joins.
-
-- Rust column and qualified-wildcard AST/IR names use `ReferenceName`, retaining transient source positions while keeping name equality, hashing and serialized strings unchanged. Custom routine constructors supply `body_origin: None`; protocol diagnostic constructors also expose internal query and position fields.
 
 ## [0.6.1] - 2026-10-22
 

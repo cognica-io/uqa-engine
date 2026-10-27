@@ -12,7 +12,7 @@ The example suite is organized by language binding and platform. Every public bi
 
 Start with unified search for the complete relational, full-text, vector, graph, fusion, and host-language UDF story. Use the focused scenarios when learning or verifying one subsystem.
 
-The vector scenario compares exact, HNSW, IVF and DiskANN access using one six-row fixture. It binds typed vector parameters, checks literal row identities and canonical-score equality, rolls back a private replacement, commits a replacement and verifies all rows and scores after closing and reopening SQLite. The Rust example also runs the scenario in memory. Real-browser verification checkpoints IndexedDB and repeats the DiskANN assertions after a fresh page load. These are functional examples for UQA Engine 0.6.1; the small fixture is not a general recall or performance benchmark.
+The vector scenario compares exact, HNSW, IVF and DiskANN access using one six-row fixture. It binds typed vector parameters, checks literal row identities and canonical-score equality, rolls back a private replacement, commits a replacement and verifies all rows and scores after closing and reopening SQLite. The Rust example also runs the scenario in memory. Real-browser verification checkpoints IndexedDB and repeats the DiskANN assertions after a fresh page load. These are functional examples for UQA Engine 0.6.2; the small fixture is not a general recall or performance benchmark.
 
 ## Run by binding
 
@@ -20,7 +20,7 @@ The vector scenario compares exact, HNSW, IVF and DiskANN access using one six-r
 - Python: install a built `uqa` wheel, then run `python3 examples/python/unified_search.py`.
 - Node.js: build `crates/uqa-node`, then run `node examples/node/unified-search.mjs`.
 - Browser WASM: run `bash scripts/build-wasm.sh`, serve the repository root over HTTP, then open `examples/browser/`.
-- C / C++: build `uqa-ffi` and compile the programs as C11 or C++17 using the commands in [`c/README.md`](c/README.md). Its runner executes the actual shared artifact on Memory, native SQLite, SQLite Key/Value and redb; persistence scenarios require a durable provider. Native C release packaging remains in progress.
+- C / C++: build `uqa-ffi` and compile the programs as C11 or C++17 using the commands in [`c/README.md`](c/README.md). Its runner executes the actual shared artifact on Memory, native SQLite, SQLite Key/Value and redb; persistence scenarios require a durable provider. Version 0.6.2 also provides native shared/static packages; see the [installed-consumer guide](../crates/uqa-ffi/README.md#native-builds-and-installed-consumers).
 
 The Node.js and Browser WASM entry points share the binding-neutral JavaScript scenarios in [`javascript/`](javascript). Platform-specific files still own engine construction, persistence, callback registration, and resource cleanup.
 

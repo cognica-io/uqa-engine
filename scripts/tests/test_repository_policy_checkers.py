@@ -145,7 +145,7 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                     source.write_bytes(original)
 
     def test_separately_licensed_crate_archives_ship_their_own_license_files(self) -> None:
-        canonical = {"LICENSE": b"agpl"}
+        canonical = {"LICENSE": b"project"}
         for crate, license_files in LICENSES.SEPARATELY_LICENSED_CRATES.items():
             path = pathlib.Path(f"{crate}-0.0.0.crate")
             members = {f"{crate}-0.0.0/{relative}": b"upstream" for relative in license_files}
@@ -161,7 +161,7 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
             with_policy = {**members, f"{crate}-0.0.0/LICENSING.md": b"policy"}
             with self.subTest(crate=crate, policy=True), \
                  mock.patch.object(LICENSES, "archive_members", return_value=with_policy), \
-                 self.assertRaisesRegex(RuntimeError, "AGPL licensing policy"):
+                 self.assertRaisesRegex(RuntimeError, "project licensing policy"):
                 LICENSES.check_archive(path, canonical)
 
     def test_release_bundle_check_rejects_partial_missing_and_duplicate_runtimes(self) -> None:
@@ -341,11 +341,10 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
                 """
 [project]
 name = "uqa"
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 license-files = [
     "LICENSE",
     "LICENSING.md",
-    "LICENSES/*.txt",
     "python/uqa/THIRD-PARTY/*",
 ]
 
@@ -363,7 +362,7 @@ Repository = "https://example.test/uqa"
             (root / "pyproject.toml").write_text(
                 """
 [project]
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 license-files = ["LICENSE", "LICENSING.md"]
 """.lstrip(),
                 encoding="utf-8",
@@ -381,8 +380,8 @@ license-files = ["LICENSE", "LICENSING.md"]
                 '''
 [project]
 description = """
-license = "AGPL-3.0-only"
-license-files = ["LICENSE", "LICENSING.md", "LICENSES/*.txt"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "LICENSING.md"]
 """
 name = "uqa"
 '''.lstrip(),

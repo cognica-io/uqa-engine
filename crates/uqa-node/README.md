@@ -5,7 +5,7 @@
 ## Install
 
 ```sh
-npm install @cognica-io/uqa@0.6.1
+npm install @cognica-io/uqa@0.6.2
 ```
 
 The installation selects one prebuilt native addon from the `@cognica-io` npm organization for the current operating system and CPU. Supported packages cover Linux glibc on x64 and arm64, macOS on x64 and arm64, and Windows MSVC on x64 and arm64.
@@ -13,7 +13,7 @@ The installation selects one prebuilt native addon from the `@cognica-io` npm or
 Applications that use only remote HTTP SQL can omit the optional native packages:
 
 ```sh
-npm install --omit=optional @cognica-io/uqa@0.6.1
+npm install --omit=optional @cognica-io/uqa@0.6.2
 ```
 
 `HttpEngine`, `HttpSQLStream`, `SQLParam`, `vector`, and `tensor` run in JavaScript on Node.js 16 or newer using Node's built-in HTTP modules. They require no Rust toolchain, native addon, or embedded database. The package loads the native addon only when embedded `Engine` functionality is used. Both CommonJS and ESM support the main package and the explicit `@cognica-io/uqa/http` entry point.
@@ -43,12 +43,12 @@ console.log(result.rows);
 engine.close();
 ```
 
-See the [UQA Engine manual](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/08-bindings-and-extensions.md) for the complete Node.js binding contract.
+See the [UQA Engine manual](https://github.com/cognica-io/uqa-engine/blob/v0.6.2/docs/manual/reference/08-bindings-and-extensions.md) for the complete Node.js binding contract.
 
-For existing installations, read the [0.6.1 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/10-upgrading.md).
+For existing installations, read the [0.6.2 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.2/docs/manual/reference/10-upgrading.md).
 
 ## License
 
 Official native packages embed the pinned Nori dictionary. `THIRD-PARTY/` contains the complete Lucene, MeCab-ko-dic, and JDK Unicode notices, modification attribution, and original resource/model manifests. The manifests describe source resources; the dictionary bytes are embedded in the native addon and require no separate download. `THIRD-PARTY/` also contains the notices of the PostgreSQL code that the engine includes: the range sorting adaptation, and the PostgreSQL regular expression engine, whose notice reproduces its PostgreSQL License, Henry Spencer's license and the Tcl license unchanged.
 
-UQA Engine is licensed under AGPL-3.0-only with optional FOSS and noncommercial application exceptions. See `LICENSING.md` in this package.
+UQA Engine development sources and releases beginning with 0.6.2 use Apache-2.0. Already published versions retain their distributed terms. See the included `LICENSE` and `LICENSING.md` files.
