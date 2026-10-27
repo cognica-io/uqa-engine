@@ -223,19 +223,6 @@ fn sequence_argument_mut(expression: &mut ScalarExpr) -> Option<&mut ScalarExpr>
         .filter(|argument| matches!(argument, ScalarExpr::Literal(Value::Str(_))))
 }
 
-fn sequence_argument(expression: &ScalarExpr) -> Option<&str> {
-    let ScalarExpr::Func { name, args, .. } = expression else {
-        return None;
-    };
-    if !is_sequence_function(name) {
-        return None;
-    }
-    match args.first() {
-        Some(ScalarExpr::Literal(Value::Str(text))) => Some(text),
-        _ => None,
-    }
-}
-
 fn is_sequence_function(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
@@ -325,40 +312,6 @@ pub fn read_prepared_oid_alias_constants<C: OidAliasInput + ?Sized>(
     plan.rewrite_scalar_expressions(&mut |root| {
         root.visit_mut(&mut |expression| {
             read_scalar_constant(catalog, expression, false, &mut failure);
-        });
-    });
-    failure.map_or(Ok(()), Err)
-}
-
-/// The alias input functions at analysis for a statement that runs at once: every `reg*` cast of a string literal, nested ones included, must name an object before the statement runs, as parse analysis reads the constant before planning and execution. The plan keeps the written names, which the cast resolves again when it is evaluated, since a statement's text is analyzed anew each time it runs.
-pub fn check_statement_oid_alias_constants<C: OidAliasInput + ?Sized>(
-    catalog: &C,
-    plan: &UnifiedPlan,
-) -> Result<(), SQLError> {
-    let mut failure = None;
-    plan.visit_scalar_expressions(&mut |root| {
-        root.visit(&mut |expression| {
-            if failure.is_some() {
-                return;
-            }
-            if let Some(text) = sequence_argument(expression) {
-                if let Err(error) = read_constant(catalog, &ColumnType::Regclass, text, false) {
-                    failure = Some(error);
-                }
-                return;
-            }
-            let ScalarExpr::Cast { expr, ty, .. } = expression else {
-                return;
-            };
-            let Some((alias, array)) = alias_type(ty) else {
-                return;
-            };
-            let ScalarExpr::Literal(Value::Str(text)) = expr.as_ref() else {
-                return;
-            };
-            if let Err(error) = read_constant(catalog, &alias, text, array) {
-                failure = Some(error);
-            }
         });
     });
     failure.map_or(Ok(()), Err)

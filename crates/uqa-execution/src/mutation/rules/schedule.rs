@@ -217,10 +217,12 @@ fn prepare<S: Clone + Send + Sync + 'static>(
         .transpose()?
         .map(uqa_sql::binding::snapshot::BindingSnapshot::from);
     let mut relations = Vec::new();
+    // View rewriting owns layer privileges. Rule capture precedes authorization
+    // of the surviving target, since an INSTEAD rule can remove that target.
     let original = match statement {
         MutationCommand::Update(plan) => {
             let mut visit = |plan: &mut UpdatePlan| -> Result<bool, SQLError> {
-                validate_update(context, plan)?;
+                lock_and_validate_returning(context, RuleMutation::Update(plan))?;
                 let rules = rule_context.analysis;
                 if rules
                     .rules
@@ -250,6 +252,7 @@ fn prepare<S: Clone + Send + Sync + 'static>(
                 Some(plan.clone())
             };
             if let Some(plan) = &mut original {
+                validate_update(context, plan)?;
                 if !visit(plan)? {
                     original = None;
                 }
@@ -258,7 +261,7 @@ fn prepare<S: Clone + Send + Sync + 'static>(
         }
         MutationCommand::Delete(plan) => {
             let mut visit = |plan: &mut DeletePlan| -> Result<bool, SQLError> {
-                validate_delete(context, plan)?;
+                lock_and_validate_returning(context, RuleMutation::Delete(plan))?;
                 let rules = rule_context.analysis;
                 if rules
                     .rules
@@ -288,6 +291,7 @@ fn prepare<S: Clone + Send + Sync + 'static>(
                 Some(plan.clone())
             };
             if let Some(plan) = &mut original {
+                validate_delete(context, plan)?;
                 if !visit(plan)? {
                     original = None;
                 }
@@ -302,7 +306,6 @@ fn validate_update<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
     plan: &UpdatePlan,
 ) -> Result<(), SQLError> {
-    lock_and_validate_returning(context, RuleMutation::Update(plan))?;
     if context
         .mutation
         .rules
@@ -346,7 +349,6 @@ fn validate_delete<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
     plan: &DeletePlan,
 ) -> Result<(), SQLError> {
-    lock_and_validate_returning(context, RuleMutation::Delete(plan))?;
     if context
         .mutation
         .rules

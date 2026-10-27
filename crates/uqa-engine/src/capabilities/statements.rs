@@ -22,7 +22,6 @@ impl Engine {
                 rules: self,
                 effects: self,
                 transactions: self,
-                aliases: self,
             },
             runtime: context::StatementRuntime {
                 cancellation: runtime.cancellation,

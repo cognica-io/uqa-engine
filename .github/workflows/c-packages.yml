@@ -73,7 +73,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build and install the C distribution
         # Native Perl must remain ahead of Git Bash for Windows dependencies.
-        run: python scripts/build-c-bindings.py --target '${{ matrix.target }}' --profile release --prefix target/c-installed --build-directory target/c-package-build
+        run: python scripts/build-c-bindings.py --target '${{ matrix.target }}' --profile release --prefix '${{ runner.temp }}/uqa-c-package/installed' --build-directory '${{ runner.temp }}/uqa-c-package/build'
       - name: Install native Windows pkgconf
         if: runner.os == 'Windows'
         id: pkgconf
@@ -89,8 +89,8 @@ jobs:
         env:
           PKG_CONFIG: ${{ runner.os == 'Windows' && format('{0}/mingw64/bin/pkgconf.exe', steps.pkgconf.outputs.msys2-location) || 'pkg-config' }}
         run: |
-          python -c 'from pathlib import Path; Path("target/c-installed").rename("target/relocated C package")'
-          python scripts/verify-c-package.py --prefix 'target/relocated C package'
+          python -c 'import os; from pathlib import Path; work = Path(os.environ["RUNNER_TEMP"]) / "uqa-c-package"; (work / "installed").rename(work / "relocated C package")'
+          python scripts/verify-c-package.py --prefix '${{ runner.temp }}/uqa-c-package/relocated C package'
       - name: Qualify native allocator failures and panic cleanup
         run: |
           cargo test --locked --release --target '${{ matrix.target }}' -p uqa-ffi --features test-support --lib
@@ -98,7 +98,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          python scripts/c-bindings-release.py package --target '${{ matrix.target }}' --prefix 'target/relocated C package' --directory dist/c
+          python scripts/c-bindings-release.py package --target '${{ matrix.target }}' --prefix '${{ runner.temp }}/uqa-c-package/relocated C package' --directory dist/c
           archives=(dist/c/uqa-c-*.tgz dist/c/uqa-c-*.zip)
           python scripts/check-release-licenses.py --require-nori --require-kuromoji "${archives[@]}"
       - uses: actions/upload-artifact@v4
@@ -112,6 +112,6 @@ jobs:
         with:
           name: c-bindings-diagnostics-${{ matrix.target }}
           path: |
-            target/c-package-build/native-build.log
-            target/c-package-build/cmake/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/uqa-c-package/build/native-build.log
+            ${{ runner.temp }}/uqa-c-package/build/cmake/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: ignore

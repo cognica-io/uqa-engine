@@ -298,10 +298,7 @@
     },
     {
       "name": "prepared_phrase_uses_installed_revision",
-      "sql": "EXECUTE binding_search($1)",
-      "params": [
-        "\"東京大学 関西国際空港\""
-      ],
+      "sql": "EXECUTE binding_search('\"東京大学 関西国際空港\"')",
       "rows": [
         {
           "id": 1
@@ -332,10 +329,7 @@
     },
     {
       "name": "transaction_graph",
-      "sql": "EXECUTE binding_search($1)",
-      "params": [
-        "\"東京大学 関西国際空港\""
-      ],
+      "sql": "EXECUTE binding_search('\"東京大学 関西国際空港\"')",
       "rows": [
         {
           "id": 3
@@ -355,10 +349,7 @@
     },
     {
       "name": "savepoint_restores_graph",
-      "sql": "EXECUTE binding_search($1)",
-      "params": [
-        "\"東京大学 関西国際空港\""
-      ],
+      "sql": "EXECUTE binding_search('\"東京大学 関西国際空港\"')",
       "rows": [
         {
           "id": 1
@@ -377,10 +368,7 @@
     },
     {
       "name": "rollback_restores_graph",
-      "sql": "EXECUTE binding_search($1)",
-      "params": [
-        "\"東京大学 関西国際空港\""
-      ],
+      "sql": "EXECUTE binding_search('\"東京大学 関西国際空港\"')",
       "rows": [
         {
           "id": 1
@@ -400,10 +388,7 @@
     },
     {
       "name": "installed_revision_survives_name_change",
-      "sql": "EXECUTE binding_search($1)",
-      "params": [
-        "\"東京大学 関西国際空港\""
-      ],
+      "sql": "EXECUTE binding_search('\"東京大学 関西国際空港\"')",
       "rows": [
         {
           "id": 1
@@ -492,10 +477,7 @@
     },
     {
       "name": "prepared_query_observes_independent_search",
-      "sql": "EXECUTE binding_search($1)",
-      "params": [
-        "\"東京大学 関西国際空港\""
-      ],
+      "sql": "EXECUTE binding_search('\"東京大学 関西国際空港\"')",
       "rows": []
     },
     {
@@ -504,10 +486,7 @@
     },
     {
       "name": "prepared_query_recovers_search_revision",
-      "sql": "EXECUTE binding_search($1)",
-      "params": [
-        "\"東京大学 関西国際空港\""
-      ],
+      "sql": "EXECUTE binding_search('\"東京大学 関西国際空港\"')",
       "rows": [
         {
           "id": 1

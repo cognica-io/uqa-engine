@@ -42,7 +42,6 @@ impl Inputs {
             rules: self,
             effects: self,
             transactions: self,
-            aliases: self,
         }
     }
     fn record(&self, event: &'static str) {

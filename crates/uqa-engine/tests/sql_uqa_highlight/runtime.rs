@@ -16,23 +16,21 @@ fn prepared_highlighting_uses_current_session_work_mem_for_complete_rendering() 
     let expected = Value::Str(format!("{tag}fox]"));
     for analyzer in [Value::Null, Value::Str("keyword".into())] {
         let parameters = [Value::Str(tag.clone()), analyzer.clone()].map(SQLParam::Scalar);
+        let analyzer_sql = if analyzer == Value::Null {
+            "NULL"
+        } else {
+            "'keyword'"
+        };
+        let execute = format!("EXECUTE limited_snippet('{tag}', {analyzer_sql})");
         engine.sql("SET work_mem = '64kB'", &[]).unwrap();
-        let error = engine
-            .sql("EXECUTE limited_snippet($1, $2)", &parameters)
-            .unwrap_err();
+        let error = engine.sql(&execute, &[]).unwrap_err();
         assert_eq!(error.sqlstate(), Some("53200"));
         assert!(
             error.to_string().contains("highlight analysis failed"),
             "{error}"
         );
         engine.sql("SET work_mem = '1MB'", &[]).unwrap();
-        assert_eq!(
-            engine
-                .sql("EXECUTE limited_snippet($1, $2)", &parameters)
-                .unwrap()
-                .rows[0]["h"],
-            expected
-        );
+        assert_eq!(engine.sql(&execute, &[]).unwrap().rows[0]["h"], expected);
         let observer = engine.new_session().unwrap();
         observer.sql("SET work_mem = '1MB'", &[]).unwrap();
         engine.sql("SET work_mem = '64kB'", &[]).unwrap();
