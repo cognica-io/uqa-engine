@@ -1,6 +1,6 @@
 # Contributor Licensing Policy
 
-UQA Engine uses Apache 2.0 for development sources and releases after 0.6.1, as described in [LICENSING.md](LICENSING.md). Cognica must retain sufficient rights to publish every accepted contribution under the project license and any separately agreed terms.
+UQA Engine uses Apache 2.0 for development sources and releases beginning with 0.6.2, as described in [LICENSING.md](LICENSING.md). Cognica must retain sufficient rights to publish every accepted contribution under the project license and any separately agreed terms.
 
 ## Public-core commitment
 

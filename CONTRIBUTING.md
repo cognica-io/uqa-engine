@@ -4,7 +4,7 @@ Thanks for considering a contribution. This document explains the gates every ch
 
 ## Contributor licensing
 
-UQA Engine development sources and releases after 0.6.1 are distributed under Apache-2.0. Earlier releases retain their distributed terms, as described in [LICENSING.md](LICENSING.md). Cognica must have sufficient rights to distribute every accepted contribution under the project license and any separately agreed terms.
+UQA Engine development sources and releases beginning with 0.6.2 are distributed under Apache-2.0. Earlier releases retain their distributed terms, as described in [LICENSING.md](LICENSING.md). Cognica must have sufficient rights to distribute every accepted contribution under the project license and any separately agreed terms.
 
 External copyrightable contributions of code or documentation require a contributor agreement accepted by Cognica. The execution workflow and final agreement are not yet published, so such contributions will not be merged until that process is available. Issues, bug reports, design discussion, and non-copyrightable factual corrections remain welcome. See [CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the public-core commitment.
 
@@ -124,7 +124,7 @@ The workspace lives under `crates/`. New crates follow the existing shape:
 1. `crates/<name>/Cargo.toml` with `version.workspace = true`, `edition.workspace = true`, `license.workspace = true`, `readme = "README.md"`, `exclude.workspace = true`, and `[lints] workspace = true`. Binding crates that belong on PyPI or npm also set `publish = false`. Do not declare `license-file` alongside the SPDX `license` field, and do not inherit `readme` from the workspace because that path resolves against the workspace root.
 2. `crates/<name>/src/lib.rs`.
 3. Add `crates/<name>` to the `members` list in the root `Cargo.toml`.
-4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.6.1", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
+4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.6.2", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
 5. Run `python3 scripts/sync-crate-legal-files.py` so a publishable crate carries `LICENSE`, `LICENSING.md`, and `LICENSE-NOTICE.md`. The imported `uqa-pg-query` and `uqa-pg-regex` crates keep their upstream licenses: MIT and libpg_query for the parser, and the PostgreSQL, Henry Spencer, and Tcl licenses for the regular expression engine.
 6. Document the new crate and its dependency boundary in `docs/design/architecture.md`; keep the repository `README.md` focused on user-facing capabilities and entry points.
 

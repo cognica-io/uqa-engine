@@ -7,7 +7,7 @@ The published WASM bundle includes the Lucene-compatible Nori dictionary and ana
 ## Install
 
 ```sh
-npm install @cognica-io/uqa-wasm@0.6.1
+npm install @cognica-io/uqa-wasm@0.6.2
 ```
 
 ## Use
@@ -22,12 +22,12 @@ console.log(result.rows);
 engine.close();
 ```
 
-See the [UQA Engine manual](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/08-bindings-and-extensions.md) for the complete Browser WASM binding contract.
+See the [UQA Engine manual](https://github.com/cognica-io/uqa-engine/blob/v0.6.2/docs/manual/reference/08-bindings-and-extensions.md) for the complete Browser WASM binding contract.
 
-For existing installations, read the [0.6.1 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/10-upgrading.md).
+For existing installations, read the [0.6.2 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.2/docs/manual/reference/10-upgrading.md).
 
 ## License
 
 The package embeds the pinned Nori dictionary in `uqa.wasm`. `THIRD-PARTY/` contains the complete Lucene, MeCab-ko-dic, and JDK Unicode notices, modification attribution, and original resource/model manifests. The manifests describe source resources; the dictionary requires no separate download. `THIRD-PARTY/` also contains the notices of the PostgreSQL code that the engine includes: the range sorting adaptation, and the PostgreSQL regular expression engine, whose notice reproduces its PostgreSQL License, Henry Spencer's license and the Tcl license unchanged.
 
-UQA Engine development sources and releases after 0.6.1 use Apache-2.0. Already published versions retain their distributed terms. See the included `LICENSE` and `LICENSING.md` files.
+UQA Engine development sources and releases beginning with 0.6.2 use Apache-2.0. Already published versions retain their distributed terms. See the included `LICENSE` and `LICENSING.md` files.

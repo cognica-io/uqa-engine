@@ -1,10 +1,10 @@
 # Upgrading UQA Engine
 
-This page describes unreleased changes and UQA Engine 0.6.1 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/docs/manual/reference/10-upgrading.md) when installing the 0.6.1 packages.
+This page describes UQA Engine 0.6.2 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.2/docs/manual/reference/10-upgrading.md) when installing the 0.6.2 packages.
 
-## Unreleased
+## 0.6.2
 
-Project-owned code moves to Apache 2.0 in the next release after 0.6.1. That release no longer uses the AGPL base license or the optional FOSS/noncommercial application exceptions. Already published releases retain their distributed terms, and third-party material retains its own licenses and notices. See the [licensing policy](../../../LICENSING.md) for the release boundary and distribution requirements.
+Project-owned code moves to Apache 2.0 beginning with 0.6.2. That release no longer uses the AGPL base license or the optional FOSS/noncommercial application exceptions. Already published releases retain their distributed terms, and third-party material retains its own licenses and notices. See the [licensing policy](../../../LICENSING.md) for the release boundary and distribution requirements.
 
 Custom physical retrieval adapters now supply `parallel: &ParallelExecutor` in `PhysicalDriverContext`. Retain this Execution-owned executor with the adapter runtime to share its lazily created workers across calls. The final external owner joins native worker shutdown; a host task releasing the last owner on its worker returns before that pool terminates. The configured worker limit is honored without initializing Rayon's global pool.
 

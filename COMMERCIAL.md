@@ -1,6 +1,6 @@
 # Commercial Support and Agreements
 
-UQA Engine development sources and releases after 0.6.1 use the Apache License, Version 2.0, as described in [LICENSING.md](LICENSING.md). Apache 2.0 permits proprietary and commercial applications subject to its terms; those uses do not require a separate commercial license from Cognica, Inc.
+UQA Engine development sources and releases beginning with 0.6.2 use the Apache License, Version 2.0, as described in [LICENSING.md](LICENSING.md). Apache 2.0 permits proprietary and commercial applications subject to its terms; those uses do not require a separate commercial license from Cognica, Inc.
 
 Cognica may offer separate agreements for maintenance, security updates, support, warranties, indemnification, or other negotiated terms. Rights and services beyond the public license arise only from the signed agreement. Open-source rights already granted for a release remain available regardless of whether a commercial agreement is offered.
 

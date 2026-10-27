@@ -1,6 +1,6 @@
 # UQA Engine Licensing Policy
 
-This source tree is licensed under the Apache License, Version 2.0 (`Apache-2.0`), except for material that carries its own license. The change applies to the next UQA Engine release after 0.6.1 and subsequent releases. The complete terms are in [LICENSE](LICENSE), reproduced from the [Apache Software Foundation](https://www.apache.org/licenses/LICENSE-2.0).
+This source tree is licensed under the Apache License, Version 2.0 (`Apache-2.0`), except for material that carries its own license. Apache 2.0 applies beginning with UQA Engine 0.6.2. The complete terms are in [LICENSE](LICENSE), reproduced from the [Apache Software Foundation](https://www.apache.org/licenses/LICENSE-2.0).
 
 ## Earlier releases
 
@@ -20,7 +20,7 @@ The project license applies only to material for which Cognica has authority to 
 
 Project-owned Rust, Python, Node.js, WebAssembly, and C distributions use `Apache-2.0` metadata and include the Apache license and this policy. Package license notices identify the project license and preserve third-party attribution. The former UQA FOSS and noncommercial application exception files are not part of Apache-licensed distributions.
 
-The release process assigns the next version before publication. This source change does not publish a package, change an existing registry version, or replace an existing release tag.
+Version 0.6.2 is the first Apache-licensed release. Existing release tags, source archives, and registry versions retain their original licensing files.
 
 ## Contributions and the public core
 
