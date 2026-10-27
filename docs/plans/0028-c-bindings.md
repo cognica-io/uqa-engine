@@ -22,7 +22,7 @@ The Cargo target is `uqa` and emits native shared/static libraries directly with
 
 ## Live delivery checklist
 
-The following checklist records the live delivery state across all fourteen original scopes. Checked items retain their implementation descriptions with compact evidence; the verification record below preserves source identities, detailed results and historical findings. Only logging remains unchecked and is explicitly deferred outside this delivery. All implementation and final qualification requirements are complete; verified merge/delivery, resolved-issue closure and branch cleanup are maintained in the live PR. The additional engine features remain open in #1292/#1293 outside this delivery.
+The following checklist records the live delivery state across all fourteen original scopes. Checked items retain their implementation descriptions with compact evidence; the verification record below preserves source identities, detailed results and historical findings. The original C binding qualification and merge are complete, with logging explicitly deferred outside this delivery. Post-merge workspace CI exposed ten failing tests; their correction and final verification remain open in the delivery follow-up below. The additional engine features remain open in #1292/#1293 outside this delivery.
 
 **1. Public headers, fixed numeric codes, C layouts, export/import modes, panic boundary, borrowed diagnostics, and checked allocation**
 
@@ -169,6 +169,15 @@ The following checklist records the live delivery state across all fourteen orig
 - [x] Integrate main `36e0173f6` while preserving C-owned stream finalization, declared callback columns, prepared CALL metadata and secondary cleanup diagnostics. The new grouped-source failure test verifies exactly-once cleanup after member or alias failure.
 - [x] Integrate main `ec71d5b40` with PostgreSQL integer bitwise operators and retained positional aggregation. Preserve the C-owned physical construction and CTE completion contracts.
 - [x] Qualify the completed C binding implementation and focused review batch through automatic Linux/macOS performance regression, all six affected FDW configurations, platform consumers, five native packages and four complete Rust/native sanitizer jobs; address all qualification failures. The excluded engine work and its original obligations remain in #1292/#1293. Verified merge/delivery, closure of resolved issues #1023/#291 and removal of the merged branch are tracked to completion in the live [PR #1266 delivery checklist](https://github.com/cognica-io/uqa-engine/pull/1266).
+
+## Post-merge workspace correction
+
+PR #1266 merged as `6c155a68272f9ab8f3c65c99916afddea07bd0e5`. Its affected PR checks passed, and the main C binding, package and Linux/macOS performance workflows also passed. The separate main workspace run [40440482246](https://github.com/cognica-io/uqa-engine/actions/runs/40440482246) failed ten distinct tests on both Linux and macOS. Branch `fix/c-binding-ci-regressions` owns this correction batch; it adds no engine feature or external dependency change.
+
+- [x] Inspect every failed job and reproduce the affected behavior. Independent PostgreSQL 18.4 checks confirm that SQL EXECUTE cannot consume host `$1` arguments, failed `lastval()` aborts an explicit transaction, and unconditional nested INSTEAD rules stop the original mutation's privilege descent. The existing independent 137-case OID input fixture supplies PREPARE diagnostic ordering.
+- [ ] Complete the corrections: retain ordered input analysis instead of a second execution-time OID scan; keep view-layer authorization in SQL rewriting and authorize the surviving mutation target; use literal SQL EXECUTE arguments in the analyzer and memory tests; distinguish live and failed transactions in the CLI DISCARD test.
+- [ ] Run complete affected owner suites, review the final diff, and pass formatting, lint, ownership and dependency checks.
+- [ ] Verify automatic Linux/macOS qualification against the completed source, merge the correction PR, verify main workspace CI, and remove its merged branch.
 
 ## Current automatic qualification
 
