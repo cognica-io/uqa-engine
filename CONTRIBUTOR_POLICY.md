@@ -1,6 +1,6 @@
 # Contributor Licensing Policy
 
-UQA Engine uses public open-source licensing together with optional exceptions and commercial licensing. Cognica must therefore retain sufficient rights to publish every accepted contribution through each supported licensing path.
+UQA Engine uses Apache 2.0 for development sources and releases after 0.6.1, as described in [LICENSING.md](LICENSING.md). Cognica must retain sufficient rights to publish every accepted contribution under the project license and any separately agreed terms.
 
 ## Public-core commitment
 
@@ -10,8 +10,7 @@ Code accepted into the public UQA Engine core will remain available under at lea
 
 Before an external copyrightable contribution of code or documentation can be merged, its copyright holders must enter into a contributor agreement accepted by Cognica. The agreement must permit Cognica to use, modify, distribute, and sublicense the contribution:
 
-- under AGPL-3.0-only;
-- with the public additional permissions documented in this repository;
+- under Apache-2.0;
 - under separate commercial terms; and
 - under a future OSI-approved open-source license.
 

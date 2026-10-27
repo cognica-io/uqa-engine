@@ -1,18 +1,9 @@
-# Commercial Licensing
+# Commercial Support and Agreements
 
-UQA Engine is available as open-source software under AGPL-3.0-only, with optional additional permissions described in [LICENSING.md](LICENSING.md). Cognica, Inc. also offers separate commercial terms for organizations whose products or deployments cannot use those public paths.
+UQA Engine development sources and releases after 0.6.1 use the Apache License, Version 2.0, as described in [LICENSING.md](LICENSING.md). Apache 2.0 permits proprietary and commercial applications subject to its terms; those uses do not require a separate commercial license from Cognica, Inc.
 
-A commercial agreement may cover, subject to its negotiated terms:
+Cognica may offer separate agreements for maintenance, security updates, support, warranties, indemnification, or other negotiated terms. Rights and services beyond the public license arise only from the signed agreement. Open-source rights already granted for a release remain available regardless of whether a commercial agreement is offered.
 
-- proprietary applications and software-as-a-service deployments;
-- closed modifications to UQA Engine;
-- OEM, appliance, device, and binary redistribution;
-- internal commercial product development and evaluation;
-- maintenance, security updates, support, warranties, or indemnification; and
-- product-, organization-, developer-, or distribution-scoped rights.
+Earlier releases and existing agreements retain their own terms. See the [0.6.1 commercial licensing document](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/COMMERCIAL.md) for the commercial path associated with that release.
 
-No commercial-license rights are granted by this document. They arise only from a separate agreement signed by Cognica and the customer. Open-source rights already granted for a release remain available regardless of whether a commercial option is offered.
-
-For evaluation or commercial licensing inquiries, contact `jaepil@cognica.io` with a short description of the intended application, deployment model, distribution model, and whether UQA Engine will be modified.
-
-Commercial terms from Cognica cover only material for which Cognica can grant those rights. Third-party components remain subject to their respective licenses and notices.
+For inquiries, contact `jaepil@cognica.io` with a description of the intended application and support requirements. Third-party components remain subject to their respective licenses and notices.

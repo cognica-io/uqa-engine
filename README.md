@@ -5,9 +5,9 @@ UQA Engine is an embeddable database engine that lets one application use a Post
 It is designed for applications that need more than a relational table but do not want to assemble a separate database, search server, vector store, and graph engine for every query path.
 
 > [!IMPORTANT]
-> **Open source with broad application exceptions**
+> **Apache 2.0 for the next release**
 >
-> UQA Engine uses AGPL-3.0-only as its base license, with FOSS and noncommercial application exceptions. Qualifying open-source applications, including commercial ones, and qualifying personal, educational, academic, or charitable applications may keep their independent code under their own licenses or chosen terms. In practice, separate commercial terms are mainly needed for proprietary commercial products or services that must keep their application or UQA Engine changes closed. UQA Engine and modifications to UQA Engine remain under the AGPL when using the public paths. See the [licensing policy](LICENSING.md) for the exact conditions.
+> UQA Engine development sources and releases after 0.6.1 use the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0). Commercial and proprietary applications can use UQA Engine under its terms. Already published releases retain their original licenses and exceptions; see the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md) for the transition boundary.
 
 > [!TIP]
 > **Using an LLM or coding agent?**
@@ -293,7 +293,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Performance](docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
 | [Citation metadata](CITATION.cff) | Software citation and DOI metadata for the underlying research papers |
-| [Licensing policy](LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
+| [Licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md) | Apache 2.0, earlier releases, third-party attribution, and contributions |
 | [History](HISTORY.md) | Release-by-release changes |
 
 ## Project layout
@@ -316,11 +316,6 @@ AI-assisted contributions follow [AI_POLICY.md](https://github.com/cognica-io/uq
 
 ## License
 
-UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](LICENSE).
+This source tree uses the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0). The change applies to the next release after 0.6.1; already published packages retain their distributed terms, including the [0.6.1 policy](https://github.com/cognica-io/uqa-engine/blob/v0.6.1/LICENSING.md). Third-party components retain their own licenses and notices. See the included `LICENSE` and `LICENSING.md` files for the complete terms and release boundary.
 
-Two optional additional permissions are available:
-
-- the [FOSS exception](LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
-- the [noncommercial application exception](LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
-
-Separate [commercial licensing](COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](LICENSING.md).
+Optional support, warranties, and other negotiated terms are described in the [commercial agreements guide](https://github.com/cognica-io/uqa-engine/blob/main/COMMERCIAL.md). A separate commercial license is not required solely for proprietary or commercial use of Apache-licensed releases.

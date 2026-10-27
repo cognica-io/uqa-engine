@@ -43,8 +43,6 @@ LEGAL_FILES = (
     "LICENSE-NOTICE.md",
     "LICENSE",
     "LICENSING.md",
-    "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
-    "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
     *licenses.binding_dictionary_payloads(),
 )
 ROOT_ENTRYPOINT_FILES = (
@@ -100,14 +98,19 @@ def write_json(path: pathlib.Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def canonical_legal_payloads() -> dict[str, bytes]:
-    payloads = licenses.binding_dictionary_payloads()
-    for relative in LEGAL_FILES:
-        if relative in payloads:
+def canonical_legal_payloads(source_root: pathlib.Path = NODE_ROOT) -> dict[str, bytes]:
+    """Read the selected release's legal inventory, including its own exceptions."""
+    manifest = load_json(source_root / "package.json")
+    files = declared_package_files(manifest)
+    required = {"LICENSE", "LICENSING.md", "LICENSE-NOTICE.md"}
+    missing = sorted(required - set(files))
+    if missing:
+        raise ReleaseError(f"npm source omits legal files: {missing}")
+    payloads = {}
+    for relative in files:
+        if relative not in required and not relative.startswith(("LICENSES/", "THIRD-PARTY/")):
             continue
-        source = (
-            NODE_ROOT / relative if relative == "LICENSE-NOTICE.md" else ROOT / relative
-        )
+        source = source_root / relative
         try:
             payloads[relative] = source.read_bytes()
         except OSError as error:
@@ -172,17 +175,20 @@ def validate_declared_files(
 
 
 def validate_node_source(
-    manifest: dict[str, object], source_root: pathlib.Path = NODE_ROOT
+    manifest: dict[str, object], source_root: pathlib.Path = NODE_ROOT,
+    legal_files: tuple[str, ...] = LEGAL_FILES,
 ) -> str:
     require_equal(manifest.get("name"), ROOT_PACKAGE, "Node.js root package name")
     version = manifest.get("version")
     if not isinstance(version, str) or not version:
         raise ReleaseError("Node.js root package has no valid version")
+    if not isinstance(manifest.get("license"), str) or not manifest["license"]:
+        raise ReleaseError("Node.js root package has no valid license")
     require_equal(
         manifest.get("publishConfig"), PUBLISH_CONFIG, "Node.js publishConfig"
     )
     files = declared_package_files(manifest)
-    missing_files = sorted(set((*ROOT_ENTRYPOINT_FILES, *LEGAL_FILES)) - set(files))
+    missing_files = sorted(set((*ROOT_ENTRYPOINT_FILES, *legal_files)) - set(files))
     if missing_files:
         raise ReleaseError(f"Node.js root package omits files: {missing_files}")
     if any(isinstance(item, str) and item.endswith(".node") for item in files):
@@ -436,8 +442,10 @@ def package_members(path: pathlib.Path) -> tuple[dict[str, object], dict[str, by
     return manifest, stripped
 
 
-def validate_legal_members(path: pathlib.Path, members: dict[str, bytes]) -> None:
-    canonical = canonical_legal_payloads()
+def validate_legal_members(
+    path: pathlib.Path, members: dict[str, bytes], source_root: pathlib.Path = NODE_ROOT
+) -> None:
+    canonical = canonical_legal_payloads(source_root)
     for relative, expected in canonical.items():
         actual = members.get(relative)
         if actual is None:
@@ -449,13 +457,13 @@ def validate_legal_members(path: pathlib.Path, members: dict[str, bytes]) -> Non
 
 
 def validate_common_manifest(
-    path: pathlib.Path, manifest: dict[str, object], version: str
+    path: pathlib.Path, manifest: dict[str, object], version: str, expected_license: str
 ) -> str:
     name = manifest.get("name")
     if not isinstance(name, str) or not name:
         raise ReleaseError(f"npm archive has no package name: {path}")
     require_equal(manifest.get("version"), version, f"{name} version")
-    require_equal(manifest.get("license"), "AGPL-3.0-only", f"{name} license")
+    require_equal(manifest.get("license"), expected_license, f"{name} license")
     require_equal(
         manifest.get("publishConfig"), PUBLISH_CONFIG, f"{name} publishConfig"
     )
@@ -530,21 +538,27 @@ def validate_archives(
     archives: list[pathlib.Path],
     version: str,
     expected_names: tuple[str, ...] = ALL_PACKAGE_NAMES,
+    source_root: pathlib.Path = NODE_ROOT,
 ) -> dict[str, pathlib.Path]:
+    source_manifest = load_json(source_root / "package.json")
+    require_equal(source_manifest.get("version"), version, "npm source version")
+    source_license = source_manifest.get("license")
+    if not isinstance(source_license, str) or not source_license:
+        raise ReleaseError("npm source has no valid license")
     expected = set(expected_names)
     by_name: dict[str, pathlib.Path] = {}
     for path in archives:
         if not path.is_file():
             raise ReleaseError(f"npm archive does not exist: {path}")
         manifest, members = package_members(path)
-        name = validate_common_manifest(path, manifest, version)
+        name = validate_common_manifest(path, manifest, version, source_license)
         if name not in expected:
             raise ReleaseError(f"unexpected npm package {name} in {path}")
         if name in by_name:
             raise ReleaseError(
                 f"duplicate npm package {name}: {by_name[name]} and {path}"
             )
-        validate_legal_members(path, members)
+        validate_legal_members(path, members, source_root)
         validate_declared_files(path, manifest, members)
         if name == ROOT_PACKAGE:
             validate_root_package(path, manifest, members, version)
@@ -662,7 +676,7 @@ def registry_version_present(package_name: str, version: str) -> bool:
 
 def check_packages(args: argparse.Namespace) -> int:
     archives = [path.resolve() for path in args.archives]
-    by_name = validate_archives(archives, args.version)
+    by_name = validate_archives(archives, args.version, source_root=args.source_dir.resolve())
     pending: list[pathlib.Path] = []
     if args.check_registry or args.require_published:
         pending = registry_pending(by_name, args.version)
@@ -687,10 +701,11 @@ def repair_root_archive(args: argparse.Namespace) -> int:
     source_root = args.source_dir.resolve()
     archive = args.archive.resolve()
     source_manifest = load_json(source_root / "package.json")
-    version = validate_node_source(source_manifest, source_root)
+    source_legal = canonical_legal_payloads(source_root)
+    version = validate_node_source(source_manifest, source_root, tuple(source_legal))
     require_equal(version, args.version, "npm repair source version")
     manifest, members = package_members(archive)
-    require_equal(validate_common_manifest(archive, manifest, version), ROOT_PACKAGE,
+    require_equal(validate_common_manifest(archive, manifest, version, source_manifest["license"]), ROOT_PACKAGE,
                   "npm repair package")
     expected_manifest = dict(source_manifest)
     expected_manifest["optionalDependencies"] = {
@@ -719,7 +734,7 @@ def repair_root_archive(args: argparse.Namespace) -> int:
             repaired = pack_stage(args.npm, stage, output, temporary_root / "npm-cache", archive.name)
             repaired_manifest, repaired_members = package_members(repaired)
             validate_root_package(repaired, repaired_manifest, repaired_members, version)
-            validate_legal_members(repaired, repaired_members)
+            validate_legal_members(repaired, repaired_members, source_root)
             os.replace(repaired, archive)
     else:
         validate_root_package(archive, manifest, members, version)
@@ -746,6 +761,8 @@ def parse_args() -> argparse.Namespace:
         "check", help="verify a complete npm release inventory"
     )
     check.add_argument("--version", required=True)
+    check.add_argument("--source-dir", type=pathlib.Path, default=NODE_ROOT,
+                       help="Node.js source directory from the release being verified")
     check.add_argument("--check-registry", action="store_true")
     check.add_argument("--require-published", action="store_true")
     check.add_argument("--pending-file", type=pathlib.Path)

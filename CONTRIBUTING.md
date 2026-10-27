@@ -4,7 +4,7 @@ Thanks for considering a contribution. This document explains the gates every ch
 
 ## Contributor licensing
 
-UQA Engine is distributed under AGPL-3.0-only, optional public exceptions, and separate commercial terms. Cognica must have sufficient rights to distribute every accepted contribution through all of those paths.
+UQA Engine development sources and releases after 0.6.1 are distributed under Apache-2.0. Earlier releases retain their distributed terms, as described in [LICENSING.md](LICENSING.md). Cognica must have sufficient rights to distribute every accepted contribution under the project license and any separately agreed terms.
 
 External copyrightable contributions of code or documentation require a contributor agreement accepted by Cognica. The execution workflow and final agreement are not yet published, so such contributions will not be merged until that process is available. Issues, bug reports, design discussion, and non-copyrightable factual corrections remain welcome. See [CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the public-core commitment.
 
@@ -125,7 +125,7 @@ The workspace lives under `crates/`. New crates follow the existing shape:
 2. `crates/<name>/src/lib.rs`.
 3. Add `crates/<name>` to the `members` list in the root `Cargo.toml`.
 4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.6.1", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
-5. Run `python3 scripts/sync-crate-legal-files.py` so a publishable crate carries `LICENSE`, `LICENSING.md`, `LICENSE-NOTICE.md`, and both exception texts. Do not give `uqa-pg-query` or `uqa-pg-regex` those AGPL copies; they keep their upstream licenses, MIT and libpg_query for the parser and the PostgreSQL, Henry Spencer and Tcl licenses for the regular expression engine.
+5. Run `python3 scripts/sync-crate-legal-files.py` so a publishable crate carries `LICENSE`, `LICENSING.md`, and `LICENSE-NOTICE.md`. The imported `uqa-pg-query` and `uqa-pg-regex` crates keep their upstream licenses: MIT and libpg_query for the parser, and the PostgreSQL, Henry Spencer, and Tcl licenses for the regular expression engine.
 6. Document the new crate and its dependency boundary in `docs/design/architecture.md`; keep the repository `README.md` focused on user-facing capabilities and entry points.
 
 ## Commit messages

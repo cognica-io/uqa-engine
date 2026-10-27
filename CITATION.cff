@@ -12,7 +12,7 @@ version: 0.6.1
 date-released: 2026-10-22
 repository-code: "https://github.com/cognica-io/uqa-engine"
 url: "https://github.com/cognica-io/uqa-engine"
-license: AGPL-3.0-only
+license: Apache-2.0
 keywords:
   - database
   - query algebra

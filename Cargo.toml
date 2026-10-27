@@ -44,9 +44,7 @@ exclude = ["fuzz"]
 [workspace.package]
 version = "0.6.1"
 edition = "2021"
-# This is the base license. Optional additional permissions and commercial
-# terms are documented in LICENSING.md.
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 authors = ["Jaepil Jeong <jaepil@cognica.io>"]
 repository = "https://github.com/cognica-io/uqa-engine"
 homepage = "https://github.com/cognica-io/uqa-engine"
