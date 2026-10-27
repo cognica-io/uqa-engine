@@ -4012,9 +4012,9 @@ dependencies = [
 
 [[package]]
 name = "uqa-libsqlite3-sys"
-version = "0.37.2"
+version = "0.37.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0310829441db4045848e3d212f9c7f0b899435f3cc96c57f183cd844086a3890"
+checksum = "79238aa7af52908fea4357c5b087e1fd67c46df4107bce4f522cb18f11b596a4"
 dependencies = [
  "cc",
  "openssl-sys",
@@ -4160,9 +4160,9 @@ dependencies = [
 
 [[package]]
 name = "uqa-rusqlite"
-version = "0.39.2"
+version = "0.39.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fddfcaa365fa3342bb104b3528fc883b61be03e0251158e78f4fb06bf51c5a6"
+checksum = "34cb158ddc736be5b6ff448b6103ed9a845d4c32ae880162b380e522ade0f564"
 dependencies = [
  "bitflags",
  "fallible-iterator",

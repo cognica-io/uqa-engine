@@ -43,7 +43,7 @@ fs2 = { workspace = true }
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [target.'cfg(target_os = "emscripten")'.dependencies]
-rusqlite = { package = "uqa-rusqlite", version = "=0.39.2", default-features = false, features = ["bundled", "blob", "cache", "functions", "hooks"] }
+rusqlite = { package = "uqa-rusqlite", version = "=0.39.3", default-features = false, features = ["bundled", "blob", "cache", "functions", "hooks"] }
 
 [dev-dependencies]
 rstest = { workspace = true }

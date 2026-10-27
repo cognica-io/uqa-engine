@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Update the maintained SQLite driver to `uqa-rusqlite` 0.39.2 and `uqa-libsqlite3-sys` 0.37.2, bundling official SQLCipher 4.19.0 / SQLite 3.53.4 with the corrected extension callback and subsequent upstream fixes. Retain the Rust wrapper API, plain SQLite bundle, connection-local cache reclamation and existing UQA format requirements.
+- Update the maintained SQLite driver to `uqa-rusqlite` 0.39.3 and `uqa-libsqlite3-sys` 0.37.3, bundling SQLCipher 4.19.0 / SQLite 3.53.4 with the official extension callback correction and subsequent upstream fixes. Complete crypto initialization before concurrent connections can open and register export through SQLite's existing connection initialization hook. Retain the Rust wrapper API, plain SQLite bundle, connection-local cache reclamation and existing UQA format requirements.
 - Preserve the full PostgreSQL timestamp range with native microseconds since 2000-01-01 and retain TIMETZ offsets in seconds. Readers convert predecessor encodings; SQLite record format 67 and redb record format 63 exclude incompatible writers. See the [upgrade requirements](docs/manual/reference/10-upgrading.md#unreleased).
 - Share immutable named and anonymous composite metadata through SQL construction, controlled copies and result conversion. Rust `RecordValue` callers now use explicit positional values and borrowed field iteration instead of a mutable pair-vector dereference; see the [Rust API migration](docs/manual/reference/02-rust-engine-api.md#composite-value-metadata). SQL observations and persistent formats are preserved.
 
