@@ -3,14 +3,15 @@
 
 from __future__ import annotations
 
+import difflib
 import importlib.util
+import json
 import os
 import pathlib
 import platform
 import shutil
 import subprocess
 import tempfile
-import tomllib
 import unittest
 from unittest import mock
 
@@ -24,20 +25,22 @@ class BinstallTransportTest(unittest.TestCase):
     def test_local_origin_preserves_the_release_manifest_and_workspace(self):
         original = ROOT / "crates/uqa-cli/Cargo.toml"
         source = original.read_bytes()
-        expected = tomllib.loads(source.decode())
+        expected = source.decode().splitlines()
         with tempfile.TemporaryDirectory(prefix="usql manifest space ") as temporary:
             manifest = pathlib.Path(temporary) / "Cargo.toml"
             CLI.local_binstall_manifest(manifest, "http://127.0.0.1:12345")
-            actual = tomllib.loads(manifest.read_text())
+            actual = manifest.read_text().splitlines()
         self.assertEqual(original.read_bytes(), source)
-        self.assertEqual(actual["package"].pop("repository"), "http://127.0.0.1:12345")
-        workspace = pathlib.Path(actual["package"].pop("workspace"))
-        self.assertEqual(workspace, ROOT)
-        self.assertEqual(expected["package"].pop("repository"), {"workspace": True})
-        self.assertEqual(actual, expected)
-        inherited = tomllib.loads((workspace / "Cargo.toml").read_text())["workspace"]["package"]
-        self.assertEqual(inherited["version"], CLI.version())
-        self.assertEqual([binary["name"] for binary in actual["bin"]], ["usql"])
+        changes = [(expected[a:b], actual[c:d])
+                   for operation, a, b, c, d in difflib.SequenceMatcher(a=expected, b=actual).get_opcodes()
+                   if operation != "equal"]
+        self.assertEqual(len(changes), 1, "all other manifest lines must be retained")
+        before, after = changes[0]
+        self.assertEqual(before, ["repository.workspace = true"])
+        self.assertEqual(len(after), 2)
+        values = {name.strip(): json.loads(value) for name, value in
+                  (line.split("=", 1) for line in after)}
+        self.assertEqual(values, {"repository": "http://127.0.0.1:12345", "workspace": str(ROOT)})
 
 
 class InstallationCleanupTest(unittest.TestCase):
