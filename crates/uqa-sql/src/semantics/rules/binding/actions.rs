@@ -23,6 +23,11 @@ mod tests;
 
 mod retained;
 pub use retained::RetainedRuleInput;
+mod query;
+pub use query::{
+    InsertRuleQueries, MutationRuleInput, RuleAction, RuleMutation, RuleQueryInput,
+    RuleQueryResolver,
+};
 
 type BindRuleAction<'a> = dyn Fn(&mut dyn VariableResolver) -> Result<Statement, SQLError> + 'a;
 

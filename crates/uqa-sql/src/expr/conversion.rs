@@ -160,7 +160,6 @@ fn append_array_elements(
             Value::Null => text.push_str("NULL")?,
             Value::Bool(value) => text.push_str(if *value { "t" } else { "f" })?,
             Value::List(values) => append_array_elements(text, values, control)?,
-            Value::Array(array) => append_array(text, array, control)?,
             other => {
                 let value = container_field_to_string(other, control)?;
                 let mut quoted = value.is_empty() || value.eq_ignore_ascii_case("null");

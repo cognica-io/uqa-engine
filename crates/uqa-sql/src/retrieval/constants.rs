@@ -70,48 +70,6 @@ pub(super) fn const_usize(expr: &ScalarExpr, constants: &RetrievalConstants<'_>)
     }
 }
 
-pub(super) fn const_vector(
-    expr: &ScalarExpr,
-    constants: &RetrievalConstants<'_>,
-) -> Option<Vec<f32>> {
-    match expr {
-        ScalarExpr::Array(items) => {
-            let mut out: Vec<f32> = Vec::with_capacity(items.len());
-            for v in items {
-                out.push(const_f64(v, constants)? as f32);
-            }
-            Some(out)
-        }
-        other => match const_value(other, constants)? {
-            Value::Array(array) if array.dimensions().len() <= 1 => {
-                let mut out: Vec<f32> = Vec::with_capacity(array.elements().len());
-                for value in array.elements() {
-                    match value {
-                        Value::Int(number) => out.push(*number as f32),
-                        Value::Float(number) => out.push(*number as f32),
-                        Value::Decimal(number) => out.push(number.to_f64()? as f32),
-                        _ => return None,
-                    }
-                }
-                Some(out)
-            }
-            Value::List(items) => {
-                let mut out: Vec<f32> = Vec::with_capacity(items.len());
-                for v in items {
-                    match v {
-                        Value::Int(n) => out.push(n as f32),
-                        Value::Float(f) => out.push(f as f32),
-                        Value::Decimal(d) => out.push(d.to_f64()? as f32),
-                        _ => return None,
-                    }
-                }
-                Some(out)
-            }
-            _ => None,
-        },
-    }
-}
-
 pub(super) fn const_f64_vector(
     expr: &ScalarExpr,
     constants: &RetrievalConstants<'_>,

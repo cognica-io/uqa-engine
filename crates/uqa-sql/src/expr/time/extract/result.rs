@@ -19,6 +19,7 @@ pub(super) enum Part {
     Null,
     Infinity(TemporalInfinity),
     Integer(i64),
+    TimestampEpoch(i64),
     Scaled {
         coefficient: i128,
         scale: u32,
@@ -45,6 +46,14 @@ impl Part {
                 Self::Infinity(TemporalInfinity::Negative) => f64::NEG_INFINITY,
                 Self::Infinity(TemporalInfinity::Positive) => f64::INFINITY,
                 Self::Integer(integer) => integer as f64,
+                Self::TimestampEpoch(micros) => {
+                    let epoch = uqa_core::POSTGRES_EPOCH_MICROS;
+                    if micros < i64::MAX - epoch {
+                        (micros + epoch) as f64 / 1_000_000.0
+                    } else {
+                        (micros as f64 + epoch as f64) / 1_000_000.0
+                    }
+                }
                 Self::Scaled { float, .. } => float,
                 Self::Julian { day, micros } => {
                     day as f64
@@ -62,6 +71,7 @@ impl Part {
                     .expect("numeric infinity input")
             }
             Self::Integer(integer) => DecimalValue::from_i64_with_control(integer, control)?,
+            Self::TimestampEpoch(micros) => timestamp_epoch(micros, control)?,
             Self::Scaled {
                 coefficient, scale, ..
             } => scaled(coefficient, scale, control)?,
@@ -70,6 +80,26 @@ impl Part {
         let (value, memory) = decimal.into_parts();
         Ok(control.finish(Value::Decimal(value), memory)?)
     }
+}
+
+fn timestamp_epoch(micros: i64, control: &ProductionControl<'_>) -> Result<Produced<DecimalValue>> {
+    let epoch = uqa_core::POSTGRES_EPOCH_MICROS;
+    if micros < i64::MAX - epoch {
+        return scaled(i128::from(micros + epoch), 6, control);
+    }
+    // PostgreSQL's overflowing integer subtraction takes the numeric division path, including its selected division scale before rounding to six places.
+    let stamp = DecimalValue::from_i64_with_control(micros, control)?;
+    let epoch = DecimalValue::from_i64_with_control(epoch, control)?;
+    let numerator = stamp
+        .checked_add_with_control(&epoch, control)?
+        .ok_or_else(|| SQLError::Internal("timestamp epoch addition failed".into()))?;
+    let denominator = DecimalValue::from_i64_with_control(MICROS_PER_SECOND, control)?;
+    let quotient = numerator
+        .checked_div_postgres_with_control(&denominator, control)?
+        .ok_or_else(|| SQLError::Internal("timestamp epoch division failed".into()))?;
+    quotient
+        .round_to_scale_with_control(6, control)?
+        .ok_or_else(|| SQLError::Internal("timestamp epoch rounding failed".into()))
 }
 
 fn scaled(

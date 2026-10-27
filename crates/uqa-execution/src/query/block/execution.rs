@@ -17,7 +17,7 @@ use super::{
     SingleRelation, SourceContext, SourcePlan,
 };
 use crate::query::binding::sources::{
-    bind_query_block_with_sources, ensure_select_with_sources, SourceBindings,
+    bind_query_block_with_sources, ensure_select_with_sources, BoundQueryBlock, SourceBindings,
 };
 
 #[expect(
@@ -34,6 +34,32 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     source_schema: &crate::RowSchema,
     sources: Option<&SourceBindings<'_>>,
 ) -> Result<QueryOutput, SQLError> {
+    // Binding and validation finish before row evaluation can reenter a routine.
+    let (expression_schema, outer) =
+        validate_bound_query_block(context, stmt, params, ctes, source_schema)?;
+    if stmt.from.is_none() {
+        return run_select_without_from_output(context, block, stmt, params, ctes, output_mode);
+    }
+    run_from_query_block(
+        context,
+        block,
+        stmt,
+        params,
+        ctes,
+        output_mode,
+        &expression_schema,
+        outer.as_ref(),
+        sources,
+    )
+}
+
+fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    stmt: &QueryBlockPlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    source_schema: &crate::RowSchema,
+) -> Result<(crate::RowSchema, Option<crate::RowSchema>), SQLError> {
     let outer = ctes.row_lock_outer_row().map(|row| row.schema.clone());
     let source_schema = with_query_table_pseudo_columns(source_schema);
     let expression_schema = overlay_outer_schema(&source_schema, outer.as_ref());
@@ -73,7 +99,7 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
             ctes,
             outer.as_ref(),
         )?;
-        return run_select_without_from_output(context, block, stmt, params, ctes, output_mode);
+        return Ok((expression_schema, outer));
     };
     validate_source_set_contexts_before_build(
         context.relational.catalog,
@@ -84,17 +110,7 @@ fn run_bound_query_block_output<'a, S: Clone + Send + Sync + 'static>(
         outer.as_ref(),
     )?;
 
-    run_from_query_block(
-        context,
-        block,
-        stmt,
-        params,
-        ctes,
-        output_mode,
-        &expression_schema,
-        outer.as_ref(),
-        sources,
-    )
+    Ok((expression_schema, outer))
 }
 
 #[expect(
@@ -288,27 +304,45 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             )?
         }
     };
-    let source_schema = operator.row_schema().clone();
-    let projection_schema = with_query_table_pseudo_columns(&source_schema);
-    let projection_schema = overlay_outer_schema(&projection_schema, outer);
-    validate_query_block_references(
-        context.ctes.routines,
-        stmt,
-        &projection_schema,
-        params,
-        ctes,
-        outer,
-    )?;
-    let physical_filter =
-        context
-            .planning
-            .residual_filter(stmt, from, qualifier_filters.as_ref(), ctes)?;
+    let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
+    let rewritten =
+        uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(stmt, operator.row_schema());
+    let original =
+        uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(block, operator.row_schema());
+    let stmt = rewritten.as_ref();
+    let block = original.as_ref();
+    let mut rewritten_scope;
+    let ctes = if rewrite_subqueries {
+        rewritten_scope = ctes.enter_scalar_subqueries(&stmt.subqueries);
+        &mut *rewritten_scope
+    } else {
+        ctes
+    };
+    let (operator, (columns, physical_filter)) =
+        crate::physical::construction::OperatorBuild::run(operator, |operator| {
+            let source_schema = operator.row_schema().clone();
+            let projection_schema = with_query_table_pseudo_columns(&source_schema);
+            let projection_schema = overlay_outer_schema(&projection_schema, outer);
+            validate_query_block_references(
+                context.ctes.routines,
+                stmt,
+                &projection_schema,
+                params,
+                ctes,
+                outer,
+            )?;
+            let physical_filter =
+                context
+                    .planning
+                    .residual_filter(stmt, from, qualifier_filters.as_ref(), ctes)?;
 
-    let columns = expand_from_star_columns(
-        projection_columns(&stmt.projections),
-        &stmt.projections,
-        &source_schema,
-    )?;
+            let columns = expand_from_star_columns(
+                projection_columns(&stmt.projections),
+                &stmt.projections,
+                &source_schema,
+            )?;
+            Ok((columns, physical_filter))
+        })?;
     execute_query_block_operator_output(
         context.relational,
         operator,
@@ -399,7 +433,7 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     output_mode: QueryOutputMode<'a>,
 ) -> Result<QueryOutput, SQLError> {
     let inherited_lock_identities = ctes.lock_identities.emit;
-    let mut scoped_ctes = ctes.enter_scalar_subqueries(&block.subqueries);
+    let mut scoped_ctes = ctes.enter_query_block(block);
     let row_identity_barrier = block.distinct
         || !block.distinct_on.is_empty()
         || matches!(block.compute, ComputePlan::Aggregate | ComputePlan::Window);
@@ -407,25 +441,49 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
         !block.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
-    let defer_distinct_limit = uqa_sql::semantics::should_defer_distinct_limit(block);
-    let outer = scoped_ctes.row_lock_outer_row().map(|row| &row.schema);
-    let bound = bind_query_block_with_sources(
-        context.ctes.routines,
-        block,
-        params,
-        &scoped_ctes,
-        outer,
-        defer_distinct_limit,
-        None,
-    )?;
+    let bound = prepare_query_block(context, block, params, &mut scoped_ctes)?;
+    let mut rewritten_scope;
+    let scoped_ctes = if block.deferred_outer_rewrites.is_empty() {
+        &mut *scoped_ctes
+    } else {
+        rewritten_scope = scoped_ctes.enter_scalar_subqueries(&bound.block.subqueries);
+        &mut *rewritten_scope
+    };
     run_bound_query_block_output(
         context,
         block,
         &bound.block,
         params,
-        &mut scoped_ctes,
+        scoped_ctes,
         output_mode,
         &bound.schema,
         bound.sources.as_ref(),
+    )
+}
+
+/// Finish outer-row rebinding and source analysis before row evaluation can recurse. Only the selected block and source descriptors remain live in the execution frame.
+fn prepare_query_block<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'a, S>,
+    block: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope<S>,
+) -> Result<BoundQueryBlock<'a>, SQLError> {
+    if let Some(outer) = ctes.row_lock_outer_row() {
+        if let std::borrow::Cow::Owned(outer) =
+            crate::query::binding::bind_outer_rewrite_row(block, outer)
+        {
+            ctes.set_row_lock_outer_row(outer);
+        }
+    }
+    let defer_distinct_limit = uqa_sql::semantics::should_defer_distinct_limit(block);
+    let outer = ctes.row_lock_outer_row().map(|row| &row.schema);
+    bind_query_block_with_sources(
+        context.ctes.routines,
+        block,
+        params,
+        ctes,
+        outer,
+        defer_distinct_limit,
+        None,
     )
 }

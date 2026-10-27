@@ -11,6 +11,78 @@ use uqa_core::{
 };
 
 #[test]
+fn stored_observers_retain_analysis_selections_without_rebinding_inputs() {
+    for sql in [
+        "SELECT pg_collation_for('x'::text COLLATE \"C\")",
+        "SELECT pg_typeof(42::smallint)",
+    ] {
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query");
+        };
+        let crate::plan::RelationalPlan::QueryBlock(mut block) = query.root else {
+            panic!("query block");
+        };
+        let mut expression = crate::plan::ExpressionPlan {
+            scalar: block.projections.remove(0).expr,
+            subqueries: block.subqueries,
+        };
+        let context = crate::binding::fixture::empty_binding_context();
+        let schema = RowSchema::default();
+        crate::binding::bind_expression_plan_routines_for_storage(
+            &NoRoutines,
+            &mut expression,
+            &[],
+            &context,
+            &schema,
+        )
+        .unwrap();
+        let mut before = None;
+        expression.scalar.visit(&mut |node| {
+            if let ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } = node
+            {
+                if binding.name.ends_with("pg_collation_for") || binding.name.ends_with("pg_typeof")
+                {
+                    before = Some(binding.clone());
+                }
+            }
+        });
+        assign_stored_input_collations(&NoRoutines, &mut expression, &schema, &context).unwrap();
+        let before = before.unwrap();
+        let mut selected = None;
+        expression.scalar.visit(&mut |node| {
+            if let ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } = node
+            {
+                if binding.name != before.name {
+                    return;
+                }
+                assert_eq!(binding.name, before.name);
+                assert_eq!(binding.argument_types, before.argument_types);
+                selected = binding.dispatch;
+            }
+        });
+        assert!(
+            matches!(
+                selected,
+                Some(
+                    crate::ast::FunctionDispatch::CollationFor {
+                        collation_oid: 950,
+                        ..
+                    } | crate::ast::FunctionDispatch::TypeOf { .. }
+                )
+            ),
+            "{sql}: {selected:?}"
+        );
+    }
+}
+
+#[test]
 fn collation_observation_binding_matches_postgresql() {
     let cases: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("collation_observation.json")).unwrap();

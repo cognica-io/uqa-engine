@@ -7,7 +7,7 @@
 //! Timestamp interval arithmetic preserves each calendar step before applying elapsed time.
 
 use super::{
-    datetime_out_of_range, infinite, micros_from_naive, naive_from_micros, shift_months,
+    datetime_out_of_range, infinite, shift_months, timestamp_fields, timestamp_micros,
     IntervalFields, Result, MICROS_PER_DAY, MICROS_PER_SECOND,
 };
 use crate::expr::EngineHook;
@@ -24,7 +24,9 @@ pub(in crate::expr) fn timestamp_tz_plus_interval(
     control: &ProductionControl<'_>,
 ) -> Result<i64> {
     control.check()?;
-    let timestamp = TemporalValue::TimestampTz { micros: ts };
+    let timestamp = TemporalValue::TimestampTz {
+        postgres_micros: ts,
+    };
     // Infinite operands and elapsed-time-only intervals do not consult a zone.
     if !timestamp.is_finite() || !span.value().is_finite() || span.months == 0 && span.days == 0 {
         return advance(ts, span, None);
@@ -39,22 +41,27 @@ pub(in crate::expr) fn timestamp_tz_plus_interval(
 }
 
 fn advance(mut ts: i64, span: IntervalFields, zone: Option<TemporalTimeZone>) -> Result<i64> {
-    let timestamp = TemporalValue::Timestamp { micros: ts };
+    let timestamp = TemporalValue::Timestamp {
+        postgres_micros: ts,
+    };
     if let Some(infinity) =
         infinite::add(timestamp.infinity(), span.value().infinity(), "timestamp")?
     {
         return Ok(infinite::timestamp_micros(infinity));
     }
     if span.months != 0 {
-        let local = naive_from_micros(local_time(ts, zone)?)?;
+        let local = timestamp_fields(local_time(ts, zone)?);
         let date = shift_months(local.date(), span.months)?;
-        ts = from_local(micros_from_naive(date.and_time(local.time())), zone)?;
+        let shifted = date
+            .at_time(local.time_micros())
+            .expect("retained time of day");
+        ts = from_local(timestamp_micros(shifted)?, zone)?;
     }
     if span.days != 0 {
         // A month step can normalize a missing civil time into the next hour or day.
         // PostgreSQL derives local time again before applying the day field.
         let local = local_time(ts, zone)?;
-        let julian = local.div_euclid(MICROS_PER_DAY) + 2_440_588 + i64::from(span.days);
+        let julian = local.div_euclid(MICROS_PER_DAY) + 2_451_545 + i64::from(span.days);
         let minimum = if zone.is_some() { -1 } else { 0 };
         if !(minimum..=i64::from(i32::MAX)).contains(&julian) {
             return Err(datetime_out_of_range("timestamp"));
@@ -73,7 +80,7 @@ fn advance(mut ts: i64, span: IntervalFields, zone: Option<TemporalTimeZone>) ->
 fn local_time(ts: i64, zone: Option<TemporalTimeZone>) -> Result<i64> {
     let offset = match zone {
         Some(zone) => zone
-            .offset_at(ts.div_euclid(MICROS_PER_SECOND))
+            .offset_at_postgres_micros(ts)
             .ok_or_else(|| datetime_out_of_range("timestamp"))?,
         None => 0,
     };
@@ -84,7 +91,10 @@ fn local_time(ts: i64, zone: Option<TemporalTimeZone>) -> Result<i64> {
 fn from_local(local: i64, zone: Option<TemporalTimeZone>) -> Result<i64> {
     let offset = match zone {
         Some(zone) => zone
-            .offset_for_local(local.div_euclid(MICROS_PER_SECOND))
+            .offset_for_local(
+                local.div_euclid(MICROS_PER_SECOND)
+                    + uqa_core::POSTGRES_EPOCH_MICROS / MICROS_PER_SECOND,
+            )
             .ok_or_else(|| datetime_out_of_range("timestamp"))?,
         None => 0,
     };

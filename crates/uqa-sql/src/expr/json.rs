@@ -29,6 +29,14 @@ pub(crate) use production::{
 
 pub(super) use path::{jsonpath_candidate, jsonpath_match};
 
+/// Quote borrowed UTF-8 with the native JSON string escaper, charging output and bounded scratch to the invoking allowance.
+pub fn quote_json_string_with_control(
+    text: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<String>> {
+    production::quote_with_control(text, control)
+}
+
 pub(super) fn parse_json(s: &str) -> Result<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(s)
         .map_err(|_| super::json_strip::invalid_json_input(s))
@@ -110,6 +118,14 @@ fn validate_jsonb_numbers(value: &serde_json::Value) -> Result<()> {
 /// Render an engine value as `PostgreSQL` JSON input text without losing the
 /// lexical representation of values already typed as `json` or `jsonb`.
 pub fn value_to_json_text(value: &Value) -> Result<String> {
+    value_to_json_text_with_catalog(value, None)
+}
+
+/// Render admitted composite, array and enum values through the observing statement's catalog.
+pub fn value_to_json_text_with_catalog(
+    value: &Value,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<String> {
     Ok(match value {
         Value::Null => "null".to_string(),
         Value::Void => "\"\"".to_string(),
@@ -133,32 +149,68 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
             serde_json::Value::String(super::value_to_string(value)?).to_string()
         }
         Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::Enum(value) => return Err(super::catalog_output_required(value)),
-        Value::Datum(value) => return value_to_json_text(&super::datums::read(value)?),
+        Value::Enum(value) => {
+            serde_json::Value::String(super::enums::enum_label(catalog, value)?.label).to_string()
+        }
+        Value::Datum(datum) => {
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            let value =
+                super::datums::read_with_value_catalog_and_control(datum, catalog, &control)?;
+            return typed_json_text(&value, Some(datum.type_oid()), catalog);
+        }
         Value::LegacyVector(vector) => legacy_vector_json(vector).to_string(),
-        Value::Array(array) => array_json_text(array.elements(), array.element_type_oid())?,
+        Value::Array(array) => {
+            array_json_text(array.elements(), array.element_type_oid(), catalog)?
+        }
         Value::List(values) => {
             let values = values
                 .iter()
-                .map(value_to_json_text)
+                .map(|value| value_to_json_text_with_catalog(value, catalog))
                 .collect::<Result<Vec<_>>>()?;
             format!("[{}]", values.join(","))
         }
         Value::Row(values) => record_json_text(
-            values
-                .iter()
-                .enumerate()
-                .map(|(index, value)| (format!("f{}", index + 1), value)),
+            values.iter().enumerate().map(|(index, value)| {
+                (
+                    format!("f{}", index + 1),
+                    value,
+                    values
+                        .field_types()
+                        .and_then(|types| types.get(index))
+                        .map(|ty| ty.oid),
+                )
+            }),
+            catalog,
         )?,
         Value::Record(fields) => {
-            record_json_text(fields.iter().map(|(name, value)| (name.clone(), value)))?
+            let descriptor = fields
+                .type_oid()
+                .and_then(|oid| catalog.map(|catalog| (oid, catalog)))
+                .map(|(oid, catalog)| catalog.value_composite_type(oid))
+                .transpose()?
+                .flatten();
+            record_json_text(
+                fields.iter().map(|(name, value)| {
+                    let oid = descriptor
+                        .as_ref()
+                        .and_then(|descriptor| descriptor.attribute(name))
+                        .map(|(_, attribute)| {
+                            crate::catalog::type_metadata::pg_type_oid(&attribute.ty) as u32
+                        });
+                    (name.clone(), value, oid)
+                }),
+                catalog,
+            )?
         }
         Value::Map(values) => {
             let values = values
                 .iter()
                 .map(|(key, value)| {
                     let key = serde_json::Value::String(key.clone()).to_string();
-                    Ok(format!("{key}:{}", value_to_json_text(value)?))
+                    Ok(format!(
+                        "{key}:{}",
+                        value_to_json_text_with_catalog(value, catalog)?
+                    ))
                 })
                 .collect::<Result<Vec<_>>>()?;
             format!("{{{}}}", values.join(","))
@@ -166,15 +218,16 @@ pub fn value_to_json_text(value: &Value) -> Result<String> {
     })
 }
 
-fn array_json_text(values: &[Value], oid: Option<u32>) -> Result<String> {
+fn array_json_text(
+    values: &[Value],
+    oid: Option<u32>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<String> {
     let fields = values
         .iter()
         .map(|value| match value {
-            Value::List(values) => array_json_text(values, oid),
-            Value::Float(value) if oid == Some(700) && value.is_finite() => {
-                Ok(super::format_real(*value as f32))
-            }
-            value => value_to_json_text(value),
+            Value::List(values) => array_json_text(values, oid, catalog),
+            value => typed_json_text(value, oid, catalog),
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(format!("[{}]", fields.join(",")))
@@ -198,22 +251,54 @@ fn legacy_vector_json(vector: &uqa_core::LegacyVectorValue) -> serde_json::Value
     )
 }
 
-fn record_json_text<'a>(fields: impl IntoIterator<Item = (String, &'a Value)>) -> Result<String> {
+fn record_json_text<'a>(
+    fields: impl IntoIterator<Item = (String, &'a Value, Option<u32>)>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<String> {
     let fields = fields
         .into_iter()
-        .map(|(name, value)| {
+        .map(|(name, value, oid)| {
             let name = serde_json::Value::String(name).to_string();
-            Ok(format!("{name}:{}", value_to_json_text(value)?))
+            Ok(format!("{name}:{}", typed_json_text(value, oid, catalog)?))
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(format!("{{{}}}", fields.join(",")))
 }
 
-pub(super) fn json_build_array_value(args: &[Value], jsonb: bool) -> Result<Value> {
+fn typed_json_text(
+    value: &Value,
+    oid: Option<u32>,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<String> {
+    if let Value::Float(value) = value {
+        if value.is_finite() {
+            let resolved = oid
+                .filter(|oid| !matches!(oid, 700 | 701))
+                .and_then(|oid| catalog.map(|catalog| (oid, catalog)))
+                .map(|(oid, catalog)| catalog.value_type_by_oid(oid))
+                .transpose()?
+                .flatten();
+            let mut base = resolved.as_ref();
+            while let Some(crate::ColumnType::Domain { base: inner, .. }) = base {
+                base = Some(inner);
+            }
+            if oid == Some(700) || matches!(base, Some(crate::ColumnType::Real)) {
+                return Ok(super::format_real(*value as f32));
+            }
+        }
+    }
+    value_to_json_text_with_catalog(value, catalog)
+}
+
+pub(super) fn json_build_array_value(
+    args: &[Value],
+    jsonb: bool,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<Value> {
     let text = format!(
         "[{}]",
         args.iter()
-            .map(value_to_json_text)
+            .map(|value| value_to_json_text_with_catalog(value, catalog))
             .collect::<Result<Vec<_>>>()?
             .join(", ")
     );
@@ -226,17 +311,51 @@ pub(super) fn json_build_array_value(args: &[Value], jsonb: bool) -> Result<Valu
 
 /// JSON object keys must be scalar SQL datums, including when an array-shaped catalog vector has a distinct runtime carrier. Each constructor retains its own NULL-key diagnostic.
 pub fn validate_json_object_key_type(value: &Value) -> Result<()> {
-    if matches!(
-        value,
-        Value::Array(_)
-            | Value::LegacyVector(_)
-            | Value::List(_)
-            | Value::Row(_)
-            | Value::Record(_)
-            | Value::Map(_)
-            | Value::Json(_)
-            | Value::JsonB(_)
-    ) {
+    validate_json_object_key_type_with_catalog(value, None)
+}
+
+pub fn validate_json_object_key_type_with_catalog(
+    value: &Value,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<()> {
+    let physical_container = if let Value::Datum(datum) = value {
+        let oid = datum.type_oid();
+        let ty = catalog
+            .map(|catalog| catalog.value_type_by_oid(oid))
+            .transpose()?
+            .flatten();
+        let mut ty = ty.as_ref();
+        while let Some(crate::ColumnType::Domain { base, .. }) = ty {
+            ty = Some(base);
+        }
+        matches!(oid, 22 | 30 | 114 | 2249 | 3802)
+            || crate::catalog::type_metadata::builtin_array_element(oid).is_some()
+            || matches!(
+                ty,
+                Some(
+                    crate::ColumnType::Array(_)
+                        | crate::ColumnType::Composite(_)
+                        | crate::ColumnType::Record
+                        | crate::ColumnType::Json
+                        | crate::ColumnType::JsonB
+                )
+            )
+    } else {
+        false
+    };
+    if physical_container
+        || matches!(
+            value,
+            Value::Array(_)
+                | Value::LegacyVector(_)
+                | Value::List(_)
+                | Value::Row(_)
+                | Value::Record(_)
+                | Value::Map(_)
+                | Value::Json(_)
+                | Value::JsonB(_)
+        )
+    {
         return Err(SQLError::Routine {
             sqlstate: "22023".into(),
             message: "key value must be scalar, not array, composite, or json".into(),
@@ -245,7 +364,26 @@ pub fn validate_json_object_key_type(value: &Value) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Value> {
+fn scalar_key(value: &Value, catalog: Option<&dyn super::SQLValueCatalog>) -> Result<String> {
+    match value {
+        Value::Datum(datum) => {
+            let decoded = super::datums::read_with_value_catalog_and_control(
+                datum,
+                catalog,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?;
+            scalar_key(&decoded, catalog)
+        }
+        Value::Enum(value) => Ok(super::enums::enum_label(catalog, value)?.label),
+        _ => super::value_to_string(value),
+    }
+}
+
+pub(super) fn json_build_object_value(
+    args: &[Value],
+    jsonb: bool,
+    catalog: Option<&dyn super::SQLValueCatalog>,
+) -> Result<Value> {
     let function = if jsonb {
         "jsonb_build_object()"
     } else {
@@ -276,9 +414,12 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
                 }
             });
         }
-        validate_json_object_key_type(&pair[0])?;
-        let key = serde_json::Value::String(super::value_to_string(&pair[0])?).to_string();
-        fields.push(format!("{key} : {}", value_to_json_text(&pair[1])?));
+        validate_json_object_key_type_with_catalog(&pair[0], catalog)?;
+        let key = serde_json::Value::String(scalar_key(&pair[0], catalog)?).to_string();
+        fields.push(format!(
+            "{key} : {}",
+            value_to_json_text_with_catalog(&pair[1], catalog)?
+        ));
     }
     let text = format!("{{{}}}", fields.join(", "));
     if jsonb {

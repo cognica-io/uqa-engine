@@ -25,6 +25,23 @@ pub type StatementAnalysisOperation<'a> =
 pub trait StatementAnalysisScopes {
     fn with_scope(&self, analyze: StatementAnalysisOperation<'_>) -> Result<(), SQLError>;
 }
+
+/// A nested command retains its enclosing CTE bindings while the session supplies fresh statement metadata and admission.
+pub struct InheritedStatementAnalysisScopes<'a> {
+    pub current: &'a dyn StatementAnalysisScopes,
+    pub parent: &'a dyn StatementBindingScope,
+}
+
+impl StatementAnalysisScopes for InheritedStatementAnalysisScopes<'_> {
+    fn with_scope(&self, analyze: StatementAnalysisOperation<'_>) -> Result<(), SQLError> {
+        self.current.with_scope(&mut |scope| {
+            let mut binding = super::snapshot::BindingSnapshot::from(scope.binding_context()?);
+            let parent = super::snapshot::BindingSnapshot::from(self.parent.binding_context()?);
+            binding.inherit_cte_bindings(&parent);
+            analyze(&binding)
+        })
+    }
+}
 pub struct StatementAnalysisContext<'a> {
     pub scopes: &'a dyn StatementAnalysisScopes,
     pub routines: &'a dyn RoutineResolution,
@@ -98,10 +115,22 @@ fn analyze_reusable_inputs(
         result = Some(match plan {
             UnifiedPlan::Command(command) => match command.as_mut() {
                 // The explained statement retains a scope of its own.
-                CommandPlan::Explain { body, .. } => {
-                    let (_, body_reusable) = analyze_reusable_inputs(context, body, params)?;
-                    reusable &= body_reusable;
-                    AnalyzedResult::Command
+                CommandPlan::Explain { .. } => {
+                    let mut explained = None;
+                    context.scopes.with_scope(&mut |scope| {
+                        explained = Some(analyze_plan_result_inner(
+                            context.routines,
+                            context.aliases,
+                            plan,
+                            params,
+                            scope,
+                            &mut reusable,
+                        )?);
+                        Ok(())
+                    })?;
+                    explained.ok_or_else(|| {
+                        SQLError::Internal("EXPLAIN analysis scope did not run".into())
+                    })?
                 }
                 _ => analyze_plan_result_inner(
                     context.routines,
@@ -148,16 +177,33 @@ fn analyze_plan_result_inner(
     scope: &dyn StatementBindingScope,
     reusable: &mut bool,
 ) -> Result<AnalyzedResult, SQLError> {
+    if let UnifiedPlan::Command(command) = plan {
+        if let CommandPlan::Explain {
+            body,
+            options,
+            unbound_parameters,
+        } = command.as_mut()
+        {
+            if params.is_empty() && options.infers_unbound_parameters()? {
+                let (parameters, body_reusable) = super::preparation::read_generic_explain_inputs(
+                    routines,
+                    body,
+                    &scope.binding_context()?,
+                    aliases,
+                )?;
+                *unbound_parameters = Some(parameters);
+                *reusable &= body_reusable;
+            } else {
+                *unbound_parameters = None;
+                analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
+            }
+            return options.result_schema().map(AnalyzedResult::Schema);
+        }
+    }
     let binding = scope.binding_context()?;
     let analysis =
         super::preparation::read_executable_inputs(routines, plan, params, &binding, aliases)?;
     *reusable &= analysis.reusable;
-    if let UnifiedPlan::Command(command) = plan {
-        if let CommandPlan::Explain { body, .. } = command.as_mut() {
-            analyze_plan_result_inner(routines, aliases, body, params, scope, reusable)?;
-            return Ok(AnalyzedResult::Command);
-        }
-    }
     Ok(analysis.result)
 }
 

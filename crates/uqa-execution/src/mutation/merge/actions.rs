@@ -264,10 +264,7 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                     }
                 }
                 apply_missing_column_defaults(services, target_table, &mut document, params)?;
-                Ok(SelectedMergeAction::Insert {
-                    document,
-                    overriding: *overriding,
-                })
+                Ok(SelectedMergeAction::Insert { document })
             }
             MergeWhenPlan::NothingMatched { .. }
             | MergeWhenPlan::NothingNotMatched { .. }

@@ -8,8 +8,13 @@
 
 pub mod age_cypher;
 pub mod aggregates;
+mod cte_order;
 pub mod cte_strategy;
 mod ctes;
+pub use cte_order::{
+    order_cte_plans_with_control, reachable_command_cte_order_with_control,
+    reachable_query_cte_order_with_control,
+};
 mod expression_shape;
 mod functions;
 mod input_values;

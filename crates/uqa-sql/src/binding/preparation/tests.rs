@@ -19,6 +19,7 @@ mod comparison_capabilities;
 mod defaults;
 mod dependencies;
 mod domain_collations;
+mod explain_inputs;
 mod field_collations;
 mod function_star;
 mod grouping_identity;
@@ -28,6 +29,7 @@ mod lateral;
 mod literal_collations;
 mod operator_joins;
 mod ordered_calls;
+mod rewritten_inputs;
 mod row_stars;
 mod set_contexts;
 mod set_ordering;
@@ -207,9 +209,9 @@ fn prepared_input_constants_keep_their_original_sites_and_selected_types() {
         assert_eq!(constants.len(), expected, "{sql}: {constants:?}");
         for value in constants {
             match value {
-                uqa_core::TemporalValue::Timestamp { micros }
-                | uqa_core::TemporalValue::TimestampTz { micros } => {
-                    assert_eq!(micros, clock, "{sql}");
+                uqa_core::TemporalValue::Timestamp { postgres_micros: micros }
+                | uqa_core::TemporalValue::TimestampTz { postgres_micros: micros } => {
+                    assert_eq!(micros, clock - uqa_core::POSTGRES_EPOCH_MICROS, "{sql}");
                 }
                 uqa_core::TemporalValue::Interval { .. } => {}
                 _ => panic!("unexpected constant in {sql}: {value:?}"),
@@ -256,10 +258,10 @@ fn prepared_assignments_read_constants_without_freezing_runtime_text_or_paramete
         let mut count = 0;
         plan.rewrite_scalar_expressions(&mut |expression| {
             if let ScalarExpr::TypedLiteral {
-                value: uqa_core::Value::Temporal(uqa_core::TemporalValue::Timestamp { micros }),
+                value: uqa_core::Value::Temporal(uqa_core::TemporalValue::Timestamp { postgres_micros: micros }),
                 ..
             } = expression {
-                assert_eq!(*micros, 90_123_456_789, "{sql}");
+                assert_eq!(*micros, 90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS, "{sql}");
                 count += 1;
             }
         });
@@ -315,7 +317,7 @@ fn domain_input_constants_use_the_base_type_without_erasing_parameter_identity()
                     assert_eq!(
                         *value,
                         uqa_core::Value::Temporal(uqa_core::TemporalValue::Timestamp {
-                            micros: 90_123_456_789
+                            postgres_micros: 90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS
                         })
                     );
                 }

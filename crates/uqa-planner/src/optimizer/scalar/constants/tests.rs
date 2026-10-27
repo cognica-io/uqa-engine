@@ -61,8 +61,12 @@ fn constant_folding_retains_selected_collation_metadata() {
 #[test]
 fn session_dependent_temporal_operators_remain_executable_after_parameter_binding() {
     use uqa_core::TemporalValue;
-    let zoned = ScalarExpr::Literal(Value::Temporal(TemporalValue::TimestampTz { micros: 0 }));
-    let plain = ScalarExpr::Literal(Value::Temporal(TemporalValue::Timestamp { micros: 0 }));
+    let zoned = ScalarExpr::Literal(Value::Temporal(TemporalValue::TimestampTz {
+        postgres_micros: 0,
+    }));
+    let plain = ScalarExpr::Literal(Value::Temporal(TemporalValue::Timestamp {
+        postgres_micros: 0,
+    }));
     let span = ScalarExpr::Literal(Value::Temporal(TemporalValue::Interval {
         months: 0,
         days: 1,
@@ -116,7 +120,7 @@ fn session_dependent_temporal_operators_remain_executable_after_parameter_bindin
     assert_eq!(
         literal_value(&folded).unwrap().as_deref(),
         Some(&Value::Temporal(TemporalValue::Timestamp {
-            micros: 86_400_000_000,
+            postgres_micros: 86_400_000_000,
         }))
     );
 }
@@ -218,7 +222,7 @@ fn bound_call(name: &str, args: Vec<ScalarExpr>) -> ScalarExpr {
                 object_id: None,
                 dispatch: None,
                 invocation: None,
-                composite_field: None,
+                value_binding: None,
                 resolution_error: None,
                 input_collation: None,
             })
@@ -581,7 +585,7 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
         ),
         (
             ColumnType::TimestampTz,
-            Value::Temporal(uqa_core::TemporalValue::TimestampTz { micros: 0 }),
+            Value::Temporal(uqa_core::TemporalValue::TimestampTz { postgres_micros: 0 }),
         ),
     ];
     for (ty, value) in values {
@@ -737,14 +741,14 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
     } = &mut call
     {
         binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
-        binding.composite_field = Some(Box::new(uqa_sql::ast::CompositeFieldBinding {
+        binding.set_composite_field(uqa_sql::ast::CompositeFieldBinding {
             collation_oid: None,
             type_oid: 20001,
             number: 2,
             result_type: ColumnType::Text,
             dropped: false,
             changed_type: None,
-        }));
+        });
     }
     let mut incompatible = call.clone();
     if let ScalarExpr::Func {
@@ -752,7 +756,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         ..
     } = &mut incompatible
     {
-        binding.composite_field.as_mut().unwrap().changed_type = Some(ColumnType::Varchar(Some(8)));
+        binding.composite_field_mut().unwrap().changed_type = Some(ColumnType::Varchar(Some(8)));
     }
     let error =
         fold_literal_expression(incompatible, |_| panic!("field must check its descriptor"))
@@ -798,7 +802,7 @@ fn selected_composite_constant_fields_fold_without_freezing_whole_records() {
         ..
     } = &mut call
     {
-        binding.composite_field.as_mut().unwrap().dropped = true;
+        binding.composite_field_mut().unwrap().dropped = true;
         args[0] = ScalarExpr::Column("volatile_result".into());
     }
     assert_eq!(

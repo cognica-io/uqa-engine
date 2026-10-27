@@ -364,3 +364,32 @@ fn temporary_creation_authorizes_before_syntax_and_allocates_only_after_validati
 
 mod lifetime;
 mod relocation;
+
+#[test]
+fn object_creation_resolves_temporary_alias_and_explicit_search_path() {
+    for name in ["pg_temp.f", "f"] {
+        let mut fixture = Fixture::new();
+        fixture.path = vec!["pg_temp".into(), "tenant".into()];
+        assert_eq!(fixture.context().object_name(name).unwrap(), "pg_temp_42.f");
+        assert!(fixture.allocated.get());
+        assert_eq!(
+            fixture.context().object_name("pg_temp_42.g").unwrap(),
+            "pg_temp_42.g"
+        );
+        assert_eq!(
+            fixture
+                .events
+                .borrow()
+                .iter()
+                .filter(|event| **event == "allocate")
+                .count(),
+            1
+        );
+    }
+    let mut fixture = Fixture::new();
+    fixture.user = "guest".into();
+    fixture.database.acl = Some(Vec::new());
+    let error = fixture.context().object_name("pg_temp.f").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert!(!fixture.allocated.get());
+}

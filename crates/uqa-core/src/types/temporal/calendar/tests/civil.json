@@ -1,0 +1,137 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "date": "4714-11-24 BC",
+      "unix_days": -2440588,
+      "year": -4714,
+      "month": 11,
+      "day": 24,
+      "doy": 328,
+      "dow": 1,
+      "isodow": 1,
+      "isoyear": -4714,
+      "week": 48
+    },
+    {
+      "date": "0001-01-01 BC",
+      "unix_days": -719528,
+      "year": -1,
+      "month": 1,
+      "day": 1,
+      "doy": 1,
+      "dow": 6,
+      "isodow": 6,
+      "isoyear": -2,
+      "week": 52
+    },
+    {
+      "date": "1999-12-31",
+      "unix_days": 10956,
+      "year": 1999,
+      "month": 12,
+      "day": 31,
+      "doy": 365,
+      "dow": 5,
+      "isodow": 5,
+      "isoyear": 1999,
+      "week": 52
+    },
+    {
+      "date": "2000-01-01",
+      "unix_days": 10957,
+      "year": 2000,
+      "month": 1,
+      "day": 1,
+      "doy": 1,
+      "dow": 6,
+      "isodow": 6,
+      "isoyear": 1999,
+      "week": 52
+    },
+    {
+      "date": "2004-12-31",
+      "unix_days": 12783,
+      "year": 2004,
+      "month": 12,
+      "day": 31,
+      "doy": 366,
+      "dow": 5,
+      "isodow": 5,
+      "isoyear": 2004,
+      "week": 53
+    },
+    {
+      "date": "2005-01-01",
+      "unix_days": 12784,
+      "year": 2005,
+      "month": 1,
+      "day": 1,
+      "doy": 1,
+      "dow": 6,
+      "isodow": 6,
+      "isoyear": 2004,
+      "week": 53
+    },
+    {
+      "date": "2015-12-31",
+      "unix_days": 16800,
+      "year": 2015,
+      "month": 12,
+      "day": 31,
+      "doy": 365,
+      "dow": 4,
+      "isodow": 4,
+      "isoyear": 2015,
+      "week": 53
+    },
+    {
+      "date": "2016-01-03",
+      "unix_days": 16803,
+      "year": 2016,
+      "month": 1,
+      "day": 3,
+      "doy": 3,
+      "dow": 0,
+      "isodow": 7,
+      "isoyear": 2015,
+      "week": 53
+    },
+    {
+      "date": "2016-01-04",
+      "unix_days": 16804,
+      "year": 2016,
+      "month": 1,
+      "day": 4,
+      "doy": 4,
+      "dow": 1,
+      "isodow": 1,
+      "isoyear": 2016,
+      "week": 1
+    },
+    {
+      "date": "294276-12-31",
+      "unix_days": 106762939,
+      "year": 294276,
+      "month": 12,
+      "day": 31,
+      "doy": 366,
+      "dow": 0,
+      "isodow": 7,
+      "isoyear": 294276,
+      "week": 52
+    },
+    {
+      "date": "5874897-12-31",
+      "unix_days": 2145042905,
+      "year": 5874897,
+      "month": 12,
+      "day": 31,
+      "doy": 365,
+      "dow": 2,
+      "isodow": 2,
+      "isoyear": 5874898,
+      "week": 1
+    }
+  ]
+}

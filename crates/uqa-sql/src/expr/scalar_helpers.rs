@@ -13,8 +13,8 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionString};
 mod quoting;
 pub(crate) use quoting::append_sql_literal;
 pub use quoting::quote_ident;
-pub(crate) use quoting::quote_ident_with_control;
-pub(super) use quoting::quote_literal_with_control;
+pub use quoting::quote_ident_with_control;
+pub use quoting::quote_literal_with_control;
 
 // --------------------------------------------------------------------
 // JSON helpers

@@ -8,7 +8,7 @@
 use super::{
     command_scope::MutationCommandState, identity::InsertIdentityContext,
     preparation::MutationPreparationContext, publication::PublicationContext,
-    rules::views::ViewRuleContext,
+    rules::ViewRuleContext,
 };
 use uqa_sql::semantics::mutation_qualifiers::MutationTargetColumns;
 #[derive(Clone)]

@@ -98,6 +98,19 @@ pub fn cast_value_from_with_control(
         let target = crate::ColumnType::from_sql_name_with_control(ty, control)?;
         return bit_string::cast(v, &target, source_ty, control);
     }
+    if matches!(target, "vector" | "tensor") {
+        return match &*crate::ColumnType::from_sql_name_with_control(ty, control)? {
+            crate::ColumnType::Vector(dimensions) => {
+                crate::assignment::conversion::convert_vector_with_control(v, *dimensions, control)
+            }
+            crate::ColumnType::Tensor(dimensions) => {
+                crate::assignment::conversion::convert_tensor_with_control(v, *dimensions, control)
+            }
+            _ => Err(SQLError::Internal(
+                "resolved dense cast has no dimension".into(),
+            )),
+        };
+    }
     if let Value::BitString(value) = v {
         let integer_target = match target {
             "integer" | "int" | "int4" => Some("integer"),
@@ -146,7 +159,7 @@ pub fn cast_value_from_with_control(
                 other => {
                     return Err(SQLError::TypeMismatch(format!(
                         "CAST AS {ty}: expected array, got {other:?}"
-                    )))
+                    )));
                 }
             };
             let elements = array::cast_array_elements(
@@ -262,10 +275,10 @@ pub fn cast_value_from_with_control(
             return text_value(text, false, control);
         }
         "int2vector" | "pg_catalog.int2vector" => {
-            return legacy_vector::cast_int2vector(v, source_ty, control)
+            return legacy_vector::cast_int2vector(v, source_ty, control);
         }
         "oidvector" | "pg_catalog.oidvector" => {
-            return legacy_vector::cast_oidvector(v, source_ty, control)
+            return legacy_vector::cast_oidvector(v, source_ty, control);
         }
         "oid" | "pg_catalog.oid" => cast_oid(v, source_ty, control),
         "regclass"
@@ -303,7 +316,7 @@ pub fn cast_value_from_with_control(
                     &canonical_cast_source_with_control(source_ty, v, control)?,
                     "record",
                 )),
-            }
+            };
         }
         "varchar" | "character varying" => {
             let text = cast_text(v, source_ty, control)?;
@@ -371,15 +384,24 @@ pub fn cast_value_from_with_control(
         "tstzrange" => return cast_range(v, source_ty, RangeSubtype::TimestampTz, control),
         "int4multirange" => return cast_multirange(v, source_ty, RangeSubtype::Integer, control),
         "int8multirange" => {
-            return cast_multirange(v, source_ty, RangeSubtype::BigInteger, control)
+            return cast_multirange(v, source_ty, RangeSubtype::BigInteger, control);
         }
         "nummultirange" => return cast_multirange(v, source_ty, RangeSubtype::Numeric, control),
         "datemultirange" => return cast_multirange(v, source_ty, RangeSubtype::Date, control),
         "tsmultirange" => return cast_multirange(v, source_ty, RangeSubtype::Timestamp, control),
         "tstzmultirange" => {
-            return cast_multirange(v, source_ty, RangeSubtype::TimestampTz, control)
+            return cast_multirange(v, source_ty, RangeSubtype::TimestampTz, control);
         }
         "json" => return super::json::cast_json_value_with_control(v, false, control),
+        "xml" => {
+            return cast_xml(
+                v,
+                source_ty,
+                crate::xml::XmlOption::Content,
+                control,
+                |_| {},
+            )
+        }
         "jsonb" => return super::json::cast_json_value_with_control(v, true, control),
         "bytea" => return cast_bytea(v, source_ty, control),
         "boolean" | "bool" => cast_boolean(v),
@@ -395,6 +417,41 @@ fn array_scalar_type_name(ty: &str) -> Option<&str> {
         element = inner.trim_end();
     }
     Some(element)
+}
+
+pub(super) fn cast_xml(
+    value: &Value,
+    source: Option<&str>,
+    option: crate::xml::XmlOption,
+    control: &ProductionControl<'_>,
+    notice: impl FnMut(crate::SQLNotice),
+) -> Result<Produced<Value>> {
+    control.check()?;
+    if matches!(value, Value::Null) {
+        return Ok(control.copy_value(value)?);
+    }
+    let declared = source
+        .filter(|source| *source != "unknown")
+        .map(|source| crate::ColumnType::from_sql_name_with_control(source, control))
+        .transpose()?;
+    if declared.as_deref() == Some(&crate::ColumnType::Xml) {
+        return Ok(control.copy_value(value)?);
+    }
+    let source = declared
+        .as_deref()
+        .map(|ty| ty.sql_name_with_control(control))
+        .transpose()?;
+    let source =
+        canonical_cast_source_with_control(source.as_deref().map(String::as_str), value, control)?;
+    if !matches!(
+        source.as_str(),
+        "unknown" | "text" | "varchar" | "bpchar" | "name"
+    ) {
+        return Err(undefined_cast(postgres_type_display_name(&source), "xml"));
+    }
+    let text = cast_text(value, Some(&source), control)?;
+    crate::xml::validate_with_control(&text, option, control, notice)?;
+    text_value(text, false, control)
 }
 
 fn text_value(
@@ -663,7 +720,7 @@ fn cast_text(
     if source == Some("\"char\"") {
         return cast_text_from_type(value, Some(&crate::ColumnType::InternalChar), control);
     }
-    if let (Value::Float(_), Some(source)) = (value, source) {
+    if let (Value::Float(_) | Value::Array(_), Some(source)) = (value, source) {
         let source = crate::ast::ColumnType::from_sql_name_with_control(source, control);
         match source {
             Ok(source) => return cast_text_from_type(value, Some(&source), control),
@@ -687,6 +744,9 @@ fn cast_text_from_type(
     if let (Value::Float(value), Some(crate::ColumnType::Real)) = (value, source) {
         return super::floating::format_real_with_control(*value as f32, control);
     }
+    if let (Value::Array(_), Some(source @ crate::ColumnType::Array(_))) = (value, source) {
+        return crate::result::format_postgres_text_with_control(value, source, None, control);
+    }
     value_to_string_with_control(value, control)
 }
 
@@ -696,7 +756,7 @@ fn cast_uuid(value: &Value, control: &ProductionControl<'_>) -> Result<Produced<
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "cannot cast {other:?} to uuid"
-            )))
+            )));
         }
     };
     text_value(

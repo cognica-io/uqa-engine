@@ -19,7 +19,7 @@ fn lower() -> FunctionBinding {
         object_id: None,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     }

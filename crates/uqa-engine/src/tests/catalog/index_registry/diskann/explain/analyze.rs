@@ -10,10 +10,10 @@ const QUERY: &str = "SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY
 
 fn analyze(engine: &Engine, query: &str) -> Json {
     let result = sql(engine, &format!("EXPLAIN (ANALYZE, FORMAT JSON) {query}"));
-    let Value::Str(value) = &result.rows[0]["plan"] else {
+    let Value::Json(value) = &result.rows[0]["QUERY PLAN"] else {
         panic!("expected text");
     };
-    serde_json::from_str(value).unwrap()
+    serde_json::from_str::<Json>(value).unwrap()[0].take()
 }
 
 fn searches(plan: &Json) -> &[Json] {
@@ -49,10 +49,9 @@ fn verify(engine: &Engine) {
     assert_eq!(searches(&calibrated).len(), 1);
     assert_eq!(searches(&calibrated)[0]["Requested K"], 2);
     let text = sql(engine, &format!("EXPLAIN ANALYZE {QUERY}"));
-    assert!(text
-        .rows
-        .iter()
-        .any(|row| matches!(&row["plan"], Value::Str(line) if line.contains("Vector Search:"))));
+    assert!(text.rows.iter().any(
+        |row| matches!(&row["QUERY PLAN"], Value::Str(line) if line.contains("Vector Search:"))
+    ));
 }
 
 #[test]
@@ -82,7 +81,7 @@ fn verify_dml(engine: &Engine) {
     sql(engine, "CREATE TABLE picked(id int)");
     sql(engine, "BEGIN");
     let plan = analyze(engine, &format!("INSERT INTO picked {QUERY}"));
-    assert_eq!(plan["Affected Rows"], 2);
+    assert_eq!(plan["Plan"]["Affected Rows"], 2);
     assert_eq!(searches(&plan).len(), 1);
     assert_eq!(sql(engine, "SELECT * FROM picked").rows.len(), 2);
     sql(engine, "ROLLBACK");
@@ -232,7 +231,7 @@ fn diskann_analyze_distinguishes_non_finite_norm_and_unexecuted_or_unsupported_l
     assert!(engine.runtime.diagnostics.capture().is_none());
     let empty = analyze(&engine, &QUERY.replace("WHERE ", "WHERE FALSE AND "));
     assert_eq!(searches(&empty).len(), 0);
-    assert_eq!(empty["Actual Rows"], 0);
+    assert_eq!(empty["Plan"]["Actual Rows"], 0);
     sql(
         &engine,
         "DROP INDEX diskann_idx; CREATE INDEX hnsw_idx ON diskann_docs USING hnsw(embedding)",

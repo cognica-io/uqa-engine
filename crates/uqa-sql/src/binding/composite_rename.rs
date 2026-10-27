@@ -64,7 +64,7 @@ impl CompositeFieldRename<'_> {
 
     fn selected(&self, binding: Option<&FunctionBinding>) -> bool {
         binding
-            .and_then(|binding| binding.composite_field.as_ref())
+            .and_then(|binding| binding.composite_field())
             .is_some_and(|field| field.type_oid == self.target && field.number == self.number)
     }
 
@@ -233,7 +233,6 @@ impl CompositeFieldRename<'_> {
 
     fn routine_params(&self, definition: &CreateFunction) -> Result<Vec<SQLParam>, SQLError> {
         crate::routines::body_parameters::sql_body_parameters(definition)
-            .into_iter()
             .map(|parameter| {
                 self.routines
                     .resolve_type_name(&parameter.type_name)

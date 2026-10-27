@@ -7,6 +7,7 @@
 //! Place streaming target sets before or after sorting without splitting their evaluation level.
 
 use super::{append_row_at_time_projection, order_projection_targets, FinalProjectionExecution};
+use crate::physical::construction::OperatorBuild;
 use crate::query::{
     projection::projection_set_batch_size,
     relational::{
@@ -22,106 +23,125 @@ use uqa_sql::{
 };
 
 pub(crate) fn attach_streaming_order_projection<'a, S: Clone + 'static>(
-    mut operator: Box<dyn crate::PhysicalOperator + 'a>,
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output: &[OutputColumnMapping],
     projections: Vec<PhysicalProjection>,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
-    let FinalProjectionExecution {
-        context,
-        params,
-        ctes,
-        runtime,
-        ref evaluator,
-    } = execution;
-    let type_resolver = context.expression_scope(ctes.clone());
-    let (mut sort_statement, required) = order_projection_targets(statement, output, &projections)?;
-    let setness = projections
+    OperatorBuild::build(operator, |operator| {
+        let FinalProjectionExecution {
+            context,
+            params,
+            ctes,
+            runtime,
+            ref evaluator,
+        } = execution;
+        let (mut sort_statement, required) =
+            order_projection_targets(statement, output, &projections)?;
+        let setness = projection_setness(&projections, operator.row_schema(), &execution)?;
+        let sets_before_sort = projections
+            .iter()
+            .zip(&setness)
+            .any(|((target, _), returns_set)| *returns_set && required.contains(target));
+        let sets_after_sort = !sets_before_sort && setness.contains(&true);
+        let mut before_sort = Vec::new();
+        let mut after_sort = Vec::new();
+        for (projection, returns_set) in projections.into_iter().zip(setness) {
+            if required.contains(&projection.0) || (sets_before_sort && returns_set) {
+                before_sort.push(projection);
+            } else {
+                after_sort.push(projection);
+            }
+        }
+        if sets_before_sort {
+            operator.attach(|input| {
+                build_set_projection(
+                    input,
+                    context,
+                    params,
+                    ctes,
+                    Arc::clone(evaluator),
+                    SetProjectionOutput {
+                        projections: before_sort,
+                        pass_through: true,
+                        batch_size: projection_set_batch_size(statement, ctes),
+                    },
+                )
+            })?;
+        } else if !before_sort.is_empty() {
+            let work_mem = runtime.work_mem_bytes()?;
+            operator.wrap(|input| {
+                Box::new(
+                    crate::Project::appending_target_evaluator(
+                        input,
+                        before_sort,
+                        Arc::clone(evaluator),
+                    )
+                    .with_memory_budget(work_mem),
+                )
+            });
+        }
+        // A postponed target set expands the sorted input before OFFSET/LIMIT counts output rows.
+        if sets_after_sort {
+            sort_statement.limit = None;
+            sort_statement.offset = None;
+            sort_statement.with_ties = false;
+        }
+        operator.attach(|input| {
+            attach_order_limit(
+                input,
+                &sort_statement,
+                output,
+                context,
+                params,
+                ctes,
+                runtime,
+                Arc::clone(evaluator),
+                None,
+            )
+        })?;
+        if sets_after_sort {
+            operator.attach(|input| {
+                build_set_projection(
+                    input,
+                    context,
+                    params,
+                    ctes,
+                    Arc::clone(evaluator),
+                    SetProjectionOutput {
+                        projections: after_sort,
+                        pass_through: true,
+                        batch_size: projection_set_batch_size(statement, ctes),
+                    },
+                )
+            })?;
+            operator.attach(|input| attach_presorted_limit(input, statement, output, execution))?;
+        } else {
+            operator.wrap(|input| {
+                append_row_at_time_projection(input, after_sort, execution.evaluator)
+            });
+        }
+        Ok(())
+    })
+}
+
+fn projection_setness<S: Clone + 'static>(
+    projections: &[PhysicalProjection],
+    schema: &crate::RowSchema,
+    execution: &FinalProjectionExecution<'_, '_, S>,
+) -> Result<Vec<bool>, SQLError> {
+    let type_resolver = execution.context.expression_scope(execution.ctes.clone());
+    projections
         .iter()
         .map(|(_, expression)| {
             expression_may_return_set(
-                context.catalog,
+                execution.context.catalog,
                 type_resolver.as_ref(),
                 expression,
-                operator.row_schema(),
-                params,
+                schema,
+                execution.params,
             )
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    let sets_before_sort = projections
-        .iter()
-        .zip(&setness)
-        .any(|((target, _), returns_set)| *returns_set && required.contains(target));
-    let sets_after_sort = !sets_before_sort && setness.contains(&true);
-    let mut before_sort = Vec::new();
-    let mut after_sort = Vec::new();
-    for (projection, returns_set) in projections.into_iter().zip(setness) {
-        if required.contains(&projection.0) || (sets_before_sort && returns_set) {
-            before_sort.push(projection);
-        } else {
-            after_sort.push(projection);
-        }
-    }
-    if sets_before_sort {
-        operator = build_set_projection(
-            operator,
-            context,
-            params,
-            ctes,
-            Arc::clone(evaluator),
-            SetProjectionOutput {
-                projections: before_sort,
-                pass_through: true,
-                batch_size: projection_set_batch_size(statement, ctes),
-            },
-        )?;
-    } else if !before_sort.is_empty() {
-        operator = Box::new(
-            crate::Project::appending_target_evaluator(
-                operator,
-                before_sort,
-                Arc::clone(evaluator),
-            )
-            .with_memory_budget(runtime.work_mem_bytes()?),
-        );
-    }
-    // A postponed target set expands the sorted input before OFFSET/LIMIT counts output rows.
-    if sets_after_sort {
-        sort_statement.limit = None;
-        sort_statement.offset = None;
-        sort_statement.with_ties = false;
-    }
-    operator = attach_order_limit(
-        operator,
-        &sort_statement,
-        output,
-        context,
-        params,
-        ctes,
-        runtime,
-        Arc::clone(evaluator),
-        None,
-    )?;
-    if sets_after_sort {
-        operator = build_set_projection(
-            operator,
-            context,
-            params,
-            ctes,
-            Arc::clone(evaluator),
-            SetProjectionOutput {
-                projections: after_sort,
-                pass_through: true,
-                batch_size: projection_set_batch_size(statement, ctes),
-            },
-        )?;
-        attach_presorted_limit(operator, statement, output, execution)
-    } else {
-        Ok(append_row_at_time_projection(
-            operator,
-            after_sort,
-            execution.evaluator,
-        ))
-    }
+        .collect()
 }

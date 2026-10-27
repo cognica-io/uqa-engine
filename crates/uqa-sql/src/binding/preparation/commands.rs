@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Mutation parameter coercion and RETURNING descriptions at preparation time.
+//! Command input analysis, mutation parameter coercion and RETURNING descriptions at preparation time.
 
 use super::{error, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::assignment::targets;
@@ -36,6 +36,20 @@ impl Preparation<'_> {
     }
 
     fn command_inner(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
+        match command {
+            CommandPlan::Explain { body, .. } => {
+                self.plan(body)?;
+                return Ok(None);
+            }
+            CommandPlan::CreateView { query, .. }
+            | CommandPlan::CreateTableAs { query, .. }
+            | CommandPlan::CreateMaterializedView { query, .. }
+            | CommandPlan::DeclareCursor { query, .. } => {
+                self.query(query, None)?;
+                return Ok(None);
+            }
+            _ => {}
+        }
         let parameters = self.scope.routine_parameters.clone();
         let outer = parameters
             .as_ref()
@@ -154,6 +168,10 @@ impl Preparation<'_> {
         }
         if let Some(source) = &insert.source {
             let mut output = self.query_output(source, outer, true)?;
+            if let Some(values) = &insert.rule_values_input {
+                let width = values.value_width(output.types.len())?;
+                output.types.truncate(width);
+            }
             self.insert_values(
                 &mut output.types,
                 &insert.columns,

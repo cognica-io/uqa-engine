@@ -11,7 +11,7 @@ use uqa_execution::ColumnarBatch;
 use crate::{Engine, SQLCursor, SQLCursorSummary};
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 
-struct SQLExecutionScope<'a> {
+pub(crate) struct SQLExecutionScope<'a> {
     engine: &'a Engine,
     depth: &'a std::sync::atomic::AtomicUsize,
     statement_clock: &'a std::sync::atomic::AtomicI64,
@@ -21,7 +21,7 @@ struct SQLExecutionScope<'a> {
 }
 
 impl<'a> SQLExecutionScope<'a> {
-    fn enter(engine: &'a Engine) -> (Self, bool) {
+    pub(crate) fn enter(engine: &'a Engine) -> (Self, bool) {
         let depth = &engine.runtime.sql_execution_depth;
         let statement_clock = &engine.session.statement_started_at_micros;
         let nested = depth.fetch_add(1, std::sync::atomic::Ordering::Relaxed) != 0;
@@ -93,6 +93,7 @@ impl Engine {
         uqa_execution::statement::thread_context::StatementThreadContext {
             retained_rows:
                 uqa_execution::query::sources::retained_source::RetainedRowContext::current(),
+            io: self.runtime.diagnostics.io_context(),
             regex_cache: Some(self.session_regex_cache()),
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: self.session_transaction_clock_micros(),
@@ -122,7 +123,7 @@ impl Engine {
         })
     }
 
-    pub(crate) fn with_direct_query_snapshot<R, E: std::fmt::Display>(
+    pub(crate) fn with_direct_query_snapshot<R, E: crate::transactions::TransactionError>(
         &self,
         read_only: bool,
         query: impl FnOnce(&Self) -> Result<R, E>,
@@ -131,6 +132,29 @@ impl Engine {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
         self.with_query_transaction_snapshot(!nested, read_only, query, map_transaction_error)
+    }
+
+    pub(crate) fn with_prepared_registration<R>(
+        &self,
+        parse: impl FnOnce(&Self) -> Result<std::sync::Arc<uqa_sql::Statement>, SQLError>,
+        register: impl FnOnce(&Self, std::sync::Arc<uqa_sql::Statement>) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.lock_statement_gate();
+        let (_execution, nested) = SQLExecutionScope::enter(self);
+        self.run_prepared_operation(
+            || {
+                self.runtime.cancellation.check()?;
+                let statement = parse(self)?;
+                Ok((
+                    crate::transactions::prepared::PreparedOperation::Parse {
+                        statement: std::sync::Arc::clone(&statement),
+                        outermost: !nested,
+                    },
+                    statement,
+                ))
+            },
+            |statement| register(self, statement),
+        )
     }
 
     /// Execute a simple-query message, delivering each statement's result in order. The whole message is parsed before execution, and implicit transaction segments retain the same boundaries as [`Engine::sql`]. The final result is delivered only after its implicit transaction has committed. Earlier results may have been delivered when a later statement fails; such failure still rolls back its implicit segment. An empty message delivers one result with no command completion.
@@ -142,13 +166,17 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
-        self.synchronize_table_catalog()
-            .map_err(|error| SQLError::Internal(format!("refresh table catalog: {error}")))?;
+        self.synchronize_table_catalog().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("refresh table catalog", &error)
+        })?;
         self.synchronize_table_data().map_err(|error| {
-            SQLError::Internal(format!("refresh committed table data: {error}"))
+            uqa_execution::storage_errors::storage_error("refresh committed table data", &error)
         })?;
         self.synchronize_catalog_registries().map_err(|error| {
-            SQLError::Internal(format!("refresh durable catalog registries: {error}"))
+            uqa_execution::storage_errors::storage_error(
+                "refresh durable catalog registries",
+                &error,
+            )
         })?;
         uqa_execution::statement::batch::execute_simple_query(
             &self.batch_execution_context(),
@@ -159,16 +187,18 @@ impl Engine {
         )
     }
 
-    /// Run a single SQL statement against the engine.
+    /// Execute a complete SQL message and return its final result. Multiple statements retain their native implicit transaction segments and explicit transaction boundaries; an empty message returns an empty result without a command tag.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
-        self.synchronize_table_catalog()
-            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
-        self.synchronize_table_data()
-            .map_err(|err| SQLError::Internal(format!("refresh committed table data: {err}")))?;
+        self.synchronize_table_catalog().map_err(|err| {
+            uqa_execution::storage_errors::storage_error("refresh table catalog", &err)
+        })?;
+        self.synchronize_table_data().map_err(|err| {
+            uqa_execution::storage_errors::storage_error("refresh committed table data", &err)
+        })?;
         self.synchronize_catalog_registries().map_err(|err| {
-            SQLError::Internal(format!("refresh durable catalog registries: {err}"))
+            uqa_execution::storage_errors::storage_error("refresh durable catalog registries", &err)
         })?;
         if nested {
             uqa_execution::statement::batch::execute_nested(
@@ -181,6 +211,34 @@ impl Engine {
         }
     }
 
+    pub(crate) fn execute_compiled_prepared(
+        &self,
+        name: &str,
+        statement: std::sync::Arc<uqa_sql::Statement>,
+        sql: Option<&str>,
+        params: &[SQLParam],
+    ) -> Result<SQLResult, SQLError> {
+        let _statement = self.lock_statement_gate();
+        let (_execution, nested) = SQLExecutionScope::enter(self);
+        self.synchronize_table_catalog().map_err(|err| {
+            uqa_execution::storage_errors::storage_error("refresh table catalog", &err)
+        })?;
+        self.synchronize_table_data().map_err(|err| {
+            uqa_execution::storage_errors::storage_error("refresh committed table data", &err)
+        })?;
+        self.synchronize_catalog_registries().map_err(|err| {
+            uqa_execution::storage_errors::storage_error("refresh durable catalog registries", &err)
+        })?;
+        uqa_execution::statement::batch::execute_prepared_statement(
+            &self.batch_execution_context(),
+            statement,
+            name,
+            sql,
+            params,
+            nested,
+        )
+    }
+
     /// Execute one read query into a bounded spill and return a columnar batch
     /// cursor. Unlike [`Engine::sql`], this path never retains the complete
     /// result as `Vec<ResultRow>` in memory. The statement finishes and its
@@ -188,12 +246,14 @@ impl Engine {
     pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, _) = SQLExecutionScope::enter(self);
-        self.synchronize_table_catalog()
-            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
-        self.synchronize_table_data()
-            .map_err(|err| SQLError::Internal(format!("refresh committed table data: {err}")))?;
+        self.synchronize_table_catalog().map_err(|err| {
+            uqa_execution::storage_errors::storage_error("refresh table catalog", &err)
+        })?;
+        self.synchronize_table_data().map_err(|err| {
+            uqa_execution::storage_errors::storage_error("refresh committed table data", &err)
+        })?;
         self.synchronize_catalog_registries().map_err(|err| {
-            SQLError::Internal(format!("refresh durable catalog registries: {err}"))
+            uqa_execution::storage_errors::storage_error("refresh durable catalog registries", &err)
         })?;
         uqa_execution::statement::cursor::execute(&self.batch_execution_context(), query, params)
     }

@@ -131,6 +131,7 @@
         "crates/uqa-engine/src/capabilities/tests/relation_arrays.rs",
         "crates/uqa-engine/src/capabilities/tests/relation_names.rs",
         "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+        "crates/uqa-engine/src/capabilities/tests/view_plans.rs",
         "crates/uqa-engine/src/capabilities/triggers.rs",
         "crates/uqa-engine/src/capabilities/truncate.rs",
         "crates/uqa-engine/src/capabilities/type_lifecycle.rs",

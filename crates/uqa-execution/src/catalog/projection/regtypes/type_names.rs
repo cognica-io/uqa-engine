@@ -173,7 +173,13 @@ pub fn resolve_catalog_column_type(
                 true,
             )
         },
-        |schema| vec![schema.to_owned()],
+        |schema| {
+            vec![if schema == "pg_temp" {
+                context.session.temporary_schema_name()
+            } else {
+                schema.to_owned()
+            }]
+        },
     );
     for schema in schemas {
         if schema == "pg_catalog" {

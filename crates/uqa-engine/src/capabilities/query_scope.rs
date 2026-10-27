@@ -68,6 +68,12 @@ impl
         crate::session::StatementReadSnapshot,
     > for Engine
 {
+    fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError> {
+        self.query_retention_control()
+    }
+    fn cancellation(&self) -> &uqa_core::CancellationToken {
+        self.query_runtime_view().cancellation
+    }
     fn command_scope(
         &self,
         privilege_subject: Option<&RoleReference>,

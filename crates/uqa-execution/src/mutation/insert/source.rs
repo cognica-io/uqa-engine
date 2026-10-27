@@ -251,6 +251,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         &self,
         services: InsertSourceContext<'_, S>,
         source_row: crate::OwnedPhysicalRow,
+        destination: Option<crate::mutation::returning::ReturningDestination<'_>>,
     ) -> Result<crate::query::consumer::QueryConsumerControl, SQLError> {
         services.runtime.check_cancelled()?;
         let mut state = self.state.borrow_mut();
@@ -297,11 +298,14 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             )?
             .is_some()
             {
-                return Err(
-                    uqa_sql::semantics::generated_values::generated_column_insert_error(
-                        &column.column,
-                    ),
-                );
+                if uqa_sql::semantics::generated_values::insert_has_written_value(stmt, index) {
+                    return Err(
+                        uqa_sql::semantics::generated_values::generated_column_insert_error(
+                            &column.column,
+                        ),
+                    );
+                }
+                continue;
             }
             let value = source_row
                 .value_at(index)
@@ -339,7 +343,6 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             id_column,
             *identity_source,
             auto_id_column.as_deref(),
-            stmt.overriding,
             &mut document,
             "prepare INSERT SELECT identity",
         )?;
@@ -455,7 +458,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             &mut prepared_conflict,
         )?;
         if let Some(row) = returning {
-            returning_rows.push(row)?;
+            returning_rows.push_to(row, destination)?;
         }
         events.append_after_rows(row_after_events, &services.rows.referential.triggers)?;
         supplied_identities.note(&target_table, &prepared_conflict);
@@ -481,5 +484,3 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
 use crate::mutation::preparation::MutationPreparationContext;
 
 pub mod binding;
-mod inputs;
-pub(super) use inputs::InsertInputRows;

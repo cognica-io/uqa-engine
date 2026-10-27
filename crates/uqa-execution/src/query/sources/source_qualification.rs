@@ -125,7 +125,10 @@ pub(super) fn shape_join_using_output<'a>(
     right: &RowSchema,
     using: &uqa_sql::semantics::ResolvedJoinUsing,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let (columns, aliases) = uqa_sql::semantics::join_using_layout(kind, left, right, using)?;
+    let (operator, (columns, aliases)) =
+        crate::physical::construction::OperatorBuild::run(operator, |_| {
+            uqa_sql::semantics::join_using_layout(kind, left, right, using)
+        })?;
     crate::JoinOutput::try_new(operator, columns, aliases)
         .map(|output| Box::new(output) as Box<dyn PhysicalOperator + 'a>)
         .map_err(physical_exec_error)

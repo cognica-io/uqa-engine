@@ -683,31 +683,33 @@ impl Expr {
 /// Return whether `name` is a built-in aggregate understood by the planner.
 #[must_use]
 pub fn is_builtin_aggregate_function(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "count"
-            | "sum"
-            | "avg"
-            | "min"
-            | "max"
-            | "string_agg"
-            | "array_agg"
-            | "bool_and"
-            | "bool_or"
-            | "stddev"
-            | "stddev_samp"
-            | "stddev_pop"
-            | "variance"
-            | "var_samp"
-            | "var_pop"
-            | "percentile_cont"
-            | "percentile_disc"
-            | "mode"
-            | "json_agg"
-            | "jsonb_agg"
-            | "json_object_agg"
-            | "jsonb_object_agg"
-    )
+    const NAMES: [&str; 22] = [
+        "count",
+        "sum",
+        "avg",
+        "min",
+        "max",
+        "string_agg",
+        "array_agg",
+        "bool_and",
+        "bool_or",
+        "stddev",
+        "stddev_samp",
+        "stddev_pop",
+        "variance",
+        "var_samp",
+        "var_pop",
+        "percentile_cont",
+        "percentile_disc",
+        "mode",
+        "json_agg",
+        "jsonb_agg",
+        "json_object_agg",
+        "jsonb_object_agg",
+    ];
+    NAMES
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

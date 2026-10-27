@@ -30,10 +30,28 @@ pub(super) fn optimize_unified_plan(
     super::source_demand::prune(plan, config, aggregates)?;
     super::derived_pullup::rewrite(plan, config)?;
     // Analyzed layouts describe the original topology, not later source expansion or join order.
-    plan.visit_queries_mut(&mut |query| query.analyzed_source = None);
+    plan.visit_queries_mut(&mut |query| {
+        query.analyzed_source = None;
+        // Discarded scalar arenas must not keep an enclosing command's CTE alive during constant evaluation.
+        super::subqueries::prune_query(query);
+    });
     match plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
+    }
+    Ok(())
+}
+
+/// VALUES keeps the same bounded constant owner whether it is a command input, query root or range item.
+pub(super) fn optimize_values(
+    rows: &mut [Vec<uqa_sql::ScalarExpr>],
+    config: &OptimizerConfig,
+) -> Result<(), SQLError> {
+    if rows.iter().any(|row| !row.is_empty()) {
+        let values_config = config.for_values()?;
+        for expression in rows.iter_mut().flatten() {
+            optimize_scalar_slot(expression, &values_config)?;
+        }
     }
     Ok(())
 }
@@ -116,11 +134,7 @@ pub(super) fn optimize_query(
             super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
         }
         RelationalPlan::Values { rows, subqueries } => {
-            for row in &mut *rows {
-                for expression in row {
-                    optimize_scalar_slot(expression, config)?;
-                }
-            }
+            optimize_values(rows, config)?;
             let live = super::subqueries::live_slots(rows.iter().flatten())?;
             super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
         }
@@ -135,18 +149,16 @@ pub(super) fn optimize_query_block(
     infer_output_demand: bool,
 ) -> Result<(), SQLError> {
     if infer_output_demand {
+        let routines = config.routine_inlining.as_ref();
         super::derived_projection::prune(
             block,
-            aggregates,
-            config
-                .routine_inlining
-                .as_ref()
-                .map(|context| context.routines),
-            config
-                .routine_inlining
-                .as_ref()
-                .map(|context| context.volatility),
-        );
+            super::OutputPruningContext {
+                aggregates,
+                routines: routines.map(|context| context.routines),
+                volatility: routines.map(|context| context.volatility),
+                visible_ctes: &|_| false,
+            },
+        )?;
     }
     if let Some(source) = &mut block.from {
         optimize_source(source, config, aggregates)?;
@@ -164,7 +176,7 @@ pub(super) fn optimize_query_block(
     )?;
     super::optimize_projections(&mut block.projections, config)?;
     if let Some(predicate) = &mut block.r#where {
-        optimize_scalar_slot(predicate, config)?;
+        super::optimize_qualification(predicate, config)?;
         let allow_unqualified_signals = source_allows_unqualified_signals(block.from.as_ref());
         rewrite_implicit_hybrid_fusion(predicate, allow_unqualified_signals);
         if config.enable_filter_pushdown {
@@ -180,7 +192,7 @@ pub(super) fn optimize_query_block(
         }
     }
     if let Some(having) = &mut block.having {
-        optimize_scalar_slot(having, config)?;
+        super::optimize_qualification(having, config)?;
     }
     for order in &mut block.order_by {
         optimize_scalar_slot(&mut order.expr, config)?;
@@ -207,7 +219,7 @@ pub(super) fn optimize_query_block(
             .as_ref()
             .map(|context| context.types),
     );
-    let live_subqueries = super::subqueries::live_slots(block.expressions())?;
+    let live_subqueries = super::subqueries::live_slots_for_block(block)?;
     super::subqueries::optimize_live(&mut block.subqueries, &live_subqueries, config, aggregates)?;
 
     // Removing an unused aggregate's value does not remove its implicit group on empty input.
@@ -241,18 +253,14 @@ pub(super) fn optimize_source(
             optimize_source(right, config, aggregates)?;
             *lateral |= function_lateral && matches!(right.as_ref(), SourcePlan::Subquery { .. });
             if let Some(on) = on {
-                optimize_scalar_slot(on, config)?;
+                super::optimize_qualification(on, config)?;
                 if config.enable_filter_pushdown {
                     prioritize_access_predicates(on);
                 }
             }
         }
         SourcePlan::Values { rows, .. } => {
-            for row in rows {
-                for expression in row {
-                    optimize_scalar_slot(expression, config)?;
-                }
-            }
+            optimize_values(rows, config)?;
         }
         SourcePlan::Function { args, .. } => {
             for expression in args {

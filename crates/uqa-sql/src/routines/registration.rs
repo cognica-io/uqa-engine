@@ -255,11 +255,10 @@ fn validate_replacement_result(
 // has no such descriptor; procedures keep even their single output column.
 fn record_output_shape(definition: &CreateFunction) -> Vec<(String, String)> {
     let outputs = definition.output_params();
-    if !definition.is_procedure && outputs.len() < 2 {
+    if !definition.is_procedure && outputs.clone().nth(1).is_none() {
         return Vec::new();
     }
     outputs
-        .iter()
         .enumerate()
         .map(|(index, parameter)| {
             (

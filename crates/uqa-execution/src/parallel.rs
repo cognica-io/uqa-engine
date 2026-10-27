@@ -27,6 +27,9 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+#[cfg(not(target_os = "emscripten"))]
+mod pool;
+
 /// Split `input` into `num_partitions` chunks, run `worker` over each
 /// chunk in parallel, and concatenate the results in the same order
 /// the chunks were emitted in.
@@ -60,13 +63,20 @@ where
     #[cfg(not(target_os = "emscripten"))]
     {
         let context = crate::statement::thread_context::StatementThreadContext::current();
-        chunks
-            .into_par_iter()
-            .map(|chunk| under_statement_thread_context(&context, || worker(chunk)))
-            .reduce(Vec::new, |mut a, b| {
-                a.extend(b);
-                a
-            })
+        let work = || {
+            chunks
+                .into_par_iter()
+                .map(|chunk| under_statement_thread_context(&context, || worker(chunk)))
+                .reduce(Vec::new, |mut a, b| {
+                    a.extend(b);
+                    a
+                })
+        };
+        if rayon::current_thread_index().is_some() {
+            work()
+        } else {
+            ParallelExecutor::new(parts).pool().install(work)
+        }
     }
     #[cfg(target_os = "emscripten")]
     {
@@ -142,14 +152,13 @@ pub const MIN_PARALLEL_BRANCHES: usize = 2;
 
 /// Branch-level parallel executor.
 ///
-/// Holds the configured worker count and a "shutdown" flag. Each call
-/// to [`Self::execute_branches`] runs the supplied workers in parallel
-/// (when enabled and above the branching threshold) and collects
-/// their results in input order.
+/// Owns a lazily created pool with the configured worker count and a shutdown flag. Clones retain the same pool. The last external owner joins every worker; if a pool task releases the last owner, its return completes termination instead. Each call to [`Self::execute_branches`] runs the supplied workers in parallel (when enabled and above the branching threshold) and collects their results in input order.
 #[derive(Debug, Clone)]
 pub struct ParallelExecutor {
     max_workers: usize,
     shutdown: Arc<AtomicBool>,
+    #[cfg(not(target_os = "emscripten"))]
+    pool: Arc<std::sync::OnceLock<pool::OwnedPool>>,
 }
 
 impl ParallelExecutor {
@@ -161,6 +170,8 @@ impl ParallelExecutor {
         Self {
             max_workers,
             shutdown: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(target_os = "emscripten"))]
+            pool: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
@@ -175,6 +186,12 @@ impl ParallelExecutor {
     /// execution.
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Release);
+    }
+
+    #[cfg(not(target_os = "emscripten"))]
+    fn pool(&self) -> &pool::OwnedPool {
+        self.pool
+            .get_or_init(|| pool::OwnedPool::start(self.max_workers))
     }
 
     /// Run each `worker` and collect results in the same order. Uses
@@ -192,10 +209,12 @@ impl ParallelExecutor {
         #[cfg(not(target_os = "emscripten"))]
         {
             let context = crate::statement::thread_context::StatementThreadContext::current();
-            workers
-                .par_iter()
-                .map(|w| under_statement_thread_context(&context, w))
-                .collect()
+            self.pool().install(|| {
+                workers
+                    .par_iter()
+                    .map(|w| under_statement_thread_context(&context, w))
+                    .collect()
+            })
         }
         #[cfg(target_os = "emscripten")]
         {
@@ -284,6 +303,7 @@ mod cancellation_tests {
         token.cancel();
         let statement = crate::statement::thread_context::StatementThreadContext {
             retained_rows: crate::query::sources::retained_source::RetainedRowContext::default(),
+            io: uqa_core::io_usage::IOContext::default(),
             regex_cache: None,
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: Some(123),
@@ -301,6 +321,7 @@ mod cancellation_tests {
             let _detached = crate::statement::thread_context::StatementThreadContext {
                 retained_rows: crate::query::sources::retained_source::RetainedRowContext::default(
                 ),
+                io: uqa_core::io_usage::IOContext::default(),
                 regex_cache: None,
                 temporal_input: uqa_sql::expr::TemporalInputContext {
                     transaction_clock_micros: None,

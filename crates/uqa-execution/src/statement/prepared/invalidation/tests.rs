@@ -133,7 +133,7 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
                     object_id: None,
                     dispatch: None,
                     invocation: None,
-                    composite_field: None,
+                    value_binding: None,
                     resolution_error: None,
                     input_collation: None,
                 });

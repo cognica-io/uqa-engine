@@ -49,7 +49,10 @@ pub(super) fn foreign_key_parent_index(
             for &id in page.iter() {
                 context.cancellation.check()?;
                 if let Some(document) = context.reads.get_document(&table, id)? {
-                    keys.insert(&foreign_key_parent_values(key, &document, comparison)?)?;
+                    keys.insert(
+                        &foreign_key_parent_values(key, &document, comparison)?,
+                        Some(context.values),
+                    )?;
                 }
             }
         }
@@ -85,9 +88,14 @@ impl ParentKeyBuffer {
         }
     }
 
-    fn insert(&mut self, values: &[Value]) -> Result<(), SQLError> {
+    fn insert(
+        &mut self,
+        values: &[Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<(), SQLError> {
         self.cancellation.check()?;
-        let key = crate::distinct::canonical_row_key(values).map_err(physical_exec_error)?;
+        let key = crate::distinct::canonical_constraint_key(values, catalog)
+            .map_err(physical_exec_error)?;
         self.cancellation.check()?;
         let digest = Sha256::digest(&key).into();
         self.insert_encoded(key, digest)
@@ -169,9 +177,14 @@ pub(super) struct ParentKeys {
 }
 
 impl ParentKeys {
-    pub(super) fn contains(&self, values: &[Value]) -> Result<bool, SQLError> {
+    pub(super) fn contains(
+        &self,
+        values: &[Value],
+        catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+    ) -> Result<bool, SQLError> {
         self.cancellation.check()?;
-        let key = crate::distinct::canonical_row_key(values).map_err(physical_exec_error)?;
+        let key = crate::distinct::canonical_constraint_key(values, catalog)
+            .map_err(physical_exec_error)?;
         let digest = Sha256::digest(&key).into();
         self.contains_encoded(&key, digest)
     }

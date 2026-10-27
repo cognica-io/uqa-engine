@@ -25,6 +25,7 @@ mod range_input;
 mod relation_arrays;
 mod relation_names;
 mod scoped_catalog;
+mod view_plans;
 
 pub(super) fn record_catalog_capture() {
     CATALOG_CAPTURES.set(CATALOG_CAPTURES.get() + 1);

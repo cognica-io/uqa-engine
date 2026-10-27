@@ -655,9 +655,30 @@ fn legacy_user_xmin_values_are_not_overwritten_by_tuple_version_metadata() {
     );
 }
 
-#[test]
-fn schemaless_system_xmin_is_projected_from_tuple_metadata() {
-    let eng = Engine::new();
+fn open_xmin_engine(provider: usize, path: &std::path::Path) -> Engine {
+    match provider {
+        0 => Engine::new(),
+        1 => Engine::open(path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
+}
+
+#[rstest::rstest]
+fn schemaless_system_xmin_is_projected_from_tuple_metadata(
+    #[values(0, 1, 2, 3)] provider: usize,
+    #[values(false, true)] joined: bool,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("system-xmin.db");
+    let eng = open_xmin_engine(provider, &path);
     eng.create_default_table("schemaless_xmin", Vec::new())
         .unwrap();
     eng.add_document(
@@ -668,7 +689,14 @@ fn schemaless_system_xmin_is_projected_from_tuple_metadata() {
     .unwrap();
     let first = eng.get_document("schemaless_xmin", 1).unwrap().unwrap()["xmin"].clone();
     let updated = eng
-        .sql("UPDATE schemaless_xmin SET value = 20 RETURNING xmin", &[])
+        .sql(
+            if joined {
+                "UPDATE schemaless_xmin SET value = 20 FROM (VALUES (1)) source(n) RETURNING xmin"
+            } else {
+                "UPDATE schemaless_xmin SET value = 20 RETURNING xmin"
+            },
+            &[],
+        )
         .unwrap();
     assert_ne!(updated.rows[0]["xmin"], first);
     let document = eng.get_document("schemaless_xmin", 1).unwrap().unwrap();
@@ -683,11 +711,30 @@ fn schemaless_system_xmin_is_projected_from_tuple_metadata() {
         ),
         [expected_xmin]
     );
+    eng.close().unwrap();
+    drop(eng);
+    if provider != 0 {
+        let reopened = open_xmin_engine(provider, &path);
+        assert_eq!(
+            integer_column(
+                &reopened
+                    .sql("SELECT xmin FROM schemaless_xmin", &[])
+                    .unwrap(),
+                "xmin"
+            ),
+            [expected_xmin]
+        );
+    }
 }
 
-#[test]
-fn schemaless_user_xmin_equal_to_tuple_version_is_not_misclassified_as_a_mirror() {
-    let eng = Engine::new();
+#[rstest::rstest]
+fn schemaless_user_xmin_equal_to_tuple_version_is_not_misclassified_as_a_mirror(
+    #[values(0, 1, 2, 3)] provider: usize,
+    #[values(false, true)] joined: bool,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("user-xmin.db");
+    let eng = open_xmin_engine(provider, &path);
     eng.create_default_table("schemaless_user_xmin", Vec::new())
         .unwrap();
     eng.add_document(
@@ -743,4 +790,30 @@ fn schemaless_user_xmin_equal_to_tuple_version_is_not_misclassified_as_a_mirror(
             ("xmin".into(), uqa_core::Value::Int(colliding_user_xmin)),
         ])
     );
+    let changed = eng.sql(if joined {
+        "UPDATE schemaless_user_xmin SET value = 40 FROM (VALUES (1)) source(n) WHERE value=30 RETURNING xmin"
+    } else {
+        "UPDATE schemaless_user_xmin SET value = 40 WHERE value=30 RETURNING xmin"
+    }, &[]).unwrap();
+    assert_eq!(integer_column(&changed, "xmin"), [colliding_user_xmin]);
+    assert_eq!(
+        eng.get_document("schemaless_user_xmin", 2)
+            .unwrap()
+            .unwrap()["xmin"],
+        uqa_core::Value::Int(colliding_user_xmin)
+    );
+    eng.close().unwrap();
+    drop(eng);
+    if provider != 0 {
+        let reopened = open_xmin_engine(provider, &path);
+        assert_eq!(
+            integer_column(
+                &reopened
+                    .sql("SELECT xmin FROM schemaless_user_xmin WHERE value=40", &[])
+                    .unwrap(),
+                "xmin"
+            ),
+            [colliding_user_xmin]
+        );
+    }
 }

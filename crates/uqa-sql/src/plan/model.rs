@@ -39,6 +39,9 @@ pub struct QueryPlan {
     /// Whether relation references in this tree are stored catalog identities rather than names that must be resolved in the executing session.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub relations_bound: bool,
+    /// Relation authorization retained when a rewritten query is nested beneath another statement's owner. SQL-visible identity and function privileges remain the invoking session's.
+    #[serde(skip)]
+    pub relation_privilege_subject: Option<crate::catalog::roles::RoleReference>,
     pub ctes: Vec<CtePlan>,
     pub root: RelationalPlan,
 }
@@ -173,13 +176,16 @@ pub enum RelationalPlan {
 /// into explicit parent/child nodes.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryBlockPlan {
+    /// Transient outer-column substitutions whose local namespace is supplied by a runtime row descriptor. Stored syntax never retains an execution's view rewrite.
+    #[serde(skip)]
+    pub deferred_outer_rewrites: Vec<crate::semantics::view_rewrite::DeferredOuterRewrite>,
     /// The canonical owners of window inputs; calls keep resolved execution copies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<crate::ast::WindowDefinition<crate::ir::ScalarWindowSpec>>,
     pub projections: Vec<ProjectionPlan>,
     /// Analyzed column reads retained when unused outputs are removed. These names authorize access but never evaluate the discarded values.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
-    pub privilege_columns: std::collections::BTreeSet<crate::ColumnIdentity>,
+    #[serde(default, skip_serializing_if = "uqa_core::memory::OwnedSet::is_empty")]
+    pub privilege_columns: uqa_core::memory::OwnedSet<crate::ColumnIdentity>,
     pub from: Option<SourcePlan>,
     pub r#where: Option<ScalarExpr>,
     pub compute: ComputePlan,
@@ -437,6 +443,9 @@ pub struct InsertPlan {
     pub ctes: Vec<CtePlan>,
     pub rows: Vec<Vec<ScalarExpr>>,
     pub source: Option<Box<QueryPlan>>,
+    /// VALUES provenance and unresolved defaults survive attached rule inputs and automatic view rewrites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_values_input: Option<RuleValuesInput>,
     pub on_conflict: Option<ConflictPlan>,
     pub returning: Vec<ProjectionPlan>,
     pub returning_aliases: crate::ast::ReturningAliases,
@@ -445,6 +454,38 @@ pub struct InsertPlan {
     pub view_rule_relations: Vec<String>,
     pub view_rule_insert_plans: Vec<ViewRuleInsertPlan>,
     pub view_rule_returning: Option<ViewRuleReturningPlan>,
+}
+
+/// The target values and private DEFAULT flags carried by a rewritten VALUES input.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RuleValuesInput {
+    pub(crate) width: usize,
+    pub(crate) inline: bool,
+    pub(crate) defaults: Vec<usize>,
+    pub(crate) unresolved: uqa_core::memory::OwnedSet<usize>,
+    pub(crate) written: uqa_core::memory::OwnedSet<usize>,
+}
+
+impl RuleValuesInput {
+    /// Whether any original VALUES row supplies a value other than DEFAULT at this position.
+    pub fn has_written_value(&self, position: usize) -> bool {
+        self.written.contains(&position)
+    }
+
+    pub fn is_inline(&self) -> bool {
+        self.inline
+    }
+
+    /// Validate private rewrite fields before excluding them from INSERT target assignment.
+    pub fn value_width(&self, source_width: usize) -> Result<usize, crate::SQLError> {
+        let flags = if self.inline { 0 } else { self.defaults.len() };
+        if source_width != self.width + flags {
+            return Err(crate::SQLError::Internal(
+                "rewritten VALUES input lost its target values or DEFAULT flags".into(),
+            ));
+        }
+        Ok(self.width)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -658,10 +699,12 @@ pub enum CommandPlan {
         library: String,
     },
     Explain {
-        analyze: bool,
-        verbose: bool,
-        format: Option<String>,
+        #[serde(flatten)]
+        options: crate::explain::ExplainOptions,
         body: Box<UnifiedPlan>,
+        /// Inferred placeholders for an ordinary `GENERIC_PLAN` without host bindings.
+        #[serde(skip)]
+        unbound_parameters: Option<Vec<crate::SQLParam>>,
     },
     Analyze {
         table: Option<String>,
@@ -755,6 +798,8 @@ pub enum CommandPlan {
         name: String,
         args: Vec<ExpressionPlan>,
     },
+    /// An empty prepared input, with neither rows nor a command completion tag.
+    Empty,
 }
 
 /// Classification hook for engine-registered aggregate functions. Built-in

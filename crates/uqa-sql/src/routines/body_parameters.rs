@@ -23,11 +23,10 @@ use std::collections::BTreeSet;
 
 /// The parameters a SQL body can name: the routine's input parameters, which `get_func_input_arg_names` lists.
 #[must_use]
-pub fn sql_body_parameters(def: &CreateFunction) -> Vec<&FunctionParam> {
-    def.params
-        .iter()
-        .filter(|parameter| is_sql_body_parameter(parameter))
-        .collect()
+pub fn sql_body_parameters(
+    def: &CreateFunction,
+) -> impl DoubleEndedIterator<Item = &FunctionParam> + Clone {
+    def.identity_params()
 }
 
 /// Whether the body can name `parameter`: an input parameter. A procedure's output parameter takes a placeholder in `CALL` but is not a parameter of its body.
@@ -45,11 +44,9 @@ pub fn sql_body_parameter_names(def: &CreateFunction) -> Vec<String> {
     match def.body {
         FunctionBody::Statements(_) => def
             .sql_body_parameters()
-            .into_iter()
             .map(|parameter| parameter.name.to_string())
             .collect(),
         FunctionBody::Source(_) => sql_body_parameters(def)
-            .iter()
             .map(|parameter| parameter.name.clone())
             .collect(),
     }

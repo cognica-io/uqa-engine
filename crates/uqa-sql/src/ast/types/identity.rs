@@ -77,6 +77,26 @@ impl UserTypeIdentity {
 }
 
 impl ColumnType {
+    /// Whether a retained value of this type may name database-owned catalog identities. Anonymous records and polymorphic arrays may contain user-defined fields or elements, so their original database remains required even without a declared outer OID.
+    #[must_use]
+    pub fn is_catalog_dependent(&self) -> bool {
+        let mut ty = self;
+        while let Self::Array(element) = ty {
+            ty = element;
+        }
+        matches!(
+            ty,
+            Self::Named(_)
+                | Self::Enum(_)
+                | Self::Composite(_)
+                | Self::Domain { .. }
+                | Self::DeclaredRange(_)
+                | Self::DeclaredMultirange(_)
+                | Self::Record
+                | Self::AnyArray
+        )
+    }
+
     /// The identity of a user-defined type or an array of one; built-in types have none.
     #[must_use]
     pub fn user_type_identity(&self) -> Option<String> {
@@ -114,6 +134,9 @@ mod tests {
             array_oid: 20_001,
         });
         let array = ColumnType::Array(Box::new(ColumnType::Array(Box::new(mood))));
+        assert!(array.is_catalog_dependent());
+        assert!(ColumnType::Record.is_catalog_dependent());
+        assert!(!ColumnType::Array(Box::new(ColumnType::Integer)).is_catalog_dependent());
         let identity = array.user_type_identity().unwrap();
         assert_eq!(identity, "enum#20000[][]");
         assert_eq!(

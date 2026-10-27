@@ -196,6 +196,46 @@ impl SessionExecutionView<'_> {
         self.show_parameter(name).ok().map(|(_, value)| value)
     }
 
+    pub(crate) fn explain_settings(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        uqa_core::memory::Produced<uqa_sql::semantics::parameters::explain::ExplainSettings>,
+        SQLError,
+    > {
+        uqa_sql::semantics::parameters::explain::capture(
+            &|definition, control| {
+                let registry = self.session.parameters.lock();
+                if definition
+                    .library
+                    .is_some_and(|library| !registry.library_loaded(library))
+                {
+                    return Ok(None);
+                }
+                drop(registry);
+                let memory = control.reserve(definition.name.len())?;
+                let key = control.finish(setting_key(definition.name), memory)?;
+                if let Some(setting) = self.session.state.read().session_vars.get(key.as_str()) {
+                    return Ok(Some(control.copy_text(setting)?));
+                }
+                if let Some(setting) = self
+                    .session
+                    .parameters
+                    .lock()
+                    .client_setting(definition.name)
+                {
+                    return Ok(Some(control.copy_text(setting)?));
+                }
+                Ok(Some(if let Some(setting) = engine_default(definition) {
+                    control.copy_text(setting)?
+                } else {
+                    definition.boot_setting_with_control(control)?
+                }))
+            },
+            control,
+        )
+    }
+
     /// Every parameter that `SHOW ALL` and `pg_settings` report, in name order: the defined parameters other than hidden ones, with those of the libraries the session has loaded.
     pub(crate) fn parameter_settings(&self) -> Vec<ParameterSetting> {
         parameter_definitions()

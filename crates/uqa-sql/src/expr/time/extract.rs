@@ -6,16 +6,15 @@
 
 //! Temporal extraction keeps exact numeric coefficients separate from floating-point evaluation.
 
-use chrono::{Datelike, NaiveDate, Timelike};
 use uqa_core::{
     memory::{Produced, ProductionControl},
-    TemporalValue, Value,
+    TemporalDate, TemporalValue, Value,
 };
 
 use crate::error::Result;
 
 use super::{
-    coerce_temporal_with_control, datetime_out_of_range, epoch_date, naive_from_micros,
+    coerce_temporal_with_control, datetime_out_of_range, timestamp_fields,
     units::{Unit, UnitName},
     MICROS_PER_DAY, MICROS_PER_HOUR, MICROS_PER_MINUTE, MICROS_PER_SECOND,
 };
@@ -63,20 +62,22 @@ pub(in crate::expr) fn extract_from_value_with_offset(
             TemporalValue::Time { micros } => time_part(unit, micros, None),
             TemporalValue::TimeTz {
                 micros,
-                offset_minutes,
-            } => time_part(unit, micros, Some(i64::from(offset_minutes) * 60)),
+                offset_seconds,
+            } => time_part(unit, micros, Some(i64::from(offset_seconds))),
             TemporalValue::Date { days } if as_numeric => date_part(unit, days)?,
             TemporalValue::Date { days } => {
                 // `date_part(text, date)` is PostgreSQL's SQL wrapper around a midnight timestamp.
-                let micros = i64::from(days)
+                let micros = (i64::from(days) - i64::from(uqa_core::POSTGRES_EPOCH_DAYS))
                     .checked_mul(MICROS_PER_DAY)
                     .ok_or_else(|| datetime_out_of_range("timestamp"))?;
                 timestamp_part(unit, micros, None)?
             }
-            TemporalValue::Timestamp { micros } => timestamp_part(unit, micros, None)?,
-            TemporalValue::TimestampTz { micros } => {
-                timestamp_part(unit, micros, Some(offset_seconds))?
-            }
+            TemporalValue::Timestamp {
+                postgres_micros: micros,
+            } => timestamp_part(unit, micros, None)?,
+            TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            } => timestamp_part(unit, micros, Some(offset_seconds))?,
         }
     };
     let part = part.ok_or_else(|| {
@@ -229,31 +230,24 @@ fn date_part(unit: Unit, days: i32) -> Result<Option<Part>> {
     if unit == Unit::Epoch {
         return Ok(Some(Part::Integer(i64::from(days) * 86_400)));
     }
-    let date = epoch_date()
-        .checked_add_signed(chrono::Duration::days(i64::from(days)))
-        .ok_or_else(|| datetime_out_of_range("date"))?;
+    let date = TemporalDate::from_unix_days(days);
     Ok(calendar_part(unit, date).map(Part::Integer))
 }
 
 fn timestamp_part(unit: Unit, micros: i64, offset_seconds: Option<i32>) -> Result<Option<Part>> {
     if unit == Unit::Epoch {
-        return Ok(Some(Part::Scaled {
-            coefficient: i128::from(micros),
-            scale: 6,
-            float: micros as f64 / 1_000_000.0,
-        }));
+        return Ok(Some(Part::TimestampEpoch(micros)));
     }
     let local = micros
         .checked_add(i64::from(offset_seconds.unwrap_or(0)) * MICROS_PER_SECOND)
         .ok_or_else(|| datetime_out_of_range("timestamp"))?;
-    let datetime = naive_from_micros(local)?;
+    let datetime = timestamp_fields(local);
     if let Some(offset) = offset_seconds {
         if let Some(part) = timezone_part(unit, i64::from(offset)) {
             return Ok(Some(part));
         }
     }
-    let time = i64::from(datetime.num_seconds_from_midnight()) * MICROS_PER_SECOND
-        + i64::from(datetime.and_utc().timestamp_subsec_micros());
+    let time = datetime.time_micros();
     if unit == Unit::Julian {
         return Ok(Some(Part::Julian {
             day: julian_day(datetime.date()),
@@ -263,11 +257,11 @@ fn timestamp_part(unit: Unit, micros: i64, offset_seconds: Option<i32>) -> Resul
     Ok(clock_part(unit, time).or_else(|| calendar_part(unit, datetime.date()).map(Part::Integer)))
 }
 
-fn julian_day(date: NaiveDate) -> i64 {
-    date.signed_duration_since(epoch_date()).num_days() + 2_440_588
+fn julian_day(date: TemporalDate) -> i64 {
+    i64::from(date.unix_days()) + 2_440_588
 }
 
-fn calendar_part(unit: Unit, date: NaiveDate) -> Option<i64> {
+fn calendar_part(unit: Unit, date: TemporalDate) -> Option<i64> {
     let year = i64::from(date.year());
     Some(match unit {
         Unit::Millennium => {
@@ -294,13 +288,13 @@ fn calendar_part(unit: Unit, date: NaiveDate) -> Option<i64> {
         }
         Unit::Quarter => i64::from(date.month0() / 3 + 1),
         Unit::Month => i64::from(date.month()),
-        Unit::Week => i64::from(date.iso_week().week()),
+        Unit::Week => i64::from(date.iso_week().1),
         Unit::Day => i64::from(date.day()),
-        Unit::Dow => i64::from(date.weekday().num_days_from_sunday()),
-        Unit::IsoDow => i64::from(date.weekday().number_from_monday()),
+        Unit::Dow => i64::from(date.weekday_sunday()),
+        Unit::IsoDow => i64::from(date.weekday_monday() + 1),
         Unit::Doy => i64::from(date.ordinal()),
         Unit::IsoYear => {
-            let year = i64::from(date.iso_week().year());
+            let year = i64::from(date.iso_week().0);
             if year > 0 {
                 year
             } else {

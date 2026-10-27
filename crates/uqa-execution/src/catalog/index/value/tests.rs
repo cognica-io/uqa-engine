@@ -436,6 +436,14 @@ fn null_candidate_eligibility_preserves_row_and_carried_index_fallbacks() {
             "key",
             [(1, Value::Row(vec![Value::Null].into()))].into_iter(),
         ),
+        ColumnValueIndex::build(
+            "key",
+            [(
+                1,
+                Value::Datum(uqa_core::DatumValue::new(16_384, 0, vec![])),
+            )]
+            .into_iter(),
+        ),
         ColumnValueIndex::build_carried([(1, Value::Null)].into_iter()),
     ] {
         assert!(!index

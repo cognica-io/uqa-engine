@@ -14,6 +14,7 @@ pub mod definition;
 pub mod dependencies;
 pub mod entry;
 pub mod planning;
+pub mod utility;
 
 pub fn declared_parameter_types(
     resolver: &dyn crate::FunctionTypeResolver,
@@ -27,11 +28,13 @@ pub fn declared_parameter_types(
             _ => crate::type_resolution::resolve_declared_column_type(resolver, ty).map(Some),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    logical_plan.rewrite_scalar_expressions(&mut |expression| {
-        if let crate::ScalarExpr::Param(index) = expression {
-            parameter_types.resize(parameter_types.len().max(*index), None);
-        }
-    });
+    if utility::requires_analysis(logical_plan) {
+        logical_plan.rewrite_scalar_expressions(&mut |expression| {
+            if let crate::ScalarExpr::Param(index) = expression {
+                parameter_types.resize(parameter_types.len().max(*index), None);
+            }
+        });
+    }
     Ok(parameter_types)
 }
 
@@ -126,6 +129,21 @@ pub fn execute_parameter_types(
         ));
     }
     Ok(types)
+}
+
+/// Host binding checks every supplied parameter, including unused utility declarations.
+pub fn validate_host_parameter_count(
+    name: &str,
+    supplied: usize,
+    expected: usize,
+) -> Result<(), SQLError> {
+    if supplied == expected {
+        return Ok(());
+    }
+    Err(error(
+        "08P01",
+        format!("bind message supplies {supplied} parameters, but prepared statement \"{name}\" requires {expected}"),
+    ))
 }
 
 pub(super) fn error(sqlstate: &str, message: impl Into<String>) -> SQLError {

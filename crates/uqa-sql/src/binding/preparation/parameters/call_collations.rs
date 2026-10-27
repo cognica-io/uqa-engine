@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Input collations recorded on the calls of an expression whose routines are already bound, without any other analysis effect on the expression.
+//! Retain input collations and type-observer selections on already bound calls without rereading constants or changing routine identities.
 
 use super::{BTreeMap, NonNull, SQLError, ScalarExpr};
 use crate::ast::FunctionBinding;
@@ -15,9 +15,24 @@ use crate::catalog::collations::CollationSelection;
 pub(in crate::binding::preparation) struct CallCollations {
     selections: BTreeMap<NonNull<ScalarExpr>, Option<CollationSelection>>,
     builtins: BTreeMap<NonNull<ScalarExpr>, FunctionBinding>,
+    observers: BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionDispatch>,
 }
 
 impl CallCollations {
+    pub(in crate::binding::preparation) fn record_observer(
+        &mut self,
+        expression: &ScalarExpr,
+        selected: &FunctionBinding,
+    ) {
+        if let Some(
+            dispatch @ (crate::ast::FunctionDispatch::CollationFor { .. }
+            | crate::ast::FunctionDispatch::TypeOf { .. }),
+        ) = selected.dispatch
+        {
+            self.observers.insert(NonNull::from(expression), dispatch);
+        }
+    }
+
     pub(in crate::binding::preparation) fn record(
         &mut self,
         expression: &ScalarExpr,
@@ -75,10 +90,15 @@ impl CallCollations {
         {
             binding.input_collation = selection;
         }
+        if let (Some(dispatch), Some(binding)) =
+            (self.observers.remove(&identity), binding.as_mut())
+        {
+            binding.dispatch = Some(dispatch);
+        }
     }
 
     fn finish(&self) -> Result<(), SQLError> {
-        if self.selections.is_empty() && self.builtins.is_empty() {
+        if self.selections.is_empty() && self.builtins.is_empty() && self.observers.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(

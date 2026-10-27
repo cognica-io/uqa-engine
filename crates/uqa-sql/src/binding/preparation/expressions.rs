@@ -544,13 +544,19 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<Option<FunctionBinding>, SQLError> {
         let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
+        let types = arguments.types();
+        if binding.is_none()
+            && crate::type_resolution::function_arguments_have_runtime_types(args, &types)?
+        {
+            return Ok(None);
+        }
         let mut selected = crate::semantics::resolve_table_function_binding_for_types(
             self.routines,
             name,
             binding,
             crate::type_resolution::RoutineCallDescriptor {
                 argument_names: &arguments.names,
-                argument_types: &arguments.types(),
+                argument_types: &types,
                 explicit_variadic: arguments.variadic,
             },
         )?;

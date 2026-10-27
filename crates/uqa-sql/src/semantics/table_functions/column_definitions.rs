@@ -157,7 +157,7 @@ pub(super) fn user_function_result_class(
     if routine_returns_anonymous_record(&function.def) {
         return Ok(ResultClass::Record);
     }
-    if function.def.output_params().len() > 1 {
+    if function.def.output_params().nth(1).is_some() {
         return Ok(ResultClass::OutParameters);
     }
     // A single OUT parameter, such as the one column of RETURNS TABLE, gives the result its type.
@@ -201,9 +201,8 @@ fn builtin_result_class(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> ResultClass {
-    let builtin =
-        crate::semantics::builtin_function_dispatch_name(&request.name.to_ascii_lowercase());
-    match builtin.as_str() {
+    let builtin = crate::semantics::builtin_function_dispatch_name(request.name);
+    match builtin.as_ref() {
         "json_each"
         | "jsonb_each"
         | "json_each_text"

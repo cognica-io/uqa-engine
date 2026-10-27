@@ -237,6 +237,7 @@ mod substrings;
 mod support;
 mod temporal;
 mod text;
+mod type_io;
 
 const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalogEntry {
     BuiltinRoutineCatalogEntry {
@@ -285,6 +286,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     pattern::ROUTINES,
     regular_expressions::ROUTINES,
     text::ROUTINES,
+    type_io::ROUTINES,
     substrings::ROUTINES,
     scalar::ROUTINES,
     aggregate_windows::ROUTINES,

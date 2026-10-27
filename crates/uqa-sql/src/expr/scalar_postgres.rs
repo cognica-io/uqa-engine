@@ -67,6 +67,7 @@ pub(super) fn eval_dispatched_postgres_function(
         dispatch,
         args,
         crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+        None,
         &ProductionControl::uncontrolled(),
     )
     .map(|result| {
@@ -83,9 +84,10 @@ pub(super) fn eval_dispatched_postgres_function_with_control(
     dispatch: FunctionDispatch,
     args: &[Value],
     collation: u32,
+    catalog: Option<&dyn super::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
-    if let Some(result) = eval_postgres_subscript_with_control(dispatch, args, control) {
+    if let Some(result) = eval_postgres_subscript_with_control(dispatch, args, catalog, control) {
         return Some(result);
     }
     if let Some(result) = eval_postgres_integer_base_with_control(dispatch, args, control) {

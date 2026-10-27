@@ -30,7 +30,8 @@ pub fn rows(session: &dyn CatalogSession) -> Vec<ResultRow> {
                 (
                     "creation_time",
                     Value::Temporal(TemporalValue::TimestampTz {
-                        micros: entry.created_at_micros,
+                        postgres_micros: (entry.created_at_micros)
+                            - uqa_core::POSTGRES_EPOCH_MICROS,
                     }),
                 ),
             ])

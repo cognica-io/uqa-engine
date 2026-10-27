@@ -7,6 +7,7 @@
 //! Native final collection eliminates temporary ownership while retaining ordinary fallback output.
 
 mod failures;
+mod measurements;
 
 use super::{bind_output_mode, collect_input};
 use crate::query::{

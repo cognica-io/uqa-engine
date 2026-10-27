@@ -183,19 +183,27 @@ impl CostEstimator {
         let c = &self.coefficients;
         let l = left_rows.max(0.0);
         let r = right_rows.max(0.0);
-        let (build, probe) = if l <= r { (l, r) } else { (r, l) };
+        let (build, probe) = if matches!(kind, OperatorKind::HashJoinOuter) {
+            (r, l)
+        } else if l <= r {
+            (l, r)
+        } else {
+            (r, l)
+        };
         match kind {
-            OperatorKind::HashJoinInner => OperatorCost {
-                cpu: build * c.hashjoin_build_per_row + probe * c.hashjoin_probe_per_row,
-                io: 0.0,
-                memory: build,
-            },
-            OperatorKind::HashJoinOuter => OperatorCost {
-                cpu: build * c.hashjoin_build_per_row * 1.2
-                    + probe * c.hashjoin_probe_per_row * 1.2,
-                io: 0.0,
-                memory: build,
-            },
+            OperatorKind::HashJoinInner | OperatorKind::HashJoinOuter => {
+                self.estimate_hash_build(kind, build).add(&OperatorCost {
+                    cpu: probe
+                        * c.hashjoin_probe_per_row
+                        * if matches!(kind, OperatorKind::HashJoinOuter) {
+                            1.2
+                        } else {
+                            1.0
+                        },
+                    io: 0.0,
+                    memory: 0.0,
+                })
+            }
             OperatorKind::SortMergeJoin => {
                 let total = l + r;
                 OperatorCost {
@@ -225,6 +233,22 @@ impl CostEstimator {
                 memory: 0.0,
             },
             _ => OperatorCost::zero(),
+        }
+    }
+
+    /// Hash construction is blocking; the probe work remains in the total join estimate.
+    pub(crate) fn estimate_hash_build(&self, kind: OperatorKind, rows: f64) -> OperatorCost {
+        let rows = rows.max(0.0);
+        OperatorCost {
+            cpu: rows
+                * self.coefficients.hashjoin_build_per_row
+                * if matches!(kind, OperatorKind::HashJoinOuter) {
+                    1.2
+                } else {
+                    1.0
+                },
+            io: 0.0,
+            memory: rows,
         }
     }
 }

@@ -16,6 +16,18 @@ use uqa_engine::{
 };
 use uqa_sql::{ast::ColumnType, SQLError};
 
+#[path = "sql_registered_functions/fallible.rs"]
+mod fallible;
+
+#[path = "sql_registered_functions/aggregate_cleanup.rs"]
+mod aggregate_cleanup;
+
+#[path = "sql_registered_functions/stream_cleanup.rs"]
+mod stream_cleanup;
+
+#[path = "sql_registered_functions/registration.rs"]
+mod registration;
+
 struct Prefixer {
     prefix: String,
 }

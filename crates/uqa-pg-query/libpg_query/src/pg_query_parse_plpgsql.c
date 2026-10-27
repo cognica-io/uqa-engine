@@ -705,8 +705,9 @@ typedef struct plStmts
 	int stmts_count;
 } plStmts;
 
-static bool stmts_walker(Node *node, plStmts *state)
+static bool stmts_walker(Node *node, void *context)
 {
+	plStmts *state = context;
 	bool result;
 	MemoryContext ccxt = CurrentMemoryContext;
 

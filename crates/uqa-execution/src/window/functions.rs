@@ -72,12 +72,20 @@ impl WindowFunctionState {
         &mut self.frame
     }
 
-    pub(super) fn begin_partition(&mut self) {
+    pub(super) fn begin_partition(&mut self) -> Result<(), SQLError> {
+        if let WindowFunction::Aggregate(aggregate) = &mut self.function {
+            aggregate.begin_partition()?;
+        }
         self.cursor = FrameCursor::new();
         self.rank = 0;
         self.ntile = NtileState::default();
-        if let WindowFunction::Aggregate(aggregate) = &mut self.function {
-            aggregate.begin_partition();
+        Ok(())
+    }
+
+    pub(super) fn close(&mut self) -> Result<(), SQLError> {
+        match &mut self.function {
+            WindowFunction::Aggregate(aggregate) => aggregate.close(),
+            _ => Ok(()),
         }
     }
 

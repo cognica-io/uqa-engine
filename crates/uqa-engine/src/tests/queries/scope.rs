@@ -24,7 +24,9 @@ fn cached_temporal_inputs_read_each_messages_transaction_clock() {
     let sql = "SELECT 'now'::timestamp AS input_clock, now()::timestamp AS transaction_clock, now() = 'now' AS implicit_input";
     for clock in [90_123_456_789, 190_123_456_789] {
         let result = execute_at_message_clock(&engine, clock, sql);
-        let expected = Value::Temporal(uqa_core::TemporalValue::Timestamp { micros: clock });
+        let expected = Value::Temporal(uqa_core::TemporalValue::Timestamp {
+            postgres_micros: (clock) - uqa_core::POSTGRES_EPOCH_MICROS,
+        });
         assert_eq!(result.rows[0]["input_clock"], expected);
         assert_eq!(result.rows[0]["transaction_clock"], expected);
         assert_eq!(result.rows[0]["implicit_input"], Value::Bool(true));
@@ -51,7 +53,9 @@ fn cached_cursor_inputs_read_each_messages_transaction_clock() {
             .collect::<Vec<_>>();
         assert_eq!(
             rows[0]["value"],
-            Value::Temporal(uqa_core::TemporalValue::Timestamp { micros: clock })
+            Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                postgres_micros: (clock) - uqa_core::POSTGRES_EPOCH_MICROS
+            })
         );
         assert!(engine.cached_sql_statement(sql).is_some());
         assert!(engine.cached_optimized_sql_plan(sql).is_none());

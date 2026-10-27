@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `EXPLAIN SELECT ...` returns one plan line per row in a single `plan`
+//! `EXPLAIN SELECT ...` returns one plan line per row in a single `QUERY PLAN`
 //! column.
 
 use uqa_engine::Engine;
@@ -17,13 +17,13 @@ fn explain_returns_plan_rows() {
     let r = eng
         .sql("EXPLAIN SELECT id FROM t WHERE n > 1 LIMIT 10", &[])
         .unwrap();
-    assert_eq!(r.columns, vec!["plan".to_string()]);
+    assert_eq!(r.columns, vec!["QUERY PLAN".to_string()]);
     assert_ne!(r.rows.len(), 0);
     // The plan must mention the from clause and limit, at minimum.
     let blob = r
         .rows
         .iter()
-        .filter_map(|row| match row.get("plan") {
+        .filter_map(|row| match row.get("QUERY PLAN") {
             Some(uqa_core::Value::Str(s)) => Some(s.as_str()),
             _ => None,
         })
@@ -47,7 +47,7 @@ fn explain_analyze_executes_the_owned_plan_and_reports_runtime_counts() {
     let text = result
         .rows
         .iter()
-        .filter_map(|row| match row.get("plan") {
+        .filter_map(|row| match row.get("QUERY PLAN") {
             Some(uqa_core::Value::Str(value)) => Some(value.as_str()),
             _ => None,
         })
@@ -70,13 +70,12 @@ fn explain_json_is_structured_and_analyze_is_not_a_second_dispatch_path() {
             &[],
         )
         .unwrap();
-    let Some(uqa_core::Value::Str(payload)) = result.rows[0].get("plan") else {
+    let Some(uqa_core::Value::Json(payload)) = result.rows[0].get("QUERY PLAN") else {
         panic!("JSON EXPLAIN must return a string payload");
     };
     let payload: serde_json::Value = serde_json::from_str(payload).unwrap();
-    assert_eq!(payload["Analyze"], true);
-    assert_eq!(payload["Actual Rows"], 1);
-    assert!(payload["Plan"]
+    assert_eq!(payload[0]["Plan"]["Actual Rows"], 1);
+    assert!(payload[0]["Plan"]["UQA Plan"]
         .as_array()
         .is_some_and(|lines| lines.iter().any(|line| line
             .as_str()
@@ -101,7 +100,7 @@ fn explain_only_executes_mutations_when_analyze_is_requested() {
     let text = analyzed
         .rows
         .iter()
-        .filter_map(|row| match row.get("plan") {
+        .filter_map(|row| match row.get("QUERY PLAN") {
             Some(uqa_core::Value::Str(value)) => Some(value.as_str()),
             _ => None,
         })

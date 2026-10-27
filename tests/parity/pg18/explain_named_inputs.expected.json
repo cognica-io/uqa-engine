@@ -1,0 +1,85 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "name": "view",
+      "setup": "CREATE TEMP VIEW named_input AS SELECT n FROM (VALUES (1),(2),(3)) input(n);",
+      "sql": "EXPLAIN (FORMAT JSON) SELECT n FROM named_input",
+      "after": null,
+      "rows": 3,
+      "width": 4,
+      "actual_rows": null,
+      "next_value": null
+    },
+    {
+      "name": "nested_view",
+      "setup": "CREATE TEMP VIEW named_input AS SELECT n FROM (VALUES (1),(2),(3)) input(n);CREATE TEMP VIEW named_outer AS SELECT n FROM named_input LIMIT 2;",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, FORMAT JSON) SELECT n FROM named_outer",
+      "after": null,
+      "rows": 2,
+      "width": 4,
+      "actual_rows": 2.0,
+      "next_value": null
+    },
+    {
+      "name": "folded_cte",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, FORMAT JSON) WITH input AS NOT MATERIALIZED (VALUES (1),(2),(3)) SELECT * FROM input",
+      "after": null,
+      "rows": 3,
+      "width": 4,
+      "actual_rows": 3.0,
+      "next_value": null
+    },
+    {
+      "name": "lexical_view_cte",
+      "setup": "CREATE TEMP VIEW named_input AS WITH input AS MATERIALIZED (VALUES (1),(2),(3)) SELECT * FROM input;",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, FORMAT JSON) WITH input AS MATERIALIZED (VALUES (9)) SELECT * FROM named_input",
+      "after": null,
+      "rows": 3,
+      "width": 4,
+      "actual_rows": 3.0,
+      "next_value": null
+    },
+    {
+      "name": "unexecuted_effect",
+      "setup": "CREATE TEMP SEQUENCE named_effect; CREATE TEMP VIEW named_input AS SELECT n, nextval('named_effect') AS effect FROM (VALUES (1),(2),(3)) input(n);",
+      "sql": "EXPLAIN (FORMAT JSON) SELECT effect FROM named_input",
+      "after": "SELECT nextval('named_effect')",
+      "rows": 3,
+      "width": 8,
+      "actual_rows": null,
+      "next_value": 1
+    },
+    {
+      "name": "executed_effect",
+      "setup": "CREATE TEMP SEQUENCE named_effect; CREATE TEMP VIEW named_input AS SELECT n, nextval('named_effect') AS effect FROM (VALUES (1),(2),(3)) input(n);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, FORMAT JSON) SELECT effect FROM named_input",
+      "after": "SELECT nextval('named_effect')",
+      "rows": 3,
+      "width": 8,
+      "actual_rows": 3.0,
+      "next_value": 4
+    },
+    {
+      "name": "unused_volatile_output",
+      "setup": "CREATE TEMP SEQUENCE named_effect; CREATE TEMP VIEW named_input AS SELECT n, nextval('named_effect') AS effect FROM (VALUES (1),(2),(3)) input(n);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, FORMAT JSON) SELECT n FROM named_input",
+      "after": "SELECT nextval('named_effect')",
+      "rows": 3,
+      "width": 4,
+      "actual_rows": 3.0,
+      "next_value": 4
+    },
+    {
+      "name": "prepared_view",
+      "setup": "CREATE TEMP VIEW named_input AS SELECT n FROM (VALUES (1),(2),(3)) input(n);PREPARE named_statement(integer) AS SELECT n FROM named_input LIMIT $1;",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, FORMAT JSON) EXECUTE named_statement(2)",
+      "after": null,
+      "rows": 2,
+      "width": 4,
+      "actual_rows": 2.0,
+      "next_value": null
+    }
+  ]
+}

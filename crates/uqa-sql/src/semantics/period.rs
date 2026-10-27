@@ -7,7 +7,7 @@
 //! Canonical range values used by temporal keys and references.
 use crate::{
     ast::RangeSubtype,
-    expr::{parse_multirange, parse_range, CanonicalRange},
+    expr::{CanonicalRange, RangeComparisonValue},
     ColumnType, SQLError,
 };
 use uqa_core::Value;
@@ -16,28 +16,30 @@ pub fn period_ranges(
     value: &Value,
     column_type: &ColumnType,
 ) -> Result<(RangeSubtype, Vec<CanonicalRange>), SQLError> {
-    let (Value::Str(text) | Value::FixedChar(text)) = value else {
-        return Err(SQLError::TypeMismatch(format!(
-            "PERIOD value has incompatible runtime carrier {value:?}"
-        )));
-    };
-    match column_type {
-        ColumnType::Range(subtype) => {
-            let range = parse_range(text, *subtype)?;
-            Ok((
-                *subtype,
-                (!range.is_empty()).then_some(range).into_iter().collect(),
-            ))
+    let subtype = match column_type {
+        ColumnType::Range(subtype) | ColumnType::Multirange(subtype) => *subtype,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "PERIOD column must be a range or multirange, got {}",
+                other.sql_name()
+            )))
         }
-        ColumnType::Multirange(subtype) => Ok((
-            *subtype,
-            parse_multirange(text, *subtype)?.ranges().to_vec(),
-        )),
-        other => Err(SQLError::TypeMismatch(format!(
-            "PERIOD column must be a range or multirange, got {}",
-            other.sql_name()
-        ))),
-    }
+    };
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let ranges =
+        match RangeComparisonValue::from_type_with_control(value, column_type, None, &control)? {
+            Some(RangeComparisonValue::Range(range)) => (!range.is_empty())
+                .then(|| range.into_uncontrolled().expect("PERIOD range"))
+                .into_iter()
+                .collect(),
+            Some(RangeComparisonValue::Multirange(ranges)) => ranges.ranges().to_vec(),
+            _ => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "PERIOD value has incompatible runtime carrier {value:?}"
+                )))
+            }
+        };
+    Ok((subtype, ranges))
 }
 
 pub fn period_values_overlap(

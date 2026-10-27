@@ -11,8 +11,10 @@ mod collations;
 pub(super) use collations::PendingCollations;
 mod commands;
 mod ctes;
+mod explain;
 mod expression_contexts;
 mod expressions;
+pub(super) use explain::read_generic_explain_inputs;
 mod fields;
 mod function_calls;
 mod json_operators;
@@ -27,7 +29,7 @@ mod routines;
 mod rows;
 pub(crate) use routines::{
     analyze_routine_body_argument, analyze_routine_body_inputs, prepare_procedure_call,
-    prepare_routine_body_inputs,
+    prepare_routine_body_inputs, read_procedure_inputs,
 };
 mod schema_expressions;
 mod set_contexts;
@@ -86,9 +88,7 @@ pub(crate) fn read_prepared_inputs(
     let parameters = analysis.parameters.finish()?;
     let params = crate::prepared::analysis_parameters(&parameters);
     constants.apply(plan, routines, &params)?;
-    retain_compute_kinds(routines, plan);
-    super::composite_inputs::retain_composite_inputs(routines, plan, &params, ctes)?;
-    plan.normalize_window_definitions()?;
+    retain_prepared_input_metadata(routines, plan, &parameters, ctes)?;
     let mut dependencies = analysis
         .scope
         .prepared_dependencies
@@ -101,6 +101,18 @@ pub(crate) fn read_prepared_inputs(
     })
 }
 
+pub(crate) fn retain_prepared_input_metadata(
+    routines: &dyn RoutineResolution,
+    plan: &mut UnifiedPlan,
+    parameters: &[Option<ColumnType>],
+    binding: &BindingContext<'_>,
+) -> Result<(), SQLError> {
+    retain_compute_kinds(routines, plan);
+    let params = crate::prepared::analysis_parameters(parameters);
+    super::composite_inputs::retain_composite_inputs(routines, plan, &params, binding)?;
+    plan.normalize_window_definitions()
+}
+
 /// Read ordinary statement inputs in prepared-analysis order and retain their
 /// converted values in this executable plan. Runtime expressions stay deferred.
 pub(crate) fn read_executable_inputs(
@@ -110,7 +122,14 @@ pub(crate) fn read_executable_inputs(
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
-    read_executable_inputs_inner(routines, plan, params, binding, aliases, false)
+    read_executable_inputs_inner(
+        routines,
+        plan,
+        params,
+        binding,
+        aliases,
+        InputAnalysisKind::Host,
+    )
 }
 
 pub(crate) fn read_procedural_inputs(
@@ -120,7 +139,19 @@ pub(crate) fn read_procedural_inputs(
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
-    read_executable_inputs_inner(routines, plan, params, binding, aliases, true)
+    read_executable_inputs_inner(
+        routines,
+        plan,
+        params,
+        binding,
+        aliases,
+        InputAnalysisKind::Procedural,
+    )
+}
+
+enum InputAnalysisKind {
+    Host,
+    Procedural,
 }
 
 fn read_executable_inputs_inner(
@@ -129,11 +160,17 @@ fn read_executable_inputs_inner(
     params: &[crate::SQLParam],
     binding: &BindingContext<'_>,
     aliases: &dyn OidAliasInput,
-    track_dependencies: bool,
+    kind: InputAnalysisKind,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
     use super::statements::AnalyzedResult;
 
-    let declared = super::statements::parameter_input_types(params)?;
+    let (declared, track_dependencies) = match kind {
+        InputAnalysisKind::Host => (
+            crate::params::bind_parameter_types(params, routines)?,
+            false,
+        ),
+        InputAnalysisKind::Procedural => (super::statements::parameter_input_types(params)?, true),
+    };
     let mut scope = SchemaScope::for_analysis(binding)?;
     scope.prepared_dependencies = track_dependencies.then(Default::default);
     let mut analysis = Preparation {
@@ -153,11 +190,11 @@ fn read_executable_inputs_inner(
     let result = match &*plan {
         UnifiedPlan::Query(query) => AnalyzedResult::Schema(analysis.query(query, None)?),
         UnifiedPlan::Command(command) => match command.as_ref() {
-            crate::plan::CommandPlan::CreateView { query, .. }
-            | crate::plan::CommandPlan::CreateTableAs { query, .. }
-            | crate::plan::CommandPlan::CreateMaterializedView { query, .. }
-            | crate::plan::CommandPlan::DeclareCursor { query, .. } => {
-                analysis.query(query, None)?;
+            crate::plan::CommandPlan::CreateView { .. }
+            | crate::plan::CommandPlan::CreateTableAs { .. }
+            | crate::plan::CommandPlan::CreateMaterializedView { .. }
+            | crate::plan::CommandPlan::DeclareCursor { .. } => {
+                analysis.command(command)?;
                 AnalyzedResult::Command
             }
             _ if command.mutation_target().is_some() => {
@@ -409,7 +446,7 @@ pub(super) fn projection_metadata(
     })
 }
 
-/// Record the input collation of each call in a stored expression whose routines are already bound for storage, as analysis records it for an executable statement. Nothing else in the expression changes, so a definition that has no other analysis pass, such as an index key or a trigger condition, keeps each call's selection.
+/// Record input collations and type-observer selections on already bound stored calls, as analysis records them for an executable statement. Constants and routine identities stay unchanged, while definitions without another analysis pass retain the complete selected metadata.
 pub(crate) fn assign_stored_input_collations(
     routines: &dyn RoutineResolution,
     expression: &mut crate::plan::ExpressionPlan,
@@ -430,7 +467,7 @@ pub(crate) fn assign_stored_input_collations(
         .apply(&mut expression.scalar, &mut expression.subqueries)
 }
 
-/// Record the input collation of each call in a stored query whose routines are already bound for storage, such as a view that an earlier release stored without selections. Nothing else in the query changes.
+/// Restore input collations and type-observer selections on already bound stored queries without rereading constants or changing routine identities.
 pub fn assign_stored_query_input_collations(
     routines: &dyn RoutineResolution,
     query: &mut QueryPlan,

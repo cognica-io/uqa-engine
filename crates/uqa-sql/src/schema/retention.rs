@@ -18,7 +18,9 @@ use uqa_core::{
 use crate::ast::{ColumnDef, ColumnType, Expr, FunctionBinding};
 
 mod columns;
+mod domains;
 mod expressions;
+mod identities;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogRetentionError {
@@ -167,6 +169,7 @@ impl Expr {
 
 enum Node<'a> {
     Column(&'a ColumnDef),
+    Domain(&'a crate::catalog::domain::StoredDomain),
     Type(&'a ColumnType),
     Expr(&'a Expr),
     Binding(&'a FunctionBinding),
@@ -216,6 +219,7 @@ impl<'a> Walker<'a> {
         self.control.check_cancellation()?;
         match node {
             Node::Column(column) => self.column(column),
+            Node::Domain(domain) => self.domain(domain),
             Node::Type(ty) => self.ty(ty),
             Node::Expr(expr) => self.expr(expr),
             Node::Binding(binding) => self.binding(binding),

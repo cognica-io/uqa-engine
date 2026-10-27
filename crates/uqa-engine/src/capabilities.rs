@@ -359,13 +359,15 @@ impl Engine {
     }
 
     pub(crate) fn query_runtime_view(&self) -> QueryRuntimeView<'_> {
+        static EMPTY: crate::SQLFunctionContext = crate::SQLFunctionContext::empty();
         QueryRuntimeView {
+            function_context: self.runtime.function_context.get().unwrap_or(&EMPTY),
             diagnostics: &self.runtime.diagnostics,
             cancellation: &self.runtime.cancellation,
             settings: self.session.as_ref(),
-            scalar_functions: &self.extensions.scalar_functions,
-            table_functions: &self.extensions.table_functions,
-            aggregate_functions: &self.extensions.aggregate_functions,
+            scalar_functions: &self.extensions.functions.scalar,
+            table_functions: &self.extensions.functions.table,
+            aggregate_functions: &self.extensions.functions.aggregate,
             notices: &self.runtime.notices,
         }
     }

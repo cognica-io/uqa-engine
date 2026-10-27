@@ -23,7 +23,7 @@ use std::sync::{
 };
 
 use uqa_core::Value;
-use uqa_engine::{Engine, SQLFunctionOptions, SQLFunctionVolatility};
+use uqa_engine::{Engine, ExecutionCompletion, SQLFunctionOptions, SQLFunctionVolatility};
 use uqa_sql::SQLError;
 use uqa_storage::mvcc::{
     CommitFailure, CommitFingerprint, CommitResult, CommitStatus, CommittedRecordSnapshot,
@@ -48,11 +48,14 @@ const REJECT_OTHER: u8 = 9;
 const REJECT_DEPENDENCY: u8 = 10;
 const LOSE_CONFLICT_REPLY: u8 = 11;
 const LOSE_ABORT_REPLY_ONCE: u8 = 12;
+const REJECT_MEMORY_ABORT_UNKNOWN: u8 = 13;
 
 fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
     use uqa_storage::mvcc::{CommitSequence, VersionError};
     Some(match fault {
-        REJECT_MEMORY => uqa_core::memory::MemoryError::SizeOverflow.into(),
+        REJECT_MEMORY | REJECT_MEMORY_ABORT_UNKNOWN => {
+            uqa_core::memory::MemoryError::SizeOverflow.into()
+        }
         REJECT_CANCELLED => uqa_core::QueryCancelled::USER_REQUEST.into(),
         REJECT_CONSTRAINT => StorageBackendError::backend(
             "fixture",
@@ -300,6 +303,16 @@ impl VersionedPersistence for FaultPersistence {
         if fault == UNAVAILABLE {
             return Err(StorageBackendError::Other("injected unavailable abort".into()).into());
         }
+        if fault == REJECT_MEMORY_ABORT_UNKNOWN {
+            return Err(StorageBackendError::backend(
+                "fixture",
+                CommitFailure::Indeterminate {
+                    transaction,
+                    source: StorageBackendError::Other("injected unavailable abort".into()),
+                },
+            )
+            .into());
+        }
         let status = self.inner.abort(transaction, control)?;
         if matches!(fault, LOSE_ABORT_REPLY | HIDE_AFTER_ABORT_RECEIPT) {
             self.fault.store(UNAVAILABLE, Ordering::Release);
@@ -536,11 +549,15 @@ fn rollback_of_a_committed_attempt_finishes_publication_and_reports_the_commit()
         persistence
             .fault
             .store(LOSE_COMMITTED_REPLY, Ordering::Release);
-        assert_unknown(&root.commit().unwrap_err());
+        let outcome = root.execute_with_completion(Engine::commit);
+        assert_unknown(&outcome.result.unwrap_err());
+        assert_eq!(outcome.completion, ExecutionCompletion::Pending);
         persistence
             .fault
             .store(HIDE_AFTER_ABORT_RECEIPT, Ordering::Release);
-        let error = root.rollback().unwrap_err();
+        let outcome = root.execute_with_completion(Engine::rollback);
+        let error = outcome.result.unwrap_err();
+        assert_eq!(outcome.completion, ExecutionCompletion::Committed);
         assert_eq!(error.sqlstate(), Some("25000"), "{error}");
         assert!(error.to_string().contains("already committed"));
         assert_eq!(root.transaction_depth(), 0);
@@ -570,11 +587,17 @@ fn rollback_resolves_an_uncommitted_attempt_without_publishing_private_effects()
         persistence
             .fault
             .store(LOSE_UNCOMMITTED_REPLY, Ordering::Release);
-        assert_unknown(&root.commit().unwrap_err());
-        assert_unknown(&root.rollback().unwrap_err());
+        let outcome = root.execute_with_completion(Engine::commit);
+        assert_unknown(&outcome.result.unwrap_err());
+        assert_eq!(outcome.completion, ExecutionCompletion::Pending);
+        let outcome = root.execute_with_completion(Engine::rollback);
+        assert_unknown(&outcome.result.unwrap_err());
+        assert_eq!(outcome.completion, ExecutionCompletion::Pending);
         assert!(root.pending_commit().is_some());
         persistence.fault.store(HEALTHY, Ordering::Release);
-        root.rollback().unwrap();
+        let outcome = root.execute_with_completion(Engine::rollback);
+        outcome.result.unwrap();
+        assert_eq!(outcome.completion, ExecutionCompletion::RolledBack);
         assert_eq!(root.transaction_depth(), 0);
         assert_eq!(root.pending_commit(), None);
         assert_eq!(count(&root, "items"), Value::Int(0));

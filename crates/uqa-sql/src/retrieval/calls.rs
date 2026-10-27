@@ -7,12 +7,12 @@
 //! Text, vector, and staged-retrieval argument validation and lowering.
 
 mod fts;
+pub(super) mod vector;
 
 use super::{
-    column_name, const_f64, const_string, const_usize, const_vector, lower_function,
-    named_arg_expr, BTreeSet, BindingResult, ExternalPriorMode, MultiStageCutoff, MultiStageEntry,
-    RetrievalArguments, RetrievalConstants, RetrievalExpr, SQLError, ScalarExpr, TextScoringMode,
-    Value,
+    column_name, const_f64, const_string, const_usize, lower_function, named_arg_expr, BTreeSet,
+    BindingResult, ExternalPriorMode, MultiStageCutoff, MultiStageEntry, RetrievalArguments,
+    RetrievalConstants, RetrievalExpr, SQLError, ScalarExpr, TextScoringMode, Value,
 };
 
 pub(super) fn try_lower_checked_retrieval(
@@ -317,100 +317,14 @@ pub(super) fn try_lower_knn_match(
     args: &[ScalarExpr],
     constants: &RetrievalConstants<'_>,
 ) -> BindingResult<RetrievalExpr> {
-    const FUNCTION_NAME: &str = "knn_match";
-    if args.len() != 3 {
-        return Err(bad_operator_arity(FUNCTION_NAME, "3", args.len()));
-    }
-    let field = column_name(&args[0]).ok_or_else(|| {
-        SQLError::TypeMismatch("knn_match.field must be a column reference".into())
-    })?;
-    if field.trim().is_empty() {
-        return Err(SQLError::TypeMismatch(
-            "knn_match.field cannot be empty".into(),
-        ));
-    }
-    let query_vector = const_vector(&args[1], constants).ok_or_else(|| {
-        SQLError::TypeMismatch("knn_match.vector must be a constant numeric vector".into())
-    })?;
-    if query_vector.is_empty() || query_vector.iter().any(|component| !component.is_finite()) {
-        return Err(SQLError::TypeMismatch(
-            "knn_match.vector must be non-empty and contain only finite values".into(),
-        ));
-    }
-    let k = const_usize(&args[2], constants).ok_or_else(|| {
-        SQLError::TypeMismatch("knn_match.k must be a non-negative integer".into())
-    })?;
-    if k == 0 || i64::try_from(k).is_err() {
-        return Err(SQLError::TypeMismatch(format!(
-            "knn_match.k must be positive and fit in a SQL BIGINT, got {k}"
-        )));
-    }
-    Ok(RetrievalExpr::KNN {
-        query_vector,
-        k,
-        field,
-    })
+    vector::ordinary(false, args, constants)
 }
 
 pub(super) fn try_lower_calibrated_vector_match(
     args: &[ScalarExpr],
     constants: &RetrievalConstants<'_>,
 ) -> BindingResult<RetrievalExpr> {
-    const FUNCTION_NAME: &str = "calibrated_vector_match";
-    if !(3..=4).contains(&args.len()) {
-        return Err(bad_operator_arity(FUNCTION_NAME, "3..=4", args.len()));
-    }
-    let field = field_name_arg(&args[0], constants).ok_or_else(|| {
-        SQLError::TypeMismatch(
-            "calibrated_vector_match.field must be a column reference or constant string".into(),
-        )
-    })?;
-    if field.trim().is_empty() {
-        return Err(SQLError::TypeMismatch(
-            "calibrated_vector_match.field cannot be empty".into(),
-        ));
-    }
-    let query_vector = const_vector(&args[1], constants).ok_or_else(|| {
-        SQLError::TypeMismatch(
-            "calibrated_vector_match.vector must be a constant numeric vector".into(),
-        )
-    })?;
-    if query_vector.is_empty() || query_vector.iter().any(|component| !component.is_finite()) {
-        return Err(SQLError::TypeMismatch(
-            "calibrated_vector_match.vector must be non-empty and contain only finite values"
-                .into(),
-        ));
-    }
-    let k = const_usize(&args[2], constants).ok_or_else(|| {
-        SQLError::TypeMismatch("calibrated_vector_match.k must be a non-negative integer".into())
-    })?;
-    if k == 0 || i64::try_from(k).is_err() {
-        return Err(SQLError::TypeMismatch(format!(
-            "calibrated_vector_match.k must be positive and fit in a SQL BIGINT, got {k}"
-        )));
-    }
-    let threshold = args
-        .get(3)
-        .map(|argument| {
-            const_f64(argument, constants).ok_or_else(|| {
-                SQLError::TypeMismatch(
-                    "calibrated_vector_match.threshold must be a constant number".into(),
-                )
-            })
-        })
-        .transpose()?;
-    if threshold.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
-        return Err(SQLError::TypeMismatch(format!(
-            "calibrated_vector_match.threshold must be finite and in [0, 1], got {}",
-            threshold.expect("checked Some above")
-        )));
-    }
-    Ok(RetrievalExpr::CalibratedVectorMatch {
-        field,
-        query_vector,
-        k,
-        threshold,
-    })
+    vector::ordinary(true, args, constants)
 }
 
 pub(super) fn lower_calibrated_vector_match(
@@ -569,13 +483,6 @@ pub(super) fn lower_operator_arg(
         return None;
     };
     lower_function(name, args, constants)
-}
-
-pub(super) fn field_name_arg(
-    expr: &ScalarExpr,
-    constants: &RetrievalConstants<'_>,
-) -> Option<String> {
-    column_name(expr).or_else(|| const_string(expr, constants))
 }
 
 enum FtsDefaultField {

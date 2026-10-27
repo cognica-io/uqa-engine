@@ -42,6 +42,23 @@ LICENSES = load_script("uqa_check_release_licenses", "check-release-licenses.py"
 
 
 class RepositoryPolicyCheckerTest(unittest.TestCase):
+    def test_integration_commands_do_not_borrow_another_commands_target(self) -> None:
+        library = "cargo test -p " + "uqa-execution --lib copy::tests"
+        integration = "cargo test -p " + 'uqa-engine --features "arrow duckdb" --test integration copy'
+        targets = {"uqa-execution": set(), "uqa-engine": {"integration"}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            path = root / "commands.md"
+            with mock.patch.object(INTEGRATION, "ROOT", root), \
+                 mock.patch.object(INTEGRATION, "command_files", return_value=[path]):
+                for separator in ("` passed. `", " && ", "; ", " || ", " | ", '\", "'):
+                    with self.subTest(separator=separator):
+                        path.write_text(library + separator + integration, encoding="utf-8")
+                        INTEGRATION.verify_command_targets(targets)
+                        path.write_text(library + separator + integration.replace("integration", "missing"), encoding="utf-8")
+                        with self.assertRaisesRegex(RuntimeError, "uqa-engine has no integration test target 'missing'"):
+                            INTEGRATION.verify_command_targets(targets)
+
     def test_nori_byte_identities_survive_windows_checkout_conversion(self) -> None:
         paths = {"crates/uqa-analysis/THIRD-PARTY/LUCENE-SOURCE.md",
                  "crates/uqa-analysis/benches/nori/corpus.json"}

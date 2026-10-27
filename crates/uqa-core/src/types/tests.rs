@@ -358,23 +358,23 @@ fn temporal_ordering_is_overflow_safe_and_consistent_with_equality() {
 
     let utc = TemporalValue::TimeTz {
         micros: 0,
-        offset_minutes: 0,
+        offset_seconds: 0,
     };
     let same_utc = TemporalValue::TimeTz {
         micros: 60 * MICROS_PER_SECOND,
-        offset_minutes: 1,
+        offset_seconds: 60,
     };
     assert_eq!(utc.cmp(&same_utc), std::cmp::Ordering::Greater);
     assert_ne!(utc, same_utc);
 
     let deserialized_extreme = TemporalValue::TimeTz {
         micros: i64::MIN,
-        offset_minutes: i32::MAX,
+        offset_seconds: i32::MAX,
     };
     let _ordering = deserialized_extreme.cmp(&utc);
     let opposite_extreme = TemporalValue::TimeTz {
         micros: i64::MAX,
-        offset_minutes: i32::MIN,
+        offset_seconds: i32::MIN,
     };
     assert!(deserialized_extreme < utc && utc < opposite_extreme);
 }
@@ -513,16 +513,20 @@ fn value_json_decoding_tagged_map_shapes() {
         decode("{\"$uqa_type\":\"time_tz\",\"micros\":5,\"offset_minutes\":-90}"),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 5,
-            offset_minutes: -90
+            offset_seconds: -5400
         })
     );
     assert_eq!(
         decode("{\"$uqa_type\":\"timestamp\",\"micros\":-7}"),
-        Value::Temporal(TemporalValue::Timestamp { micros: -7 })
+        Value::Temporal(TemporalValue::Timestamp {
+            postgres_micros: -7 - crate::POSTGRES_EPOCH_MICROS
+        })
     );
     assert_eq!(
         decode("{\"$uqa_type\":\"timestamp_tz\",\"micros\":8}"),
-        Value::Temporal(TemporalValue::TimestampTz { micros: 8 })
+        Value::Temporal(TemporalValue::TimestampTz {
+            postgres_micros: 8 - crate::POSTGRES_EPOCH_MICROS
+        })
     );
     assert_eq!(
         decode("{\"$uqa_type\":\"interval\",\"months\":1,\"days\":2,\"micros\":3}"),

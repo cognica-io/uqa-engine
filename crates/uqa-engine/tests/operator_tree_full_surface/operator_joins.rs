@@ -101,7 +101,7 @@ fn explain_plan(engine: &Engine, sql: &str) -> String {
         .unwrap()
         .rows
         .iter()
-        .filter_map(|row| match row.get("plan") {
+        .filter_map(|row| match row.get("QUERY PLAN") {
             Some(Value::Str(line)) => Some(line.as_str()),
             _ => None,
         })

@@ -51,11 +51,11 @@ pub use preparation::{
 };
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
-    prepare_routine_body_inputs,
+    prepare_routine_body_inputs, read_procedure_inputs,
 };
 pub(crate) use preparation::{
     analyze_domain_check, analyze_stored_expression_inputs, analyze_table_check,
-    assign_stored_input_collations, read_prepared_inputs,
+    assign_stored_input_collations, read_prepared_inputs, retain_prepared_input_metadata,
 };
 
 #[cfg(test)]
@@ -78,8 +78,8 @@ pub use scope::{
 };
 pub use scope::{overlay_outer_schema, values_schema_in_scope, values_types_in_scope};
 pub use sources::{
-    analyze_source_plan_schema, bind_source_plan_schema, bind_source_plan_schema_for_execution,
-    with_query_table_pseudo_columns,
+    analyze_source_plan_schema, bind_source_input_schema, bind_source_plan_schema,
+    bind_source_plan_schema_for_execution, with_query_table_pseudo_columns, SourceBindingInput,
 };
 pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 
@@ -110,7 +110,6 @@ use crate::semantics::{
 };
 use crate::RowSchema;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 #[cfg(test)]
 thread_local! {
@@ -130,7 +129,7 @@ struct SchemaScope {
     catalog: CatalogReadView,
     resolution: RelationNameResolution,
     ctes: BTreeMap<String, RowSchema>,
-    deferred_ctes: BTreeMap<String, Arc<crate::plan::CtePlan>>,
+    deferred_ctes: BTreeMap<String, crate::plan::RetainedCtePlan>,
     non_returning_ctes: BTreeSet<String>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
@@ -294,6 +293,17 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        let captured_outer = outer
+            .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+        let outer = captured_outer.as_deref();
+        let source_rewrites = crate::semantics::view_rewrite::resolve_outer_sources(
+            block,
+            outer,
+            &mut |source, subqueries, scope| {
+                self.bind_source_input(routines, source, subqueries, params, scope)
+            },
+        )?;
+        let block = source_rewrites.as_ref();
         let source = block.from.as_ref().map_or_else(
             || Ok(RowSchema::default()),
             |source| self.bind_source(routines, source, &block.subqueries, params, outer),
@@ -303,6 +313,8 @@ impl SchemaScope {
         }
         // Query-owned metadata types belong to both analysis and metadata-only binding.
         let source = analysis::with_query_source_columns(&source, block);
+        let rewritten = crate::semantics::view_rewrite::resolve_outer_rewrites(block, &source);
+        let block = rewritten.as_ref();
         let expression_schema = overlay_outer_schema(&source, outer);
         let output = preparation::block_metadata(self, routines, block, &source, outer, params)?;
         let output = analysis::with_projected_open_columns(&output, &block.projections, &source);
@@ -649,6 +661,16 @@ impl SchemaScope {
                 if let Some(function) = &user_function {
                     self.record_routine_dependency(&function.binding);
                 }
+                let registered_columns = user_function
+                    .is_none()
+                    .then(|| routines.registered_table_function_columns(name))
+                    .flatten();
+                let declared_host_columns = registered_columns.is_some();
+                if registered_columns.as_ref().is_some_and(Vec::is_empty) {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "table function `{name}` declares no columns"
+                    )));
+                }
                 let catalog_columns = if !self.validate_references && user_function.is_none() {
                     user_function_output_columns(self.catalog.as_ref(), &self.resolution, name)?
                 } else {
@@ -665,7 +687,7 @@ impl SchemaScope {
                         *ordinality,
                     )?
                 } else {
-                    catalog_columns.map_or_else(
+                    registered_columns.or(catalog_columns).map_or_else(
                         || {
                             table_function_empty_schema(
                                 name,
@@ -710,6 +732,7 @@ impl SchemaScope {
                 let schema = RowSchema::with_qualified_types(qualifier, columns, types);
                 Ok(
                     if user_function.is_none()
+                        && !declared_host_columns
                         && column_types.is_empty()
                         && routines.has_registered_table_function(name)
                     {
@@ -738,18 +761,29 @@ impl SchemaScope {
                     columns.extend(schema.iter().enumerate().map(|(position, column)| {
                         schema.public_name(position).unwrap_or(column).to_string()
                     }));
-                    types.extend(schema.column_types().iter().cloned());
+                    types.extend(schema.column_types().iter().map(|ty| {
+                        if open {
+                            None
+                        } else {
+                            ty.clone()
+                        }
+                    }));
                 }
                 if *ordinality {
                     columns.push("ordinality".into());
-                    types.push(Some(ColumnType::BigInteger));
+                    types.push((!open).then_some(ColumnType::BigInteger));
                 }
                 let qualifier = alias.as_deref().unwrap_or(&first.output_name);
-                validate_table_function_alias_count(
-                    qualifier,
-                    columns.len(),
-                    column_aliases.len(),
-                )?;
+                // A runtime member can shift every later output position,
+                // including ordinality. Its complete descriptor validates
+                // the aliases and supplies those types at execution.
+                if !open {
+                    validate_table_function_alias_count(
+                        qualifier,
+                        columns.len(),
+                        column_aliases.len(),
+                    )?;
+                }
                 for (column, alias) in columns.iter_mut().zip(column_aliases) {
                     column.clone_from(alias);
                 }

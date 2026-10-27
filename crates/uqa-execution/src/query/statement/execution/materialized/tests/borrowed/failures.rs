@@ -64,11 +64,14 @@ fn borrowed_public_results_keep_predicate_errors_and_close_after_partial_output(
                 super::collect_input(source, super::bind_output_mode(None, mode, None)?)
             })
             .unwrap_err();
-            assert!(error.to_string().contains("division by zero"), "{error}");
+            assert_eq!(error.sqlstate(), Some("22012"));
+            assert_eq!(error.to_string(), "division by zero");
             assert_eq!(
-                error.to_string().contains("cleanup marker"),
+                error
+                    .detail()
+                    .is_some_and(|detail| detail.contains("cleanup marker")),
                 cleanup_failure,
-                "{error}"
+                "{error:?}"
             );
             assert_eq!(closes.load(Ordering::Relaxed), 1);
             assert_eq!(counts.releases.load(Ordering::Relaxed), 1);

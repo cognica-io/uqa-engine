@@ -483,9 +483,13 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
             &source.projections,
         )?;
         operator = align_recheck_schema(operator, &self.schema)?;
-        operator
-            .open()
-            .map_err(crate::physical::physical_exec_error)?;
+        if let Err(error) = operator.open() {
+            return Err(crate::query::projection::close_after_physical_failure(
+                operator.as_mut(),
+                error,
+                "open row-lock recheck",
+            ));
+        }
         let first_row = loop {
             match operator.next() {
                 Ok(Some(batch)) => {
@@ -507,8 +511,11 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 }
                 Ok(None) => break None,
                 Err(error) => {
-                    let _ = operator.close();
-                    return Err(crate::physical::physical_exec_error(error));
+                    return Err(crate::query::projection::close_after_physical_failure(
+                        operator.as_mut(),
+                        error,
+                        "execute row-lock recheck",
+                    ));
                 }
             }
         };
@@ -535,51 +542,53 @@ fn align_recheck_schema<'a>(
     operator: Box<dyn PhysicalOperator + 'a>,
     expected: &RowSchema,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let rebuilt = operator.row_schema();
-    if rebuilt.columns() == expected.columns() {
-        return Ok(operator);
-    }
-    let mut positions = Vec::with_capacity(expected.len());
-    let mut used = vec![false; rebuilt.len()];
-    for (index, column) in expected.columns().iter().enumerate() {
-        let wanted_identity = expected.identities().get(index);
-        let mut resolved = None;
-        for (candidate, candidate_column) in rebuilt.columns().iter().enumerate() {
-            if used[candidate] || candidate_column != column {
-                continue;
-            }
-            let identity_matches = match (wanted_identity, rebuilt.identities().get(candidate)) {
-                (Some(wanted), Some(candidate_identity)) => {
-                    wanted.qualifier().is_none()
-                        || candidate_identity.qualifier().is_none()
-                        || wanted.qualifier() == candidate_identity.qualifier()
+    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+        let rebuilt = operator.row_schema();
+        if rebuilt.columns() == expected.columns() {
+            return Ok(());
+        }
+        let mut positions = Vec::with_capacity(expected.len());
+        let mut used = vec![false; rebuilt.len()];
+        for (index, column) in expected.columns().iter().enumerate() {
+            let wanted_identity = expected.identities().get(index);
+            let mut resolved = None;
+            for (candidate, candidate_column) in rebuilt.columns().iter().enumerate() {
+                if used[candidate] || candidate_column != column {
+                    continue;
                 }
-                _ => true,
-            };
-            if !identity_matches {
-                continue;
-            }
-            if resolved.is_some() {
-                return Err(SQLError::Internal(format!(
+                let identity_matches = match (wanted_identity, rebuilt.identities().get(candidate))
+                {
+                    (Some(wanted), Some(candidate_identity)) => {
+                        wanted.qualifier().is_none()
+                            || candidate_identity.qualifier().is_none()
+                            || wanted.qualifier() == candidate_identity.qualifier()
+                    }
+                    _ => true,
+                };
+                if !identity_matches {
+                    continue;
+                }
+                if resolved.is_some() {
+                    return Err(SQLError::Internal(format!(
                     "row-lock recheck column `{column}` is ambiguous in the rebuilt schema {:?}",
                     rebuilt.columns()
                 )));
+                }
+                resolved = Some(candidate);
             }
-            resolved = Some(candidate);
+            let Some(position) = resolved else {
+                return Err(SQLError::Internal(format!(
+                    "row-lock recheck schema {:?} diverged from the lock boundary schema {:?}",
+                    rebuilt.columns(),
+                    expected.columns()
+                )));
+            };
+            used[position] = true;
+            positions.push((column.clone(), position));
         }
-        let Some(position) = resolved else {
-            return Err(SQLError::Internal(format!(
-                "row-lock recheck schema {:?} diverged from the lock boundary schema {:?}",
-                rebuilt.columns(),
-                expected.columns()
-            )));
-        };
-        used[position] = true;
-        positions.push((column.clone(), position));
-    }
-    Ok(Box::new(crate::ColumnSelection::with_positions(
-        operator, positions,
-    )))
+        operator.wrap(|input| Box::new(crate::ColumnSelection::with_positions(input, positions)));
+        Ok(())
+    })
 }
 
 fn lock_origin_matches_target(origin: &crate::RowLockOrigin, target: &ResolvedRowLock) -> bool {

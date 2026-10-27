@@ -111,11 +111,28 @@ impl TemporalTimeZone {
     #[must_use]
     pub fn offset_at_micros(self, unix_micros: i64) -> Option<i32> {
         let seconds = unix_micros.div_euclid(1_000_000);
+        self.offset_at_fractional(
+            seconds,
+            unix_micros < super::POSTGRES_EPOCH_MICROS && unix_micros % 1_000_000 != 0,
+        )
+    }
+
+    /// Select the offset from the full `PostgreSQL` microsecond carrier without narrowing through Unix microseconds.
+    #[must_use]
+    pub fn offset_at_postgres_micros(self, postgres_micros: i64) -> Option<i32> {
+        let seconds =
+            postgres_micros.div_euclid(1_000_000) + super::POSTGRES_EPOCH_MICROS / 1_000_000;
+        self.offset_at_fractional(
+            seconds,
+            postgres_micros < 0 && postgres_micros % 1_000_000 != 0,
+        )
+    }
+
+    fn offset_at_fractional(self, seconds: i64, fractional_before_epoch: bool) -> Option<i32> {
         if let Zone::Abbreviated { zone, name } = self.0 {
             // timestamptz_to_time_t truncates toward zero at the PostgreSQL
             // epoch; timestamp2tm (including the fallback) floors civil time.
-            let probe = seconds
-                + i64::from(unix_micros < 946_684_800_000_000 && unix_micros % 1_000_000 != 0);
+            let probe = seconds + i64::from(fractional_before_epoch);
             abbreviations::offset_at(zone, name, probe)
                 .or_else(|| abbreviated_fallback_offset(zone, seconds))
         } else {

@@ -9,6 +9,7 @@
 use super::ordering::resolve_order_expression;
 use super::row_count::{resolve_fetch_limit_with_ties, resolve_limit_offset_with_ctes};
 use super::RelationalContext;
+use crate::physical::construction::OperatorBuild;
 use crate::query::projection::physical_work_mem_bytes;
 use crate::query::runtime::QueryRuntimeView;
 use crate::query::{CteScope, OutputColumnMapping};
@@ -70,7 +71,7 @@ pub(super) fn attach_presorted_limit<'a, S: Clone + 'static>(
     reason = "keeps SELECT scope and established ordering explicit"
 )]
 fn attach_ordered_slice<'a, S: Clone + 'static>(
-    mut operator: Box<dyn crate::PhysicalOperator + 'a>,
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
     context: RelationalContext<'a, S>,
@@ -82,101 +83,127 @@ fn attach_ordered_slice<'a, S: Clone + 'static>(
     presorted: bool,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     use crate::{ExternalSort, Limit};
-
-    // DISTINCT executes before slicing. Its internal execution statement keeps the semantic flag so ORDER BY values are projected exactly once, but clears the count; only a statement that still has that count attaches the tie boundary here.
-    let with_ties = statement.with_ties && statement.limit.is_some();
-    let offset =
-        resolve_limit_offset_with_ctes(statement.offset.as_ref(), context, params, "OFFSET", ctes)?;
-    let limit = if with_ties {
-        Some(resolve_fetch_limit_with_ties(
-            statement.limit.as_ref(),
+    OperatorBuild::build(operator, |operator| {
+        // DISTINCT executes before slicing. Its internal execution statement keeps the semantic flag so ORDER BY values are projected exactly once, but clears the count; only a statement that still has that count attaches the tie boundary here.
+        let with_ties = statement.with_ties && statement.limit.is_some();
+        let offset = resolve_limit_offset_with_ctes(
+            statement.offset.as_ref(),
             context,
             params,
+            "OFFSET",
             ctes,
-        )?)
-    } else {
-        resolve_limit_offset_with_ctes(statement.limit.as_ref(), context, params, "LIMIT", ctes)?
-    };
-    let mut tie_keys = None;
-    if !statement.order_by.is_empty() {
-        let keys = resolved_sort_keys(
-            statement,
-            output_columns,
-            Some(operator.row_schema()),
-            evaluator.as_ref(),
         )?;
-        if with_ties {
-            tie_keys = Some(keys.clone());
-        }
-        let keep = ordered_keep(limit, offset)?;
-        let required_ordering = keys
-            .iter()
-            .map(|key| {
-                crate::order_expression_position(operator.row_schema(), &key.expr).map(|position| {
-                    crate::PhysicalOrder {
-                        position,
-                        descending: key.descending,
-                        nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
-                        nullable: true,
-                    }
-                })
-            })
-            .collect::<Option<Vec<_>>>();
-        let already_ordered = presorted
-            || required_ordering.as_ref().is_some_and(|required| {
-                crate::ordering_satisfies(operator.output_ordering(), required)
-            });
-        if !already_ordered {
-            // A locking query must keep the complete sorted candidate stream: SKIP LOCKED skips rows, and a tuple-local recheck can drop a changed candidate, in which case PostgreSQL 18 surfaces the next candidate in sort order instead of returning fewer rows.
-            operator = Box::new(ExternalSort::new(
-                operator,
-                keys,
-                Arc::clone(&evaluator),
-                keep.filter(|_| statement.locking.is_empty() && !with_ties),
-                physical_work_mem_bytes(runtime)?,
-            ));
-            if ctes.scans_backwards() {
-                operator = crate::prepare_backward_scan(operator);
+        let limit = if with_ties {
+            Some(resolve_fetch_limit_with_ties(
+                statement.limit.as_ref(),
+                context,
+                params,
+                ctes,
+            )?)
+        } else {
+            resolve_limit_offset_with_ctes(
+                statement.limit.as_ref(),
+                context,
+                params,
+                "LIMIT",
+                ctes,
+            )?
+        };
+        let mut tie_keys = None;
+        if !statement.order_by.is_empty() {
+            let keys = resolved_sort_keys(
+                statement,
+                output_columns,
+                Some(operator.row_schema()),
+                evaluator.as_ref(),
+            )?;
+            if with_ties {
+                tie_keys = Some(keys.clone());
+            }
+            let keep = ordered_keep(limit, offset)?;
+            let already_ordered = presorted || input_satisfies_ordering(&**operator, &keys);
+            if !already_ordered {
+                // A locking query must keep the complete sorted candidate stream: SKIP LOCKED skips rows, and a tuple-local recheck can drop a changed candidate, in which case PostgreSQL 18 surfaces the next candidate in sort order instead of returning fewer rows.
+                let work_mem = physical_work_mem_bytes(runtime)?;
+                operator.wrap(|input| {
+                    Box::new(ExternalSort::new(
+                        input,
+                        keys,
+                        Arc::clone(&evaluator),
+                        keep.filter(|_| statement.locking.is_empty() && !with_ties),
+                        work_mem,
+                    ))
+                });
+                if ctes.scans_backwards() {
+                    operator.wrap(crate::prepare_backward_scan);
+                }
             }
         }
-    }
-    if !statement.locking.is_empty() {
-        let max_rows = if with_ties {
-            None
-        } else {
-            limit
-                .map(|limit| {
-                    offset
-                        .unwrap_or(0)
-                        .checked_add(limit)
-                        .ok_or_else(|| SQLError::TypeMismatch("OFFSET + LIMIT overflow".into()))
-                })
-                .transpose()?
-        };
-        operator = super::attach_lock_rows(
-            context,
-            operator,
-            statement,
-            params,
-            ctes,
-            max_rows,
-            recheck_source,
-        )?;
-    }
-    if with_ties {
-        operator = Box::new(Limit::with_ties(
-            operator,
-            offset.unwrap_or(0),
-            limit.expect("WITH TIES row count resolved above"),
-            tie_keys.ok_or_else(|| {
+        if !statement.locking.is_empty() {
+            let max_rows = if with_ties {
+                None
+            } else {
+                limit
+                    .map(|limit| {
+                        offset
+                            .unwrap_or(0)
+                            .checked_add(limit)
+                            .ok_or_else(|| SQLError::TypeMismatch("OFFSET + LIMIT overflow".into()))
+                    })
+                    .transpose()?
+            };
+            operator.attach(|input| {
+                super::attach_lock_rows(
+                    context,
+                    input,
+                    statement,
+                    params,
+                    ctes,
+                    max_rows,
+                    recheck_source,
+                )
+            })?;
+        }
+        if with_ties {
+            let tie_keys = tie_keys.ok_or_else(|| {
                 SQLError::Internal("FETCH ... WITH TIES has no ORDER BY keys".into())
-            })?,
-            evaluator,
-        ));
-    } else if offset.is_some() || limit.is_some() {
-        operator = Box::new(Limit::new(operator, offset.unwrap_or(0), limit));
-    }
-    Ok(operator)
+            })?;
+            operator.wrap(|input| {
+                Box::new(Limit::with_ties(
+                    input,
+                    offset.unwrap_or(0),
+                    limit.expect("WITH TIES row count resolved above"),
+                    tie_keys,
+                    evaluator,
+                ))
+            });
+        } else if offset.is_some() || limit.is_some() {
+            operator.wrap(|input| Box::new(Limit::new(input, offset.unwrap_or(0), limit)));
+        }
+        Ok(())
+    })
+}
+
+fn input_satisfies_ordering(
+    operator: &dyn crate::PhysicalOperator,
+    keys: &[crate::SortKey],
+) -> bool {
+    let required = keys
+        .iter()
+        .map(|key| {
+            crate::order_expression_position(operator.row_schema(), &key.expr).map(|position| {
+                crate::PhysicalOrder {
+                    position,
+                    descending: key.descending,
+                    nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
+                    nullable: true,
+                }
+            })
+        })
+        .collect::<Option<Vec<_>>>();
+    required
+        .as_ref()
+        .is_some_and(|required| crate::ordering_satisfies(operator.output_ordering(), required))
 }
 
 pub fn resolved_sort_keys(

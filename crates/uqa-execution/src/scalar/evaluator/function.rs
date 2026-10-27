@@ -190,13 +190,35 @@ fn array_access(
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>, SQLError>> {
     let dispatch = binding.and_then(|binding| binding.dispatch)?;
+    if let Some(assignment) = binding.and_then(|binding| binding.assignment()) {
+        let catalog = context
+            .function_hook()
+            .map(uqa_sql::expr::EngineValueCatalog);
+        return Some(uqa_sql::assignment::path::evaluate(
+            assignment,
+            args.len(),
+            catalog
+                .as_ref()
+                .map(|catalog| catalog as &dyn uqa_sql::expr::SQLValueCatalog),
+            control,
+            |index| eval_scalar_inner(&args[index], context, control),
+        ));
+    }
     let access = uqa_sql::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
         matches!(args[index], ScalarExpr::Literal(Value::Null))
     })?;
     Some(access.and_then(|access| {
-        uqa_sql::expr::eval_array_access_with_control(access, control, |index| {
-            eval_scalar_inner(&args[index], context, control)
-        })
+        let catalog = context
+            .function_hook()
+            .map(uqa_sql::expr::EngineValueCatalog);
+        uqa_sql::expr::eval_array_access_with_catalog_and_control(
+            access,
+            catalog
+                .as_ref()
+                .map(|catalog| catalog as &dyn uqa_sql::expr::SQLValueCatalog),
+            control,
+            |index| eval_scalar_inner(&args[index], context, control),
+        )
     }))
 }
 

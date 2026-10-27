@@ -159,46 +159,6 @@ impl Engine {
             .is_some_and(|frame| !frame.implicit_statement)
     }
 
-    /// Tear down engine state cleanly, rolling back open transaction frames
-    /// and clearing registries.
-    /// The engine value can no longer be used afterwards in a
-    /// well-defined sense; idiomatic Rust drops the value at scope
-    /// exit, but this method exists for API compatibility
-    /// reference and for explicit shutdown ordering.
-    pub fn close(&self) -> Result<(), SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
-        // Use the ordinary state machine for every frame. Clearing the stack
-        // before asking SQLite to roll back loses the session snapshot and can
-        // leave dirty flags/caches inconsistent when physical cleanup fails.
-        while self.transaction_depth() != 0 {
-            self.rollback().map_err(|error| {
-                Self::rollback_cleanup_error(
-                    &error,
-                    format!("close: rollback open transaction failed: {error}"),
-                )
-            })?;
-        }
-        // Logical catalog and runtime registries are database state shared by
-        // sibling sessions. Closing one session must not erase them from the
-        // sessions that remain alive.
-        self.release_automatic_statistics_client();
-        self.runtime.terminations.disarm();
-        Ok(())
-    }
-
-    pub(crate) fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
-        if let Some(error) = self
-            .session
-            .transactions
-            .lock()
-            .last()
-            .and_then(|frame| Self::transaction_status_error(frame.status))
-        {
-            return Err(error);
-        }
-        Ok(())
-    }
-
     pub(crate) fn begin_implicit_statement_transaction(
         &self,
         read_only: bool,

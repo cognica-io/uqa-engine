@@ -24,7 +24,8 @@ use uqa_core::{
 };
 
 use super::subscription::{
-    NotificationSubscriptionError, NotificationSubscriptionOptions, NotificationWait,
+    NotificationReceive, NotificationSubscriptionError, NotificationSubscriptionOptions,
+    NotificationWait,
 };
 
 pub(crate) struct SubscriptionInbox {
@@ -184,17 +185,42 @@ impl SubscriptionInbox {
         &self,
         timeout: Duration,
     ) -> Result<NotificationWait, NotificationSubscriptionError> {
+        Ok(
+            match self.wait_with(timeout, |_| Ok::<_, NotificationSubscriptionError>(()))? {
+                NotificationReceive::Event { event, .. } => NotificationWait::Event(event),
+                NotificationReceive::TimedOut => NotificationWait::TimedOut,
+                NotificationReceive::Closed => NotificationWait::Closed,
+            },
+        )
+    }
+
+    pub(super) fn poll_with<T, E: From<NotificationSubscriptionError>>(
+        &self,
+        prepare: impl FnOnce(&SQLNotification) -> Result<T, E>,
+    ) -> Result<NotificationReceive<T>, E> {
+        self.state
+            .lock()
+            .receive_with(&self.identity, &self.memory, prepare)
+    }
+
+    pub(super) fn wait_with<T, E: From<NotificationSubscriptionError>>(
+        &self,
+        timeout: Duration,
+        prepare: impl FnOnce(&SQLNotification) -> Result<T, E>,
+    ) -> Result<NotificationReceive<T>, E> {
         let started = Instant::now();
+        let mut prepare = Some(prepare);
         let mut state = self.state.lock();
         loop {
-            match state.poll(&self.identity, &self.memory)? {
-                Poll::Ready(Some(event)) => return Ok(NotificationWait::Event(event)),
-                Poll::Ready(None) => return Ok(NotificationWait::Closed),
-                Poll::Pending => {}
+            match state.receive_with(&self.identity, &self.memory, |notification| {
+                prepare.take().expect("one admitted event ends the receive")(notification)
+            })? {
+                NotificationReceive::TimedOut => {}
+                received => return Ok(received),
             }
             let remaining = timeout.saturating_sub(started.elapsed());
             if remaining.is_zero() {
-                return Ok(NotificationWait::TimedOut);
+                return Ok(NotificationReceive::TimedOut);
             }
             self.wake.wait_for(&mut state, remaining);
         }
@@ -215,27 +241,53 @@ impl InboxState {
         identity: &NotificationIdentity,
         memory: &MemoryBudget,
     ) -> Result<Poll<Option<NotificationEvent>>, NotificationSubscriptionError> {
+        Ok(
+            match self.receive_with(identity, memory, |_| {
+                Ok::<_, NotificationSubscriptionError>(())
+            })? {
+                NotificationReceive::Event { event, .. } => Poll::Ready(Some(event)),
+                NotificationReceive::Closed => Poll::Ready(None),
+                NotificationReceive::TimedOut => Poll::Pending,
+            },
+        )
+    }
+
+    fn receive_with<T, E: From<NotificationSubscriptionError>>(
+        &mut self,
+        identity: &NotificationIdentity,
+        memory: &MemoryBudget,
+        prepare: impl FnOnce(&SQLNotification) -> Result<T, E>,
+    ) -> Result<NotificationReceive<T>, E> {
         if let Some(error) = self.failure.as_ref() {
-            return Err(error.clone());
+            return Err(error.clone().into());
         }
         if self.closed {
-            return Ok(Poll::Ready(None));
+            return Ok(NotificationReceive::Closed);
         }
         let Some(sequence) = self.next_sequence else {
             let error =
                 NotificationSubscriptionError::new(NotificationFailureKind::SequenceExhausted);
             self.fail(error.clone(), memory);
-            return Err(error);
+            return Err(error.into());
         };
-        let Some(value) = self.queue.pop_front() else {
-            return Ok(Poll::Pending);
+        let Some(value) = self.queue.iter().next() else {
+            return Ok(NotificationReceive::TimedOut);
         };
+        let admitted = prepare(&value.value)?;
+        let identity = identity.clone();
+        let value = self
+            .queue
+            .pop_front()
+            .expect("admitted front remains under the inbox lock");
         self.next_sequence = sequence.checked_add(1);
-        Ok(Poll::Ready(Some(NotificationEvent::Notification {
-            identity: identity.clone(),
-            sequence,
-            notification: value.value,
-        })))
+        Ok(NotificationReceive::Event {
+            event: NotificationEvent::Notification {
+                identity,
+                sequence,
+                notification: value.value,
+            },
+            admitted,
+        })
     }
 }
 

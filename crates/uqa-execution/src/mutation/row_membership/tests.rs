@@ -17,6 +17,7 @@ fn deleted_row_membership_bounds_retention_and_preserves_exact_physical_keys() {
             "deleted-row membership",
         );
         for id in (0..COUNT).rev() {
+            assert!(!rows.contains(TABLE, id * 2).unwrap());
             assert!(rows.insert_if_absent(TABLE, id * 2).unwrap());
         }
         for id in [0, 2, COUNT, (COUNT - 1) * 2] {
@@ -49,6 +50,10 @@ fn deleted_row_membership_propagates_cancellation_before_write_and_read() {
     let mut unfinished =
         PhysicalRowBuffer::new(64 * 1024, cancel.clone(), "deleted-row membership");
     cancel.cancel();
+    assert_eq!(
+        unfinished.contains("t", 2).unwrap_err().sqlstate(),
+        Some("57014")
+    );
     assert_eq!(rows.contains("t", 1).unwrap_err().sqlstate(), Some("57014"));
     assert_eq!(
         unfinished.insert("t", 2).unwrap_err().sqlstate(),
@@ -82,7 +87,9 @@ fn physical_row_membership_spills_below_one_key_without_losing_exact_keys() {
             let mut rows =
                 PhysicalRowBuffer::new(bytes, CancellationToken::new(), "row membership");
             for id in (0..256).rev() {
+                assert!(!rows.contains("partition", id).unwrap());
                 assert!(rows.insert_if_absent("partition", id).unwrap());
+                assert!(rows.contains("partition", id).unwrap());
             }
             assert!(!rows.insert_if_absent("partition", 17).unwrap());
             rows.insert("partition2", DocId::MAX).unwrap();

@@ -25,7 +25,9 @@ impl Engine {
         name: &str,
         body: uqa_sql::ast::SelectStmt,
     ) -> Result<(), SQLError> {
-        view_creation::register_view(self, name, body)
+        self.with_implicit_definition_transaction(|engine| {
+            view_creation::register_view(engine, name, body)
+        })
     }
     fn view_creation_context(&self) -> ViewCreationContext<'_> {
         ViewCreationContext {
@@ -51,14 +53,17 @@ impl Engine {
     }
 }
 impl ViewCreationTransactions for Engine {
+    fn explain_existing_target(&self, name: &str, if_not_exists: bool) -> Result<bool, SQLError> {
+        view_creation::explain_existing_target(&self.view_creation_context(), name, if_not_exists)
+    }
     fn with_view_creation(&self, write: ViewCreationWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_definition_transaction(|engine| write(&engine.view_creation_context()))
+        self.with_definition_publication(|engine| write(&engine.view_creation_context()))
     }
     fn with_materialized_view_creation(
         &self,
         write: MaterializedViewWrite<'_>,
     ) -> Result<Option<u64>, SQLError> {
-        self.with_implicit_definition_transaction(|engine| write(&engine.view_creation_context()))
+        self.with_definition_publication(|engine| write(&engine.view_creation_context()))
     }
 }
 impl ViewCreationCatalog for Engine {

@@ -30,10 +30,14 @@ fn scalar_clones_preserve_bits_and_temporal_fields_without_allocating() {
         Value::Temporal(TemporalValue::Time { micros: 123 }),
         Value::Temporal(TemporalValue::TimeTz {
             micros: 456,
-            offset_minutes: -570,
+            offset_seconds: -34200,
         }),
-        Value::Temporal(TemporalValue::Timestamp { micros: -789 }),
-        Value::Temporal(TemporalValue::TimestampTz { micros: i64::MAX }),
+        Value::Temporal(TemporalValue::Timestamp {
+            postgres_micros: -789,
+        }),
+        Value::Temporal(TemporalValue::TimestampTz {
+            postgres_micros: i64::MAX,
+        }),
         Value::Temporal(TemporalValue::Interval {
             months: 2,
             days: -60,

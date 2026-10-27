@@ -74,7 +74,8 @@ fn source_transfer_rebinds_changed_parameters_and_cte_definitions() {
     scope.insert_deferred(
         query("WITH input AS (SELECT 1 AS value) SELECT * FROM input")
             .ctes
-            .remove(0),
+            .remove(0)
+            .into(),
     );
     let query_plan = query("SELECT * FROM (SELECT * FROM input) AS derived");
     let root = block(&query_plan);
@@ -87,7 +88,8 @@ fn source_transfer_rebinds_changed_parameters_and_cte_definitions() {
     scope.insert_deferred(
         query("WITH input AS (SELECT 'text'::text AS value) SELECT * FROM input")
             .ctes
-            .remove(0),
+            .remove(0)
+            .into(),
     );
     assert!(bindings
         .query_source(&routines, child(root), &[], &scope, None, false)

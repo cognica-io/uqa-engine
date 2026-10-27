@@ -127,7 +127,7 @@ fn loaded_sequence_binding_does_not_consult_the_session_search_path() {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     });

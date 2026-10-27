@@ -28,6 +28,9 @@ impl RoutineNameCatalog for Names {
     fn search_path(&self) -> Vec<String> {
         vec!["app".into()]
     }
+    fn temporary_schema(&self) -> Option<String> {
+        None
+    }
     fn require_schema_usage(&self, schema: &str, _: &RoleReference) -> Result<(), SQLError> {
         self.visited.borrow_mut().push(schema.into());
         if self.denied.iter().any(|denied| denied == schema) {

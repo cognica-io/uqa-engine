@@ -77,6 +77,9 @@
 pub mod functions;
 pub mod migration;
 pub mod operator_tree_bridge;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use uqa_storage::test_support as storage_test_support;
 mod queries;
 /// SQL result formatting, type metadata and bounded cursors.
 pub use uqa_execution::result as sql;
@@ -96,7 +99,9 @@ mod hook;
 mod models;
 mod notifications;
 mod open;
+mod parameters;
 mod prepared;
+pub use prepared::{PreparedStatement, PreparedStatementDescription};
 mod relations;
 mod roles;
 mod schema_security;
@@ -119,6 +124,7 @@ mod statement_cache;
 mod table_storage;
 mod tables;
 mod transactions;
+pub use transactions::{ExecutionCompletion, ExecutionOutcome};
 mod user_functions;
 mod value_index;
 
@@ -155,8 +161,9 @@ use uqa_storage_sqlite::{
 };
 
 pub use notifications::{
-    NotificationSubscription, NotificationSubscriptionError, NotificationSubscriptionOptions,
-    NotificationSubscriptionPermit, NotificationWait, SQLNotification, SQLNotificationOptions,
+    NotificationReceive, NotificationSubscription, NotificationSubscriptionError,
+    NotificationSubscriptionOptions, NotificationSubscriptionPermit, NotificationWait,
+    SQLNotification, SQLNotificationOptions,
 };
 pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
@@ -168,12 +175,14 @@ pub use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions, SQLit
 
 use functions::RegisteredSQLFunction;
 pub use functions::{
-    SQLAggregateFunction, SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility,
-    SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, SQLTableFunctionStream,
+    SQLAggregateFactory, SQLAggregateFunction, SQLAggregateState, SQLFunctionContext,
+    SQLFunctionOptions, SQLFunctionVolatility, SQLRowSource, SQLRowStream, SQLScalarFunction,
+    SQLTableFunction, SQLTableFunctionResult, SQLTableFunctionStream,
 };
 use notifications::{
     NotificationHubOwner as NotificationHub, PendingListenAction, PendingNotification,
 };
+pub use sql_registry::{SQLFunctionRegistration, SQLFunctionRegistrationError};
 use state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
     SessionContext, StorageContext, StoredView, StoredViewKind,
@@ -232,7 +241,7 @@ pub struct Engine {
     durable: Arc<DurableCatalogState>,
     session: Arc<SessionContext>,
     extensions: RuntimeExtensions,
-    epochs: EpochCoordinator,
+    epochs: Arc<EpochCoordinator>,
     runtime: QueryRuntime,
     row_locks: Arc<row_locks::RowLockManager>,
     statistics: Arc<statistics::StatisticsCoordinator>,
@@ -780,6 +789,7 @@ fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, Analyze
 impl Drop for Engine {
     fn drop(&mut self) {
         if self.owns_session_registration {
+            let _ = self.close();
             self.session.portals.lock().clear();
             if let Some(backend) = self.storage.backend.as_ref() {
                 if backend.in_transaction() {

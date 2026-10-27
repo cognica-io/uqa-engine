@@ -7,19 +7,15 @@
 //! Immutable SQL inputs adapted from the active statement scope.
 
 use crate::catalog::{analysis::CatalogReadView, resolution::RelationNameResolution};
-use crate::{
-    plan::{CtePlan, QueryPlan},
-    RowSchema,
-};
+use crate::{plan::QueryPlan, RowSchema};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct BindingContext<'a> {
     pub catalog: CatalogReadView,
     pub resolution: RelationNameResolution,
     pub ctes: BTreeMap<String, RowSchema>,
-    pub deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
+    pub deferred_ctes: BTreeMap<String, crate::plan::RetainedCtePlan>,
     pub non_returning_ctes: BTreeSet<String>,
     pub scalar_subqueries: &'a [QueryPlan],
 }

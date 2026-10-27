@@ -78,7 +78,7 @@ impl uqa_sql::assignment::AssignmentContext for Engine {
     fn evaluate_domain_check(
         &self,
         expression: &Expr,
-        row: &uqa_sql::ResultRow,
+        row: &dyn uqa_sql::expr::RowLookup,
         schema: &uqa_sql::RowSchema,
     ) -> Result<uqa_core::Value, SQLError> {
         crate::capabilities::query_expressions::eval_lowered_expression_with_schema(

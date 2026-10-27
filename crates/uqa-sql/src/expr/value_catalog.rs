@@ -16,6 +16,26 @@ use uqa_core::{
 
 mod records;
 pub use records::SQLRecordFields;
+mod record_view;
+pub use record_view::SQLRecordView;
+mod types;
+pub(crate) use types::field_type_with_control;
+pub(crate) use types::type_by_oid_with_control;
+
+pub(crate) struct ValueCompositeCatalog<'a>(pub(crate) Option<&'a dyn SQLValueCatalog>);
+
+impl super::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
+    fn composite_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<Arc<super::composites::CompositeTypeDescriptor>>> {
+        self.0
+            .ok_or_else(|| {
+                crate::SQLError::Internal("composite operator lookup has no catalog".into())
+            })?
+            .value_composite_type(oid)
+    }
+}
 
 /// Type metadata and enum support used to observe already admitted SQL values. Implementations borrow one statement catalog generation and never invoke type input.
 pub trait SQLValueCatalog {

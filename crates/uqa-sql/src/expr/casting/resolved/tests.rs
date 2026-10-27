@@ -149,7 +149,7 @@ fn resolved_temporal_modifiers_preserve_postgresql_rounding_and_field_rules() {
             ColumnType::TimestampPrecision(2),
             "2000-01-01 12:34:56.789",
             TemporalValue::Timestamp {
-                micros: 946_730_096_790_000,
+                postgres_micros: (946_730_096_790_000) - uqa_core::POSTGRES_EPOCH_MICROS,
             },
         ),
         (

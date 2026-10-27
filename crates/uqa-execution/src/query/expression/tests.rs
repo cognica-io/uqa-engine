@@ -111,7 +111,7 @@ impl crate::functions::AggregateFunctionRegistry for Context {
     fn registered_aggregate_function(
         &self,
         _: &str,
-    ) -> Option<Arc<dyn crate::functions::SQLAggregateFunction>> {
+    ) -> Option<Arc<dyn crate::functions::SQLAggregateFactory>> {
         None
     }
 }
@@ -170,7 +170,7 @@ fn binding(builtin: bool) -> FunctionBinding {
         builtin,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     }

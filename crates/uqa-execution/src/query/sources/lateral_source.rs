@@ -7,9 +7,9 @@
 //! Lateral source execution and correlated query-block remapping.
 
 use super::{
-    build_join_operator_with_ctes, eval_scalar, resolve_user_table_function,
-    validate_table_function_column_definition, CteScope, PlanSubqueryArena, SQLError, SQLParam,
-    ScalarEvalContext, ScalarExpr, SourceContext, SourcePlan, TableFunctionCall,
+    build_join_operator_with_ctes, resolve_user_table_function,
+    validate_table_function_column_definition, CteScope, SQLError, SQLParam, ScalarExpr,
+    SourceContext, SourcePlan, TableFunctionCall,
 };
 
 /// Enforce EXECUTE on each function of a lateral FROM item, which the join calls once per outer row, as `PostgreSQL` checks it when it initializes the scan, before any outer row is read.
@@ -71,7 +71,10 @@ pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>
 pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
-    pub(super) on: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
+    pub(super) on: Option<(
+        crate::scalar::PreparedExpressions<ScalarExpr>,
+        crate::SharedExpressionEvaluator<'a>,
+    )>,
     /// The planner's predicates on the right relation's qualifiers, bound to `right_schema`. The planner removes them from the query block's residual filter, so every produced right row must satisfy them. An error names a column they read that the relation does not produce.
     pub(super) right_filter: Option<
         Result<
@@ -95,6 +98,8 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) input_schema: crate::RowSchema,
     pub(super) right_schema: crate::RowSchema,
     pub(super) pinned_right: Option<crate::OwnedPhysicalRow>,
+    pub(super) prepared_right: Option<Box<dyn crate::PhysicalOperator + 'a>>,
+    pub(super) runtime_columns: bool,
 }
 
 impl<'a, S: Clone + Send + Sync + 'static> QueryLateralSource<'a, S> {
@@ -197,18 +202,53 @@ impl<'a, S: Clone + Send + Sync + 'static> QueryLateralSource<'a, S> {
             column_types,
         };
         let output = hook.table_function_rows(call, self.params, Some(left_row))?;
+        self.table_rows(name, alias.as_deref().unwrap_or(output_name), output)
+            .map(Some)
+    }
+
+    fn table_rows(
+        &self,
+        name: &str,
+        qualifier: &str,
+        mut output: crate::query::table_functions::TableFunctionRows,
+    ) -> crate::ExecResult<crate::LateralRows<'a>> {
         let schema = self.right_schema.clone();
-        if output.columns.len() != schema.len() {
-            return Err(SQLError::Internal(format!(
-                "lateral table function produced {} columns for a {}-column source",
-                output.columns.len(),
-                schema.len()
-            ))
-            .into());
+        if self.runtime_columns
+            && (output.columns.len() != schema.len()
+                || output
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .any(|(position, name)| schema.public_name(position) != Some(name.as_str())))
+        {
+            return Err(output
+                .rows
+                .fail(SQLError::TypeMismatch(format!(
+                    "lateral table function `{name}` changed its result columns"
+                )))
+                .into());
         }
-        Ok(Some(Box::new(output.rows.map(move |row| {
-            row.map(|row| crate::OwnedPhysicalRow::new(schema.clone(), row))
-        }))))
+        let slots = if schema.is_identity_layout() {
+            None
+        } else {
+            let positional = crate::RowSchema::with_qualified_types(
+                qualifier,
+                (0..schema.len())
+                    .map(|position| schema.public_name(position).unwrap().to_string())
+                    .collect(),
+                schema.column_types().to_vec(),
+            );
+            row_slots(&positional, &schema).map_err(|error| output.rows.fail(error))?
+        };
+        Ok(output
+            .into_rows(schema.len(), "lateral table function")?
+            .map_rows(move |row| {
+                let row = match &slots {
+                    Some(slots) => row.project_slots(slots),
+                    None => row,
+                };
+                Ok(crate::OwnedPhysicalRow::new(schema.clone(), row))
+            }))
     }
 }
 
@@ -236,8 +276,15 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
         &mut self,
         left_row: &crate::OwnedPhysicalRow,
     ) -> crate::ExecResult<crate::LateralRows<'a>> {
+        if let Some(operator) = self.prepared_right.take() {
+            return crate::physical::demand::OperatorRows::open(operator)
+                .map(crate::SQLRowStream::from_source);
+        }
         if let Some(row) = self.pinned_right.as_ref() {
-            return Ok(Box::new(std::iter::once(Ok(row.clone()))));
+            return Ok(self.context.scans.runtime.diagnostics.observe_rows(
+                crate::SQLRowStream::new(std::iter::once(Ok(row.clone()))),
+                "Lateral Retained Rows Scan",
+            )?);
         }
         let combined;
         let left_row = if let Some(outer) = self.ctes.row_lock_outer_row() {
@@ -250,20 +297,30 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
             left_row
         };
         if let Some(rows) = self.function_rows(left_row)? {
-            return Ok(rows);
+            return Ok(self
+                .context
+                .scans
+                .runtime
+                .diagnostics
+                .observe_rows(rows, "Lateral Function Scan")?);
         }
         let group_runtime = matches!(self.right, SourcePlan::FunctionGroup { .. })
             .then(|| self.expression_runtime())
             .filter(|runtime| runtime.routine_description_scope().is_some());
         let operator = if let Some(runtime) = group_runtime {
-            self.function_group.operator(
+            let input = self.function_group.operator(
                 &self.context,
                 &self.right,
                 self.params,
                 &self.ctes,
                 &runtime,
                 left_row,
-            )?
+            )?;
+            self.context
+                .scans
+                .runtime
+                .diagnostics
+                .observe(input, "Lateral Function Group Scan")?
         } else {
             let mut scoped_ctes = self.ctes.clone();
             scoped_ctes.set_row_lock_outer_row(left_row.clone());
@@ -277,22 +334,66 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
             )?
         };
         let schema = self.right_schema.clone();
+        let (operator, slots) =
+            crate::physical::construction::OperatorBuild::run(operator, |input| {
+                if self.runtime_columns
+                    && (input.row_schema().len() != schema.len()
+                        || (0..schema.len()).any(|position| {
+                            input.row_schema().public_name(position) != schema.public_name(position)
+                        }))
+                {
+                    return Err(SQLError::TypeMismatch(
+                        "lateral source changed its result columns".into(),
+                    ));
+                }
+                row_slots(input.row_schema(), &schema)
+            })?;
         let rows = crate::physical::demand::OperatorRows::open(operator)?;
-        Ok(Box::new(rows.map(move |row| row?.relabel(schema.clone()))))
+        Ok(crate::SQLRowStream::from_source(rows).map_rows(move |row| {
+            let row = match &slots {
+                Some(slots) => row.row.project_slots(slots),
+                None => row.row,
+            };
+            Ok(crate::OwnedPhysicalRow::new(schema.clone(), row))
+        }))
     }
 
     fn matches(&mut self, joined: &crate::OwnedPhysicalRow) -> crate::ExecResult<bool> {
-        let Some(filter) = self.on.as_ref() else {
+        let Some((filter, evaluator)) = self.on.as_ref() else {
             return Ok(true);
         };
-        let scoped_hook = self.expression_runtime();
-        let subquery_arena =
-            PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(scoped_hook.as_ref()));
-        let context = ScalarEvalContext::from_row_lookup(joined, self.params)
-            .with_function_hook(scoped_hook.as_ref())
-            .with_function_states(filter.calls())
-            .with_subquery_runner(&subquery_arena)
-            .with_physical_outer_row(&joined.schema, &joined.row);
-        Ok(uqa_sql::expr::truthy(&eval_scalar(filter, &context)?))
+        Ok(uqa_sql::expr::truthy(
+            &evaluator.evaluate_physical_with_function_states(
+                filter,
+                &joined.schema,
+                &joined.row,
+                filter.calls(),
+            )?,
+        ))
+    }
+
+    fn close(&mut self) -> crate::ExecResult<()> {
+        self.prepared_right
+            .take()
+            .map_or(Ok(()), |mut input| input.close())
+    }
+}
+
+/// Bind the complete physical layout once per invocation, keeping the direct
+/// row transfer when both inputs already use the same slot positions.
+fn row_slots(
+    input: &crate::RowSchema,
+    output: &crate::RowSchema,
+) -> Result<Option<Vec<usize>>, SQLError> {
+    if input.has_same_physical_layout(output) {
+        return Ok(None);
+    }
+    let slots = input
+        .relayout_slots(output)
+        .map_err(|error| crate::physical::physical_exec_error(error.into()))?;
+    if slots.len() == input.physical_width() && slots.iter().copied().eq(0..slots.len()) {
+        Ok(None)
+    } else {
+        Ok(Some(slots))
     }
 }

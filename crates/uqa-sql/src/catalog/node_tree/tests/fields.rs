@@ -143,7 +143,7 @@ fn retained_composite_field_nodes_keep_original_attribute_identity_after_rename(
             } = node
             {
                 if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect) {
-                    binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+                    binding.set_composite_field(crate::ast::CompositeFieldBinding {
                         type_oid: u32::try_from(crate::catalog::type_metadata::pg_type_oid(&base))
                             .unwrap(),
                         number: i16::try_from(position + 2).unwrap(),
@@ -151,7 +151,7 @@ fn retained_composite_field_nodes_keep_original_attribute_identity_after_rename(
                         collation_oid: Some(if position == 0 { 0 } else { 950 }),
                         dropped: false,
                         changed_type: None,
-                    }));
+                    });
                     count += 1;
                 }
             }

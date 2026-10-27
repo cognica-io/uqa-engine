@@ -13,7 +13,6 @@ use super::{
 };
 use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema, RowCast};
 use std::sync::OnceLock;
-use uqa_core::ArrayValue;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
@@ -26,8 +25,8 @@ pub(super) fn array(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let element_oid = context.with_type_schema(|schema| {
-        uqa_sql::type_resolution::scalar_array_element_oid_with_control(
+    let element_type = context.with_type_schema(|schema| {
+        uqa_sql::type_resolution::scalar_array_input_type_with_control(
             items,
             schema,
             context.params(),
@@ -35,17 +34,12 @@ pub(super) fn array(
             control,
         )
     })?;
-    let items = evaluate_items(items, context, control)?;
-    let array = ArrayValue::try_new_with_control(items, control)?.ok_or_else(|| {
-        SQLError::TypeMismatch("multidimensional arrays must have matching dimensions".into())
-    })?;
-    let (array, memory) = array.into_parts();
-    control
-        .finish(
-            Value::Array(array.with_element_type_oid(element_oid)),
-            memory,
-        )
-        .map_err(Into::into)
+    uqa_sql::expr::construct_array_with_control(
+        items.len(),
+        element_type.as_deref(),
+        control,
+        |index| eval_scalar_inner(&items[index], context, control),
+    )
 }
 
 pub(super) fn row(
@@ -102,6 +96,20 @@ pub(super) fn binary(
 ) -> Result<Produced<Value>, SQLError> {
     let left = eval_scalar_inner(lhs, context, control)?;
     let right = eval_scalar_inner(rhs, context, control)?;
+    binary_values(op, lhs, rhs, &left, &right, context, control)
+}
+
+// Value conversion scratch belongs to the completed operands, not to a frame
+// that remains live while either operand recursively evaluates another routine.
+fn binary_values(
+    op: BinaryOp,
+    lhs: &ScalarExpr,
+    rhs: &ScalarExpr,
+    left: &Value,
+    right: &Value,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     if matches!(
         op,
         BinaryOp::Equal
@@ -111,13 +119,13 @@ pub(super) fn binary(
             | BinaryOp::Greater
             | BinaryOp::GreaterEqual
     ) {
-        if matches!((&*left, &*right), (Value::Row(_), Value::Row(_)))
+        if matches!((left, right), (Value::Row(_), Value::Row(_)))
             && !matches!((lhs, rhs), (ScalarExpr::Row(_), ScalarExpr::Row(_)))
         {
             let value = uqa_sql::expr::eval_record_comparison_truth_with_engine(
                 op,
-                &left,
-                &right,
+                left,
+                right,
                 control,
                 context.function_hook(),
             )?;
@@ -125,8 +133,8 @@ pub(super) fn binary(
         }
         let value = uqa_sql::expr::eval_comparison_truth_with_deferred_state(
             op,
-            &left,
-            &right,
+            left,
+            right,
             control,
             context.function_hook(),
             || context.enum_binary_comparison_state(lhs),
@@ -149,8 +157,8 @@ pub(super) fn binary(
     {
         let value = uqa_sql::expr::eval_float_arithmetic_with_control(
             op,
-            &left,
-            &right,
+            left,
+            right,
             uqa_sql::expr::FloatWidth::Real,
             control,
         )?;
@@ -159,7 +167,7 @@ pub(super) fn binary(
     // Integer operand widths constrain only integer arithmetic.
     // Other carriers keep their existing
     // numeric promotion without re-inferring the operand trees.
-    let integer_width = if matches!((&*left, &*right), (Value::Int(_), Value::Int(_)))
+    let integer_width = if matches!((left, right), (Value::Int(_), Value::Int(_)))
         && matches!(
             op,
             BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
@@ -178,8 +186,8 @@ pub(super) fn binary(
     };
     eval_binary_values_with_engine(
         op,
-        &left,
-        &right,
+        left,
+        right,
         integer_width,
         context.function_hook(),
         control,
@@ -217,7 +225,12 @@ pub(super) fn is_null(
 ) -> Result<Produced<Value>, SQLError> {
     let value = eval_scalar_inner(expr, context, control)?;
     plain(
-        Value::Bool(uqa_core::sql_null_test(Some(&value), negated)),
+        Value::Bool(uqa_sql::expr::sql_null_test_with_control(
+            &value,
+            negated,
+            context.function_hook(),
+            control,
+        )?),
         control,
     )
 }

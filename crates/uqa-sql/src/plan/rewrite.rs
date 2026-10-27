@@ -31,6 +31,9 @@ pub(super) fn rewrite_query_scalars(
     rewrite_ctes(&mut query.ctes, rewrite);
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
+            for pending in &mut block.deferred_outer_rewrites {
+                pending.rewrite_scalar_expressions(rewrite);
+            }
             if let Some(source) = &mut block.from {
                 rewrite_source_scalars(source, rewrite);
             }
@@ -381,7 +384,8 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::DropTrigger(_)
         | CommandPlan::CreateRule(_)
         | CommandPlan::DropRule(_)
-        | CommandPlan::DoBlock { .. } => {}
+        | CommandPlan::DoBlock { .. }
+        | CommandPlan::Empty => {}
     }
 }
 

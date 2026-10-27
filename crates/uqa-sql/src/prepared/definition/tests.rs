@@ -7,8 +7,10 @@
 use super::*;
 use crate::binding::statements::StatementAnalysisOperation;
 use std::cell::{Cell, RefCell};
+mod calls;
 mod dependencies;
 mod fixtures;
+mod utility;
 use fixtures::NoRoutines;
 
 #[derive(Default)]
@@ -64,7 +66,9 @@ fn analyze(scopes: &Scopes, declared: &[ColumnType]) -> Result<PreparedDefinitio
         &PreparedDefinitionContext {
             types: &NoRoutines,
             routines: &NoRoutines,
+            procedures: &NoRoutines,
             scopes,
+            session: &NoRoutines,
             aliases: &NoRoutines,
         },
         UnifiedPlan::lower(
@@ -112,7 +116,9 @@ fn preparation_retains_the_input_scope_namespace_and_live_reads_release_their_sc
     let current = effective_search_path(&PreparedDefinitionContext {
         types: &NoRoutines,
         routines: &NoRoutines,
+        procedures: &NoRoutines,
         scopes: &scopes,
+        session: &NoRoutines,
         aliases: &NoRoutines,
     })
     .unwrap();

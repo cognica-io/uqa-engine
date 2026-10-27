@@ -48,7 +48,8 @@ impl QueryBlockPlan {
 
     /// One scalar SELECT with no relational clauses or subplans. The caller must also reject set-returning routines using its selected catalog.
     pub fn is_single_expression(&self) -> bool {
-        matches!(self.compute, ComputePlan::Project)
+        self.deferred_outer_rewrites.is_empty()
+            && matches!(self.compute, ComputePlan::Project)
             && self.from.is_none()
             && self.r#where.is_none()
             && self.group_by.is_empty()
@@ -99,6 +100,7 @@ impl QueryPlan {
             analyzed_output: None,
             analyzed_source: None,
             analyzed_grouping: None,
+            relation_privilege_subject: None,
             relations_bound: false,
             ctes,
             root,
@@ -274,6 +276,7 @@ pub(super) fn lower_relational_root(
             analyzed_output: None,
             analyzed_source: None,
             analyzed_grouping: None,
+            relation_privilege_subject: None,
             relations_bound: false,
             ctes: Vec::new(),
             root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(
@@ -328,9 +331,10 @@ impl QueryBlockPlan {
             })
             .collect();
         let mut block = Self {
+            deferred_outer_rewrites: Vec::new(),
             windows,
             projections,
-            privilege_columns: std::collections::BTreeSet::default(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             from: statement
                 .from
                 .map(|source| SourcePlan::lower_with(source, aggregates, &mut subqueries)),
@@ -388,51 +392,63 @@ impl QueryBlockPlan {
     #[must_use]
     pub fn expressions(&self) -> Vec<&ScalarExpr> {
         let mut expressions = Vec::new();
-        if let Some(source) = &self.from {
-            source.push_expressions(&mut expressions);
-        }
-        self.push_query_expressions(&mut expressions);
+        self.visit_expressions(&mut |expression| expressions.push(expression));
         expressions
+    }
+
+    /// Borrow direct source roots followed by this query's own roots. Derived-query bodies and scalar-query arenas keep their separate namespaces.
+    pub fn visit_expressions<'a>(&'a self, visit: &mut dyn FnMut(&'a ScalarExpr)) {
+        self.try_visit_expressions(&mut |expression| {
+            visit(expression);
+            Ok::<_, std::convert::Infallible>(true)
+        })
+        .unwrap_or_else(|never| match never {});
+    }
+
+    /// Visit direct expression roots in initialization order. Return false when the callback stops successfully; an error also stops before the next root.
+    pub fn try_visit_expressions<'a, E>(
+        &'a self,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<bool, E>,
+    ) -> Result<bool, E> {
+        if let Some(source) = &self.from {
+            if !source.try_visit_expressions(visit)? {
+                return Ok(false);
+            }
+        }
+        for expression in self.query_expressions() {
+            if !visit(expression)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Expressions at this query level, excluding FROM-item inputs and join conditions, which have their own namespaces.
-    pub fn query_expressions(&self) -> Vec<&ScalarExpr> {
-        let mut expressions = Vec::new();
-        self.push_query_expressions(&mut expressions);
-        expressions
-    }
-
-    fn push_query_expressions<'a>(&'a self, expressions: &mut Vec<&'a ScalarExpr>) {
-        // Scan projections initialize before scan qualifications; aggregate and window outputs initialize after their input scan.
-        if matches!(self.compute, ComputePlan::Project) {
-            expressions.extend(self.projections.iter().map(|projection| &projection.expr));
-        }
-        if let Some(filter) = &self.r#where {
-            expressions.push(filter);
-        }
-        if !matches!(self.compute, ComputePlan::Project) {
-            expressions.extend(self.projections.iter().map(|projection| &projection.expr));
-        }
-        expressions.extend(&self.group_by);
-        for set in &self.grouping_sets {
-            expressions.extend(set);
-        }
-        if let Some(having) = &self.having {
-            expressions.push(having);
-        }
-        expressions.extend(self.order_by.iter().map(|order| &order.expr));
-        if let Some(limit) = &self.limit {
-            expressions.push(limit);
-        }
-        if let Some(offset) = &self.offset {
-            expressions.push(offset);
-        }
-        expressions.extend(&self.distinct_on);
-        expressions.extend(
-            self.windows
-                .iter()
-                .flat_map(|window| window.spec.expressions()),
-        );
+    pub fn query_expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        // Scan projections precede scan qualifications; aggregate and window outputs follow their input scan.
+        let (before, after): (&[ProjectionPlan], &[ProjectionPlan]) =
+            if matches!(self.compute, ComputePlan::Project) {
+                (&self.projections, &[])
+            } else {
+                (&[], &self.projections)
+            };
+        before
+            .iter()
+            .map(|projection| &projection.expr)
+            .chain(self.r#where.as_ref())
+            .chain(after.iter().map(|projection| &projection.expr))
+            .chain(&self.group_by)
+            .chain(self.grouping_sets.iter().flatten())
+            .chain(self.having.as_ref())
+            .chain(self.order_by.iter().map(|order| &order.expr))
+            .chain(self.limit.as_ref())
+            .chain(self.offset.as_ref())
+            .chain(&self.distinct_on)
+            .chain(
+                self.windows
+                    .iter()
+                    .flat_map(|window| window.spec.expressions()),
+            )
     }
 }
 
@@ -608,32 +624,57 @@ impl SourcePlan {
         }
     }
 
-    /// Append scalar inputs owned by this source, including JOIN predicates; nested query bodies retain their own expression scope.
-    pub fn push_expressions<'a>(&'a self, output: &mut Vec<&'a ScalarExpr>) {
+    /// Visit scalar roots in this source's expression namespace. Derived-query bodies retain their own scope. Return false on a successful callback stop; an error also stops before the next root.
+    pub fn try_visit_expressions<'a, E>(
+        &'a self,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<bool, E>,
+    ) -> Result<bool, E> {
         match self {
-            crate::plan::SourcePlan::RetainedRows(_) => {}
-            Self::Table { .. } | Self::Subquery { .. } => {}
+            Self::RetainedRows(_) | Self::Table { .. } | Self::Subquery { .. } => {}
             Self::Join {
                 left, right, on, ..
             } => {
-                left.push_expressions(output);
-                right.push_expressions(output);
+                if !left.try_visit_expressions(visit)? || !right.try_visit_expressions(visit)? {
+                    return Ok(false);
+                }
                 if let Some(on) = on {
-                    output.push(on);
+                    if !visit(on)? {
+                        return Ok(false);
+                    }
                 }
             }
             Self::Values { rows, .. } => {
-                for row in rows {
-                    output.extend(row);
+                for expression in rows.iter().flatten() {
+                    if !visit(expression)? {
+                        return Ok(false);
+                    }
                 }
             }
-            Self::Function { args, .. } => output.extend(args),
+            Self::Function { args, .. } => {
+                for expression in args {
+                    if !visit(expression)? {
+                        return Ok(false);
+                    }
+                }
+            }
             Self::FunctionGroup { functions, .. } => {
-                for function in functions {
-                    output.extend(&function.args);
+                for expression in functions.iter().flat_map(|function| &function.args) {
+                    if !visit(expression)? {
+                        return Ok(false);
+                    }
                 }
             }
         }
+        Ok(true)
+    }
+
+    /// Append scalar inputs owned by this source, including JOIN predicates; nested query bodies retain their own expression scope.
+    pub fn push_expressions<'a>(&'a self, output: &mut Vec<&'a ScalarExpr>) {
+        self.try_visit_expressions(&mut |expression| {
+            output.push(expression);
+            Ok::<_, std::convert::Infallible>(true)
+        })
+        .unwrap_or_else(|never| match never {});
     }
 
     pub fn collect_tables(&self, output: &mut Vec<(String, Option<String>)>) {

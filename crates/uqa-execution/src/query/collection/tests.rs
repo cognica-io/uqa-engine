@@ -98,3 +98,84 @@ fn materialized_collection_preserves_empty_and_late_error_cleanup() {
     assert_eq!(error.sqlstate(), Some("22012"));
     assert_eq!(failing.closes.load(Ordering::Relaxed), 1);
 }
+
+#[test]
+fn rejected_consumer_preparation_closes_the_unopened_input() {
+    use super::super::consumer::{QueryConsumerControl, QueryRowConsumer};
+    use std::rc::Rc;
+
+    struct Input {
+        schema: RowSchema,
+        closed: Arc<AtomicUsize>,
+    }
+    impl PhysicalOperator for Input {
+        fn row_schema(&self) -> &RowSchema {
+            &self.schema
+        }
+        fn open(&mut self) -> ExecResult<()> {
+            panic!("rejected consumer must not open input")
+        }
+        fn next(&mut self) -> ExecResult<Option<Batch>> {
+            panic!("rejected consumer must not read")
+        }
+        fn close(&mut self) -> ExecResult<()> {
+            assert_eq!(self.closed.fetch_add(1, Ordering::SeqCst), 0);
+            Err(SQLError::Routine {
+                sqlstate: "58030".into(),
+                message: "input close failed".into(),
+            }
+            .into())
+        }
+    }
+    struct Reject {
+        directional: bool,
+        reject_preparation: bool,
+    }
+    impl QueryRowConsumer for Reject {
+        fn begin(&self, _: &[String], _: &RowSchema) -> Result<(), SQLError> {
+            Err(SQLError::Routine {
+                sqlstate: "53200".into(),
+                message: "consumer admission failed".into(),
+            })
+        }
+        fn consume(&self, _: crate::OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {
+            panic!("no rows")
+        }
+        fn uses_directional_scan(&self) -> bool {
+            self.directional
+        }
+        fn directional_scan_prepared(&self, _: crate::BackwardScanSupport) -> Result<(), SQLError> {
+            if self.reject_preparation {
+                self.begin(&[], &RowSchema::default())
+            } else {
+                Ok(())
+            }
+        }
+    }
+    for (directional, reject_preparation) in [(false, false), (true, false), (true, true)] {
+        let closed = Arc::new(AtomicUsize::new(0));
+        let schema = RowSchema::new(vec!["n".into()]);
+        let mut input: Box<dyn PhysicalOperator> = Box::new(Input {
+            schema: schema.clone(),
+            closed: closed.clone(),
+        });
+        let consumer: Rc<dyn QueryRowConsumer> = Rc::new(Reject {
+            directional,
+            reject_preparation,
+        });
+        let result = super::collect_consumed_rows(
+            schema.columns(),
+            &schema,
+            &mut input,
+            &consumer,
+            &uqa_core::CancellationToken::new(),
+        );
+        let Err(error) = result else {
+            panic!("consumer was accepted")
+        };
+        assert_eq!(error.sqlstate(), Some("53200"));
+        assert_eq!(error.to_string(), "consumer admission failed");
+        assert!(error.detail().unwrap().contains("input close failed"));
+        assert_eq!(closed.load(Ordering::SeqCst), 1);
+    }
+}

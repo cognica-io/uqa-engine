@@ -180,25 +180,28 @@ pub(super) fn round_temporal_precision(value: &mut Value, precision: u32) -> Res
     if !value.is_finite() {
         return Ok(());
     }
-    let (micros, epoch, overflow) = match value {
+    let (micros, overflow) = match value {
         TemporalValue::Time { micros } | TemporalValue::TimeTz { micros, .. } => {
-            (micros, 0, ("22008", "time"))
+            (micros, ("22008", "time"))
         }
-        TemporalValue::Interval { micros, .. } => (micros, 0, ("22015", "interval")),
+        TemporalValue::Interval { micros, .. } => (micros, ("22015", "interval")),
         // PostgreSQL rounds signed timestamps around its 2000 epoch, including ties before that epoch.
-        TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros } => {
-            (micros, 946_684_800_000_000_i128, ("22008", "timestamp"))
+        TemporalValue::Timestamp {
+            postgres_micros: micros,
         }
+        | TemporalValue::TimestampTz {
+            postgres_micros: micros,
+        } => (micros, ("22008", "timestamp")),
         TemporalValue::Date { .. } => return Ok(()),
     };
     let scale = 10_i128.pow(6 - precision);
-    let offset = i128::from(*micros) - epoch;
+    let offset = i128::from(*micros);
     let rounded = if offset >= 0 {
         (offset + scale / 2) / scale * scale
     } else {
         -((-offset + scale / 2) / scale * scale)
     };
-    *micros = i64::try_from(rounded + epoch).map_err(|_| SQLError::Routine {
+    *micros = i64::try_from(rounded).map_err(|_| SQLError::Routine {
         sqlstate: overflow.0.into(),
         message: format!("{} out of range", overflow.1),
     })?;
@@ -306,9 +309,16 @@ fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Opti
         }
         (
             TemporalCastTarget::Date,
-            TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
+            TemporalValue::Timestamp {
+                postgres_micros: micros,
+            }
+            | TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            },
         ) => Some(TemporalValue::Date {
-            days: i32::try_from(micros.div_euclid(MICROS_PER_DAY)).ok()?,
+            days: i32::try_from(micros.div_euclid(MICROS_PER_DAY))
+                .ok()?
+                .checked_add(uqa_core::POSTGRES_EPOCH_DAYS)?,
         }),
         (TemporalCastTarget::Time, TemporalValue::Time { micros })
         | (TemporalCastTarget::Time, TemporalValue::TimeTz { micros, .. }) => {
@@ -316,7 +326,12 @@ fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Opti
         }
         (
             TemporalCastTarget::Time,
-            TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
+            TemporalValue::Timestamp {
+                postgres_micros: micros,
+            }
+            | TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            },
         )
         | (TemporalCastTarget::Time, TemporalValue::Interval { micros, .. }) => {
             Some(TemporalValue::Time {
@@ -327,41 +342,29 @@ fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Opti
             TemporalCastTarget::TimeTz,
             TemporalValue::TimeTz {
                 micros,
-                offset_minutes,
+                offset_seconds,
             },
         ) => Some(TemporalValue::TimeTz {
             micros: *micros,
-            offset_minutes: *offset_minutes,
+            offset_seconds: *offset_seconds,
         }),
         (TemporalCastTarget::TimeTz, TemporalValue::Time { micros }) => {
             Some(TemporalValue::TimeTz {
                 micros: *micros,
-                offset_minutes: 0,
+                offset_seconds: 0,
             })
         }
-        (TemporalCastTarget::TimeTz, TemporalValue::TimestampTz { micros }) => {
-            Some(TemporalValue::TimeTz {
-                micros: micros.rem_euclid(MICROS_PER_DAY),
-                offset_minutes: 0,
-            })
-        }
-        (TemporalCastTarget::Timestamp, TemporalValue::Timestamp { micros })
-        | (TemporalCastTarget::Timestamp, TemporalValue::TimestampTz { micros }) => {
-            Some(TemporalValue::Timestamp { micros: *micros })
-        }
-        (TemporalCastTarget::Timestamp, TemporalValue::Date { days }) => {
-            Some(TemporalValue::Timestamp {
-                micros: i64::from(*days).checked_mul(MICROS_PER_DAY)?,
-            })
-        }
-        (TemporalCastTarget::TimestampTz, TemporalValue::TimestampTz { micros })
-        | (TemporalCastTarget::TimestampTz, TemporalValue::Timestamp { micros }) => {
-            Some(TemporalValue::TimestampTz { micros: *micros })
-        }
-        (TemporalCastTarget::TimestampTz, TemporalValue::Date { days }) => {
-            Some(TemporalValue::TimestampTz {
-                micros: i64::from(*days).checked_mul(MICROS_PER_DAY)?,
-            })
+        (
+            TemporalCastTarget::TimeTz,
+            TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            },
+        ) => Some(TemporalValue::TimeTz {
+            micros: micros.rem_euclid(MICROS_PER_DAY),
+            offset_seconds: 0,
+        }),
+        (TemporalCastTarget::Timestamp | TemporalCastTarget::TimestampTz, value) => {
+            cast_timestamp_carrier(value, matches!(target, TemporalCastTarget::TimestampTz))
         }
         (
             TemporalCastTarget::Interval,
@@ -384,6 +387,22 @@ fn cast_temporal_kind(value: &TemporalValue, target: TemporalCastTarget) -> Opti
         }
         _ => None,
     }
+}
+
+fn cast_timestamp_carrier(value: &TemporalValue, with_timezone: bool) -> Option<TemporalValue> {
+    let postgres_micros = match value {
+        TemporalValue::Timestamp { postgres_micros }
+        | TemporalValue::TimestampTz { postgres_micros } => *postgres_micros,
+        TemporalValue::Date { days } => (i64::from(*days)
+            - i64::from(uqa_core::POSTGRES_EPOCH_DAYS))
+        .checked_mul(86_400_000_000)?,
+        _ => return None,
+    };
+    Some(if with_timezone {
+        TemporalValue::TimestampTz { postgres_micros }
+    } else {
+        TemporalValue::Timestamp { postgres_micros }
+    })
 }
 
 /// The diagnostic `DateTimeParseError` reports for input the type `ty` rejects: `22007` for text that is not a value, `22008` for a field or value out of range with the `DateStyle` hint when the month or day order could be the cause, `22009` for a UTC offset out of range, `22023` for an unknown time zone and `22015` for an interval field that does not fit.

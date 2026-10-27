@@ -14,12 +14,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{atomic::AtomicU64, Arc};
 use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::plan::{CtePlan, QueryPlan};
+use uqa_sql::plan::QueryPlan;
 use uqa_sql::SQLError;
 
 pub(crate) mod binding;
 mod cte;
 mod definitions;
+mod producers;
 #[cfg(test)]
 mod retained_plans;
 mod row_locks;
@@ -32,12 +33,15 @@ use subqueries::ScalarSubqueryCacheEntry;
 
 #[derive(Clone)]
 pub struct CteScope<S: Clone = ()> {
+    producers: producers::CteProducers,
     pub rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
-    deferred_ctes: BTreeMap<String, Arc<CtePlan>>,
+    deferred_ctes: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
     definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
     folded_ctes: BTreeSet<String>,
     pub non_returning_ctes: BTreeSet<String>,
     pub scalar_subqueries: Arc<[QueryPlan]>,
+    pub(crate) source_outer_rewrites:
+        Option<Arc<[uqa_sql::semantics::view_rewrite::DeferredOuterRewrite]>>,
     pub lock_identities: LockIdentityOptions,
     row_lock: Option<Box<RowLockScopeState>>,
     visible_cte_names: BTreeSet<String>,
@@ -61,12 +65,14 @@ pub struct CteScope<S: Clone = ()> {
 impl<S: Clone> Default for CteScope<S> {
     fn default() -> Self {
         Self {
+            producers: producers::CteProducers::default(),
             rows: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
             definition_scopes: BTreeMap::new(),
             folded_ctes: BTreeSet::new(),
             non_returning_ctes: BTreeSet::new(),
             scalar_subqueries: Arc::default(),
+            source_outer_rewrites: None,
             lock_identities: LockIdentityOptions::default(),
             row_lock: None,
             visible_cte_names: BTreeSet::new(),
@@ -189,6 +195,40 @@ mod tests {
     use crate::ScalarExpr;
     use crate::ScalarFrameBound;
     use uqa_sql::ast::{FrameExclusion, FrameMode};
+
+    #[test]
+    fn query_scope_restores_relation_authority_and_namespace_after_unwind() {
+        use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
+        let uqa_sql::plan::UnifiedPlan::Query(mut query) =
+            uqa_sql::plan::UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        query.relation_privilege_subject = Some("caller".into());
+        let mut scope = CteScope::<()>::new();
+        scope.privilege_subject = Some("action_owner".into());
+        scope.catalog_resolution = Some(RelationNameResolution {
+            search_path: vec!["public".into()],
+            temporary_schema: "pg_temp_1".into(),
+            temporary_namespace_allocated: false,
+            current_user: "caller".into(),
+            lookup_mode: RelationLookupMode::Bound,
+        });
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let current = scope.enter_query_plan_scope(&query).unwrap();
+            assert_eq!(current.privilege_subject().unwrap(), &"caller".into());
+            let resolution = current.relation_name_resolution().unwrap();
+            assert_eq!(resolution.lookup_mode, RelationLookupMode::Dynamic);
+            assert_eq!(resolution.current_user, "caller".into());
+            panic!("query failed while retaining caller authority");
+        }));
+        assert!(unwind.is_err());
+        assert_eq!(scope.privilege_subject().unwrap(), &"action_owner".into());
+        assert_eq!(
+            scope.relation_name_resolution().unwrap().lookup_mode,
+            RelationLookupMode::Bound
+        );
+    }
 
     #[test]
     fn empty_row_lock_scopes_leave_non_locking_state_unallocated() {

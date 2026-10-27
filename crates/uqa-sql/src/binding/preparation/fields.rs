@@ -61,7 +61,7 @@ impl Preparation<'_> {
                 input.qualified_type(qualifier, name).cloned(),
                 input.qualified_collation(qualifier, name).unwrap_or(0),
             )
-        } else if let Some(field) = &binding.composite_field {
+        } else if let Some(field) = binding.composite_field() {
             (
                 Some(field.result_type.clone()),
                 field.collation_oid.unwrap_or_else(|| {

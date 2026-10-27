@@ -12,12 +12,12 @@ use uqa_sql::SQLError;
 #[test]
 fn deferred_rows_start_their_call_at_the_first_row_request() {
     let starts = AtomicUsize::new(0);
-    let mut rows = DeferredTableFunctionRows::new(|| {
+    let mut rows = crate::SQLRowStream::from_source(DeferredTableFunctionRows::new(|| {
         starts.fetch_add(1, Ordering::Relaxed);
-        Ok(Box::new([1, 2].into_iter().map(|value| {
+        Ok(crate::SQLRowStream::new([1, 2].into_iter().map(|value| {
             Ok(crate::PhysicalRow::from_values(vec![Value::Int(value)]))
         })))
-    });
+    }));
     assert_eq!(starts.load(Ordering::Relaxed), 0);
     let produced = rows.by_ref().collect::<Result<Vec<_>, _>>().unwrap();
     assert_eq!(
@@ -41,12 +41,12 @@ fn deferred_rows_start_their_call_at_the_first_row_request() {
 
 #[test]
 fn deferred_rows_report_a_failed_start_once() {
-    let mut rows = DeferredTableFunctionRows::new(|| {
+    let mut rows = crate::SQLRowStream::from_source(DeferredTableFunctionRows::new(|| {
         Err(SQLError::Routine {
             sqlstate: "22023".into(),
             message: "step size cannot equal zero".into(),
         })
-    });
+    }));
     let error = rows.next().unwrap().unwrap_err();
     assert!(error.to_string().contains("step size cannot equal zero"));
     assert!(rows.next().is_none());

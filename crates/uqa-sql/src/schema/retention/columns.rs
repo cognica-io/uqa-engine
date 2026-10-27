@@ -156,6 +156,7 @@ impl<'a> Walker<'a> {
                 scale: _,
             }
             | ColumnType::Json
+            | ColumnType::Xml
             | ColumnType::JsonB
             | ColumnType::Bytea
             | ColumnType::Bit(_)
@@ -203,7 +204,7 @@ impl<'a> Walker<'a> {
             builtin: _,
             dispatch: _,
             invocation,
-            composite_field,
+            value_binding,
             resolution_error,
             input_collation: _,
         } = binding;
@@ -228,11 +229,18 @@ impl<'a> Walker<'a> {
             self.texts(parameter_types)?;
             self.optional_text(return_type.as_ref())?;
         }
-        if let Some(field) = composite_field {
-            self.charge(size_of::<crate::ast::CompositeFieldBinding>())?;
-            self.ty(&field.result_type)?;
-            if let Some(ty) = &field.changed_type {
-                self.ty(ty)?;
+        if let Some(binding) = value_binding {
+            self.charge(size_of::<crate::ast::FunctionValueBinding>())?;
+            match binding.as_ref() {
+                crate::ast::FunctionValueBinding::CompositeField(field) => {
+                    self.ty(&field.result_type)?;
+                    if let Some(ty) = &field.changed_type {
+                        self.ty(ty)?;
+                    }
+                }
+                crate::ast::FunctionValueBinding::Assignment(assignment) => {
+                    self.buffer::<crate::ast::AssignmentPathStep>(assignment.path.capacity())?;
+                }
             }
         }
         if let Some(error) = resolution_error {

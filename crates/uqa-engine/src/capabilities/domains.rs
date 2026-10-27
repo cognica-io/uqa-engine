@@ -175,6 +175,11 @@ impl Engine {
     }
 }
 impl TypeObjectCatalog for Engine {
+    fn temporary_schema(&self) -> Option<String> {
+        self.temporary_namespace_allocated()
+            .then(|| self.temporary_schema_name())
+    }
+
     fn shell_by_type_oid(&self, oid: u32) -> Option<uqa_sql::catalog::shell_type::StoredShellType> {
         self.durable
             .shells

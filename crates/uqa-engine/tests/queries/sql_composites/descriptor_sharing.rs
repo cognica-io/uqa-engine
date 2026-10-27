@@ -6,7 +6,8 @@
 
 //! Public results retain producer metadata through output conversion and catalog changes.
 
-use uqa_core::Value;
+use uqa_core::{memory::ProductionControl, Value};
+use uqa_sql::expr::SQLRecordView;
 
 #[rstest::rstest]
 #[case::memory(0)]
@@ -33,13 +34,13 @@ fn composite_result_descriptors_survive_output_catalog_rollback_and_reopen(
         .unwrap();
     let sql = "SELECT ROW(id, body) AS anonymous, ROW(id, body)::shaped_pair AS named FROM shaped_input ORDER BY id";
     let original = engine.sql(sql, &[]).unwrap();
-    let (Some(Value::Row(first)), Some(Value::Record(named))) =
+    let (Some(Value::Row(first)), Some(Value::Datum(named))) =
         (original.value_at(0, 0), original.value_at(0, 1))
     else {
         panic!("composite carriers")
     };
     for row in 1..3 {
-        let (Some(Value::Row(other)), Some(Value::Record(other_named))) =
+        let (Some(Value::Row(other)), Some(Value::Datum(other_named))) =
             (original.value_at(row, 0), original.value_at(row, 1))
         else {
             panic!("composite carriers")
@@ -48,13 +49,24 @@ fn composite_result_descriptors_survive_output_catalog_rollback_and_reopen(
             .descriptor()
             .unwrap()
             .shares_storage_with(other.descriptor().unwrap()));
-        assert!(named
-            .descriptor()
-            .shares_storage_with(other_named.descriptor()));
+        assert_eq!(named.type_oid(), other_named.type_oid());
     }
+    let control = ProductionControl::uncontrolled();
+    let named_view = SQLRecordView::new(
+        original.value_at(0, 1).unwrap(),
+        original.column_types[1].as_ref(),
+        Some(&engine),
+        &control,
+    )
+    .unwrap();
     assert_eq!(
-        original.value_at(2, 1).unwrap(),
-        &Value::Record(vec![("id".into(), Value::Int(3)), ("body".into(), Value::Null)].into())
+        uqa_sql::result::format_postgres_text(
+            original.value_at(2, 1).unwrap(),
+            original.column_types[1].as_ref().unwrap(),
+            Some(&engine)
+        )
+        .unwrap(),
+        "(3,)"
     );
     let serialized = serde_json::to_string(original.value_at(0, 1).unwrap()).unwrap();
     engine
@@ -74,11 +86,33 @@ fn composite_result_descriptors_survive_output_catalog_rollback_and_reopen(
         )
         .unwrap();
     let during = engine.sql(sql, &[]).unwrap();
-    let Some(Value::Record(during)) = during.value_at(0, 1) else {
-        panic!("record")
-    };
-    assert_eq!(during.descriptor().field_names(), &["id", "changed"]);
-    assert_eq!(named.descriptor().field_names(), &["id", "body"]);
+    let during = SQLRecordView::new(
+        during.value_at(0, 1).unwrap(),
+        during.column_types[1].as_ref(),
+        Some(&engine),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        during
+            .descriptor()
+            .unwrap()
+            .attributes
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        ["id", "changed"]
+    );
+    assert_eq!(
+        named_view
+            .descriptor()
+            .unwrap()
+            .attributes
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        ["id", "body"]
+    );
     engine.sql("ROLLBACK", &[]).unwrap();
     let restored = engine.sql(sql, &[]).unwrap();
     assert_eq!(

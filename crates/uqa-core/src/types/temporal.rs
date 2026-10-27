@@ -14,6 +14,7 @@ use crate::{
     ValueRetentionError,
 };
 
+mod carriers;
 mod date_style;
 mod infinite;
 mod input;
@@ -21,22 +22,28 @@ mod interval_input;
 mod interval_style;
 mod keys;
 mod production;
+pub(super) mod serialization;
 mod timezone;
 
 pub use date_style::TemporalDateStyle;
 pub use infinite::TemporalInfinity;
 mod calendar;
+pub use calendar::{TemporalDate, TemporalDateTime};
 pub use input::{TemporalDateOrder, TemporalInputError};
 pub use interval_style::TemporalIntervalStyle;
 pub use timezone::TemporalTimeZone;
 
 pub(super) const MICROS_PER_SECOND: i64 = 1_000_000;
 pub(super) const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
+/// Unix microseconds at the `PostgreSQL` timestamp epoch, 2000-01-01.
+pub const POSTGRES_EPOCH_MICROS: i64 = 946_684_800_000_000;
+/// Unix days at the `PostgreSQL` timestamp epoch, 2000-01-01.
+pub const POSTGRES_EPOCH_DAYS: i32 = 10_957;
 
 /// Compact temporal values used by SQL `DATE`, `TIME`, and `TIMESTAMP`
 /// columns. The payload is numeric so comparison and sorting do not
 /// depend on string collation.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "$uqa_type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TemporalValue {
     Date {
@@ -45,15 +52,18 @@ pub enum TemporalValue {
     Time {
         micros: i64,
     },
+    #[serde(rename = "time_tz_seconds")]
     TimeTz {
         micros: i64,
-        offset_minutes: i32,
+        offset_seconds: i32,
     },
+    #[serde(rename = "postgres_timestamp")]
     Timestamp {
-        micros: i64,
+        postgres_micros: i64,
     },
+    #[serde(rename = "postgres_timestamp_tz")]
     TimestampTz {
-        micros: i64,
+        postgres_micros: i64,
     },
     /// `INTERVAL` values use `PostgreSQL`'s exact three-field model:
     /// months and days stay symbolic (a month is not a fixed number of
@@ -72,11 +82,10 @@ impl TemporalValue {
         calendar::valid_date(days)
     }
 
-    /// Test a finite Unix-microsecond timestamp against `PostgreSQL`'s Julian range. The epoch conversion uses a wider integer because `PostgreSQL`'s upper bound lies beyond this carrier's largest Unix-microsecond value.
+    /// Test finite microseconds since 2000-01-01 against `PostgreSQL`'s Julian range.
     #[must_use]
     pub const fn timestamp_micros_in_range(micros: i64) -> bool {
-        let postgres_micros = micros as i128 - 946_684_800_000_000;
-        postgres_micros >= -211_813_488_000_000_000 && postgres_micros < 9_223_371_331_200_000_000
+        micros >= -211_813_488_000_000_000 && micros < 9_223_371_331_200_000_000
     }
 
     /// The `parse_*` readers are the input functions with the wall clock standing in for the transaction start that `now` and `today` name; a text the type rejects reads as `None`.
@@ -128,16 +137,19 @@ impl TemporalValue {
             Self::Time { micros } => (1, i128::from(*micros), 0),
             Self::TimeTz {
                 micros,
-                offset_minutes,
+                offset_seconds,
             } => (
                 2,
-                i128::from(*micros)
-                    - i128::from(*offset_minutes) * 60 * i128::from(MICROS_PER_SECOND),
-                // PostgreSQL compares seconds west of UTC after adjusted time; our carrier stores minutes east. Widen before negation for arbitrary deserialized carriers.
-                -i64::from(*offset_minutes),
+                i128::from(*micros) - i128::from(*offset_seconds) * i128::from(MICROS_PER_SECOND),
+                // PostgreSQL compares seconds west of UTC after adjusted time; our carrier stores seconds east. Widen before negation for arbitrary deserialized carriers.
+                -i64::from(*offset_seconds),
             ),
-            Self::Timestamp { micros } => (3, self.timestamp_rank(*micros), 0),
-            Self::TimestampTz { micros } => (4, self.timestamp_rank(*micros), 0),
+            Self::Timestamp {
+                postgres_micros: micros,
+            } => (3, self.timestamp_rank(*micros), 0),
+            Self::TimestampTz {
+                postgres_micros: micros,
+            } => (4, self.timestamp_rank(*micros), 0),
             // PostgreSQL's interval_cmp flattens to microseconds with
             // 30-day months for ordering purposes.
             Self::Interval {

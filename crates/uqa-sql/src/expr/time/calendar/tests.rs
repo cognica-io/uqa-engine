@@ -61,11 +61,15 @@ fn timestamp(text: &str, zoned: bool) -> Value {
             infinity.timestamp()
         }
     } else {
-        let micros = pg.checked_add(946_684_800_000_000).unwrap();
+        let micros = pg;
         if zoned {
-            TemporalValue::TimestampTz { micros }
+            TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            }
         } else {
-            TemporalValue::Timestamp { micros }
+            TemporalValue::Timestamp {
+                postgres_micros: micros,
+            }
         }
     })
 }
@@ -144,7 +148,7 @@ fn zone_lookup_follows_strictness_infinity_and_elapsed_time_and_retains_cancella
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
     let finite = Value::Temporal(TemporalValue::TimestampTz {
-        micros: 1_710_003_600_000_000,
+        postgres_micros: 1_710_003_600_000_000,
     });
     let day = Value::Temporal(TemporalValue::Interval {
         months: 0,

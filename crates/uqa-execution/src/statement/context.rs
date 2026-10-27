@@ -18,28 +18,45 @@ pub mod routines;
 pub mod schemas;
 pub mod session;
 
-pub type ExplainRenderer =
-    fn(&UnifiedPlan, bool, Option<&str>, Option<&ExplainAnalysis>) -> Result<SQLResult, SQLError>;
-
 pub type PhysicalExplainRenderer = fn(
     &UnifiedPlan,
-    bool,
-    Option<&str>,
+    &uqa_sql::explain::ExplainSettings,
     Option<&ExplainAnalysis>,
     &ExplainPhysicalPlan,
+    &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<SQLResult, SQLError>;
 
 /// Capture physical facts before an optional execution without invoking the explained query.
 pub trait PhysicalExplainPlanning: Sync {
+    /// Optimize the already analyzed body only after the command has interpreted its options.
+    fn plan_explained_statement(&self, body: &UnifiedPlan) -> Result<UnifiedPlan, SQLError>;
+    fn explained_plan_estimates(
+        &self,
+        body: &UnifiedPlan,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        uqa_core::memory::Produced<Vec<uqa_sql::result::explain::ExplainNodeEstimate>>,
+        SQLError,
+    >;
     fn physical_explain_plan(
         &self,
         body: &UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<ExplainPhysicalPlan, SQLError>;
+        costs: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<ExplainPhysicalPlan>, SQLError>;
 }
 
 pub trait StatementDiagnostics: Sync {
-    fn diagnostics_scope(&self) -> Result<crate::query::diagnostics::DiagnosticsScope, SQLError>;
+    fn diagnostics_control(
+        &self,
+    ) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
+    fn diagnostics_scope(
+        &self,
+        timing: Option<bool>,
+        io: uqa_core::io_usage::IOOptions,
+    ) -> Result<crate::query::diagnostics::DiagnosticsScope, SQLError>;
 }
 
 pub trait StatementEffects {
@@ -65,6 +82,9 @@ pub struct StatementValidationContext<'a> {
 
 /// Capture live subsystem inputs only when a statement is ready to execute.
 pub trait StatementExecutionInputs<S: Clone + 'static> {
+    fn io_context(&self) -> uqa_core::io_usage::IOContext {
+        uqa_core::io_usage::IOContext::current()
+    }
     /// The session-owned compiled regex cache, shared by its nested statements and workers.
     fn regex_cache(&self) -> Option<std::sync::Arc<uqa_sql::expr::RegexCache>> {
         None
@@ -106,6 +126,7 @@ pub(super) fn statement_thread_scope<S: Clone + 'static>(
 ) -> super::thread_scope::StatementThreadScope {
     super::thread_context::StatementThreadContext {
         retained_rows: crate::query::sources::retained_source::RetainedRowContext::current(),
+        io: statements.io_context(),
         regex_cache: statements.regex_cache(),
         temporal_input: uqa_sql::expr::TemporalInputContext {
             transaction_clock_micros: statements
@@ -123,7 +144,9 @@ pub(super) fn statement_thread_scope<S: Clone + 'static>(
     .enter()
 }
 
-pub trait StatementMutationInputs<S: Clone + 'static> {
+pub trait StatementMutationInputs<S: Clone + 'static>:
+    crate::mutation::returning::ReturningInputs<S>
+{
     fn mutation_context(&self) -> crate::mutation::entry::MutationEntryContext<'_, S>;
     /// Borrow read services for expression initialization without entering a writable command.
     fn mutation_initialization_context(

@@ -29,8 +29,12 @@ pub(in crate::expr) fn eval_timezone(
         return Err(SQLError::UnknownFunction("timezone".into()));
     };
     let (micros, to_utc) = match value {
-        TemporalValue::Timestamp { micros } => (*micros, true),
-        TemporalValue::TimestampTz { micros } => (*micros, false),
+        TemporalValue::Timestamp {
+            postgres_micros: micros,
+        } => (*micros, true),
+        TemporalValue::TimestampTz {
+            postgres_micros: micros,
+        } => (*micros, false),
         _ => return Err(SQLError::UnknownFunction("timezone".into())),
     };
     // PostgreSQL returns non-finite timestamps before consulting a text zone
@@ -71,9 +75,13 @@ pub(in crate::expr) fn eval_timezone(
         .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
         .ok_or_else(|| datetime_out_of_range("timestamp"))?;
     finish(Value::Temporal(if to_utc {
-        TemporalValue::TimestampTz { micros }
+        TemporalValue::TimestampTz {
+            postgres_micros: micros,
+        }
     } else {
-        TemporalValue::Timestamp { micros }
+        TemporalValue::Timestamp {
+            postgres_micros: micros,
+        }
     }))
 }
 
@@ -116,11 +124,11 @@ fn interval_offset(
 }
 
 fn directional_offset(zone: TemporalTimeZone, micros: i64, to_utc: bool) -> Result<i32> {
-    let seconds = micros.div_euclid(1_000_000);
+    let seconds = micros.div_euclid(1_000_000) + uqa_core::POSTGRES_EPOCH_MICROS / 1_000_000;
     let offset = if to_utc {
         zone.offset_for_local(seconds)
     } else {
-        zone.offset_at_micros(micros)
+        zone.offset_at_postgres_micros(micros)
     }
     .ok_or_else(|| datetime_out_of_range("timestamp"))?;
     Ok(if to_utc { offset } else { -offset })

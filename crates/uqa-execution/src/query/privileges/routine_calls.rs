@@ -48,13 +48,22 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut scope = ctes.clone();
-    for cte in uqa_sql::semantics::ordered_plan_ctes(plan)? {
-        scope.insert_deferred(cte.clone());
+    let mut lookup = scope.enter_query_plan_scope(plan)?;
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    let ordered = uqa_sql::semantics::order_cte_plans_with_control(&plan.ctes, control)?;
+    for cte in ordered.iter() {
+        lookup.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
-    let mut lookup = scope.enter_relation_lookup_mode(plan.relations_bound)?;
     let mut visible = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &mut *visible;
-    for scheduled in crate::query::cte::strategy::schedule_plan_ctes(context.volatility, plan)? {
+    let scheduled =
+        crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, plan)?;
+    for scheduled in scheduled.iter() {
         if !scheduled.deferred {
             if let Some(query) = scheduled.plan.body.query() {
                 let definition = scope
@@ -64,7 +73,18 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
             }
         }
     }
-    match &plan.root {
+    initialize_root(context, permissions, &plan.root, params, scope, outer)
+}
+
+fn initialize_root<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    permissions: &BuiltinRoutinePermissions,
+    root: &RelationalPlan,
+    params: &[SQLParam],
+    scope: &mut CteScope<S>,
+    outer: Option<&RowSchema>,
+) -> Result<(), SQLError> {
+    match root {
         RelationalPlan::QueryBlock(block) => {
             let schema = block.from.as_ref().map_or_else(
                 || Ok(RowSchema::default()),
@@ -78,14 +98,7 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
                 super::ensure_select_privileges_for_query_block(block, from, scope)?;
             }
             generated_calls(context, permissions, block, params, scope)?;
-            let mut expressions = Vec::new();
-            if !context.planning.block_input_is_empty(block) {
-                if let Some(from) = &block.from {
-                    inputs::collect(context.planning, from, &mut expressions);
-                }
-            }
-            expressions.extend(block.query_expressions());
-            for expression in expressions {
+            let mut initialize_expression = |expression: &ScalarExpr| {
                 expression_calls(
                     context,
                     permissions,
@@ -94,7 +107,15 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
                     &block.subqueries,
                     params,
                     scope,
-                )?;
+                )
+            };
+            if !context.planning.block_input_is_empty(block) {
+                if let Some(from) = &block.from {
+                    inputs::visit(context.planning, from, &mut initialize_expression)?;
+                }
+            }
+            for expression in block.query_expressions() {
+                initialize_expression(expression)?;
             }
             if let Some(from) = block
                 .from

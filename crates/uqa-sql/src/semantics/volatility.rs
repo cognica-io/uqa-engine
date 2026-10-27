@@ -28,6 +28,15 @@ pub trait VolatilityCatalog {
         binding: Option<&FunctionBinding>,
     ) -> Option<Vec<FunctionVolatility>>;
     fn view_query(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
+
+    /// Lend the selected view plan for one read. Catalogs retaining immutable definitions can override this adapter without constructing an owned plan.
+    fn with_view_query(
+        &self,
+        name: &str,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<bool, SQLError>,
+    ) -> Result<Option<bool>, SQLError> {
+        self.view_query(name)?.as_ref().map(read).transpose()
+    }
 }
 
 use super::builtin_function_dispatch_name;
@@ -86,7 +95,7 @@ pub fn function_volatility_with_binding(
     if is_intrinsic_scalar_syntax(binding) || builtin == FunctionVolatility::Volatile {
         return builtin;
     }
-    let identity = name.to_ascii_lowercase();
+    let identity = super::functions::lowercase_function_name(name);
 
     // Registrations made through the original APIs retain the conservative
     // VOLATILE default. Explicit options let pure callbacks participate in
@@ -118,7 +127,7 @@ pub fn builtin_function_volatility(
     if is_intrinsic_scalar_syntax(binding) {
         return FunctionVolatility::Immutable;
     }
-    let lower = builtin_function_dispatch_name(&name.to_ascii_lowercase());
+    let lower = builtin_function_dispatch_name(name);
     if builtin_is_volatile(&lower) {
         return FunctionVolatility::Volatile;
     }
@@ -128,7 +137,7 @@ pub fn builtin_function_volatility(
     // statement-stable contract.  All remaining built-ins are value-pure.
     if crate::registry::is_registered(&lower)
         || matches!(
-            lower.as_str(),
+            lower.as_ref(),
             "current_schema"
                 | "concat"
                 | "concat_ws"
@@ -345,15 +354,54 @@ pub fn expression_plan_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     plan: &crate::plan::ExpressionPlan,
 ) -> Result<bool, SQLError> {
-    if expr_contains_volatile_function_with(catalog, &plan.scalar, false) {
+    scalar_with_subqueries_contains_volatile_function(catalog, &plan.scalar, &plan.subqueries)
+}
+
+/// Inspect a borrowed expression and only the query children it references in its owning arena. Other projections may share that arena without contributing effects to this expression.
+pub fn scalar_with_subqueries_contains_volatile_function(
+    catalog: &dyn VolatilityCatalog,
+    scalar: &ScalarExpr,
+    subqueries: &[QueryPlan],
+) -> Result<bool, SQLError> {
+    scalar_in_scope_contains_volatile_function(catalog, scalar, subqueries, &|_| false)
+}
+
+/// Inspect an expression's referenced subqueries under its enclosing CTE namespace. Those external producers are owned and evaluated by their defining query, not by this scalar expression.
+pub fn scalar_in_scope_contains_volatile_function(
+    catalog: &dyn VolatilityCatalog,
+    scalar: &ScalarExpr,
+    subqueries: &[QueryPlan],
+    visible_ctes: &dyn Fn(&str) -> bool,
+) -> Result<bool, SQLError> {
+    if scalar_calls_are_volatile(catalog, scalar) {
         return Ok(true);
     }
-    for query in &plan.subqueries {
-        if query_contains_volatile_function(catalog, query)? {
-            return Ok(true);
+    let mut result = Ok(false);
+    scalar.visit(&mut |node| {
+        if !matches!(result, Ok(false)) {
+            return;
         }
-    }
-    Ok(false)
+        let index = match node {
+            ScalarExpr::ScalarSubquery(index)
+            | ScalarExpr::Exists {
+                subquery: index, ..
+            }
+            | ScalarExpr::InSubquery {
+                subquery: index, ..
+            } => *index,
+            _ => return,
+        };
+        // An unresolved arena reference cannot authorize eliminating its expression; the ordinary validation path retains its diagnostic.
+        result = subqueries.get(index).map_or(Ok(true), |query| {
+            query_contains_volatile_function_inner(
+                catalog,
+                query,
+                &mut BTreeSet::new(),
+                visible_ctes,
+            )
+        });
+    });
+    result
 }
 
 /// The block's own subquery plans are inspected separately by the query-level walk, so subquery references here are not conservatively volatile.
@@ -362,9 +410,13 @@ pub fn select_contains_volatile_function(
     block: &QueryBlockPlan,
 ) -> bool {
     block
-        .projections
+        .deferred_outer_rewrites
         .iter()
-        .any(|projection| expr_contains_volatile_function_with(catalog, &projection.expr, false))
+        .flat_map(super::view_rewrite::DeferredOuterRewrite::expressions)
+        .any(|expression| expr_contains_volatile_function_with(catalog, &expression.scalar, true))
+        || block.projections.iter().any(|projection| {
+            expr_contains_volatile_function_with(catalog, &projection.expr, false)
+        })
         || block
             .r#where
             .as_ref()
@@ -404,19 +456,32 @@ pub fn query_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     plan: &QueryPlan,
 ) -> Result<bool, SQLError> {
-    query_contains_volatile_function_inner(catalog, plan, &mut BTreeSet::new())
+    query_contains_volatile_function_inner(catalog, plan, &mut BTreeSet::new(), &|_| false)
 }
 
 fn query_contains_volatile_function_inner(
     catalog: &dyn VolatilityCatalog,
     plan: &QueryPlan,
     visiting_views: &mut BTreeSet<String>,
+    outer: &dyn Fn(&str) -> bool,
 ) -> Result<bool, SQLError> {
-    for cte in &plan.ctes {
+    let scope = |name: &str| plan.ctes.iter().any(|cte| cte.name == name) || outer(name);
+    let recursive = plan.ctes.iter().any(|cte| cte.recursive);
+    for (index, cte) in plan.ctes.iter().enumerate() {
+        let visible = if recursive {
+            &plan.ctes[..]
+        } else {
+            &plan.ctes[..index]
+        };
+        let definition_scope =
+            |name: &str| visible.iter().any(|cte| cte.name == name) || outer(name);
         if match &cte.body {
-            crate::plan::CtePlanBody::Query(query) => {
-                query_contains_volatile_function_inner(catalog, query, visiting_views)?
-            }
+            crate::plan::CtePlanBody::Query(query) => query_contains_volatile_function_inner(
+                catalog,
+                query,
+                visiting_views,
+                &definition_scope,
+            )?,
             crate::plan::CtePlanBody::Command(_) => true,
         } {
             return Ok(true);
@@ -428,12 +493,17 @@ fn query_contains_volatile_function_inner(
                 return Ok(true);
             }
             for subquery in &block.subqueries {
-                if query_contains_volatile_function_inner(catalog, subquery, visiting_views)? {
+                if query_contains_volatile_function_inner(
+                    catalog,
+                    subquery,
+                    visiting_views,
+                    &scope,
+                )? {
                     return Ok(true);
                 }
             }
             if let Some(source) = &block.from {
-                source_contains_volatile_function(catalog, source, visiting_views)
+                source_contains_volatile_function(catalog, source, visiting_views, &scope)
             } else {
                 Ok(false)
             }
@@ -447,22 +517,27 @@ fn query_contains_volatile_function_inner(
             subqueries,
             ..
         } => {
-            if query_contains_volatile_function_inner(catalog, left, visiting_views)?
-                || query_contains_volatile_function_inner(catalog, right, visiting_views)?
+            if query_contains_volatile_function_inner(catalog, left, visiting_views, &scope)?
+                || query_contains_volatile_function_inner(catalog, right, visiting_views, &scope)?
                 || order_by
                     .iter()
-                    .any(|order| expr_contains_volatile_function(catalog, &order.expr))
+                    .any(|order| scalar_calls_are_volatile(catalog, &order.expr))
                 || limit
                     .as_ref()
-                    .is_some_and(|expr| expr_contains_volatile_function(catalog, expr))
+                    .is_some_and(|expr| scalar_calls_are_volatile(catalog, expr))
                 || offset
                     .as_ref()
-                    .is_some_and(|expr| expr_contains_volatile_function(catalog, expr))
+                    .is_some_and(|expr| scalar_calls_are_volatile(catalog, expr))
             {
                 return Ok(true);
             }
             for subquery in subqueries {
-                if query_contains_volatile_function_inner(catalog, subquery, visiting_views)? {
+                if query_contains_volatile_function_inner(
+                    catalog,
+                    subquery,
+                    visiting_views,
+                    &scope,
+                )? {
                     return Ok(true);
                 }
             }
@@ -472,12 +547,17 @@ fn query_contains_volatile_function_inner(
             if rows
                 .iter()
                 .flatten()
-                .any(|expr| expr_contains_volatile_function(catalog, expr))
+                .any(|expr| scalar_calls_are_volatile(catalog, expr))
             {
                 return Ok(true);
             }
             for subquery in subqueries {
-                if query_contains_volatile_function_inner(catalog, subquery, visiting_views)? {
+                if query_contains_volatile_function_inner(
+                    catalog,
+                    subquery,
+                    visiting_views,
+                    &scope,
+                )? {
                     return Ok(true);
                 }
             }
@@ -490,20 +570,26 @@ fn source_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     source: &SourcePlan,
     visiting_views: &mut BTreeSet<String>,
+    scope: &dyn Fn(&str) -> bool,
 ) -> Result<bool, SQLError> {
     match source {
         crate::plan::SourcePlan::RetainedRows(_) => Ok(false),
         SourcePlan::Table { name, .. } => {
+            if super::cte_reference_name(name).is_some_and(|name| scope(&name)) {
+                // Each visible CTE definition was already inspected in its defining query. A same-named catalog view is a different relation.
+                return Ok(false);
+            }
             let key = name.to_ascii_lowercase();
             if !visiting_views.insert(key.clone()) {
                 return Ok(false);
             }
-            let result = match catalog.view_query(name)? {
-                Some(view) => {
-                    query_contains_volatile_function_inner(catalog, &view, visiting_views)
-                }
-                None => Ok(false),
-            };
+            let result = catalog
+                .with_view_query(name, &mut |view| {
+                    query_contains_volatile_function_inner(catalog, view, visiting_views, &|_| {
+                        false
+                    })
+                })
+                .map(|result| result.unwrap_or(false));
             visiting_views.remove(&key);
             result
         }
@@ -512,19 +598,19 @@ fn source_contains_volatile_function(
         } => {
             if on
                 .as_ref()
-                .is_some_and(|expr| expr_contains_volatile_function(catalog, expr))
+                .is_some_and(|expr| scalar_calls_are_volatile(catalog, expr))
             {
                 return Ok(true);
             }
             Ok(
-                source_contains_volatile_function(catalog, left, visiting_views)?
-                    || source_contains_volatile_function(catalog, right, visiting_views)?,
+                source_contains_volatile_function(catalog, left, visiting_views, scope)?
+                    || source_contains_volatile_function(catalog, right, visiting_views, scope)?,
             )
         }
         SourcePlan::Values { rows, .. } => Ok(rows
             .iter()
             .flatten()
-            .any(|expr| expr_contains_volatile_function(catalog, expr))),
+            .any(|expr| scalar_calls_are_volatile(catalog, expr))),
         SourcePlan::Function {
             name,
             binding,
@@ -535,7 +621,7 @@ fn source_contains_volatile_function(
                 == FunctionVolatility::Volatile
                 || args
                     .iter()
-                    .any(|expr| expr_contains_volatile_function(catalog, expr)),
+                    .any(|expr| scalar_calls_are_volatile(catalog, expr)),
         ),
         SourcePlan::FunctionGroup { functions, .. } => Ok(functions.iter().any(|function| {
             function_volatility_with_binding(
@@ -547,248 +633,27 @@ fn source_contains_volatile_function(
                 || function
                     .args
                     .iter()
-                    .any(|expr| expr_contains_volatile_function(catalog, expr))
+                    .any(|expr| scalar_calls_are_volatile(catalog, expr))
         })),
         SourcePlan::Subquery { body, .. } => {
-            query_contains_volatile_function_inner(catalog, body, visiting_views)
+            query_contains_volatile_function_inner(catalog, body, visiting_views, scope)
         }
     }
 }
 
-/// Whether scalar optimizer rewrites or `DPccp` join enumeration must be kept
-/// away from a plan.  `rewrite_scalar_expressions` is exhaustive over query,
-/// mutation, CTE, prepared/explained, and expression-plan children.
+/// Whether scalar optimizer rewrites or `DPccp` join enumeration must preserve volatile call scheduling. Borrow the plan and its expression roots; inspecting constants must not copy their retained payloads or allocate command child lists.
 pub fn unified_plan_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     plan: &UnifiedPlan,
 ) -> bool {
-    let mut inspected = plan.clone();
     let mut volatile = false;
-    inspected.rewrite_scalar_expressions(&mut |expr| {
-        if volatile {
-            return;
-        }
-        match expr {
-            ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                ..
-            } => {
-                volatile =
-                    function_volatility_with_binding(catalog, name, binding.as_ref(), args.len())
-                        == FunctionVolatility::Volatile;
-            }
-            ScalarExpr::WindowCall { name, args, .. } => {
-                volatile =
-                    function_volatility(catalog, name, args.len()) == FunctionVolatility::Volatile;
-            }
-            _ => {}
+    plan.visit_scalar_expressions(&mut |expression| {
+        if !volatile {
+            volatile = scalar_calls_are_volatile(catalog, expression);
         }
     });
     volatile
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        expr_contains_volatile_function, FunctionBinding, FunctionVolatility, QueryPlan, SQLError,
-        ScalarExpr, VolatilityCatalog,
-    };
-
-    struct EmptyCatalog;
-    impl VolatilityCatalog for EmptyCatalog {
-        fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
-            None
-        }
-        fn routine_volatilities(
-            &self,
-            _: &str,
-            _: Option<&FunctionBinding>,
-        ) -> Option<Vec<FunctionVolatility>> {
-            None
-        }
-        fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
-            Ok(None)
-        }
-    }
-    use crate::ast::{FrameExclusion, FrameMode};
-    use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
-
-    #[test]
-    fn collation_volatility_follows_only_its_operand() {
-        struct Shadowed;
-        impl VolatilityCatalog for Shadowed {
-            fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
-                Some(FunctionVolatility::Volatile)
-            }
-            fn routine_volatilities(
-                &self,
-                _: &str,
-                _: Option<&FunctionBinding>,
-            ) -> Option<Vec<FunctionVolatility>> {
-                unreachable!("host function wins ordinary calls")
-            }
-            fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
-                unreachable!("no view")
-            }
-        }
-        for (input, expected) in [
-            ("'x' COLLATE \"C\"", false),
-            ("nextval('effect')::text COLLATE \"C\"", true),
-            ("\"COLLATE\"('x')", true),
-            ("true IS TRUE", false),
-            ("(nextval('effect') > 0) IS NOT FALSE", true),
-            ("\"IS TRUE\"(true)", true),
-            ("(ARRAY[1,2])[1]", false),
-            ("(ARRAY[1,2])[:1]", false),
-            ("(ARRAY[1,2])[nextval('effect')]", true),
-            ("(ARRAY[1,2])[:nextval('effect')]", true),
-            ("slice(ARRAY[1,2], 1, 2)", true),
-            ("subscript(ARRAY[1,2], 1)", true),
-        ] {
-            let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {input}"))
-                .unwrap()
-                .remove(0)
-            else {
-                panic!("SELECT")
-            };
-            let scalar =
-                crate::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
-            assert_eq!(
-                expr_contains_volatile_function(&Shadowed, &scalar),
-                expected,
-                "{input}"
-            );
-        }
-        let binding =
-            FunctionBinding::dispatched(crate::ast::FunctionDispatch::Collate { oid: Some(950) });
-        assert_eq!(
-            super::builtin_function_volatility("nextval", Some(&binding), 2),
-            FunctionVolatility::Immutable
-        );
-    }
-
-    #[test]
-    fn builtin_constants_preserve_postgresql_statement_and_session_inputs() {
-        // Checked against PostgreSQL 18.4 pg_proc.provolatile before enabling bound built-in constant folding.
-        for name in [
-            "concat",
-            "concat_ws",
-            "format",
-            "pg_typeof",
-            "row_to_json",
-            "to_json",
-            "to_jsonb",
-            "json_build_object",
-            "jsonb_build_array",
-            "to_char",
-            "to_date",
-            "to_number",
-            "has_table_privilege",
-            "has_column_privilege",
-        ] {
-            assert_eq!(
-                super::builtin_function_volatility(name, None, 2),
-                FunctionVolatility::Stable,
-                "{name}"
-            );
-        }
-        for name in ["repeat", "upper"] {
-            assert_eq!(
-                super::builtin_function_volatility(name, None, 2),
-                FunctionVolatility::Immutable,
-                "{name}"
-            );
-        }
-        assert_eq!(
-            super::builtin_function_volatility("nextval", None, 1),
-            FunctionVolatility::Volatile
-        );
-    }
-
-    #[test]
-    fn sequence_introspection_volatility_matches_postgresql() {
-        for (name, expected) in [
-            ("pg_get_sequence_data", FunctionVolatility::Volatile),
-            ("pg_sequence_last_value", FunctionVolatility::Volatile),
-            ("pg_sequence_parameters", FunctionVolatility::Stable),
-        ] {
-            for qualified in [name.to_string(), format!("pg_catalog.{name}")] {
-                assert_eq!(
-                    super::function_volatility(&EmptyCatalog, &qualified, 1),
-                    expected,
-                    "{qualified}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn timestamp_zone_volatility_preserves_session_dependence() {
-        assert_eq!(
-            super::builtin_function_volatility("timezone", None, 1),
-            FunctionVolatility::Stable
-        );
-        assert_eq!(
-            super::builtin_function_volatility("timezone", None, 2),
-            FunctionVolatility::Immutable
-        );
-    }
-
-    #[test]
-    fn volatility_inspection_includes_window_frame_expressions() {
-        let expression = ScalarExpr::WindowCall {
-            name: "sum".into(),
-            args: vec![ScalarExpr::Column("amount".into())],
-            spec: ScalarWindowSpec {
-                definition: None,
-                partition_by: Vec::new(),
-                order_by: Vec::new(),
-                frame: Some(ScalarWindowFrame {
-                    mode: FrameMode::Rows,
-                    start: ScalarFrameBound::Preceding(Box::new(ScalarExpr::Func {
-                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
-                        name: "random".into(),
-                        binding: None,
-                        args: Vec::new(),
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    })),
-                    end: ScalarFrameBound::CurrentRow,
-                    between: true,
-                    exclusion: FrameExclusion::NoOthers,
-                }),
-            },
-            filter: None,
-            modifiers: crate::ast::WindowCallModifiers::default(),
-        };
-        assert!(expr_contains_volatile_function(&EmptyCatalog, &expression));
-    }
-    #[test]
-    fn scalar_plan_volatility_inspects_its_subquery_body() {
-        for (sql, expected) in [
-            ("SELECT (SELECT 1 / 0)", false),
-            ("SELECT (SELECT nextval('ticks'))", true),
-        ] {
-            let crate::plan::UnifiedPlan::Query(query) =
-                crate::plan::UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
-            else {
-                panic!("query");
-            };
-            let crate::plan::RelationalPlan::QueryBlock(mut block) = query.root else {
-                panic!("query block");
-            };
-            let plan = crate::plan::ExpressionPlan {
-                scalar: block.projections.remove(0).expr,
-                subqueries: block.subqueries,
-            };
-            assert_eq!(
-                super::expression_plan_contains_volatile_function(&EmptyCatalog, &plan).unwrap(),
-                expected,
-                "{sql}"
-            );
-        }
-    }
-}
+mod tests;

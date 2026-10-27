@@ -29,7 +29,9 @@ use std::rc::Rc;
 use uqa_sql::{
     ast::SetOpKind,
     plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
-    semantics::{primary_query_cte_references, sets::validation::validate_values_set_contexts},
+    semantics::{
+        primary_query_cte_references_with_control, sets::validation::validate_values_set_contexts,
+    },
     SQLError, SQLParam, SQLResult,
 };
 
@@ -40,6 +42,19 @@ pub fn execute_query_plan_with_ctes<S: Clone + Send + Sync + 'static>(
     ctes: &mut CteScope<S>,
 ) -> Result<SQLResult, SQLError> {
     materialized::collect(|mode| execute_query_plan_output(context, plan, params, ctes, mode))
+}
+
+/// Keep the ordinary public-row and borrowed-storage paths while measuring a selected relation destination's source query.
+pub fn execute_query_plan_measured<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+    measurement: Option<&crate::query::measurement::QueryMeasurement>,
+) -> Result<SQLResult, SQLError> {
+    materialized::collect_measured(measurement, |mode| {
+        execute_query_plan_output(context, plan, params, ctes, mode)
+    })
 }
 
 pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
@@ -72,23 +87,25 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
             running_statement = Some(crate::mutation::statement_end::enter_statement(statement));
         }
     }
-    let mut relation_lookup = ctes.enter_relation_lookup_mode(plan.relations_bound)?;
+    let result = ctes.with_cte_producers(!plan.ctes.is_empty(), |ctes| {
+        execute_prepared_query_output(context, plan, params, ctes, output_mode)
+    });
+    drop(running_statement);
+    result
+}
+
+fn execute_prepared_query_output<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+    output_mode: QueryOutputMode<S>,
+) -> Result<QueryOutput, SQLError> {
+    let mut relation_lookup = ctes.enter_query_plan_scope(plan)?;
     let mut visible_ctes =
         relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let ctes = &mut *visible_ctes;
-    if !plan.ctes.is_empty() {
-        let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;
-        let filters = context.cte_filters.output_filters(plan, ctes)?;
-        install_statement_ctes(
-            context.source.ctes,
-            &plan.ctes,
-            scheduled,
-            || primary_query_cte_references(plan),
-            params,
-            ctes,
-            &filters,
-        )?;
-    }
+    install_query_ctes(context, plan, params, ctes)?;
     let output = match ctes.command_cte_snapshot() {
         Some(snapshot) => with_query_snapshot(context.snapshots, &snapshot, |selected| {
             execute_query_root(selected, plan, params, ctes, output_mode)
@@ -105,8 +122,29 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
                 .fire_after_triggers(commands.after_triggers())?;
         }
     }
-    drop(running_statement);
     Ok(output)
+}
+
+fn install_query_ctes<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+) -> Result<(), SQLError> {
+    if plan.ctes.is_empty() {
+        return Ok(());
+    }
+    let scheduled = schedule_plan_ctes(context.source.ctes, context.source.volatility, plan)?;
+    let filters = context.cte_filters.output_filters(plan, ctes)?;
+    install_statement_ctes(
+        context.source.ctes,
+        &plan.ctes,
+        &scheduled,
+        |control| primary_query_cte_references_with_control(plan, control),
+        params,
+        ctes,
+        &filters,
+    )
 }
 fn execute_query_root<S: Clone + Send + Sync + 'static>(
     context: &QueryContext<'_, S>,
@@ -131,34 +169,46 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
             execute_set_operation(context, plan, params, ctes, output_mode)
         }
         RelationalPlan::Values { rows, subqueries } => {
-            {
-                let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
-                let type_resolver = context
-                    .source
-                    .relational
-                    .expression_scope((*scoped_ctes).clone());
-                validate_values_set_contexts(
-                    context.source.relational.catalog,
-                    type_resolver.as_ref(),
-                    rows,
-                    &crate::RowSchema::default(),
-                    params,
-                )?;
-            }
-            execute_plan_values_output(
-                context.source.relational,
-                rows,
-                subqueries,
-                params,
-                ctes,
-                bind_output_mode(
-                    context.generation,
-                    output_mode,
-                    context.source.types.enum_labels(),
-                )?,
-            )
+            execute_values_root(context, rows, subqueries, params, ctes, output_mode)
         }
     }
+}
+
+/// VALUES validation owns its scalar-query scope; ordinary SELECT dispatch retains none of this preparation scratch while evaluating rows.
+fn execute_values_root<S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'_, S>,
+    rows: &[Vec<uqa_sql::ScalarExpr>],
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+    output_mode: QueryOutputMode<S>,
+) -> Result<QueryOutput, SQLError> {
+    {
+        let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+        let type_resolver = context
+            .source
+            .relational
+            .expression_scope((*scoped_ctes).clone());
+        validate_values_set_contexts(
+            context.source.relational.catalog,
+            type_resolver.as_ref(),
+            rows,
+            &crate::RowSchema::default(),
+            params,
+        )?;
+    }
+    execute_plan_values_output(
+        context.source.relational,
+        rows,
+        subqueries,
+        params,
+        ctes,
+        bind_output_mode(
+            context.generation,
+            output_mode,
+            context.source.types.enum_labels(),
+        )?,
+    )
 }
 
 #[expect(
@@ -211,12 +261,18 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
             child_ctes.clone(),
             left_schema,
         )?;
-        let right: Box<dyn crate::PhysicalOperator + '_> = context.directional.query_operator(
-            (**right).clone(),
-            params.to_vec(),
-            child_ctes,
-            right_schema,
-        )?;
+        let (left, right) = crate::physical::construction::OperatorBuild::run(left, |_| {
+            context.directional.query_operator(
+                (**right).clone(),
+                params.to_vec(),
+                child_ctes,
+                right_schema,
+            )
+        })?;
+        let (left, right, work_mem) =
+            crate::physical::construction::OperatorBuild::pair(left, right, |_, _| {
+                physical_work_mem_bytes(context.source.relational.runtime)
+            })?;
         let mut operation: Box<dyn crate::PhysicalOperator + '_> = Box::new(
             crate::ExternalSetOperation::new_directional_with_types(
                 left,
@@ -224,30 +280,32 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
                 *kind,
                 *all,
                 set_schema.column_types().to_vec(),
-                physical_work_mem_bytes(context.source.relational.runtime)?,
+                work_mem,
             )
             .map_err(physical_exec_error)?,
         );
-        let (resolved_offset, resolved_limit) = {
-            let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
-            (
-                resolve_limit_offset_with_ctes(
-                    offset.as_deref(),
-                    context.source.relational,
-                    params,
-                    "OFFSET",
-                    &scoped_ctes,
-                )?
-                .unwrap_or(0),
-                resolve_limit_offset_with_ctes(
-                    limit.as_deref(),
-                    context.source.relational,
-                    params,
-                    "LIMIT",
-                    &scoped_ctes,
-                )?,
-            )
-        };
+        let (input, (resolved_offset, resolved_limit)) =
+            crate::physical::construction::OperatorBuild::run(operation, |_| {
+                let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+                Ok((
+                    resolve_limit_offset_with_ctes(
+                        offset.as_deref(),
+                        context.source.relational,
+                        params,
+                        "OFFSET",
+                        &scoped_ctes,
+                    )?
+                    .unwrap_or(0),
+                    resolve_limit_offset_with_ctes(
+                        limit.as_deref(),
+                        context.source.relational,
+                        params,
+                        "LIMIT",
+                        &scoped_ctes,
+                    )?,
+                ))
+            })?;
+        operation = input;
         if resolved_offset != 0 || resolved_limit.is_some() {
             operation = Box::new(crate::Limit::new(
                 operation,
@@ -368,7 +426,8 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
     );
     if !order_by.is_empty() || limit.is_some() || offset.is_some() {
         let synthetic = QueryBlockPlan {
-            privilege_columns: std::collections::BTreeSet::default(),
+            deferred_outer_rewrites: Vec::new(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             projections: Vec::new(),
             from: None,
             r#where: None,
@@ -413,14 +472,18 @@ pub fn collect_query_operator<'a, S: Clone + Send + Sync + 'static>(
     operator: Box<dyn crate::PhysicalOperator + 'a>,
     output_mode: QueryOutputMode<S>,
 ) -> Result<QueryOutput, SQLError> {
+    let (operator, output_mode) =
+        crate::physical::construction::OperatorBuild::run(operator, |_| {
+            bind_output_mode(
+                context.generation,
+                output_mode,
+                context.source.types.enum_labels(),
+            )
+        })?;
     crate::query::collection::collect_query_operator(
         context.source.relational.runtime,
         columns,
         operator,
-        bind_output_mode(
-            context.generation,
-            output_mode,
-            context.source.types.enum_labels(),
-        )?,
+        output_mode,
     )
 }

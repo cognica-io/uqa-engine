@@ -7,7 +7,6 @@
 //! Engine-backed scalar and function callback adapters.
 
 use std::sync::Arc;
-use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_execution::SharedExpressionEvaluator;
 use uqa_sql::expr::RowLookup;
@@ -77,7 +76,7 @@ impl uqa_execution::functions::AggregateFunctionRegistry for ScopedEngineHook<'_
     fn registered_aggregate_function(
         &self,
         name: &str,
-    ) -> Option<Arc<dyn crate::SQLAggregateFunction>> {
+    ) -> Option<Arc<dyn crate::SQLAggregateFactory>> {
         self.engine.registered_aggregate_function(name)
     }
 }
@@ -110,6 +109,42 @@ impl EngineExpressionEvaluator {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn construct_range(
+        &self,
+        oid: u32,
+        bounds: uqa_sql::expr::RangeBoundsInput,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        uqa_execution::catalog::range_type::input::construct_range(
+            &self
+                .engine
+                .range_input_context(&self.ctes.catalog_read_view()?, self),
+            oid,
+            bounds,
+            control,
+        )
+    }
+
+    fn construct_multirange(
+        &self,
+        oid: u32,
+        members: &[Value],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        uqa_execution::catalog::range_type::input::construct_multirange(
+            &self
+                .engine
+                .range_input_context(&self.ctes.catalog_read_view()?, self),
+            oid,
+            members,
+            control,
+        )
+    }
+
+    fn sql_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.engine.push_sql_notice(notice);
+    }
+
     fn catalog_cast_scope(&self) -> Option<&uqa_sql::expr::CatalogCastScope> {
         // Cast names read this hook's immutable CTE catalog; SQL restricts retention to spellings independent of live namespace settings.
         Some(self.cast_scope.get_or_init(Default::default))
@@ -164,6 +199,21 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         target: &uqa_sql::ast::ColumnType,
     ) -> Result<Option<Value>, SQLError> {
         uqa_sql::assignment::domain::cast_domain_value(self.engine, value, source, target)
+    }
+    fn cast_domain_with_control(
+        &self,
+        value: &Value,
+        source: Option<&str>,
+        target: &uqa_sql::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Value>>, SQLError> {
+        uqa_sql::assignment::domain::cast_domain_value_with_control(
+            self.engine,
+            value,
+            source,
+            target,
+            control,
+        )
     }
     fn resolve_type_name(
         &self,
@@ -283,8 +333,11 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     ) -> Option<std::result::Result<Value, SQLError>> {
         let registration = self.runtime.lookup_scalar_function(name)?;
         Some(
-            uqa_sql::expr::enums::render_host_arguments(Some(self.engine), args)
-                .and_then(|args| registration.function.call(&args)),
+            uqa_sql::expr::enums::render_host_arguments(Some(self.engine), args).and_then(|args| {
+                registration
+                    .function
+                    .call_with_context(self.runtime.function_context, &args)
+            }),
         )
     }
 
@@ -440,8 +493,8 @@ mod function_invocation;
 mod routine_descriptions;
 mod type_resolution;
 
-use uqa_execution::{PhysicalRow, RowSchema};
-use uqa_sql::{plan::ExpressionPlan, ResultRow};
+use uqa_execution::RowSchema;
+use uqa_sql::ResultRow;
 
 pub(crate) fn eval_lowered_expression(
     engine: &Engine,
@@ -477,19 +530,5 @@ pub(crate) fn eval_lowered_expression_with_schema(
     let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
     uqa_execution::query::catalog_expression::eval_lowered_expression_with_schema(
         engine, scope, expression, row, schema, params,
-    )
-}
-
-pub(crate) fn eval_stored_expression_plan_with_row(
-    engine: &Engine,
-    expression: &ExpressionPlan,
-    schema: &RowSchema,
-    row: &PhysicalRow,
-    params: &[SQLParam],
-    privilege_subject: Option<&RoleReference>,
-) -> Result<Value, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_statement(engine, privilege_subject);
-    uqa_execution::query::catalog_expression::eval_stored_expression_plan_with_row(
-        engine, scope, expression, schema, row, params,
     )
 }

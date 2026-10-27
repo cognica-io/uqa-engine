@@ -34,6 +34,7 @@ pub mod catalog;
 pub mod compiler;
 pub mod copy;
 pub mod error;
+pub mod explain;
 pub mod expr;
 pub mod fts_query;
 pub mod ir;
@@ -50,6 +51,7 @@ pub mod schema;
 pub mod semantics;
 mod sql_batch_error;
 pub mod type_resolution;
+pub mod xml;
 
 pub use ast::{ColumnType, Statement};
 pub use async_sql_engine::AsyncSQLEngine;

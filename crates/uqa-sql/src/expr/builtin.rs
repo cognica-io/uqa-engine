@@ -267,6 +267,7 @@ pub fn bound_scalar_function_strictness(
             | FunctionDispatch::JsonExtract { .. }
             | FunctionDispatch::Range { .. } => Some(true),
             FunctionDispatch::ArraySubscripts
+            | FunctionDispatch::AssignmentStore
             | FunctionDispatch::ArraySlices
             | FunctionDispatch::ArraySlicesWithBounds(_)
             | FunctionDispatch::CollationFor { .. }
@@ -385,7 +386,7 @@ pub(super) fn eval_dispatched_builtin_with_control(
     context: &EvalContext<'_>,
 ) -> Result<uqa_core::memory::Produced<Value>> {
     if dispatch == FunctionDispatch::FieldSelect {
-        if let Some(field) = &binding.composite_field {
+        if let Some(field) = binding.composite_field() {
             // Arguments have already run: descriptor changes must not suppress their observable effects.
             return super::composites::fields::select_with_control(
                 field,
@@ -396,8 +397,15 @@ pub(super) fn eval_dispatched_builtin_with_control(
         }
     }
     let collation = FunctionBinding::selected_input_collation(Some(binding));
+    let catalog = context.engine.map(super::EngineValueCatalog);
+    let catalog = catalog
+        .as_ref()
+        .map(|catalog| catalog as &dyn super::SQLValueCatalog);
+    if dispatch == FunctionDispatch::AssignmentStore {
+        return eval_assignment_arguments(binding, evaluated, catalog, control);
+    }
     if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(
-        dispatch, evaluated, collation, control,
+        dispatch, evaluated, collation, catalog, control,
     ) {
         return result;
     }
@@ -442,14 +450,7 @@ pub(super) fn eval_dispatched_builtin_with_control(
             super::json::json_extract_operator_with_control(evaluated, as_text, path, control)
         }
         FunctionDispatch::ArraySortJson => {
-            let catalog = context.engine.map(super::EngineValueCatalog);
-            scalar_array::eval_dispatched_json_array_sort_with_control(
-                evaluated,
-                control,
-                catalog
-                    .as_ref()
-                    .map(|catalog| catalog as &dyn super::SQLValueCatalog),
-            )
+            scalar_array::eval_dispatched_json_array_sort_with_control(evaluated, control, catalog)
         }
         FunctionDispatch::ArrayConcat
         | FunctionDispatch::ArrayAppend
@@ -484,4 +485,18 @@ pub(super) fn eval_dispatched_builtin_with_control(
             dispatch.label()
         ))),
     }
+}
+
+fn eval_assignment_arguments(
+    binding: &FunctionBinding,
+    evaluated: &[Value],
+    catalog: Option<&dyn super::SQLValueCatalog>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<Value>> {
+    let assignment = binding
+        .assignment()
+        .ok_or_else(|| SQLError::Internal("partial assignment lost its bound path".into()))?;
+    crate::assignment::path::evaluate(assignment, evaluated.len(), catalog, control, |index| {
+        Ok(&evaluated[index])
+    })
 }

@@ -140,21 +140,27 @@ pub fn note_action_rows(publication: &mut MutationPublicationBatch) {
     note_triggered_rows(&publication.take_written());
 }
 
-/// End a statement whose WITH, `ctes`, modifies data: run the items `scope` kept for after the primary query, then fire every AFTER event the statement's commands queued. A statement whose WITH only reads fired its events when its command ended, and one that did not get as far as its WITH has nothing left to end.
-pub fn finish_statement<S: Clone + Send + Sync + 'static>(
+/// Finish successful command work and release the scope's CTE producers on every result. Data-modifying WITH items and their AFTER events run only after primary success; producer cleanup preserves any primary failure.
+pub fn finish_statement<S: Clone + Send + Sync + 'static, T>(
     context: &MutationStatementContext<'_, S>,
     params: &[SQLParam],
     ctes: &[CtePlan],
     scope: Option<&mut CteScope<S>>,
-) -> Result<(), SQLError> {
-    let Some(scope) = scope.filter(|_| ctes.iter().any(|cte| cte.body.modifies_data())) else {
-        return Ok(());
+    result: Result<T, SQLError>,
+) -> Result<T, SQLError> {
+    let Some(scope) = scope else {
+        return result;
     };
-    crate::query::cte::finish_statement_ctes(context.query.source.ctes, params, scope)?;
-    let Some(commands) = scope.statement_commands() else {
-        return Ok(());
-    };
-    commands
-        .after_triggers()
-        .fire(&context.mutation.preparation.referential.triggers)
+    let result = result.and_then(|output| {
+        if ctes.iter().any(|cte| cte.body.modifies_data()) {
+            crate::query::cte::finish_statement_ctes(context.query.source.ctes, params, scope)?;
+            if let Some(commands) = scope.statement_commands() {
+                commands
+                    .after_triggers()
+                    .fire(&context.mutation.preparation.referential.triggers)?;
+            }
+        }
+        Ok(output)
+    });
+    scope.finish_cte_producers(result)
 }

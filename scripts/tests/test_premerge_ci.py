@@ -74,7 +74,8 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
     def test_pull_request_validation_runs_only_for_completed_batches(self) -> None:
         expected = {"pr-checks.yml", "performance-checks.yml", "dependency-checks.yml",
                     "regular-expression-checks.yml", "http-carrier-parity.yml",
-                    "fdw-features.yml", "wasm-build-checks.yml", "usql-release-checks.yml"}
+                    "fdw-features.yml", "wasm-build-checks.yml", "usql-release-checks.yml",
+                    "c-bindings.yml", "c-packages.yml"}
         actual = set()
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             workflow = path.read_text(encoding="utf-8")
@@ -140,7 +141,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("needs: build", shard)
         self.assertIn("--archive-file", shard)
         self.assertNotIn("cargo test", shard)
-        self.assertIn("--workspace --locked --doc --exclude uqa-node", workspace)
+        self.assertIn("--workspace --locked --doc --exclude uqa-node --exclude uqa-ffi", workspace)
         archive = workspace.split("      - name: Build workspace tests once\n", 1)[1].split("      - uses:", 1)[0]
         self.assertNotIn("--exclude uqa-node", archive)
         self.assertIn("Verify independent analyzer features", workspace)

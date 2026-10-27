@@ -16,7 +16,7 @@
 #include "pg_query_summary.h"
 
 /* Declare the huge function early so we can put it at the end of the file. */
-static bool pg_query_summary_stmt_walk_impl(Node *node, Summary * summary);
+static bool pg_query_summary_stmt_walk_impl(Node *node, void *context);
 
 /*
  * Adds new_stmt_type to summary->statement_types, if it's not already in it.
@@ -46,8 +46,9 @@ pg_query_summary_statement_walk(Summary * summary, Node *tree)
 }
 
 static bool
-pg_query_summary_stmt_walk_impl(Node *node, Summary * summary)
+pg_query_summary_stmt_walk_impl(Node *node, void *context)
 {
+	Summary *summary = context;
 	if (node == NULL)
 		return false;
 

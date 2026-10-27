@@ -7,8 +7,8 @@
 //! Session-level integration between the SQL transaction stack and the row-lock manager: typed-mutation locking, statement-scoped recheck contexts, and change publication for tuple-local rechecks.
 
 use super::{
-    panic_description, BackendTransactionMode, Engine, SQLError, TransactionIntent,
-    TransactionRowChange,
+    BackendTransactionMode, Engine, SQLError, TransactionIntent, TransactionRowChange,
+    TransactionScope,
 };
 
 impl Engine {
@@ -39,9 +39,11 @@ impl Engine {
         table: &str,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.lock_statement_gate();
-        self.ensure_row_mutation_allowed(table)?;
-        self.with_implicit_transaction_mutation(f)
+        self.with_implicit_transaction_mutation(|engine| {
+            engine.ensure_row_mutation_allowed(table)?;
+            engine.prepare_explicit_transaction_writer()?;
+            f(engine)
+        })
     }
 
     /// Run one typed row mutation with the same relation/tuple locking order as SQL DML: logical locks first, backend-writer promotion second. This prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a writer/row-lock inversion while waiting for another transaction.
@@ -99,19 +101,12 @@ impl Engine {
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
         let _statement = self.lock_statement_gate();
-        self.ensure_row_mutation_allowed(table)?;
         if self.storage.backend.is_none() && self.transaction_depth() == 0 {
+            self.ensure_row_mutation_allowed(table)?;
             return f(self);
         }
-        if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()?;
-        }
-
-        let started = self.transaction_depth() == 0;
-        if started {
-            self.begin_implicit_statement_transaction(false)?;
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let operation = || {
+            self.ensure_row_mutation_allowed(table)?;
             self.prepare_serializable_transaction_snapshot()?;
             self.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
             if let Some((doc_id, strength)) = row {
@@ -136,30 +131,12 @@ impl Engine {
                 self.prepare_unrefreshed_transaction_writer()?;
             }
             f(self)
-        }));
-
-        if !started {
-            return self.finish_existing_transaction_operation(result, std::convert::identity);
+        };
+        if self.transaction_depth() != 0 {
+            return self.run_existing_transaction_operation(operation, std::convert::identity);
         }
-        match result {
-            Ok(Ok(value)) => {
-                self.commit()?;
-                Ok(value)
-            }
-            Ok(Err(error)) => match self.rollback() {
-                Ok(()) => Err(error),
-                Err(rollback_error) => Err(Self::rollback_cleanup_error(&rollback_error, format!(
-                    "typed row mutation failed: {error}; rollback also failed: {rollback_error}"
-                ))),
-            },
-            Err(payload) => match self.rollback() {
-                Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_error) => Err(Self::rollback_cleanup_error(&rollback_error, format!(
-                    "typed row mutation rollback after panic failed: {rollback_error}; original panic: {}",
-                    panic_description(payload.as_ref())
-                ))),
-            },
-        }
+        let scope = TransactionScope::begin_implicit_statement(self, false)?;
+        self.run_transaction_scope(scope, |_| operation(), std::convert::identity)
     }
 
     fn row_lock_table_name(&self, table: &str) -> Result<String, SQLError> {
@@ -460,7 +437,7 @@ impl Engine {
                     constraint: self.foreign_key_constraint_identity(table, &foreign_key)?,
                     firing_relation: firing_relation.clone(),
                     row: Some(row),
-                    referenced: false,
+                    referenced_values: None,
                 });
             }
         }
@@ -590,6 +567,7 @@ impl Engine {
         event: super::DeferredReferencedKey<'_>,
         row_table: &str,
         doc_id: uqa_core::DocId,
+        values: std::sync::Arc<[crate::Value]>,
     ) -> Result<(), SQLError> {
         let canonical_row_table = self.row_lock_table_name(row_table)?;
         let check = crate::DeferredForeignKeyCheck {
@@ -599,7 +577,7 @@ impl Engine {
                 table: self.row_locks.table_key(&canonical_row_table),
                 doc_id,
             }),
-            referenced: true,
+            referenced_values: Some(values),
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -629,7 +607,7 @@ impl Engine {
             constraint: self.referenced_key_constraint_identity(&event)?,
             firing_relation: self.deferred_firing_relation(event.firing_table)?,
             row: None,
-            referenced: true,
+            referenced_values: None,
         };
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {

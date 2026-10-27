@@ -162,9 +162,11 @@ fn scalar_query(
         analyzed_output: None,
         analyzed_source: None,
         analyzed_grouping: None,
+        relation_privilege_subject: None,
         relations_bound: false,
         ctes: Vec::new(),
         root: uqa_sql::plan::RelationalPlan::QueryBlock(Box::new(uqa_sql::plan::QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             windows: Vec::new(),
             projections: row
                 .into_iter()
@@ -174,7 +176,7 @@ fn scalar_query(
                     alias: Some(name.clone()),
                 })
                 .collect(),
-            privilege_columns: std::collections::BTreeSet::new(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             from: None,
             r#where: None,
             compute: uqa_sql::plan::ComputePlan::Project,

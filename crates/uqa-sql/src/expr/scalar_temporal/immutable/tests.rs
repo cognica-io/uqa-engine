@@ -109,7 +109,9 @@ fn construction_cases(interval: Value) -> [(&'static str, Vec<Value>, Value); 5]
         (
             "to_timestamp",
             vec![Value::Decimal(DecimalValue::parse("1.25").unwrap())],
-            Value::Temporal(TemporalValue::TimestampTz { micros: 1_250_000 }),
+            Value::Temporal(TemporalValue::TimestampTz {
+                postgres_micros: (1_250_000) - uqa_core::POSTGRES_EPOCH_MICROS,
+            }),
         ),
         (
             "make_timestamp",
@@ -121,7 +123,9 @@ fn construction_cases(interval: Value) -> [(&'static str, Vec<Value>, Value); 5]
                 Value::Int(0),
                 Value::Float(1.25),
             ],
-            Value::Temporal(TemporalValue::Timestamp { micros: 1_250_000 }),
+            Value::Temporal(TemporalValue::Timestamp {
+                postgres_micros: (1_250_000) - uqa_core::POSTGRES_EPOCH_MICROS,
+            }),
         ),
         (
             "make_date",
@@ -155,11 +159,11 @@ fn transform_cases() -> [(&'static str, Vec<Value>, Value); 6] {
             vec![
                 Value::Str("DAY".into()),
                 Value::Temporal(TemporalValue::Timestamp {
-                    micros: 86_401_234_567,
+                    postgres_micros: (86_401_234_567) - uqa_core::POSTGRES_EPOCH_MICROS,
                 }),
             ],
             Value::Temporal(TemporalValue::Timestamp {
-                micros: 86_400_000_000,
+                postgres_micros: (86_400_000_000) - uqa_core::POSTGRES_EPOCH_MICROS,
             }),
         ),
         (
@@ -200,7 +204,9 @@ fn transform_cases() -> [(&'static str, Vec<Value>, Value); 6] {
         (
             "uuid_extract_timestamp",
             vec![Value::Str("00000000-0001-7000-8000-000000000000".into())],
-            Value::Temporal(TemporalValue::TimestampTz { micros: 1_000 }),
+            Value::Temporal(TemporalValue::TimestampTz {
+                postgres_micros: (1_000) - uqa_core::POSTGRES_EPOCH_MICROS,
+            }),
         ),
     ]
 }

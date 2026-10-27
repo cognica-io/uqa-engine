@@ -407,7 +407,7 @@ fn typed_foreign_table() -> Engine {
             ),
             (
                 "ts",
-                Value::Temporal(uqa_core::TemporalValue::TimestampTz { micros: 0 }),
+                Value::Temporal(uqa_core::TemporalValue::TimestampTz { postgres_micros: 0 }),
             ),
             ("a", Value::List(vec![Value::Int(1), Value::Int(2)])),
         ])],

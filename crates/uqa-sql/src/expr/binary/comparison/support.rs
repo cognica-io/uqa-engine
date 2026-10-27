@@ -10,19 +10,7 @@ pub(in crate::expr) use crate::type_resolution::ComparisonSupport;
 use crate::{expr::SQLValueCatalog, SQLError};
 use uqa_core::{memory::ProductionControl, ArrayValue};
 
-pub(super) struct ValueCompositeCatalog<'a>(pub(super) Option<&'a dyn SQLValueCatalog>);
-
-impl crate::expr::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
-    fn composite_type(
-        &self,
-        oid: u32,
-    ) -> Result<Option<std::sync::Arc<crate::expr::composites::CompositeTypeDescriptor>>, SQLError>
-    {
-        self.0
-            .ok_or_else(|| SQLError::Internal("composite operator lookup has no catalog".into()))?
-            .value_composite_type(oid)
-    }
-}
+pub(super) use crate::expr::value_catalog::ValueCompositeCatalog;
 
 impl ComparisonSupport {
     pub(super) fn error(self, sqlstate: &str, type_name: String) -> SQLError {

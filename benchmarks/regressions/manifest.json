@@ -5191,19 +5191,6 @@
       "invariant": "The event column boundary preserves its selected identity and implicit strength; a containing explicit selection still wins."
     },
     {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "retained_rule_condition_inputs_preserve_postgresql_collations_and_values",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-execution/src/mutation/rules/condition_binding/tests.rs",
-      "capability": "Runtime OLD/NEW input metadata",
-      "workload": "The sixteen independent PostgreSQL rule attributes are materialized both with stored values and with absent row images.",
-      "invariant": "Joined private inputs retain each declared collation and exact value or NULL without exposing user-visible wildcard columns."
-    },
-    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "rule_event_namespaces_match_postgresql_diagnostics",
@@ -5729,7 +5716,7 @@
       "case_names": [
         ""
       ],
-      "source": "crates/uqa-sql/src/semantics/volatility.rs",
+      "source": "crates/uqa-sql/src/semantics/volatility/tests.rs",
       "capability": "Structural syntax effect classification",
       "workload": "Collation and Boolean-test syntax are analyzed beside identically named host/routine registrations and volatile children.",
       "invariant": "Structural predicates retain their intrinsic immutability while preserving child effects; ordinary named calls retain their own volatility."
@@ -11306,15 +11293,15 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "range_reservations_preserve_deferred_fields_and_existing_nonrange_addresses",
+      "test": "range_reservations_observe_physical_fields_and_keep_predecessor_addresses",
       "cases": 1,
       "case_names": [
         ""
       ],
       "source": "crates/uqa-execution/src/distinct/encoding/range_tests.rs",
       "capability": "Range unique reservation compatibility",
-      "workload": "Opaque physical and invalid vector fields, enum identities and scalar values alongside selected range fields.",
-      "invariant": "Selected range equivalence changes the current reservation while all predecessor addresses remain; unrelated fields are not eagerly read."
+      "workload": "Selected physical integers, malformed owned datums, catalog vectors, enum identities and scalar values alongside range fields.",
+      "invariant": "Reached physical fields use native SQL equality or report XX001; each predecessor reservation address remains available without invoking SQL hash support."
     },
     {
       "package": "uqa-execution",
@@ -15833,6 +15820,32 @@
     {
       "package": "uqa-engine",
       "kind": "test",
+      "test": "event_definitions_match_postgresql_sqlite_key_value",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
+      "capability": "Native nested rule input identity",
+      "workload": "The 43 PostgreSQL rule and trigger references, including a rule UPDATE that fires another UPDATE rule, on sqlite_key_value.",
+      "invariant": "Definitions, mutation results and diagnostics match PostgreSQL after nested input capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "event_definitions_match_postgresql_redb",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/event_definitions.rs",
+      "capability": "Native nested rule input identity",
+      "workload": "The 43 PostgreSQL rule and trigger references, including a rule UPDATE that fires another UPDATE rule, on redb.",
+      "invariant": "Definitions, mutation results and diagnostics match PostgreSQL after nested input capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
       "test": "notification_policy_api_batch_rejection_keeps_the_callers_transaction",
       "cases": 1,
       "source": "crates/uqa-engine/tests/catalog/sql_notifications/session_policy.rs",
@@ -17648,12 +17661,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "captured_rule_images_spill_and_share_original_contexts_without_complete_output",
+      "test": "native_rule_images_spill_and_preserve_context_without_complete_output",
       "cases": 1,
       "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
       "capability": "Bounded rewrite-rule output",
-      "workload": "48MiB of action OLD/NEW/current images with duplicate labels, 64KiB work memory and one shared 2.1MiB source context.",
-      "invariant": "Combined action production and captured image peak allocation stays below 2MiB; exact image order/content/count, shared original scope and complete source release.",
+      "workload": "64MiB of action current/OLD/NEW/source fields with 64KiB work memory and one shared typed context schema.",
+      "invariant": "Combined action production and captured image peak allocation stays below 2MiB; exact image order, content, count and source context survive without complete output retention.",
       "case_names": [
         ""
       ]
@@ -17661,12 +17674,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "captured_rule_images_keep_positional_assignment_nulls_and_original_source_indices",
+      "test": "native_rule_images_keep_positional_assignment_nulls_and_context_values",
       "cases": 1,
       "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
       "capability": "Bounded rewrite-rule output",
-      "workload": "Two action rows with numeric typmods, NULL images and reversed source indices under one-byte work memory.",
-      "invariant": "Positional assignment values and exact original source mapping remain unchanged across spill.",
+      "workload": "Two action rows with numeric typmods, NULL images and distinct source context values under one-byte work memory.",
+      "invariant": "Positional assignment values and each original context value survive spill.",
       "case_names": [
         ""
       ]
@@ -17674,12 +17687,25 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "captured_rule_images_reject_invalid_source_indices_and_observe_cancellation",
+      "test": "native_rule_images_keep_private_and_aliased_physical_context",
       "cases": 1,
       "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
       "capability": "Bounded rewrite-rule output",
-      "workload": "Negative, absent, mistyped and out-of-range source indices; cancellation before reading a spilled action result.",
-      "invariant": "Invalid internal indices fail before projection and cancellation remains 57014; every source owner is released.",
+      "workload": "Private captured source attributes and repeated logical names share one physical RETURNING context slot through encrypted spill.",
+      "invariant": "RETURNING context retains its complete schema and physical values without equating logical column count with row width.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_rule_images_reject_incomplete_descriptors_and_observe_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/rules/returning/tests.rs",
+      "capability": "Bounded rewrite-rule output",
+      "workload": "A native RETURNING descriptor with missing source context fields and cancellation before captured action production.",
+      "invariant": "Incomplete descriptors fail before projection and cancellation remains 57014.",
       "case_names": [
         ""
       ]
@@ -18158,58 +18184,6 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "rule_action_input_spills_without_copying_a_complete_values_plan",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
-      "capability": "Bounded set-oriented rule inputs",
-      "workload": "1,024 original OLD/NEW images, 8KiB per field, in reversed selection order with 64KiB work memory.",
-      "invariant": "The 32MiB action input retains below 2MiB additional live allocation; two readers preserve every byte and original ordinal without a complete VALUES plan."
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_action_input_preserves_empty_null_and_selected_original_ordinals",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
-      "capability": "Bounded set-oriented rule inputs",
-      "workload": "Empty and two selected NULL events with a one-byte spill allowance.",
-      "invariant": "Exact multiplicity and noncontiguous original ordinals survive; dropping the action makes its source inaccessible."
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_action_input_cancellation_and_bad_ordinals_do_not_bind_or_keep_a_source",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-execution/src/mutation/rules/row_source/tests.rs",
-      "capability": "Bounded set-oriented rule inputs",
-      "workload": "Cancelled production and an invalid qualified event ordinal.",
-      "invariant": "Failed input cannot invoke the action binder, and later independent source scopes clean up correctly."
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "retained_admitted_fields_read_current_types_only_when_the_source_is_built",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-execution/src/query/sources/retained_source/tests/admitted.rs",
-      "capability": "Bounded set-oriented rule inputs",
-      "workload": "Spilled admitted composite constants before addition, after addition and after rollback of their descriptor.",
-      "invariant": "Typed fields observe the current descriptor at source construction, untyped whole rows and original values remain unchanged, and cancellation precedes catalog reads."
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
       "test": "spill_batch_writer_bounds_zero_width_row_batches_and_keeps_their_count",
       "cases": 1,
       "case_names": [
@@ -18291,9 +18265,9 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "rule_events_spill_original_images_and_replay_selected_ordinals_with_bounded_memory",
+      "test": "mutation_images_spill_original_images_and_replay_selected_ordinals_with_bounded_memory",
       "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "source": "crates/uqa-execution/src/mutation/row_images/buffer/tests.rs",
       "capability": "Bounded original rewrite-rule events",
       "workload": "2,048 original OLD/NEW events totaling 32MiB, 64KiB work memory, repeated out-of-order reads after sharing and dropping the initial owner.",
       "invariant": "Construction and replay remain below 2MiB live allocation; exact full-width document identities and payloads survive, and event allocations are released.",
@@ -18304,9 +18278,9 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "rule_events_preserve_complete_context_schema_lock_lineage_and_absent_images",
+      "test": "mutation_images_preserve_complete_context_schema_lock_lineage_and_absent_images",
       "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "source": "crates/uqa-execution/src/mutation/row_images/buffer/tests.rs",
       "capability": "Bounded original rewrite-rule events",
       "workload": "Memory and forced disk retention with absent/empty OLD/NEW images, qualified text, collation and a maximum-width row-lock identity.",
       "invariant": "The complete immutable source schema and physical lock lineage survive positional replay; empty documents remain distinct from missing images.",
@@ -18317,9 +18291,9 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "rule_event_failure_and_cancellation_preserve_the_published_owner",
+      "test": "mutation_image_failure_and_cancellation_preserve_the_published_owner",
       "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
+      "source": "crates/uqa-execution/src/mutation/row_images/buffer/tests.rs",
       "capability": "Bounded original rewrite-rule events",
       "workload": "A partially constructed replacement fails and the current shared owner is subsequently cancelled.",
       "invariant": "Failed replacement leaves the original image readable; cancellation rejects every owner and admission without publishing another event.",
@@ -18538,15 +18512,15 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
-      "test": "retained_constant_storage_is_created_only_for_values_commands",
+      "test": "retained_constant_storage_follows_values_inputs_in_commands_and_queries",
       "cases": 1,
       "case_names": [
         ""
       ],
       "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/retained.rs",
       "capability": "Bounded folded VALUES retention",
-      "workload": "Optimize SELECT, INSERT SELECT, DEFAULT VALUES, multirow VALUES and a modifying VALUES CTE with a counted storage factory.",
-      "invariant": "Plans without VALUES never initialize a constant spool; each VALUES command initializes it once for all its rows, including nested modifying CTEs."
+      "workload": "Optimize SELECT, INSERT SELECT, DEFAULT VALUES, command and query VALUES, derived VALUES and a modifying VALUES CTE with a counted storage factory.",
+      "invariant": "Plans without VALUES never initialize a constant spool; each VALUES input initializes it once, including query and nested modifying inputs."
     },
     {
       "package": "uqa-engine",
@@ -18599,32 +18573,6 @@
       "capability": "Trigger-view INSERT order and bounded input"
     },
     {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "insert_candidates_preserve_full_width_identities_with_bounded_payload_retention",
-      "source": "crates/uqa-execution/src/mutation/insert/pending.rs",
-      "workload": "512 lazy 32KiB documents with absent and full-width prepared identities, two positional reads and a 64KiB allowance.",
-      "invariant": "The complete 16MiB payload stays below 2MiB additional peak allocation while preserving exact document bytes, order, identity width and supplied flags.",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "capability": "Bounded original INSERT candidates"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "insert_candidates_keep_cancellation_and_reject_invalid_identity_records",
-      "source": "crates/uqa-execution/src/mutation/insert/pending.rs",
-      "workload": "An empty candidate, a malformed identity tuple and cancellation before reading or appending.",
-      "invariant": "Malformed records fail explicitly; cancellation retains 57014 and does not append a candidate.",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "capability": "Bounded original INSERT candidates"
-    },
-    {
       "package": "uqa-engine",
       "kind": "test",
       "test": "rule_values_insert_does_not_retain_complete_candidate_images",
@@ -18636,45 +18584,6 @@
         ""
       ],
       "capability": "Bounded original INSERT candidates"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "insert_source_input_bounds_live_payload_during_creation_and_replay",
-      "source": "crates/uqa-execution/src/mutation/insert/source/inputs/tests.rs",
-      "workload": "512 lazy 32KiB rows become a completed 64KiB spill and then ordered input expressions.",
-      "invariant": "Creation and replay stay below the unchanged 2MiB peak allocation ceiling, with every ordinal and payload byte preserved.",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "capability": "Bounded INSERT SELECT rule inputs"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "insert_source_input_preserves_positions_nulls_and_zero_column_multiplicity",
-      "source": "crates/uqa-execution/src/mutation/insert/source/inputs/tests.rs",
-      "workload": "Duplicate public labels, reordered logical-to-physical slots, hidden source columns, logical NULL slots and 4,097 zero-column rows.",
-      "invariant": "Public selection reuses the result layout rather than a physical prefix, preserving duplicate positions, NULLs, hidden-column exclusion and nullary multiplicity.",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "capability": "Bounded INSERT SELECT rule inputs"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "insert_source_input_observes_cancellation_and_requires_bounded_query_output",
-      "source": "crates/uqa-execution/src/mutation/insert/source/inputs/tests.rs",
-      "workload": "Cancellation after source completion, an unbounded output representation and a borrowed VALUES DEFAULT expression.",
-      "invariant": "Reads observe 57014; an unexpected unbounded query output fails; VALUES expressions remain borrowed and unevaluated.",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "capability": "Bounded INSERT SELECT rule inputs"
     },
     {
       "package": "uqa-engine",
@@ -18706,45 +18615,6 @@
       "capability": "Bounded INSERT SELECT rule inputs"
     },
     {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "view_rule_inputs_bound_live_payload_and_retain_row_specific_types",
-      "source": "crates/uqa-execution/src/mutation/views/commands/insert/inputs/tests.rs",
-      "cases": 1,
-      "workload": "512 rows of 32KiB with row-specific VARCHAR typmods and NULLs use a 16KiB retained input allowance.",
-      "invariant": "Creation and replay preserve each typed slot below an unchanged 2MiB peak allowance.",
-      "capability": "Bounded rewrite-rule view input ownership",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "view_rule_query_input_preserves_duplicate_positions_and_excludes_hidden_slots",
-      "source": "crates/uqa-execution/src/mutation/views/commands/insert/inputs/tests.rs",
-      "cases": 1,
-      "workload": "Duplicate public labels, declared assignment types, reordered physical slots, hidden prefixes and logical NULL slots in completed SELECT output.",
-      "invariant": "Replay follows the shared public logical layout, retains each positional assignment type and never reads the physical prefix as the selected output.",
-      "capability": "Bounded rewrite-rule view input ownership",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "view_rule_inputs_preserve_empty_rows_and_reject_cancelled_or_invalid_input",
-      "source": "crates/uqa-execution/src/mutation/views/commands/insert/inputs/tests.rs",
-      "cases": 1,
-      "workload": "Thirty-three zero-width rows cross a one-byte spill allowance, followed by cancellation with one row unread and invalid type metadata.",
-      "invariant": "Empty-row multiplicity is retained, cancellation raises 57014 and malformed or unbounded inputs are rejected.",
-      "capability": "Bounded rewrite-rule view input ownership",
-      "case_names": [
-        ""
-      ]
-    },
-    {
       "package": "uqa-engine",
       "kind": "test",
       "test": "copy_rule_trigger_view_insert_keeps_bounded_input_and_proposed_rows",
@@ -18757,84 +18627,6 @@
       "workload": "128 rows of 128KiB pass through an INSTEAD OF trigger and a DO ALSO rewrite rule using VALUES or SELECT, under 512KiB query and 4MiB native SQLite retention allowances.",
       "invariant": "Peak additional allocation stays below the unchanged 8MiB ceiling; all 16MiB COPY bytes and all 128 rule-action identities with sum 8,256 are exact.",
       "capability": "Bounded rewrite-rule view input ownership"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "all_rule_indices_bound_metadata_and_preserve_repeatable_order",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "131,072 unconditional rule-event ordinals, constructed and replayed twice.",
-      "invariant": "Additional peak allocation is below the fixed 512KiB ceiling and every original ordinal is retained in order.",
-      "capability": "Bounded rewrite-rule selection metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "sparse_rule_indices_bound_metadata_and_preserve_repeatable_order",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "131,072 alternating rule-event ordinals under a 16KiB spill allowance, constructed and replayed twice.",
-      "invariant": "Additional peak allocation stays below the fixed 512KiB ceiling and both passes preserve the entire sparse selection.",
-      "capability": "Bounded rewrite-rule selection metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_indices_preserve_duplicates_reverse_order_and_full_width_ordinals",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Adjacent, duplicated, reversed and full-width ordinals under a one-byte spill allowance.",
-      "invariant": "The spill reader preserves ordinal identity, ordering and multiplicity on repeated reads.",
-      "capability": "Bounded rewrite-rule selection metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "empty_and_contiguous_rule_indices_do_not_create_spill_records",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Empty, single-row and 131,072-row contiguous selections with a one-byte allowance.",
-      "invariant": "Range ownership retains exact counts without producing spill records.",
-      "capability": "Bounded rewrite-rule selection metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_indices_propagate_cancellation_and_stop_failed_readers",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Cancellation between ordinal reads and before append/finalization.",
-      "invariant": "All consumers report SQLSTATE 57014; an errored iterator stops without returning subsequent rows.",
-      "capability": "Bounded rewrite-rule selection metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_indices_reject_malformed_ranges_counts_and_unaddressable_ordinals",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Invalid encoded ranges, truncated/excess selection counts and ordinal/count overflow.",
-      "invariant": "Malformed selections fail explicitly rather than dropping, adding or wrapping event ordinals.",
-      "capability": "Bounded rewrite-rule selection metadata"
     },
     {
       "package": "uqa-engine",
@@ -18920,45 +18712,6 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "uniform_rule_suppression_keeps_constant_metadata",
-      "source": "crates/uqa-execution/src/mutation/rules/suppression/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "A million-row event starts with no suppressed rows, then an unconditional rule suppresses all rows.",
-      "invariant": "Peak additional allocation stays below the fixed 128KiB ceiling; first/last and out-of-range decisions remain exact.",
-      "capability": "Bounded rewrite-rule suppression metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "sparse_rule_suppression_bounds_metadata_and_preserves_union",
-      "source": "crates/uqa-execution/src/mutation/rules/suppression/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Two sparse rule selections with strides 257 and 509 are unioned over 1,048,576 events, then every decision is read.",
-      "invariant": "Peak additional allocation stays below the unchanged 128KiB ceiling and all original-row decisions equal the selection union.",
-      "capability": "Bounded rewrite-rule suppression metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_suppression_handles_all_override_empty_bounds_and_cancellation",
-      "source": "crates/uqa-execution/src/mutation/rules/suppression/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Empty and mixed decisions transition to all rows, followed by invalid ordinals and cancellation.",
-      "invariant": "All-row override preserves each decision, invalid writes fail and cancelled consumers return 57014.",
-      "capability": "Bounded rewrite-rule suppression metadata"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
       "test": "match_flags_cache_bounds_page_io_and_preserves_union",
       "source": "crates/uqa-execution/src/spill/match_flags/tests.rs",
       "cases": 1,
@@ -19009,84 +18762,6 @@
       "capability": "Bounded rewrite-rule suppression metadata"
     },
     {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "matched_rule_columns_bound_memory_and_preserve_sparse_action_unions",
-      "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/column_tests.rs",
-      "capability": "Rewrite-rule required-column retention",
-      "workload": "16,384 original events, unconditional and sparse rules with overlapping action columns; existing images prepared outside allocation scope.",
-      "invariant": "Peak additional live allocations remain below 512KiB; every original ordinal receives the exact union of matched action columns.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "missing_rule_columns_bound_memory_and_keep_old_new_presence",
-      "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/column_tests.rs",
-      "capability": "Rewrite-rule required-column retention",
-      "workload": "16,384 original events with partially projected OLD and optional NEW images, unconditional and sparse rule actions.",
-      "invariant": "Peak additional allocations remain below 512KiB; missing columns preserve both existing keys and absence of either image.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_column_projection_rejects_invalid_qualification_order_and_bounds",
-      "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/column_tests.rs",
-      "capability": "Rewrite-rule required-column retention",
-      "workload": "Reversed, duplicate and out-of-range qualification ordinals through the actual prepared-batch consumer.",
-      "invariant": "Invalid qualification metadata is rejected before supplemental expression evaluation; generic action selection remains order preserving.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_column_runs_preserve_uniform_empty_sparse_and_owned_replay",
-      "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/columns/tests.rs",
-      "capability": "Rewrite-rule required-column retention",
-      "workload": "Zero, one and 129 rows, uniform and fragmented requirements under one-byte and 16KiB allowances with independent readers.",
-      "invariant": "Exact OLD/NEW column sets and row count survive owner drop; uniform requirements retain one set and fragmented requirements spill.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_column_readers_validate_runs_counts_and_column_names",
-      "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/columns/tests.rs",
-      "capability": "Rewrite-rule required-column retention",
-      "workload": "Invalid lengths, widths, names, duplicates and truncated/excess declared counts.",
-      "invariant": "Malformed metadata reports an error and failed readers stop.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_column_metadata_finishes_before_consumption_and_propagates_cancellation",
-      "cases": 1,
-      "source": "crates/uqa-execution/src/mutation/rules/columns/tests.rs",
-      "capability": "Rewrite-rule required-column retention",
-      "workload": "Late metadata failure and cancellation before construction or during independent replay.",
-      "invariant": "Construction fails before exposing incomplete projection requirements; cancellation propagates as SQLSTATE 57014.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
       "package": "uqa-engine",
       "kind": "test",
       "test": "nested_view_rule_columns_preserve_sparse_old_new_and_lazy_unused_fields",
@@ -19098,97 +18773,6 @@
       "case_names": [
         ""
       ]
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "unsuppressed_rule_ordinals_bound_full_selection_memory",
-      "source": "crates/uqa-execution/src/mutation/rules/views/indices_tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "262,144 original event ordinals with no suppressed rows.",
-      "invariant": "Peak additional allocation stays below the unchanged 512KiB ceiling and every local ordinal maps to the same original row.",
-      "capability": "Bounded original-event ordinal mapping"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "unsuppressed_rule_ordinals_bound_fragmented_selection_memory",
-      "source": "crates/uqa-execution/src/mutation/rules/views/indices_tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "262,144 original events, alternating suppressed rows, a 16KiB ordinal allowance.",
-      "invariant": "Peak additional allocation stays below the unchanged 512KiB ceiling; the surviving 131,072 ordinals retain their exact order.",
-      "capability": "Bounded original-event ordinal mapping"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_ordinal_lookup_bounds_memory_and_page_io_for_repeated_projection",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "131,073 fragmented ordinals, repeated OLD/NEW positional reads and a reverse pass after dropping the source owner.",
-      "invariant": "Allocation stays below 512KiB; exactly 65 page writes and 129 page reads serve all positions, preserving every mapped ordinal.",
-      "capability": "Bounded original-event ordinal mapping"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_ordinal_lookup_keeps_contiguous_ranges_implicit",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Empty, singleton and 131,072-row contiguous selections beginning at a nonzero original ordinal.",
-      "invariant": "No positional spill is created; reverse reads preserve offsets and reject out-of-range positions.",
-      "capability": "Bounded original-event ordinal mapping"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_ordinal_lookup_preserves_duplicates_full_width_and_nonmonotonic_reads",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Fragmented ranges containing duplicates and near-usize::MAX ordinals, probed in nonmonotonic order.",
-      "invariant": "Positional reads retain exact original identities and multiplicity across range boundaries.",
-      "capability": "Bounded original-event ordinal mapping"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_ordinal_lookup_propagates_cancellation_counts_and_truncated_pages",
-      "source": "crates/uqa-execution/src/mutation/rules/indices/lookup/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "Cancelled selections, malformed counts and a short final authenticated page following a cached complete page.",
-      "invariant": "Cancellation reports 57014, inconsistent counts fail, and failed reads invalidate the partial page without losing earlier valid records.",
-      "capability": "Bounded original-event ordinal mapping"
-    },
-    {
-      "package": "uqa-execution",
-      "kind": "lib",
-      "test": "rule_event_selection_shares_full_ownership_and_replays_fragmented_indices",
-      "source": "crates/uqa-execution/src/mutation/rules/rows/tests.rs",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "workload": "A full original event selection and a fragmented selection with repeated and reversed ordinals, under a zero-byte row allowance.",
-      "invariant": "Full selection shares the original owner; fragmented replay retains ordering and duplicates, while bounds and cancellation propagate.",
-      "capability": "Bounded original-event ordinal mapping"
     },
     {
       "package": "uqa-engine",
@@ -25052,6 +24636,165 @@
       "capability": "Integer bitwise operators",
       "workload": "Independent PostgreSQL replay of row operators, mixed widths, prepared generic/custom plans, strict NULL effects, domains, generated values, expression indexes, views and rollback across four providers and persistent reopen.",
       "invariant": "Exact values, result types, errors, tags, stored definitions and side effects agree with PostgreSQL; state persists or rolls back as declared."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_expressions_retain_event_collation_in_each_scalar_scope",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/query/tests.rs",
+      "capability": "Native rewrite-rule input identity",
+      "workload": "VALUES, SELECT and mutation expressions in direct, nested and qualified scopes with C and POSIX collations.",
+      "invariant": "Rewritten native expressions retain event type, namespace and collation instead of materializing a separate event relation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_inputs_keep_native_namespaces_and_event_collations",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/query/tests.rs",
+      "capability": "Native rewrite-rule input identity",
+      "workload": "VALUES, SELECT and mutation expressions in direct, nested and qualified scopes with C and POSIX collations.",
+      "invariant": "Rewritten native expressions retain event type, namespace and collation instead of materializing a separate event relation."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_rule_inputs_rebind_captured_attributes_in_assignments_and_predicates",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/query/tests.rs",
+      "capability": "Native rewrite-rule input identity",
+      "workload": "Direct and scalar-subquery UPDATE assignments plus predicates referencing an earlier captured source.",
+      "invariant": "Each original internal source attribute binds through the next capture and retains its declared collation."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "values_queries_bound_folded_payloads_before_cloning_their_native_plans",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/retained.rs",
+      "capability": "Bounded folded VALUES retention",
+      "workload": "128 independently folded 128KiB values in standalone, derived and INSERT SELECT query plans, including a cloned executable plan.",
+      "invariant": "Peak allocation stays below 8MiB for each 16MiB logical input; all 128 values survive both plans with exact payloads."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "captured_input_pruning_keeps_identity_cardinality_and_volatile_outputs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/statement_planning/rule_inputs/tests.rs",
+      "capability": "Native rewrite-rule input work",
+      "workload": "Unused scalar errors, nested subqueries, volatile calls, set-returning outputs, DISTINCT and ordered source projections.",
+      "invariant": "Unused scalar work is removed while row identity, set cardinality and every required effect remain."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "captured_rule_projections_use_the_enclosing_cte_namespace",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/statement_planning/rule_inputs/tests.rs",
+      "capability": "Scoped rewrite-rule input work",
+      "workload": "An inherited CTE shadows a catalog view containing a volatile expression.",
+      "invariant": "Pruning resolves each source in its actual namespace and preserves reachable effects."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "rule_query_inputs_match_postgresql",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/tests/prepared/explain_serialization.rs",
+      "capability": "Native rewrite-rule query semantics",
+      "workload": "188 INSERT and 77 UPDATE/DELETE cases independently captured from PostgreSQL 18, replayed on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Exact values, source evaluation counts, set cardinality, SQLSTATE and savepoint recovery match the reference on every provider."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_binding_work_grows_with_inputs_instead_of_join_depth",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/deferred/tests.rs",
+      "capability": "Bounded automatic-view source analysis",
+      "workload": "One, eight and thirty-two joined table-function inputs with counted overload analysis.",
+      "invariant": "Previously analyzed child descriptors are reused so analysis work grows with input count rather than repeated join subtree traversal."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "the_last_executor_clone_joins_every_worker_through_tls_cleanup",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Two native workers retain destructor probes while an executor clone keeps the pool alive.",
+      "invariant": "Dropping the final clone completes both thread-local destructors; no worker remains after external ownership ends."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "configured_workers_bound_concurrency_and_preserve_branch_order",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Eight synchronized branches execute through a two-worker pool.",
+      "invariant": "Exactly two native worker identities execute all eight branches and results retain their input order."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "repeated_and_nested_work_reuses_the_owned_pool",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Three repeated dispatches include nested eight-part chunk work inside a two-worker executor.",
+      "invariant": "Every nested branch stays in the existing two-worker pool and returns the original ordered values."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failed_pool_construction_joins_workers_already_started",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/parallel/pool/tests.rs",
+      "capability": "Bounded native parallel worker ownership",
+      "workload": "Worker startup fails after the first native worker has initialized its destructor probe.",
+      "invariant": "Construction returns an error only after the started worker and its thread-local resources finish cleanup."
     }
   ]
 }

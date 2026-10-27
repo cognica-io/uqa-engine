@@ -23,14 +23,20 @@ use crate::ast::{
 use crate::ir::{ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec};
 
 mod command_children;
+mod command_expressions;
+pub(crate) mod copy;
 pub mod input_projection;
 mod model;
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
 mod query;
 mod query_visit;
+mod retained;
+pub use retained::RetainedCtePlan;
 mod rewrite;
 mod scalar;
+mod scoped_visit;
+pub use scoped_visit::ScopedPlanVisitor;
 mod source_metadata;
 mod source_visit;
 mod statement;

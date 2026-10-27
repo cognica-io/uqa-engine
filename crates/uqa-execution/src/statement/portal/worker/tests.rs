@@ -226,6 +226,7 @@ fn unopened_worker(directional: bool) -> Vec<SessionPortalWorkerResponse> {
         &UnopenedQuery,
         &crate::statement::thread_context::StatementThreadContext {
             retained_rows: crate::query::sources::retained_source::RetainedRowContext::default(),
+            io: uqa_core::io_usage::IOContext::default(),
             regex_cache: None,
             temporal_input: uqa_sql::expr::TemporalInputContext {
                 transaction_clock_micros: Some(313),

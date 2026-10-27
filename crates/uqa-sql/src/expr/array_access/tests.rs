@@ -172,6 +172,7 @@ fn pre_evaluated_array_bounds_coerce_without_copying_unselected_input() {
             binding.dispatch.unwrap(),
             &arguments,
             DEFAULT_COLLATION,
+            None,
             &control,
         )
         .unwrap()
@@ -199,6 +200,7 @@ fn pre_evaluated_array_bounds_coerce_without_copying_unselected_input() {
             binding.dispatch.unwrap(),
             &[input.clone(), Value::Null, upper],
             DEFAULT_COLLATION,
+            None,
             &control,
         )
         .unwrap()
@@ -245,4 +247,48 @@ fn array_access_releases_admitted_inputs_on_cancellation_and_quota_failure() {
         assert!(result.is_err());
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn physical_array_access_retains_bounds_and_defers_bytes_until_after_bound_effects() {
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(16384);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let ty = crate::ColumnType::Array(Box::new(crate::ColumnType::Integer));
+    let values = values();
+    let payload = crate::expr::datums::encoding::encode(&values, &ty, None, &control).unwrap();
+    let mut bytes = crate::expr::datums::encoding::header(payload.len())
+        .unwrap()
+        .to_vec();
+    bytes.extend_from_slice(&payload);
+    drop(payload);
+    let array = Value::Datum(uqa_core::DatumValue::new(1007, 0, bytes));
+    let (_, access) = syntax("SELECT a[2]");
+    let result = eval_array_access_with_control(access, &control, |index| {
+        Ok(control.copy_value(if index == 0 { &array } else { &Value::Int(2) })?)
+    })
+    .unwrap();
+    assert_eq!(*result, Value::Int(2));
+    drop(result);
+    assert_eq!(budget.used(), 0);
+
+    let invalid = Value::Datum(uqa_core::DatumValue::new(1007, 0, vec![]));
+    let (_, access) = syntax("SELECT a[lo:hi]");
+    let mut visits = Vec::new();
+    let result = eval_array_access_with_control(access, &control, |index| {
+        visits.push(index);
+        Ok(control.copy_value(if index == 0 { &invalid } else { &Value::Null })?)
+    })
+    .unwrap();
+    assert_eq!(*result, Value::Null);
+    assert_eq!(visits, [0, 2, 1]);
+    drop(result);
+    assert_eq!(budget.used(), 0);
+    let (_, access) = syntax("SELECT a[1]");
+    let error = eval_array_access_with_control(access, &control, |index| {
+        Ok(control.copy_value(if index == 0 { &invalid } else { &Value::Int(1) })?)
+    })
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX001"));
+    assert_eq!(budget.used(), 0);
 }

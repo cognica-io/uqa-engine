@@ -21,7 +21,8 @@ pub(crate) fn input_byte(text: &str) -> u8 {
     }
 }
 
-pub(crate) fn value_byte(value: &Value) -> Option<u8> {
+/// Observe an admitted internal-character carrier without applying text input conversion.
+pub fn value_byte(value: &Value) -> Option<u8> {
     let Value::Str(text) = value else {
         return None;
     };
@@ -33,7 +34,8 @@ pub(crate) fn value_byte(value: &Value) -> Option<u8> {
     characters.next().is_none().then_some(byte)
 }
 
-pub(crate) fn carrier_with_control(
+/// Construct an internal-character carrier from its complete unsigned byte domain.
+pub fn carrier_with_control(
     byte: u8,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, ValueRetentionError> {

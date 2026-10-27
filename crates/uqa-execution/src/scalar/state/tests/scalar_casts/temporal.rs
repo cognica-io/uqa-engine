@@ -134,7 +134,7 @@ fn temporal_descriptors_keep_live_zone_date_output_and_interval_input() {
                 &prepared,
                 &schema,
                 Value::Temporal(TemporalValue::TimestampTz {
-                    micros: 1_577_838_600_123_456,
+                    postgres_micros: 1_577_838_600_123_456 - uqa_core::POSTGRES_EPOCH_MICROS,
                 }),
                 &catalog,
             )

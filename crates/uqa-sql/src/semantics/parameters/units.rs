@@ -133,9 +133,25 @@ pub(super) fn parse_integer(
 }
 
 /// Show an integer value in the greatest unit that divides it.
-pub(super) fn show_integer(value: i64, unit: Option<ParameterUnit>) -> String {
+#[cfg(test)]
+fn show_integer(value: i64, unit: Option<ParameterUnit>) -> String {
+    show_integer_with_control(
+        value,
+        unit,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary setting formatting")
+    .into_uncontrolled()
+    .expect("ordinary setting")
+}
+
+pub(super) fn show_integer_with_control(
+    value: i64,
+    unit: Option<ParameterUnit>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<String>, crate::SQLError> {
     let Some(unit) = unit.filter(|_| value > 0) else {
-        return value.to_string();
+        return Ok(control.format(format_args!("{value}"))?);
     };
     for (name, multiplier) in unit.conversions() {
         if name.is_empty() {
@@ -143,7 +159,7 @@ pub(super) fn show_integer(value: i64, unit: Option<ParameterUnit>) -> String {
         }
         if multiplier <= 1.0 || value % (multiplier as i64) == 0 {
             let converted = (value as f64 / multiplier).round_ties_even() as i64;
-            return format!("{converted}{name}");
+            return Ok(control.format(format_args!("{converted}{name}"))?);
         }
     }
     unreachable!("every unit lists its base unit")

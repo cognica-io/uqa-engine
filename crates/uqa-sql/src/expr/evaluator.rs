@@ -6,7 +6,7 @@
 
 //! AST scalar evaluation orchestration.
 
-use uqa_core::{ArrayValue, Value};
+use uqa_core::Value;
 
 use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
@@ -19,11 +19,37 @@ use super::casting::negate_value;
 use super::context::{cast_value_with_type_resolution, EvalContext};
 
 /// Evaluate a value-producing AST expression against one row and parameter context.
+pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
+    let value = eval_inner(expr, ctx)?;
+    if matches!(
+        expr,
+        Expr::Literal(_)
+            | Expr::TypedLiteral { .. }
+            | Expr::Param(_)
+            | Expr::Column(_)
+            | Expr::QualifiedColumn { .. }
+            | Expr::InternalColumn(_)
+            | Expr::Func { .. }
+    ) {
+        if let Some(engine) = ctx.engine {
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            return super::composites::retain_value_with_control(
+                control.finish(value, None)?,
+                engine.composite_types(),
+                &control,
+            )?
+            .into_uncontrolled()
+            .map_err(|_| SQLError::Internal("ordinary expression retention".into()));
+        }
+    }
+    Ok(value)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "builtin dispatch preserves arity, NULL, and error precedence"
 )]
-pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
+fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     match expr {
         Expr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
@@ -84,24 +110,22 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let crate::ScalarExpr::Array(items) = scalar else {
                 unreachable!("array lowering")
             };
-            let element_oid = crate::type_resolution::scalar_array_element_oid_with_control(
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            let element_type = crate::type_resolution::scalar_array_input_type_with_control(
                 &items,
                 &crate::RowSchema::default(),
                 ctx.params,
                 ctx.engine,
-                &uqa_core::memory::ProductionControl::uncontrolled(),
+                &control,
             )?;
-            let mut out = Vec::with_capacity(elements.len());
-            for e in elements {
-                out.push(eval(e, ctx)?);
-            }
-            ArrayValue::try_new(out)
-                .map(|array| Value::Array(array.with_element_type_oid(element_oid)))
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(
-                        "multidimensional arrays must have matching dimensions".into(),
-                    )
-                })
+            Ok(super::construct_array_with_control(
+                elements.len(),
+                element_type.as_deref(),
+                &control,
+                |index| Ok(control.finish(eval(&elements[index], ctx)?, None)?),
+            )?
+            .into_uncontrolled()
+            .expect("ordinary array constructor"))
         }
         Expr::CompositeRow { items, binding } => {
             let control = uqa_core::memory::ProductionControl::uncontrolled();
@@ -210,6 +234,21 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     _ => Value::Bool(false),
                 });
             }
+            if let Some(assignment) = binding.as_ref().and_then(|binding| binding.assignment()) {
+                let control = uqa_core::memory::ProductionControl::uncontrolled();
+                let catalog = ctx.engine.map(super::EngineValueCatalog);
+                return Ok(crate::assignment::path::evaluate(
+                    assignment,
+                    args.len(),
+                    catalog
+                        .as_ref()
+                        .map(|catalog| catalog as &dyn super::SQLValueCatalog),
+                    &control,
+                    |index| Ok(control.finish(eval(&args[index], ctx)?, None)?),
+                )?
+                .into_uncontrolled()
+                .expect("ordinary array assignment"));
+            }
             if let Some(access) = binding
                 .as_ref()
                 .and_then(|binding| binding.dispatch)
@@ -220,13 +259,17 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 })
             {
                 let control = uqa_core::memory::ProductionControl::uncontrolled();
-                return Ok(
-                    super::eval_array_access_with_control(access?, &control, |index| {
-                        Ok(control.finish(eval(&args[index], ctx)?, None)?)
-                    })?
-                    .into_uncontrolled()
-                    .expect("ordinary array access"),
-                );
+                let catalog = ctx.engine.map(super::EngineValueCatalog);
+                return Ok(super::eval_array_access_with_catalog_and_control(
+                    access?,
+                    catalog
+                        .as_ref()
+                        .map(|catalog| catalog as &dyn super::SQLValueCatalog),
+                    &control,
+                    |index| Ok(control.finish(eval(&args[index], ctx)?, None)?),
+                )?
+                .into_uncontrolled()
+                .expect("ordinary array access"));
             }
             // A set-returning built-in cannot produce the one value this expression needs; `PostgreSQL` rejects it before evaluating its arguments.
             if let Some(binding) = binding.as_ref().filter(|binding| binding.builtin) {
@@ -348,7 +391,12 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         }
         Expr::IsNull { expr, negated } => {
             let v = eval(expr, ctx)?;
-            Ok(Value::Bool(uqa_core::sql_null_test(Some(&v), *negated)))
+            Ok(Value::Bool(super::sql_null_test_with_control(
+                &v,
+                *negated,
+                ctx.engine,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?))
         }
         Expr::Between { expr, low, high } => eval_between(expr, low, high, ctx, 0),
         Expr::InList {

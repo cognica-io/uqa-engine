@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import functools
 import hashlib
 import http.server
@@ -19,6 +20,7 @@ import subprocess
 import tarfile
 import tempfile
 import threading
+import time
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -139,15 +141,19 @@ def install_binstall(tool: str, target: str, directory: pathlib.Path, destinatio
             pass
 
     handler = functools.partial(DownloadHandler, directory=str(directory))
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+    with tempfile.TemporaryDirectory(prefix="usql-binstall-manifest-") as temporary, \
+            http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            # Only the transport origin is replaced. Binstall selects the archive
-            # format and binary path, with no source or third-party fallback.
-            url = f"http://127.0.0.1:{server.server_port}/{{ name }}-{{ version }}-{{ target }}{{ archive-suffix }}"
+            # Binstall resolves repository redirects before its package URL.
+            # Relocate both transport origins while retaining archive discovery.
+            origin = f"http://127.0.0.1:{server.server_port}"
+            manifest = pathlib.Path(temporary) / "Cargo.toml"
+            local_binstall_manifest(manifest, origin)
+            url = origin + "/{ name }-{ version }-{ target }{ archive-suffix }"
             env = {key: value for key, value in os.environ.items() if key not in ("GH_TOKEN", "GITHUB_TOKEN")}
-            subprocess.run([tool, "--manifest-path", str(ROOT / "crates/uqa-cli"),
+            subprocess.run([tool, "--manifest-path", str(manifest),
                             "--targets", target, "--pkg-url", url, "--allow-insecure-http",
                             "--strategies", "crate-meta-data", "--no-discover-github-token",
                             "--root", str(destination.parent / "cargo-root"),
@@ -159,11 +165,41 @@ def install_binstall(tool: str, target: str, directory: pathlib.Path, destinatio
             thread.join()
 
 
+def local_binstall_manifest(destination: pathlib.Path, repository: str) -> None:
+    """Keep the release manifest and workspace inheritance with a local origin."""
+    source = (ROOT / "crates/uqa-cli/Cargo.toml").read_text(encoding="utf-8")
+    inherited = "repository.workspace = true"
+    if source.count(inherited) != 1:
+        raise ValueError("expected one inherited CLI repository")
+    destination.write_text(source.replace(
+        inherited, f"repository = {json.dumps(repository)}\nworkspace = {json.dumps(str(ROOT))}"),
+        encoding="utf-8")
+
+
+@contextlib.contextmanager
+def temporary_installation():
+    temporary = tempfile.TemporaryDirectory(prefix="usql-installed-")
+    try:
+        yield pathlib.Path(temporary.name)
+    finally:
+        # Windows can retain an executable image after its process has exited.
+        # Wait only for a reported sharing violation; permanent locks still fail.
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                temporary.cleanup()
+                break
+            except OSError as error:
+                remaining = deadline - time.monotonic()
+                if getattr(error, "winerror", None) != 32 or remaining <= 0:
+                    raise
+                time.sleep(min(0.05, remaining))
+
+
 def smoke(target: str, directory: pathlib.Path, binstall: str | None = None) -> None:
     verify(target, directory)
     directory = directory.resolve()
-    with tempfile.TemporaryDirectory(prefix="usql-installed-") as temporary:
-        work = pathlib.Path(temporary)
+    with temporary_installation() as work:
         destination = work / "installed bin"
         if "windows" in target:
             command = ["pwsh", "-NoProfile", "-File", str(directory / "install-usql.ps1"),

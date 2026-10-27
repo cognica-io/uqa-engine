@@ -102,7 +102,24 @@ pub fn coerce_to_column_type_from(
     else {
         return Ok(value);
     };
-    coerce_assignment_value(assignment, value, &shape.ty, source)
+    coerce_column_value(assignment, value, &shape.ty, source)
+}
+
+/// Admit a table attribute and flatten procedural record descriptors at the tuple
+/// boundary. The same representation is used by triggers, constraints and storage.
+pub fn coerce_column_value(
+    assignment: &dyn AssignmentContext,
+    value: Value,
+    target: &ColumnType,
+    source: Option<&ColumnType>,
+) -> Result<Value, SQLError> {
+    let value = coerce_assignment_value(assignment, value, target, source)?;
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    crate::expr::composites::flatten_value_with_control(
+        control.retain_external_value(value)?,
+        &control,
+    )
+    .map(|value| value.into_uncontrolled().expect("table column assignment"))
 }
 
 pub fn validate_mutation_columns<'a>(

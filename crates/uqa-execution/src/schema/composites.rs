@@ -53,7 +53,7 @@ pub fn create_composite_type(
 ) -> Result<(), SQLError> {
     let owner = context.creation.bind_owner()?;
     context.writer.prepare_writer()?;
-    let name = context.creation.persistent_name(&definition.name)?;
+    let name = context.creation.object_name(&definition.name)?;
     let requested = RelationIdentity::from_legacy_name(&name).map_err(SQLError::Internal)?;
     let shell = context.shells.retain(&name, owner.identity())?;
     super::types::arrays::displace_array_type(

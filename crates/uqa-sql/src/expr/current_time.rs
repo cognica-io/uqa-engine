@@ -109,21 +109,26 @@ pub(super) fn eval_current_time(
             },
             "current_time" => TemporalValue::TimeTz {
                 micros: micros.rem_euclid(MICROS_PER_DAY),
-                offset_minutes: 0,
+                offset_seconds: 0,
             },
             "localtime" => TemporalValue::Time {
                 micros: micros.rem_euclid(MICROS_PER_DAY),
             },
-            "localtimestamp" => TemporalValue::Timestamp { micros },
+            "localtimestamp" => TemporalValue::Timestamp {
+                postgres_micros: (micros) - uqa_core::POSTGRES_EPOCH_MICROS,
+            },
             "age" => {
                 return age_between(
                     &TemporalValue::Timestamp {
-                        micros: micros.div_euclid(MICROS_PER_DAY) * MICROS_PER_DAY,
+                        postgres_micros: (micros.div_euclid(MICROS_PER_DAY) * MICROS_PER_DAY)
+                            - uqa_core::POSTGRES_EPOCH_MICROS,
                     },
                     &coerce_temporal(&args[0])?,
                 );
             }
-            _ => TemporalValue::TimestampTz { micros },
+            _ => TemporalValue::TimestampTz {
+                postgres_micros: (micros) - uqa_core::POSTGRES_EPOCH_MICROS,
+            },
         };
         Ok(Value::Temporal(value))
     })())
@@ -144,7 +149,9 @@ mod tests {
         ] {
             assert_eq!(
                 coerce_temporal(&Value::Str(input.into())).unwrap(),
-                TemporalValue::Timestamp { micros },
+                TemporalValue::Timestamp {
+                    postgres_micros: (micros) - uqa_core::POSTGRES_EPOCH_MICROS
+                },
                 "{input}"
             );
         }
@@ -164,13 +171,13 @@ mod tests {
             },
             TemporalValue::TimeTz {
                 micros: 3_723_456_789,
-                offset_minutes: 0,
+                offset_seconds: 0,
             },
             TemporalValue::Timestamp {
-                micros: 90_123_456_789,
+                postgres_micros: (90_123_456_789) - uqa_core::POSTGRES_EPOCH_MICROS,
             },
             TemporalValue::TimestampTz {
-                micros: 90_123_456_789,
+                postgres_micros: (90_123_456_789) - uqa_core::POSTGRES_EPOCH_MICROS,
             },
         ] {
             let value = Value::Temporal(temporal);
@@ -193,13 +200,13 @@ mod tests {
             (
                 RangeSubtype::Timestamp,
                 TemporalValue::Timestamp {
-                    micros: 90_123_456_789,
+                    postgres_micros: (90_123_456_789) - uqa_core::POSTGRES_EPOCH_MICROS,
                 },
             ),
             (
                 RangeSubtype::TimestampTz,
                 TemporalValue::TimestampTz {
-                    micros: 90_123_456_789,
+                    postgres_micros: (90_123_456_789) - uqa_core::POSTGRES_EPOCH_MICROS,
                 },
             ),
         ] {

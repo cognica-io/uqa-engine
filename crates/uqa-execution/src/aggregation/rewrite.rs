@@ -95,10 +95,10 @@ pub fn new_aggregate_accumulators_with_budget(
     params: &[uqa_sql::SQLParam],
     budget_bytes: usize,
 ) -> Result<Vec<AggregateAccumulator>, SQLError> {
-    Ok(instantiate_aggregate_accumulators(
+    instantiate_aggregate_accumulators(
         &aggregate_accumulator_templates(context, aggregate_targets, input_schema, params)?,
         budget_bytes,
-    ))
+    )
 }
 
 pub fn aggregate_accumulator_templates(
@@ -193,11 +193,20 @@ pub fn aggregate_accumulator_templates(
 pub fn instantiate_aggregate_accumulators(
     templates: &[AggregateAccumulatorTemplate],
     budget_bytes: usize,
-) -> Vec<AggregateAccumulator> {
-    templates
-        .iter()
-        .map(|template| template.instantiate(budget_bytes))
-        .collect()
+) -> Result<Vec<AggregateAccumulator>, SQLError> {
+    let mut accumulators = Vec::with_capacity(templates.len());
+    for template in templates {
+        match template.instantiate(budget_bytes) {
+            Ok(accumulator) => accumulators.push(accumulator),
+            Err(error) => {
+                return super::state::with_cleanup(
+                    Err(error),
+                    super::state::close_accumulators(&mut accumulators),
+                )
+            }
+        }
+    }
+    Ok(accumulators)
 }
 
 pub fn observe_aggregate(

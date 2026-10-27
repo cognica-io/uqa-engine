@@ -3030,7 +3030,7 @@ protobuf_c_message_unpack(const ProtobufCMessageDescriptor *desc,
 	ProtobufCMessage *rv;
 	size_t rem = len;
 	const uint8_t *at = data;
-	const ProtobufCFieldDescriptor *last_field = desc->fields + 0;
+	const ProtobufCFieldDescriptor *last_field = desc->fields;
 	ScannedMember first_member_slab[1UL <<
 					FIRST_SCANNED_MEMBER_SLAB_SIZE_LOG2];
 

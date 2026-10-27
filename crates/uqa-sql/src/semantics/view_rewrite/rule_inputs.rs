@@ -17,6 +17,24 @@ pub struct RuleInputRequirements {
     pub requires_rows: bool,
 }
 
+/// A surviving automatic-view mutation continues through its base relation before it becomes an executable query.
+pub fn original_rule_target(
+    services: ViewRewriteContext<'_>,
+    table: &str,
+    event: RuleEvent,
+) -> Result<Option<String>, SQLError> {
+    let trigger = match event {
+        RuleEvent::Insert => TriggerEvent::Insert,
+        RuleEvent::Update => TriggerEvent::Update,
+        RuleEvent::Delete => TriggerEvent::Delete,
+        RuleEvent::Select => return Ok(None),
+    };
+    if has_instead_of_trigger(services, table, trigger)? {
+        return Ok(None);
+    }
+    Ok(automatic_view_layer(services, table)?.map(|layer| layer.source_name))
+}
+
 pub fn rule_input_requirements(
     services: ViewRewriteContext<'_>,
     table: &str,

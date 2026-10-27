@@ -31,6 +31,7 @@ impl UnifiedPlan {
     )]
     pub fn lower_with(statement: Statement, aggregates: &dyn AggregateClassifier) -> Self {
         match statement {
+            Statement::Empty => Self::Command(Box::new(CommandPlan::Empty)),
             Statement::Select(query) => {
                 Self::Query(Box::new(QueryPlan::lower_with(*query, aggregates)))
             }
@@ -48,6 +49,7 @@ impl UnifiedPlan {
                     analyzed_output: None,
                     analyzed_source: None,
                     analyzed_grouping: None,
+                    relation_privilege_subject: None,
                     relations_bound: false,
                     ctes: Vec::new(),
                     root: RelationalPlan::Values { rows, subqueries },
@@ -136,6 +138,7 @@ impl UnifiedPlan {
                     ctes,
                     rows,
                     source,
+                    rule_values_input: None,
                     on_conflict,
                     returning,
                     returning_aliases: statement.returning_aliases,
@@ -324,16 +327,10 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Discard { target }))
             }
             Statement::Load { library } => Self::Command(Box::new(CommandPlan::Load { library })),
-            Statement::Explain {
-                analyze,
-                verbose,
-                format,
-                body,
-            } => Self::Command(Box::new(CommandPlan::Explain {
-                analyze,
-                verbose,
-                format,
+            Statement::Explain { options, body } => Self::Command(Box::new(CommandPlan::Explain {
+                options,
                 body: Box::new(Self::lower_with(*body, aggregates)),
+                unbound_parameters: None,
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
             Statement::Vacuum(vacuum) => Self::Command(Box::new(CommandPlan::Vacuum(vacuum))),
@@ -636,6 +633,7 @@ impl CommandPlan {
             Self::DropRule(_) => "DropRule",
             Self::DoBlock { .. } => "DoBlock",
             Self::Call { .. } => "Call",
+            Self::Empty => "Empty",
         }
     }
 }

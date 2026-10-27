@@ -1,0 +1,146 @@
+{
+  "reference": "PostgreSQL",
+  "version": "18.4",
+  "image_id": "sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15",
+  "setup": "CREATE TEMP TABLE samples(g INTEGER,n INTEGER); INSERT INTO samples VALUES(1,1),(1,2),(2,3); CREATE FUNCTION pg_temp.aggregate_transition(bigint,integer) RETURNS bigint LANGUAGE sql IMMUTABLE AS 'SELECT $1 + COALESCE($2,0)'; CREATE AGGREGATE pg_temp.host_sum(integer)(SFUNC=pg_temp.aggregate_transition,STYPE=bigint,INITCOND='0');",
+  "cases": [
+    {
+      "name": "global",
+      "query": "SELECT pg_temp.host_sum(n) AS v FROM samples",
+      "values": [
+        6
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "empty_global",
+      "query": "SELECT pg_temp.host_sum(n) AS v FROM samples WHERE false",
+      "values": [
+        0
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "empty_grouped",
+      "query": "SELECT pg_temp.host_sum(n) AS v FROM samples WHERE false GROUP BY g",
+      "values": [],
+      "sqlstate": null
+    },
+    {
+      "name": "grouped",
+      "query": "SELECT pg_temp.host_sum(n) AS v FROM samples GROUP BY g ORDER BY g",
+      "values": [
+        3,
+        3
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "grouping_sets",
+      "query": "SELECT pg_temp.host_sum(n) AS v FROM samples GROUP BY GROUPING SETS((),(g),()) ORDER BY v",
+      "values": [
+        3,
+        3,
+        6,
+        6
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "ordered",
+      "query": "SELECT pg_temp.host_sum(n ORDER BY n DESC) AS v FROM samples",
+      "values": [
+        6
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "distinct",
+      "query": "SELECT pg_temp.host_sum(DISTINCT g) AS v FROM samples",
+      "values": [
+        3
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "filtered",
+      "query": "SELECT pg_temp.host_sum(n) FILTER(WHERE false) AS v FROM samples",
+      "values": [
+        0
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "having",
+      "query": "SELECT pg_temp.host_sum(n) AS v FROM samples HAVING pg_temp.host_sum(n) < 0",
+      "values": [],
+      "sqlstate": null
+    },
+    {
+      "name": "empty_window",
+      "query": "SELECT pg_temp.host_sum(n) OVER() AS v FROM samples WHERE false",
+      "values": [],
+      "sqlstate": null
+    },
+    {
+      "name": "cumulative_window",
+      "query": "SELECT pg_temp.host_sum(n) OVER(ORDER BY n ROWS UNBOUNDED PRECEDING) AS v FROM samples ORDER BY n",
+      "values": [
+        1,
+        3,
+        6
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "partition_window",
+      "query": "SELECT pg_temp.host_sum(n) OVER(PARTITION BY g ORDER BY n ROWS UNBOUNDED PRECEDING) AS v FROM samples ORDER BY n",
+      "values": [
+        1,
+        3,
+        3
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "moving_window",
+      "query": "SELECT pg_temp.host_sum(n) OVER(ORDER BY n ROWS CURRENT ROW) AS v FROM samples ORDER BY n",
+      "values": [
+        1,
+        2,
+        3
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "empty_frame",
+      "query": "SELECT pg_temp.host_sum(n) OVER(ORDER BY n ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) AS v FROM samples WHERE n=1",
+      "values": [
+        0
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "exclusion_window",
+      "query": "SELECT pg_temp.host_sum(n) OVER(ORDER BY n ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW EXCLUDE CURRENT ROW) AS v FROM samples ORDER BY n",
+      "values": [
+        0,
+        1,
+        3
+      ],
+      "sqlstate": null
+    },
+    {
+      "name": "input_error",
+      "query": "SELECT pg_temp.host_sum(10/(n-2)) AS v FROM samples",
+      "values": [],
+      "sqlstate": "22012"
+    },
+    {
+      "name": "grouped_input_error",
+      "query": "SELECT pg_temp.host_sum(10/(n-2)) AS v FROM samples GROUP BY g",
+      "values": [],
+      "sqlstate": "22012"
+    }
+  ]
+}

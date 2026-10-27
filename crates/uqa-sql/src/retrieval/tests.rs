@@ -91,10 +91,10 @@ fn temporal_membership_retains_sql_operators_instead_of_physical_set_keys() {
     for value in [
         uqa_core::TemporalValue::Date { days: 18_262 },
         uqa_core::TemporalValue::Timestamp {
-            micros: 1_577_836_800_000_000,
+            postgres_micros: 1_577_836_800_000_000,
         },
         uqa_core::TemporalValue::TimestampTz {
-            micros: 1_577_836_800_000_000,
+            postgres_micros: 1_577_836_800_000_000,
         },
     ] {
         for negated in [false, true] {
@@ -136,10 +136,10 @@ fn temporal_filters_retain_sql_comparison_instead_of_carrier_order() {
     for value in [
         uqa_core::TemporalValue::Date { days: 18_262 },
         uqa_core::TemporalValue::Timestamp {
-            micros: 1_577_836_800_000_000,
+            postgres_micros: 1_577_836_800_000_000,
         },
         uqa_core::TemporalValue::TimestampTz {
-            micros: 1_577_836_800_000_000,
+            postgres_micros: 1_577_836_800_000_000,
         },
     ] {
         let literal = ScalarExpr::Literal(Value::Temporal(value));

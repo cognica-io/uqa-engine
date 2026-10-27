@@ -77,7 +77,17 @@ pub(super) fn build_table_function_rows_with_row(
                     context.eval_hook.enum_labels(),
                     &evaluated,
                 )
-                .and_then(|arguments| registration.function.call(&arguments))
+                .and_then(|arguments| {
+                    let result = registration
+                        .function
+                        .call_with_context(context.runtime.function_context, &arguments)?;
+                    super::validate_registered_columns(
+                        name,
+                        registration.function.output_columns(),
+                        &result.columns,
+                    )?;
+                    Ok(result)
+                })
             })
         {
             return registered_table_function_rows(name, result?, alias, column_aliases);
@@ -124,7 +134,7 @@ pub(super) fn build_table_function_rows_with_row(
     if has_named_args {
         return Err(unknown_function_error(&lower, &call_args));
     }
-    match lower.as_str() {
+    match lower.as_ref() {
         "pg_get_sequence_data" => singleton_record_rows(
             context.session.sequence_data(&evaluated)?,
             &["last_value", "is_called"],

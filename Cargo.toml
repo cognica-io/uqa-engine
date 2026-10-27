@@ -23,6 +23,7 @@ members = [
     "crates/uqa-pg-server",
     "crates/uqa-fdw",
     "crates/uqa-engine",
+    "crates/uqa-ffi",
     "crates/uqa",
     "crates/uqa-client",
     "crates/uqa-api",
@@ -107,7 +108,7 @@ unicode-normalization = "0.1"
 # Controlled decimal conversion audits this implementation's allocation strategy.
 num-bigint = "=0.4.6"
 num-traits = "0.2"
-rusqlite = { package = "uqa-rusqlite", version = "=0.39.1", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
+rusqlite = { package = "uqa-rusqlite", version = "=0.39.3", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tz-rs = { version = "=0.7.3", default-features = false }
 tzdb_data = "=0.2.5"
@@ -133,12 +134,14 @@ writeable = { version = "=0.6.3", default-features = false }
 icu_properties = "=2.0.2"
 libm = "0.2"
 redb = "4.1"
-zstd = "0.13"
+zstd = "0.14.3"
 arrow-array = "58"
 arrow-ipc = "58"
 arrow-schema = "58"
 duckdb = { package = "uqa-duckdb", version = "=1.10505.1", features = ["bundled", "parquet"] }
-parquet = { version = "58", features = ["arrow"] }
+# QueryBuilder writes uncompressed Parquet. Retain the existing feature set
+# without the unused Zstd codec, whose 58.x dependency requires vulnerable 0.13.
+parquet = { version = "58", default-features = false, features = ["arrow", "snap", "brotli", "flate2-zlib-rs", "lz4", "base64", "simdutf8"] }
 pyo3 = "0.29"
 napi = { version = "3.10", default-features = false, features = ["napi8", "tokio_rt"] }
 napi-derive = "3.5"

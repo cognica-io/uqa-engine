@@ -6,6 +6,7 @@
 
 //! Ordered RETURNING values detach from source fragments and spill in bounded batches.
 
+use crate::query::consumer::QueryConsumerControl;
 use crate::{
     physical::physical_exec_error,
     query::{projection::physical_work_mem_bytes, runtime::QueryRuntimeView},
@@ -20,6 +21,7 @@ pub struct ReturningRows {
     schema: Option<RowSchema>,
     pending: Vec<PhysicalRow>,
     pending_bytes: usize,
+    delivery: QueryConsumerControl,
     batch_bytes: usize,
     cancellation: CancellationToken,
 }
@@ -44,6 +46,7 @@ impl ReturningRows {
             schema: None,
             pending: Vec::new(),
             pending_bytes: 0,
+            delivery: QueryConsumerControl::Continue,
             batch_bytes: bytes / 2,
             cancellation,
         }
@@ -59,6 +62,28 @@ impl ReturningRows {
 
     pub(crate) fn schema(&self) -> Option<&RowSchema> {
         self.schema.as_ref()
+    }
+
+    pub fn push_to(
+        &mut self,
+        row: OwnedPhysicalRow,
+        destination: Option<super::ReturningDestination<'_>>,
+    ) -> Result<(), SQLError> {
+        let Some(destination) = destination else {
+            return self.push(row);
+        };
+        self.cancellation.check()?;
+        if self.delivery == QueryConsumerControl::Continue {
+            self.delivery = match destination.consume(row)? {
+                QueryConsumerControl::Rewind => {
+                    return Err(SQLError::Internal(
+                        "a RETURNING receiver cannot rewind a mutation".into(),
+                    ))
+                }
+                control => control,
+            };
+        }
+        Ok(())
     }
 
     pub fn push(&mut self, row: OwnedPhysicalRow) -> Result<(), SQLError> {

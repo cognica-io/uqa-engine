@@ -15,7 +15,7 @@ use super::{
 use std::collections::BTreeMap;
 use uqa_sql::{
     plan::{CtePlan, CtePlanBody},
-    semantics::{cte_references_own_name, order_cte_plans},
+    semantics::{cte_references_own_name_with_control, order_cte_plans_with_control},
     SQLError, SQLParam, ScalarExpr,
 };
 pub mod context;
@@ -36,9 +36,18 @@ pub(crate) fn install_scheduled_ctes<'a, S: Clone>(
     ctes: &mut CteScope<S>,
     output_filters: &BTreeMap<String, (String, ScalarExpr)>,
 ) -> Result<(), SQLError> {
+    let retained = context.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.runtime.cancellation,
+    );
     for scheduled in plans {
         if scheduled.deferred {
-            ctes.insert_deferred(scheduled.plan.clone());
+            ctes.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(
+                scheduled.plan,
+                &control,
+            )?);
         } else {
             materialize_plan_ctes_with_filters(
                 context,
@@ -68,9 +77,15 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
     ctes: &mut CteScope<S>,
     output_filters: &BTreeMap<String, (String, ScalarExpr)>,
 ) -> Result<(), SQLError> {
-    let plans = order_cte_plans(plans.into_iter().collect())?;
-    for plan in plans {
-        if cte_references_own_name(plan) {
+    let retained = context.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.runtime.cancellation,
+    );
+    let plans = order_cte_plans_with_control(plans, control)?;
+    for plan in plans.iter().copied() {
+        if cte_references_own_name_with_control(plan, control)? {
             let rows = {
                 let mut cte_scope = ctes.enter_lock_identity_emission(false);
                 materialize_recursive_cte(
@@ -88,26 +103,7 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
         if install_read_only_prefix(context, plan, params, ctes)? {
             continue;
         }
-        let outer_row = ctes.row_lock_outer_row().cloned();
-        let result = {
-            let mut cte_scope = ctes.enter_lock_identity_emission(false);
-            match &plan.body {
-                CtePlanBody::Query(query) => {
-                    if let Some(outer_row) = outer_row.as_ref() {
-                        context
-                            .queries
-                            .execute_lateral_query(query, outer_row, params, &cte_scope)?
-                    } else {
-                        context
-                            .queries
-                            .execute_query(query, params, &mut cte_scope)?
-                    }
-                }
-                CtePlanBody::Command(command) => {
-                    execute_command_cte(context, command, params, &cte_scope)?
-                }
-            }
-        };
+        let result = execute_cte_body(context, plan, params, ctes)?;
         let mut columns = result.columns.clone();
         let source_columns = result.internal_schema.columns().to_vec();
         let mut operator = result.into_operator();
@@ -166,6 +162,28 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
     Ok(())
 }
 
+fn execute_cte_body<S: Clone>(
+    context: CteExecutionContext<'_, S>,
+    plan: &CtePlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope<S>,
+) -> Result<QueryOutput, SQLError> {
+    let outer_row = ctes.row_lock_outer_row().cloned();
+    let mut cte_scope = ctes.enter_lock_identity_emission(false);
+    match &plan.body {
+        CtePlanBody::Query(query) => {
+            if let Some(outer_row) = outer_row.as_ref() {
+                context
+                    .queries
+                    .execute_lateral_query(query, outer_row, params, &cte_scope)
+            } else {
+                context.queries.execute_query(query, params, &mut cte_scope)
+            }
+        }
+        CtePlanBody::Command(command) => execute_command_cte(context, command, params, &cte_scope),
+    }
+}
+
 fn install_read_only_prefix<S: Clone>(
     context: CteExecutionContext<'_, S>,
     plan: &CtePlan,
@@ -195,10 +213,11 @@ fn install_read_only_prefix<S: Clone>(
             let operator = Box::new(
                 crate::ColumnSelection::with_positions(operator, columns).discarding_lock_origins(),
             );
-            ctes.insert_rows(
-                plan.name.clone(),
-                rows::CteRows::from_producer(operator, context.runtime.work_mem_bytes()?),
-            );
+            let (operator, budget) =
+                crate::physical::construction::OperatorBuild::run(operator, |_| {
+                    context.runtime.work_mem_bytes()
+                })?;
+            ctes.insert_producer(plan.name.clone(), operator, budget)?;
             return Ok(true);
         }
     }

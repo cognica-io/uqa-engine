@@ -16,6 +16,28 @@ mod identities;
 mod native;
 mod rows;
 
+#[test]
+fn typed_temporal_readers_preserve_old_epochs_and_new_second_precision_payloads() {
+    for source in [
+        r#"{"kind":"temporal","value":{"$uqa_type":"timestamp","micros":0}}"#,
+        r#"{"kind":"temporal","value":{"$uqa_type":"timestamp_tz","micros":-9223372036854775807}}"#,
+        r#"{"kind":"temporal","value":{"$uqa_type":"time_tz","micros":86400000000,"offset_minutes":-959}}"#,
+        r#"{"kind":"temporal","value":{"$uqa_type":"postgres_timestamp","postgres_micros":9223371331199999999}}"#,
+        r#"{"kind":"temporal","value":{"$uqa_type":"postgres_timestamp_tz","postgres_micros":-211813488000000000}}"#,
+        r#"{"kind":"temporal","value":{"$uqa_type":"time_tz_seconds","micros":86400000000,"offset_seconds":-57599}}"#,
+    ] {
+        parity(source.as_bytes());
+        let value = serde_json::from_str::<StoredValue>(source)
+            .unwrap()
+            .into_value();
+        let current = encoded(value);
+        parity(&current);
+        let control = StorageReadControl::with_limit(0);
+        assert!(typed::decode(source.as_bytes(), &control, 127, false).is_err());
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
 fn encoded(value: Value) -> Vec<u8> {
     serde_json::to_vec(&StoredValue::from_value(value)).unwrap()
 }
@@ -41,9 +63,24 @@ fn parity(input: &[u8]) {
     assert_eq!(control.memory().used(), 0);
 }
 
-#[test]
-fn typed_blob_round_trips_every_persisted_variant() {
-    let scalars = vec![
+fn expanded_record() -> Value {
+    Value::Datum(
+        uqa_core::DatumValue::new(16_384, u32::MAX, vec![0]).with_record_fields(vec![
+            uqa_core::RecordDatumField {
+                name: "retained".into(),
+                type_oid: 23,
+                type_modifier: -1,
+                collation_oid: None,
+                length: 4,
+                alignment: b'i',
+                dropped: false,
+            },
+        ]),
+    )
+}
+
+fn persisted_value_samples() -> Vec<Value> {
+    vec![
         Value::Null,
         Value::Void,
         Value::Bool(true),
@@ -62,10 +99,14 @@ fn typed_blob_round_trips_every_persisted_variant() {
         Value::Temporal(TemporalValue::Time { micros: i64::MAX }),
         Value::Temporal(TemporalValue::TimeTz {
             micros: -1,
-            offset_minutes: -55,
+            offset_seconds: -3300,
         }),
-        Value::Temporal(TemporalValue::Timestamp { micros: i64::MIN }),
-        Value::Temporal(TemporalValue::TimestampTz { micros: i64::MAX }),
+        Value::Temporal(TemporalValue::Timestamp {
+            postgres_micros: i64::MIN,
+        }),
+        Value::Temporal(TemporalValue::TimestampTz {
+            postgres_micros: i64::MAX,
+        }),
         Value::Temporal(TemporalValue::Interval {
             months: -3,
             days: 5,
@@ -103,6 +144,7 @@ fn typed_blob_round_trips_every_persisted_variant() {
             0,
             vec![2, 0, 0, 0, 3, b'x'],
         )),
+        expanded_record(),
         Value::Enum(EnumValue::new(
             16_390,
             EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap(),
@@ -121,7 +163,12 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ])
             .unwrap(),
         ),
-    ];
+    ]
+}
+
+#[test]
+fn typed_blob_round_trips_every_persisted_variant() {
+    let scalars = persisted_value_samples();
     for value in &scalars {
         parity(&encoded(value.clone()));
     }
@@ -147,6 +194,7 @@ fn typed_blob_round_trips_every_persisted_variant() {
 #[test]
 fn typed_compact_carriers_retain_indirect_metadata_and_release_failed_reads() {
     for value in [
+        expanded_record(),
         Value::BitString(uqa_core::BitStringValue::try_from_packed(Vec::new(), 0).unwrap()),
         Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap()),
         Value::Enum(EnumValue::new(

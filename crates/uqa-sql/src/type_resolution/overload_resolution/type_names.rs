@@ -188,6 +188,7 @@ pub(in crate::type_resolution) const fn builtin_canonical_type_name(
         ColumnType::Bytea => "bytea",
         ColumnType::Uuid => "uuid",
         ColumnType::Json => "json",
+        ColumnType::Xml => "xml",
         ColumnType::JsonB => "jsonb",
         ColumnType::Oid => "oid",
         _ => return None,

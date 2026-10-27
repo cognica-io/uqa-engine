@@ -12,6 +12,34 @@ mod call_signatures;
 mod range_subtype_distance;
 
 #[test]
+fn type_io_catalog_identities_match_postgresql() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("tests/type_io.json")).unwrap();
+    for expected in reference["routines"].as_array().unwrap() {
+        let routine = PG18_BUILTIN_ROUTINE_GROUPS
+            .iter()
+            .flat_map(|group| group.iter())
+            .find(|entry| Some(entry.oid) == expected["oid"].as_i64())
+            .unwrap();
+        assert_eq!(
+            serde_json::json!({
+                "oid": routine.oid,
+                "proname": routine.name,
+                "prokind": routine.kind,
+                "proisstrict": routine.strict,
+                "provolatile": routine.volatility,
+                "proparallel": routine.parallel,
+                "proleakproof": routine.leakproof,
+                "prorettype": routine.return_type,
+                "args": routine.argument_types,
+                "prosrc": routine.source,
+            }),
+            *expected
+        );
+    }
+}
+
+#[test]
 fn type_introspection_metadata_matches_postgresql() {
     let reference: serde_json::Value =
         serde_json::from_str(include_str!("tests/type_introspection.json")).unwrap();

@@ -23,7 +23,177 @@ impl FunctionTypeResolver for Routines {
     }
 }
 
-impl RoutineResolution for Routines {}
+impl RoutineResolution for Routines {
+    fn has_registered_table_function(&self, name: &str) -> bool {
+        matches!(name, "host_rows" | "host_declared" | "host_empty")
+    }
+
+    fn registered_table_function_columns(&self, name: &str) -> Option<Vec<String>> {
+        match name {
+            "host_declared" => Some(vec!["value".into(), "label".into()]),
+            "host_empty" => Some(Vec::new()),
+            _ => None,
+        }
+    }
+}
+
+#[test]
+fn declared_host_columns_bind_before_execution_including_aliases_and_groups() {
+    for (sql, expected) in [
+        ("SELECT * FROM host_declared(3)", vec!["value", "label"]),
+        (
+            "SELECT * FROM host_declared(3) AS h(renamed)",
+            vec!["renamed", "label"],
+        ),
+        (
+            "SELECT * FROM host_declared(3) WITH ORDINALITY",
+            vec!["value", "label", "ordinality"],
+        ),
+        (
+            "SELECT * FROM ROWS FROM (host_declared(3), host_declared(4)) AS h(a,b,c,d)",
+            vec!["a", "b", "c", "d"],
+        ),
+    ] {
+        let block = block(sql);
+        let schema = SchemaScope::for_analysis(&empty_binding_context())
+            .unwrap()
+            .bind_source(
+                &Routines,
+                block.from.as_ref().unwrap(),
+                &block.subqueries,
+                &[],
+                None,
+            )
+            .unwrap();
+        assert!(!schema.columns_are_open(None), "{sql}");
+        let names = (0..schema.len())
+            .map(|index| schema.public_name(index).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(names, expected, "{sql}");
+    }
+    let block = block("SELECT * FROM host_rows(3)");
+    let schema = SchemaScope::for_analysis(&empty_binding_context())
+        .unwrap()
+        .bind_source(
+            &Routines,
+            block.from.as_ref().unwrap(),
+            &block.subqueries,
+            &[],
+            None,
+        )
+        .unwrap();
+    assert!(schema.columns_are_open(None));
+}
+
+#[test]
+fn runtime_group_width_defers_alias_validation_and_positional_types() {
+    let bind = |sql| {
+        let statement = block(sql);
+        SchemaScope::for_analysis(&empty_binding_context())
+            .unwrap()
+            .bind_source(
+                &Routines,
+                statement.from.as_ref().unwrap(),
+                &statement.subqueries,
+                &[],
+                None,
+            )
+    };
+    let schema = bind(
+        "SELECT * FROM ROWS FROM(host_rows(2), json_each('{}'::json)) WITH ORDINALITY h(a,b,c,d,e)",
+    )
+    .unwrap();
+    assert!(schema.columns_are_open(None));
+    assert!(schema.column_types().iter().all(Option::is_none));
+    let schema = bind(
+        "SELECT * FROM ROWS FROM(json_each('{}'::json), host_rows(2)) WITH ORDINALITY h(a,b,c,d,e)",
+    )
+    .unwrap();
+    assert!(schema.columns_are_open(None));
+    assert_eq!(schema.column_type(0), Some(&ColumnType::Text));
+    assert_eq!(schema.column_type(1), Some(&ColumnType::Json));
+    assert!(schema.column_types()[2..].iter().all(Option::is_none));
+    let error = bind("SELECT * FROM ROWS FROM(host_declared(2)) h(a,b,c)").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P10"));
+    let error = bind("SELECT * FROM host_empty(2)").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+}
+
+#[test]
+fn registered_table_calls_are_validated_before_set_placement() {
+    for (name, expected) in [("host_rows", true), ("missing_host_rows", false)] {
+        let block = block(&format!("SELECT {name}(3)"));
+        let expression = &block.projections[0].expr;
+        let ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            order_by,
+            ..
+        } = expression
+        else {
+            panic!("function expression");
+        };
+        let schema = RowSchema::default();
+        let result = functions::validate_scalar_function(
+            &Routines,
+            functions::ScalarFunctionValidation {
+                name,
+                binding: binding.as_ref(),
+                args,
+                order_by,
+                expression,
+                schema: &schema,
+                params: &[],
+                resolver: &Routines,
+            },
+        );
+        assert_eq!(result.is_ok(), expected, "{result:?}");
+        assert_eq!(
+            crate::semantics::sets::validation::function_may_return_set(
+                &Routines,
+                &Routines,
+                name,
+                binding.as_ref(),
+                args,
+                &schema,
+                &[],
+            )
+            .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn expression_analysis_resolves_parameters_in_its_supplied_scope() {
+    let context = empty_binding_context();
+    let parameters = [SQLParam::typed_scalar(
+        uqa_core::Value::Int(7),
+        ColumnType::Integer,
+    )];
+    for (number, supplied, expected) in [
+        (0, &parameters[..], Some("there is no parameter $0")),
+        (1, &[][..], Some("there is no parameter $1")),
+        (2, &parameters[..], Some("there is no parameter $2")),
+        (1, &parameters[..], None),
+    ] {
+        let expression = crate::plan::ExpressionPlan::lower(crate::ast::Expr::Param(number));
+        let result = crate::binding::analyze_expression_plan_type(
+            &Routines,
+            &expression,
+            supplied,
+            &context,
+        );
+        if let Some(expected) = expected {
+            let error = result.unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42P02"));
+            assert_eq!(error.to_string(), expected);
+        } else {
+            assert_eq!(result.unwrap(), Some(ColumnType::Integer));
+        }
+    }
+}
 
 fn block(sql: &str) -> Box<QueryBlockPlan> {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))

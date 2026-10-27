@@ -122,9 +122,12 @@ fn bounded_rule_output_keeps_owner_plan_identity_and_error_before_execution() {
     let inputs = Inputs::default();
     assert_planning_error(execute_output_with_privilege_subject(
         &inputs.context(),
-        statement("WITH source AS (SELECT $1 AS id FROM public.items) SELECT id FROM source"),
+        statement("WITH source AS (SELECT $1 AS id FROM public.items) SELECT id FROM source")
+            .into(),
         &[SQLParam::scalar(Value::Int(7))],
+        None,
         &"rule_owner".into(),
+        None,
     ));
     let plans = inputs.planned.borrow();
     let [UnifiedPlan::Query(query)] = &plans[..] else {

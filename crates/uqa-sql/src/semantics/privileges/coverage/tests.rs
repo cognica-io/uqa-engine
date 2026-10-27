@@ -15,13 +15,15 @@ use crate::{
         PrivilegeCatalog, PrivilegeCteCatalog, PrivilegeRelation, PrivilegeRelationKind,
     },
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 struct Catalog {
     subject: RoleReference,
     reads: Cell<usize>,
     checks: Cell<usize>,
     foreign: bool,
+    lookups: RefCell<Vec<(String, RelationLookupMode)>>,
+    required_subjects: std::collections::BTreeMap<String, RoleReference>,
 }
 
 impl Catalog {
@@ -31,6 +33,8 @@ impl Catalog {
             reads: Cell::new(0),
             checks: Cell::new(0),
             foreign,
+            lookups: RefCell::new(Vec::new()),
+            required_subjects: std::collections::BTreeMap::new(),
         }
     }
     fn scope(&self) -> PrivilegeScope<'_, &[QueryPlan]> {
@@ -52,12 +56,23 @@ impl Catalog {
 impl PrivilegeCatalog for Catalog {
     fn relation(
         &self,
-        _: &RelationNameResolution,
+        resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<PrivilegeRelation>, SQLError> {
         self.reads.set(self.reads.get() + 1);
+        self.lookups
+            .borrow_mut()
+            .push((name.into(), resolution.lookup_mode));
+        let canonical = if resolution.lookup_mode == RelationLookupMode::Bound {
+            crate::catalog::resolution::bound_relation_identity(name)?;
+            name.to_string()
+        } else if name.contains('.') {
+            name.to_string()
+        } else {
+            format!("public.{name}")
+        };
         Ok(Some(PrivilegeRelation {
-            canonical: name.into(),
+            canonical,
             columns: vec!["id".into(), "secret".into()],
             kind: if self.foreign {
                 PrivilegeRelationKind::ForeignTable
@@ -69,15 +84,19 @@ impl PrivilegeCatalog for Catalog {
     fn has_select_privilege(
         &self,
         _: &RelationNameResolution,
-        _: &PrivilegeRelation,
+        relation: &PrivilegeRelation,
         column: Option<&str>,
-        _: &RoleReference,
+        subject: &RoleReference,
     ) -> Result<bool, SQLError> {
         self.checks.set(self.checks.get() + 1);
         if self.foreign && column.is_some() {
             return Err(SQLError::Internal("missing foreign ACL metadata".into()));
         }
-        Ok(column != Some("secret"))
+        Ok(column != Some("secret")
+            && self
+                .required_subjects
+                .get(&relation.canonical)
+                .is_none_or(|required| required == subject))
     }
 }
 impl PrivilegeCteCatalog for Catalog {
@@ -193,4 +212,120 @@ fn join_coverage_projects_only_original_children_and_declines_local_ctes() {
     let source = root.from.as_ref().unwrap();
     let coverage = check_query_source(root, source, &catalog.scope()).unwrap();
     assert!(coverage.query_source(child(source)).is_none());
+}
+
+#[test]
+fn nested_authorization_preserves_query_relation_identity_modes() {
+    for enclosing in [RelationLookupMode::Bound, RelationLookupMode::Dynamic] {
+        for column in ["id", "secret"] {
+            let catalog = Catalog::new(false);
+            let mut query = query(&format!("SELECT l.id FROM (SELECT id FROM public.input) AS l CROSS JOIN (SELECT {column} FROM input) AS r"));
+            let RelationalPlan::QueryBlock(root) = &mut query.root else {
+                panic!("block")
+            };
+            let SourcePlan::Join { left, .. } = root.from.as_mut().unwrap() else {
+                panic!("join")
+            };
+            let SourcePlan::Subquery { body, .. } = left.as_mut() else {
+                panic!("query")
+            };
+            body.relations_bound = true;
+            let mut scope = catalog.scope();
+            scope.resolution.lookup_mode = enclosing;
+            let result = check_query_source(root, root.from.as_ref().unwrap(), &scope);
+            assert_eq!(
+                result
+                    .err()
+                    .and_then(|error| error.sqlstate().map(str::to_owned)),
+                (column == "secret").then(|| "42501".to_string())
+            );
+            assert_eq!(
+                &catalog.lookups.borrow()[..2],
+                &[
+                    ("public.input".into(), RelationLookupMode::Bound),
+                    ("input".into(), RelationLookupMode::Dynamic)
+                ]
+            );
+            assert_eq!(scope.resolution.lookup_mode, enclosing);
+        }
+    }
+}
+
+#[test]
+fn nested_query_authority_is_checked_independently_of_its_action_owner() {
+    for subject in ["caller", "reader"] {
+        let mut catalog = Catalog::new(false);
+        catalog
+            .required_subjects
+            .insert("public.input".into(), "caller".into());
+        catalog
+            .required_subjects
+            .insert("public.action".into(), "reader".into());
+        let mut query = query(
+            "SELECT l.id FROM (SELECT id FROM input) AS l CROSS JOIN (SELECT id FROM action) AS r",
+        );
+        let RelationalPlan::QueryBlock(root) = &mut query.root else {
+            panic!("block")
+        };
+        let SourcePlan::Join { left, .. } = root.from.as_mut().unwrap() else {
+            panic!("join")
+        };
+        let SourcePlan::Subquery { body, .. } = left.as_mut() else {
+            panic!("query")
+        };
+        body.relation_privilege_subject = Some(subject.into());
+        let scope = catalog.scope();
+        let result = check_query_source(root, root.from.as_ref().unwrap(), &scope);
+        assert_eq!(
+            result
+                .err()
+                .and_then(|error| error.sqlstate().map(str::to_owned)),
+            (subject == "reader").then(|| "42501".into())
+        );
+        assert_eq!(
+            scope.privilege_subject().unwrap(),
+            &RoleReference::from("reader")
+        );
+        assert_eq!(scope.resolution.current_user, RoleReference::from("reader"));
+    }
+}
+
+#[test]
+fn complete_query_permissions_keep_declared_inputs_and_the_selected_owner() {
+    for (sql, permitted) in [
+        ("SELECT id FROM public.input", true),
+        (
+            "SELECT id FROM (SELECT id,secret FROM public.input) AS derived",
+            false,
+        ),
+        (
+            "WITH c AS (SELECT secret FROM public.input) SELECT * FROM c",
+            false,
+        ),
+        ("SELECT id,1/0 FROM public.input", true),
+    ] {
+        for subject in ["owner", "reader"] {
+            let mut catalog = Catalog::new(false);
+            catalog
+                .required_subjects
+                .insert("public.input".into(), "owner".into());
+            let mut query = query(sql);
+            query.relation_privilege_subject = Some(subject.into());
+            let scope = catalog.scope();
+            let result =
+                crate::semantics::privileges::ensure_select_privileges_for_query(&query, &scope);
+            assert_eq!(
+                result.is_ok(),
+                permitted && subject == "owner",
+                "{sql}: {subject}: {result:?}"
+            );
+            if let Err(error) = result {
+                assert_eq!(error.sqlstate(), Some("42501"));
+            }
+            assert_eq!(
+                scope.privilege_subject().unwrap(),
+                &RoleReference::from("reader")
+            );
+        }
+    }
 }

@@ -84,7 +84,12 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
         &context.catalog,
         table,
     )?);
-    let mut source = crate::query::scored_input::defer_entries(source, pending, None, None)?;
+    let source = crate::query::scored_input::defer_entries(source, pending, None, None)?;
+    let mut source = context
+        .scans
+        .runtime
+        .diagnostics
+        .observe(source, "Facet Scan")?;
     if let Some(predicate) = predicate {
         source = Box::new(Filter::with_evaluator(
             source,
@@ -132,7 +137,7 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
                         Some(Ok(projected))
                     },
                 );
-                Ok(Box::new(rows) as crate::PhysicalProjectRows)
+                Ok(crate::SQLRowStream::new(rows))
             }),
         ));
 

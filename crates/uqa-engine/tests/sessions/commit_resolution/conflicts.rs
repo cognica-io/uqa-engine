@@ -99,7 +99,9 @@ fn rejected_commit_preserves_typed_diagnostics_and_cleans_up_without_replay() {
             let evaluated = calls.load(Ordering::Acquire);
             *persistence.attempt.lock().unwrap() = None;
             persistence.fault.store(fault, Ordering::Release);
-            let error = root.sql("COMMIT", &[]).unwrap_err();
+            let outcome = root.execute_with_completion(|root| root.sql("COMMIT", &[]));
+            assert_eq!(outcome.completion, ExecutionCompletion::RolledBack);
+            let error = outcome.result.unwrap_err();
             assert_eq!(error.sqlstate(), Some(state), "{error}");
             if fault == REJECT_CANCELLED {
                 assert!(matches!(error, SQLError::Cancelled(_)));
@@ -114,6 +116,52 @@ fn rejected_commit_preserves_typed_diagnostics_and_cleans_up_without_replay() {
             root.sql("DELETE FROM items", &[]).unwrap();
         }
         drop((root, observer));
+        assert_eq!(count(&engine(persistence), "items"), Value::Int(0));
+    }
+}
+
+#[test]
+fn rejected_commit_and_unknown_abort_keep_both_diagnostics_and_the_rollback_intent() {
+    let (_directory, fixtures) = fixtures();
+    for persistence in fixtures {
+        let root = engine(persistence.clone());
+        root.sql("CREATE TABLE items(id INTEGER)", &[]).unwrap();
+        for commit in [false, true] {
+            root.sql("BEGIN; INSERT INTO items VALUES (1)", &[])
+                .unwrap();
+            *persistence.attempt.lock().unwrap() = None;
+            persistence
+                .fault
+                .store(REJECT_MEMORY_ABORT_UNKNOWN, Ordering::Release);
+            let outcome = root.execute_with_completion(Engine::commit);
+            assert_eq!(outcome.completion, ExecutionCompletion::Pending);
+            let error = outcome.result.unwrap_err();
+            assert_unknown(&error);
+            let message = error.to_string();
+            assert!(
+                message.contains(&uqa_core::memory::MemoryError::SizeOverflow.to_string()),
+                "{message}"
+            );
+            assert!(message.contains("injected unavailable abort"), "{message}");
+            let identity = root.pending_transaction_completion().unwrap();
+            assert!(root.transaction_failed());
+            assert_unknown(&root.sql("SELECT 1", &[]).unwrap_err());
+            assert_unknown(&root.commit().unwrap_err());
+            assert_eq!(root.pending_transaction_completion(), Some(identity));
+            persistence.fault.store(HEALTHY, Ordering::Release);
+            let outcome = root.execute_with_completion(|root| {
+                if commit {
+                    root.commit()
+                } else {
+                    root.rollback()
+                }
+            });
+            outcome.result.unwrap();
+            assert_eq!(outcome.completion, ExecutionCompletion::RolledBack);
+            assert_eq!(root.transaction_depth(), 0);
+            assert_eq!(count(&root, "items"), Value::Int(0));
+        }
+        drop(root);
         assert_eq!(count(&engine(persistence), "items"), Value::Int(0));
     }
 }

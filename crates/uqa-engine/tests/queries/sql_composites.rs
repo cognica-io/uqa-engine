@@ -63,3 +63,6 @@ fn composite_types_match_postgresql_sqlite() {
 
 #[path = "sql_composites/descriptor_sharing.rs"]
 mod descriptor_sharing;
+
+#[path = "sql_composites/host_retention.rs"]
+mod host_retention;

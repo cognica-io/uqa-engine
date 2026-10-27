@@ -99,11 +99,11 @@ impl AssignmentContext for Session<'_> {
     fn evaluate_domain_check(
         &self,
         _: &crate::ast::Expr,
-        row: &crate::ResultRow,
+        row: &dyn crate::expr::RowLookup,
         _: &crate::RowSchema,
     ) -> Result<Value> {
         assert!(matches!(
-            row.get("value"),
+            row.column("value"),
             Some(Value::Temporal(TemporalValue::TimestampTz { .. }))
         ));
         self.checks.set(self.checks.get() + 1);
@@ -116,7 +116,9 @@ fn timestamp(text: &str) -> Value {
 }
 
 fn zoned(micros: i64) -> Value {
-    Value::Temporal(TemporalValue::TimestampTz { micros })
+    Value::Temporal(TemporalValue::TimestampTz {
+        postgres_micros: (micros) - uqa_core::POSTGRES_EPOCH_MICROS,
+    })
 }
 
 #[test]

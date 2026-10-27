@@ -11,6 +11,53 @@ use crate::{
 };
 
 #[test]
+fn civil_fields_match_postgresql_across_the_full_date_domain() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("tests/civil.json")).unwrap();
+    for case in reference["cases"].as_array().unwrap() {
+        let date = TemporalDate::from_unix_days(case["unix_days"].as_i64().unwrap() as i32);
+        let sql_year = |year: i32| if year <= 0 { year - 1 } else { year };
+        for (field, actual) in [
+            ("year", sql_year(date.year())),
+            ("month", date.month() as i32),
+            ("day", date.day() as i32),
+            ("doy", date.ordinal() as i32),
+            ("dow", date.weekday_sunday() as i32),
+            ("isodow", date.weekday_monday() as i32 + 1),
+            ("isoyear", sql_year(date.iso_week().0)),
+            ("week", date.iso_week().1 as i32),
+        ] {
+            assert_eq!(
+                i64::from(actual),
+                case[field].as_i64().unwrap(),
+                "{field}: {case}"
+            );
+        }
+        assert_eq!(
+            TemporalDate::from_calendar(date.year(), date.month(), date.day()),
+            Some(date)
+        );
+    }
+    for days in [i32::MIN, i32::MIN + 1, i32::MAX - 1, i32::MAX] {
+        assert!((1..=53).contains(&TemporalDate::from_unix_days(days).iso_week().1));
+    }
+    for micros in [
+        i64::MIN,
+        -211_813_488_000_000_000,
+        -1,
+        0,
+        1,
+        9_223_371_331_199_999_999,
+        i64::MAX,
+    ] {
+        assert_eq!(
+            TemporalDateTime::from_postgres_micros(micros).postgres_micros(),
+            Some(micros)
+        );
+    }
+}
+
+#[test]
 fn full_date_input_and_output_match_postgresql_boundaries() {
     let reference: serde_json::Value =
         serde_json::from_str(include_str!("tests/postgresql.json")).unwrap();

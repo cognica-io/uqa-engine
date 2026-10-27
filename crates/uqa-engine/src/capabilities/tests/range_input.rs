@@ -34,6 +34,75 @@ fn range() -> StoredRange {
 }
 
 #[test]
+fn host_range_constructors_share_statement_effects_and_recover_native_transaction_failure() {
+    use uqa_core::memory::ProductionControl;
+    use uqa_sql::params::RangeParameterBounds;
+    let engine = Engine::new();
+    engine
+        .durable
+        .ranges
+        .write()
+        .insert("public.r".into(), range());
+    engine.sql("CREATE SEQUENCE host_canonical_calls; CREATE FUNCTION host_canonical(r) RETURNS r LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM nextval('host_canonical_calls'); RETURN $1; END $$", &[]).unwrap();
+    let result = engine
+        .sql(
+            "SELECT oid FROM pg_proc WHERE proname = 'host_canonical'",
+            &[],
+        )
+        .unwrap();
+    let Some(Value::Int(oid)) = result.rows[0].get("oid") else {
+        panic!("routine OID");
+    };
+    engine
+        .durable
+        .ranges
+        .write()
+        .get_mut("public.r")
+        .unwrap()
+        .canonical_oid = Some(*oid as u32);
+    let control = ProductionControl::uncontrolled();
+    let lower = uqa_sql::SQLParam::typed_scalar(Value::Str("1".into()), ColumnType::Text);
+    let upper = uqa_sql::SQLParam::typed_scalar(Value::Int(4), ColumnType::Integer);
+    let bounds = || RangeParameterBounds::Bounds {
+        lower: Some(&lower),
+        upper: Some(&upper),
+        lower_inclusive: true,
+        upper_inclusive: true,
+    };
+    let value = engine
+        .create_range_parameter_with_control("r", bounds(), &control)
+        .unwrap();
+    let multi = engine
+        .create_multirange_parameter_with_control("rs", std::slice::from_ref(&value), &control)
+        .unwrap();
+    let result = engine
+        .sql(
+            "SELECT $1::text AS v, currval('host_canonical_calls') AS calls",
+            std::slice::from_ref(&multi),
+        )
+        .unwrap();
+    assert_eq!(result.rows[0].get("v"), Some(&Value::Str("{[1,4]}".into())));
+    assert_eq!(result.rows[0].get("calls"), Some(&Value::Int(1)));
+    engine.sql("CREATE OR REPLACE FUNCTION host_canonical(r) RETURNS r LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('host_canonical_calls'); RETURN NULL; END $$; BEGIN; SAVEPOINT host_range", &[]).unwrap();
+    let error = engine
+        .create_range_parameter_with_control("r", bounds(), &control)
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert_eq!(
+        engine.sql("SELECT 1", &[]).unwrap_err().sqlstate(),
+        Some("25P02")
+    );
+    let result = engine
+        .sql(
+            "ROLLBACK TO host_range; SELECT currval('host_canonical_calls') AS calls",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0].get("calls"), Some(&Value::Int(2)));
+    engine.sql("COMMIT", &[]).unwrap();
+}
+
+#[test]
 fn declared_range_input_adapters_invoke_selected_sql_routines_without_repeating_input() {
     let engine = Engine::new();
     engine

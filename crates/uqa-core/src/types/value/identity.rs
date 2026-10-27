@@ -74,16 +74,30 @@ fn same_temporal(left: &TemporalValue, right: &TemporalValue) -> bool {
     match (left, right) {
         (Date { days: left }, Date { days: right }) => left == right,
         (Time { micros: left }, Time { micros: right })
-        | (Timestamp { micros: left }, Timestamp { micros: right })
-        | (TimestampTz { micros: left }, TimestampTz { micros: right }) => left == right,
+        | (
+            Timestamp {
+                postgres_micros: left,
+            },
+            Timestamp {
+                postgres_micros: right,
+            },
+        )
+        | (
+            TimestampTz {
+                postgres_micros: left,
+            },
+            TimestampTz {
+                postgres_micros: right,
+            },
+        ) => left == right,
         (
             TimeTz {
                 micros: a,
-                offset_minutes: a_offset,
+                offset_seconds: a_offset,
             },
             TimeTz {
                 micros: b,
-                offset_minutes: b_offset,
+                offset_seconds: b_offset,
             },
         ) => a == b && a_offset == b_offset,
         (

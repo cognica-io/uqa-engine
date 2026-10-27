@@ -64,6 +64,41 @@
       "output": "0001-12-31 14:59:59.123456+00 BC",
       "postgresql_binary": "ff1fe2f83a5e3c00",
       "unix_micros": "-62135629200876544"
+    },
+    {
+      "type": "timestamp",
+      "input": "294276-12-31 23:59:59.999999",
+      "output": "294276-12-31 23:59:59.999999",
+      "postgresql_binary": "7fffff5bb3b29fff",
+      "unix_micros": "9224318015999999999"
+    },
+    {
+      "type": "timestamp",
+      "input": "294276-01-01",
+      "output": "294276-01-01 00:00:00",
+      "postgresql_binary": "7fffe29909c76000",
+      "unix_micros": "9224286393600000000"
+    },
+    {
+      "type": "timestamp",
+      "input": "4714-11-24 BC",
+      "output": "4714-11-24 00:00:00 BC",
+      "postgresql_binary": "fd0f7cc1411fa000",
+      "unix_micros": "-210866803200000000"
+    },
+    {
+      "type": "timestamptz",
+      "input": "294277-01-01 00:00:00+00:00:01",
+      "output": "294276-12-31 23:59:59+00",
+      "postgresql_binary": "7fffff5bb3a35dc0",
+      "unix_micros": "9224318015999000000"
+    },
+    {
+      "type": "timestamptz",
+      "input": "4714-11-23 12:00:00-12 BC",
+      "output": "4714-11-24 00:00:00+00 BC",
+      "postgresql_binary": "fd0f7cc1411fa000",
+      "unix_micros": "-210866803200000000"
     }
   ]
 }

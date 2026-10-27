@@ -6,8 +6,6 @@
 
 //! Capture caller attributes structurally before entering a routine's lexical scopes.
 
-use std::collections::BTreeSet;
-
 use crate::{
     ast::{InternalRelationId, JoinKind},
     plan::{
@@ -140,9 +138,11 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
         analyzed_output: None,
         analyzed_source: None,
         analyzed_grouping: None,
+        relation_privilege_subject: None,
         relations_bound: body.relations_bound,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             projections: columns
                 .iter()
                 .map(|name| ProjectionPlan {
@@ -158,7 +158,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
                 column_aliases: columns,
             }),
             windows: Vec::new(),
-            privilege_columns: BTreeSet::default(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             r#where: None,
             compute: ComputePlan::Project,
             group_by: Vec::new(),

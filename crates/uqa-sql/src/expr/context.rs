@@ -37,6 +37,9 @@ pub use regtype::{
 /// accepted here: lowering assigns them physical query-plan slots executed by
 /// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
+    /// Retain a diagnostic reported by a type input or scalar operation without failing it.
+    fn sql_notice(&self, _notice: crate::SQLNotice) {}
+
     /// Enforce EXECUTE on a selected built-in at an execution boundary. Catalog-free embedders have no mutable routine ACLs.
     fn require_builtin_execute(&self, _binding: &crate::ast::FunctionBinding) -> Result<()> {
         Ok(())
@@ -103,6 +106,30 @@ pub trait EngineHook {
         )))
     }
 
+    /// Construct an admitted declared range with its selected canonical support, without repeating endpoint conversion.
+    fn construct_range(
+        &self,
+        oid: u32,
+        _bounds: super::RangeBoundsInput,
+        _control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        Err(SQLError::Internal(format!(
+            "cache lookup failed for range type {oid}"
+        )))
+    }
+
+    /// Normalize admitted members with the selected declaration's comparison and canonical support.
+    fn construct_multirange(
+        &self,
+        oid: u32,
+        _members: &[Value],
+        _control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        Err(SQLError::Internal(format!(
+            "cache lookup failed for range type {oid}"
+        )))
+    }
+
     /// Certify stable descriptors for bound/schema-qualified type names. Live custom catalogs decline by default; conversion callbacks, settings and unqualified namespace resolution are never covered by this capability.
     fn catalog_cast_scope(&self) -> Option<&CatalogCastScope> {
         None
@@ -131,6 +158,20 @@ pub trait EngineHook {
         _target: &ColumnType,
     ) -> Result<Option<Value>> {
         Ok(None)
+    }
+
+    /// Apply domain input with the invoking value's allowance and cancellation owners. Native catalogs override this method so base conversion and checks retain that control; the default admits results returned by an external legacy adapter.
+    fn cast_domain_with_control(
+        &self,
+        value: &Value,
+        source: Option<&str>,
+        target: &ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Value>>> {
+        control.check()?;
+        self.cast_domain(value, source, target)?
+            .map(|value| control.retain_external_value(value).map_err(SQLError::from))
+            .transpose()
     }
 
     /// Resolve a regtype cast to its OID carrier when a complete type catalog is available.

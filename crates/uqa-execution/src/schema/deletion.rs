@@ -70,6 +70,23 @@ pub fn perform_quiet_cascade(
     delete_objects(context, originals, true, true)
 }
 
+/// Remove every object owned by a namespace and everything that depends on those objects, retaining the namespace itself. Session temporary cleanup uses the same locking, dependency order and publication as ordinary deletion.
+pub fn remove_namespace_members(
+    context: &CatalogRemovalContext<'_>,
+    namespace: &str,
+) -> Result<(), SQLError> {
+    perform_quiet_cascade(context, |dependencies| {
+        let namespace = required_address(dependencies.schema_address(namespace), || {
+            format!("schema {namespace}")
+        })?;
+        Ok(dependencies
+            .graph()
+            .dependents_of(namespace)
+            .map(|dependency| dependency.dependent)
+            .collect())
+    })
+}
+
 fn delete_objects(
     context: &CatalogRemovalContext<'_>,
     originals: impl Fn(&CatalogDependencies) -> Result<Vec<ObjectAddress>, SQLError>,

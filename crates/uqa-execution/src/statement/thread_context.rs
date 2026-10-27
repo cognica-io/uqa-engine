@@ -13,6 +13,8 @@ use super::thread_scope::StatementThreadScope;
 pub struct StatementThreadContext {
     /// SQL-invisible immutable row sources owned by this invocation, also shared by its workers.
     pub retained_rows: crate::query::sources::retained_source::RetainedRowContext,
+    /// Physical I/O belongs to the invocation executing this work, including explicit absence for unrelated sessions.
+    pub io: uqa_core::io_usage::IOContext,
     /// The session-owned compiled-pattern allowance, or `None` outside a session.
     pub regex_cache: Option<std::sync::Arc<uqa_sql::expr::RegexCache>>,
     pub temporal_input: uqa_sql::expr::TemporalInputContext,
@@ -26,6 +28,7 @@ impl StatementThreadContext {
     pub fn current() -> Self {
         Self {
             retained_rows: crate::query::sources::retained_source::RetainedRowContext::current(),
+            io: uqa_core::io_usage::IOContext::current(),
             regex_cache: uqa_sql::expr::current_regex_cache(),
             temporal_input: uqa_sql::expr::TemporalInputContext::current(),
             cancellation: uqa_sql::expr::statement_cancellation(),

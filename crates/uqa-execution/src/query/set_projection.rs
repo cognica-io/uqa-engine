@@ -52,6 +52,10 @@ struct SetExpansion {
 }
 
 impl SetExpansion {
+    fn close(&mut self) -> ExecResult<()> {
+        close_calls(&mut self.calls)
+    }
+
     fn next_values(&mut self) -> ExecResult<Option<Vec<Value>>> {
         if !self.has_set {
             if self.scalar_emitted {
@@ -97,6 +101,24 @@ impl SetExpansion {
     }
 }
 
+fn close_calls(calls: &mut [SetFunctionState]) -> ExecResult<()> {
+    let mut result = Ok(());
+    for call in calls {
+        if let SetFunctionState::Set {
+            rows, exhausted, ..
+        } = call
+        {
+            *exhausted = true;
+            result = crate::physical::with_cleanup(
+                result,
+                rows.close().map_err(Into::into),
+                "close set-returning call",
+            );
+        }
+    }
+    result
+}
+
 fn set_row_value(row: PhysicalRow, columns: &[String]) -> Value {
     let values = row.into_physical_values();
     if values.len() == 1 {
@@ -134,13 +156,16 @@ pub fn build_set_projection<'a>(
         pass_through,
         batch_size: output_batch_size,
     } = output;
-    let plan = SetProjectionPlan::new(
-        catalog,
-        runtime.as_ref(),
-        projections,
-        operator.row_schema(),
-        params,
-    )?;
+    let (input, plan) = crate::physical::construction::OperatorBuild::run(operator, |operator| {
+        SetProjectionPlan::new(
+            catalog,
+            runtime.as_ref(),
+            projections,
+            operator.row_schema(),
+            params,
+        )
+    })?;
+    operator = input;
     let max_level = plan.calls.iter().map(|call| call.level).max().unwrap_or(0);
     for level in 0..=max_level {
         let calls = plan

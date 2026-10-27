@@ -22,7 +22,10 @@ use crate::semantics::graph_functions::{
 };
 use crate::{ast::BinaryOp, SQLError, SQLParam, ScalarExpr};
 pub use binding::{lower_sql_function_bound, lower_where_bound};
-pub use description::{describe_vector_call, VectorCallDescription};
+pub use description::{
+    describe_vector_call, describe_vector_call_with_control, ProducedVectorCallDescription,
+    VectorCallDescription,
+};
 pub use ir::{AttentionSpec, MultiStageEntry, RetrievalExpr, TextScoringMode};
 pub use joins::lower_operator_join_table_function;
 use std::collections::BTreeSet;
@@ -34,6 +37,13 @@ type BindingResult<T> = Result<T, SQLError>;
 
 /// Evaluates a scalar with the caller's parameter values and without runtime function hooks.
 pub type ConstantEvaluator<'a> = dyn Fn(&ScalarExpr, &[SQLParam]) -> Result<Value, SQLError> + 'a;
+/// A constant producer admits its constructed values under the original statement allowance.
+pub type ControlledConstantEvaluator<'a> = dyn Fn(
+        &ScalarExpr,
+        &[SQLParam],
+        &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError>
+    + 'a;
 pub struct RetrievalConstants<'a> {
     pub params: &'a [SQLParam],
     pub evaluate: &'a ConstantEvaluator<'a>,
@@ -79,7 +89,7 @@ use calls::{
 };
 use constants::{
     const_bool, const_f64, const_f64_vector, const_gating, const_optional_string, const_string,
-    const_temporal_bound, const_usize, const_value, const_vector, named_arg_expr,
+    const_temporal_bound, const_usize, const_value, named_arg_expr,
 };
 use fusion::{
     lower_bayesian_evidence_fusion, lower_learned_fusion, lower_positive_evidence_pool,

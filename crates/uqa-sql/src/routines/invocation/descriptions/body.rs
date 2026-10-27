@@ -42,11 +42,9 @@ fn input_record(result: Option<&AnalyzedResult>) -> Option<&[Option<ColumnType>]
 }
 
 pub(super) fn fixed_result(definition: &CreateFunction) -> bool {
-    let outputs = definition.output_params();
-    if !outputs.is_empty() {
-        return outputs
-            .iter()
-            .all(|parameter| super::fixed_name(&parameter.type_name));
+    let mut outputs = definition.output_params();
+    if outputs.clone().next().is_some() {
+        return outputs.all(|parameter| super::fixed_name(&parameter.type_name));
     }
     match &definition.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {

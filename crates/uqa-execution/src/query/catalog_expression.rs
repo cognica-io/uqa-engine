@@ -9,7 +9,7 @@
 use crate::scalar::plan::{eval_physical, PhysicalEvalContext};
 use crate::{
     query::{relational::QueryExpressionFactory, CteScope},
-    PhysicalRow, RowSchema, RowSchemaExecution,
+    RowSchema,
 };
 use std::sync::Arc;
 use uqa_core::Value;
@@ -264,34 +264,6 @@ impl RowLookup for CatalogRowView<'_> {
             visitor(name, self.positional_column(index).unwrap_or(&Value::Null));
         }
     }
-}
-
-/// Execute a catalog-bound scalar plan against one typed physical row while applying an independent relation-privilege subject to every nested query.
-pub fn eval_stored_expression_plan_with_row<S: Clone + 'static>(
-    factory: &dyn QueryExpressionFactory<S>,
-    mut scope: CteScope<S>,
-    expression: &ExpressionPlan,
-    schema: &RowSchema,
-    row: &PhysicalRow,
-    params: &[SQLParam],
-) -> Result<Value, SQLError> {
-    let mut expression = expression.clone();
-    scope.scalar_subqueries = expression.subqueries.as_slice().into();
-    let hook = factory.bind_scope(scope);
-    crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
-    expression.scalar = crate::bind_type_introspection_with_resolver(
-        expression.scalar,
-        schema,
-        params,
-        hook.as_ref(),
-    );
-    let view = schema.view(row);
-    let context = PhysicalEvalContext::from_row_lookup(&view, params)
-        .with_row_schema(schema)
-        .with_function_hook(hook.as_ref())
-        .with_subquery_runner(hook.as_ref())
-        .with_physical_outer_row(schema, row);
-    eval_physical(&expression, &context)
 }
 
 #[cfg(test)]

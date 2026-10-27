@@ -18,7 +18,11 @@ use crate::params::SQLParam;
 use crate::result::ResultRow;
 
 mod array_access;
-pub use array_access::eval_array_access_with_control;
+pub(crate) mod array_construction;
+pub use array_access::{
+    eval_array_access_with_catalog_and_control, eval_array_access_with_control,
+};
+pub use array_construction::construct_array_with_control;
 mod array_transform;
 pub mod bit_string;
 pub mod datums;
@@ -29,6 +33,7 @@ pub(crate) mod integer_input;
 mod json;
 mod json_strip;
 pub(crate) mod observations;
+pub use observations::sql_null_test_with_control;
 mod random;
 mod range;
 pub(crate) use range::datum as range_datum;
@@ -43,14 +48,19 @@ pub use array_transform::{
     argument_positions_with_control as array_transform_argument_positions_with_control,
 };
 pub(crate) use json::{decode_jsonb_datum_with_control, encode_jsonb_datum};
-pub use json::{validate_json_object_key_type, value_to_json_text};
+pub use json::{
+    quote_json_string_with_control, validate_json_object_key_type,
+    validate_json_object_key_type_with_catalog, value_to_json_text,
+    value_to_json_text_with_catalog,
+};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     declared_multirange_datum_with_control, declared_range_datum_with_control,
-    multirange_from_ranges, multirange_from_ranges_with_operations, parse_multirange,
-    parse_multirange_with_operations, parse_range, parse_range_with_operations, range_bound_flags,
-    range_from_bounds_with_operations, CanonicalMultirange, CanonicalRange, RangeComparisonValue,
-    RangeConstruction, RangeValueDescriptor,
+    multirange_from_ranges, multirange_from_ranges_with_operations,
+    multirange_value_from_members_with_control, parse_multirange, parse_multirange_with_operations,
+    parse_range, parse_range_with_operations, range_bound_flags, range_from_bounds_with_operations,
+    range_value_from_bounds_with_control, CanonicalMultirange, CanonicalRange, RangeBoundValues,
+    RangeBoundsInput, RangeComparisonValue, RangeConstruction, RangeValueDescriptor,
 };
 pub use time::IntervalFields;
 use time::{
@@ -59,7 +69,7 @@ use time::{
 };
 pub(crate) use uuid::format_uuid;
 use uuid::generate_random_uuid;
-pub use uuid::parse_uuid_bytes;
+pub use uuid::{format_uuid_with_control, parse_uuid_bytes, parse_uuid_bytes_with_control};
 mod binary;
 mod casting;
 pub use casting::numeric::NumericCast;
@@ -74,6 +84,9 @@ mod current_time;
 pub mod enums;
 pub(crate) mod hashing;
 pub(crate) mod internal_char;
+pub use internal_char::{
+    carrier_with_control as internal_char_value_with_control, value_byte as internal_char_byte,
+};
 pub(crate) mod interval_style;
 mod pattern;
 mod scalar_array;
@@ -94,7 +107,8 @@ mod statement_cancellation;
 mod temporal_input;
 mod value_catalog;
 pub mod variadic_any;
-pub use value_catalog::{EngineValueCatalog, SQLRecordFields, SQLValueCatalog};
+pub(crate) use value_catalog::{type_by_oid_with_control, ValueCompositeCatalog};
+pub use value_catalog::{EngineValueCatalog, SQLRecordFields, SQLRecordView, SQLValueCatalog};
 
 #[cfg(test)]
 use binary::eval_comparison_op;
@@ -132,8 +146,8 @@ pub use conversion::{
     value_to_string_with_control, vector_value_to_string,
 };
 pub(crate) use conversion::{
-    bytea_to_string_with_control, tensor_items, vector_element, vector_items,
-    vector_value_to_string_with_control,
+    bytea_to_string_with_control, tensor_items, vector_element, vector_element_with_control,
+    vector_items, vector_value_to_string_with_control,
 };
 pub use conversion::{
     value_to_tensor, value_to_tensor_with_control, value_to_vector, value_to_vector_with_control,
@@ -147,9 +161,11 @@ pub use floating::{
 pub use in_range::{in_range, in_range_with_engine};
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
-pub(crate) use scalar_helpers::{append_sql_literal, quote_ident_with_control};
+pub(crate) use scalar_helpers::append_sql_literal;
 use scalar_helpers::{point_xy, typeof_value};
-pub use scalar_helpers::{quote_ident, CompiledLikePattern};
+pub use scalar_helpers::{
+    quote_ident, quote_ident_with_control, quote_literal_with_control, CompiledLikePattern,
+};
 pub use statement_cancellation::{
     check_statement_cancellation, statement_cancellation, StatementCancellationScope,
 };

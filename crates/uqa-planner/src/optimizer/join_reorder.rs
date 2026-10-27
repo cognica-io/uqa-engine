@@ -120,13 +120,11 @@ fn reorder_command_joins(
         CommandPlan::DeclareCursor { query, .. } => {
             reorder_query_joins(query, statistics)?;
         }
-        CommandPlan::Explain { body, .. } => {
-            reorder_unified_plan_joins(body, statistics)?;
-        }
         CommandPlan::Call { args: params, .. } => {
             reorder_expression_subquery_joins(params, statistics)?;
         }
-        CommandPlan::CreateTableAs { .. }
+        CommandPlan::Explain { .. }
+        | CommandPlan::CreateTableAs { .. }
         | CommandPlan::CreateMaterializedView { .. }
         | CommandPlan::CreateView { .. }
         | CommandPlan::Execute { .. }
@@ -195,7 +193,8 @@ fn reorder_command_joins(
         | CommandPlan::DropTrigger(_)
         | CommandPlan::CreateRule(_)
         | CommandPlan::DropRule(_)
-        | CommandPlan::DoBlock { .. } => {}
+        | CommandPlan::DoBlock { .. }
+        | CommandPlan::Empty => {}
     }
     Ok(())
 }

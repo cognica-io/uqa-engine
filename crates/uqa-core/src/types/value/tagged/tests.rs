@@ -271,7 +271,7 @@ fn rejected_array_tags_do_not_normalize_the_original_nested_values() {
         "array",
         [
             ("values", Value::List(vec![Value::Array(inner)])),
-            ("lower_bounds", Value::List(vec![Value::Int(1)])),
+            ("lower_bounds", Value::List(vec![Value::Int(1); 3])),
         ],
     );
     let Value::Map(map) = value_from_tagged_map(map).unwrap() else {

@@ -194,11 +194,12 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
                 &stmt.ctes,
-                || {
-                    uqa_sql::semantics::primary_command_cte_references(
+                |control| {
+                    uqa_sql::semantics::primary_command_cte_references_with_control(
                         &stmt.ctes,
-                        &stmt.query_inputs(),
+                        stmt.query_inputs(),
                         stmt.source_input(),
+                        control,
                     )
                 },
                 params,
@@ -581,35 +582,38 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             events.after_rows_mut(),
                         )?;
                         if row_affected && !stmt.returning.is_empty() {
-                            returning_rows.push(build_merge_returning_row(
-                                &preparation.returning,
-                                MergeReturningRow {
-                                    target_table: &target_table,
-                                    target_qual: &target_qual,
-                                    images: MutationRowImages {
-                                        old: Some(MutationRowImage {
-                                            storage_table: old_storage_table,
-                                            doc_id: prepared.doc_id,
-                                            document: &prepared.old_document,
-                                            metadata: old_metadata,
-                                        }),
-                                        new: Some(MutationRowImage {
-                                            storage_table: new_storage_table,
-                                            doc_id: rewritten_doc_id,
-                                            document: &prepared.new_document,
-                                            metadata: new_metadata,
-                                        }),
+                            returning_rows.push_to(
+                                build_merge_returning_row(
+                                    &preparation.returning,
+                                    MergeReturningRow {
+                                        target_table: &target_table,
+                                        target_qual: &target_qual,
+                                        images: MutationRowImages {
+                                            old: Some(MutationRowImage {
+                                                storage_table: old_storage_table,
+                                                doc_id: prepared.doc_id,
+                                                document: &prepared.old_document,
+                                                metadata: old_metadata,
+                                            }),
+                                            new: Some(MutationRowImage {
+                                                storage_table: new_storage_table,
+                                                doc_id: rewritten_doc_id,
+                                                document: &prepared.new_document,
+                                                metadata: new_metadata,
+                                            }),
+                                        },
+                                        returning_aliases: &stmt.returning_aliases,
+                                        source_row: &pair.source_row,
+                                        source_schema: source_rows.row_schema(),
+                                        source_relation: returning_source_relation,
+                                        action: "UPDATE",
                                     },
-                                    returning_aliases: &stmt.returning_aliases,
-                                    source_row: &pair.source_row,
-                                    source_schema: source_rows.row_schema(),
-                                    source_relation: returning_source_relation,
-                                    action: "UPDATE",
-                                },
-                                &stmt.returning,
-                                params,
-                                &snapshot_ctes,
-                            )?)?;
+                                    &stmt.returning,
+                                    params,
+                                    &snapshot_ctes,
+                                )?,
+                                context.mutation.preparation.returning.destination,
+                            )?;
                         }
                         affected += u64::from(row_affected);
                         has_mutation = true;
@@ -671,30 +675,33 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             events.after_rows_mut(),
                         )?;
                         if !stmt.returning.is_empty() {
-                            returning_rows.push(build_merge_returning_row(
-                                &preparation.returning,
-                                MergeReturningRow {
-                                    target_table: &target_table,
-                                    target_qual: &target_qual,
-                                    images: MutationRowImages {
-                                        old: Some(MutationRowImage {
-                                            storage_table: prepared.table.clone(),
-                                            doc_id: prepared.doc_id,
-                                            document: &prepared.document,
-                                            metadata: old_metadata,
-                                        }),
-                                        new: None,
+                            returning_rows.push_to(
+                                build_merge_returning_row(
+                                    &preparation.returning,
+                                    MergeReturningRow {
+                                        target_table: &target_table,
+                                        target_qual: &target_qual,
+                                        images: MutationRowImages {
+                                            old: Some(MutationRowImage {
+                                                storage_table: prepared.table.clone(),
+                                                doc_id: prepared.doc_id,
+                                                document: &prepared.document,
+                                                metadata: old_metadata,
+                                            }),
+                                            new: None,
+                                        },
+                                        returning_aliases: &stmt.returning_aliases,
+                                        source_row: &pair.source_row,
+                                        source_schema: source_rows.row_schema(),
+                                        source_relation: returning_source_relation,
+                                        action: "DELETE",
                                     },
-                                    returning_aliases: &stmt.returning_aliases,
-                                    source_row: &pair.source_row,
-                                    source_schema: source_rows.row_schema(),
-                                    source_relation: returning_source_relation,
-                                    action: "DELETE",
-                                },
-                                &stmt.returning,
-                                params,
-                                &snapshot_ctes,
-                            )?)?;
+                                    &stmt.returning,
+                                    params,
+                                    &snapshot_ctes,
+                                )?,
+                                context.mutation.preparation.returning.destination,
+                            )?;
                         }
                         affected += 1;
                         has_mutation = true;
@@ -704,10 +711,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             PreparedMutationAction::Delete(prepared),
                         )?;
                     }
-                    SelectedMergeAction::Insert {
-                        mut document,
-                        overriding,
-                    } => {
+                    SelectedMergeAction::Insert { mut document } => {
                         let (auto_id_col, id_column, identity_source) = insert_identity_columns(
                             mutation.identities,
                             &target_table,
@@ -719,7 +723,6 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             &id_column,
                             identity_source,
                             auto_id_col.as_deref(),
-                            overriding,
                             &mut document,
                             "prepare MERGE INSERT identity",
                         )?;
@@ -855,30 +858,33 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             )?;
                         }
                         if !stmt.returning.is_empty() {
-                            returning_rows.push(build_merge_returning_row(
-                                &preparation.returning,
-                                MergeReturningRow {
-                                    target_table: &target_table,
-                                    target_qual: &target_qual,
-                                    images: MutationRowImages {
-                                        old: None,
-                                        new: Some(MutationRowImage {
-                                            storage_table: storage_table.clone(),
-                                            doc_id,
-                                            document: &document,
-                                            metadata: new_tuple_metadata(assignment.rows)?,
-                                        }),
+                            returning_rows.push_to(
+                                build_merge_returning_row(
+                                    &preparation.returning,
+                                    MergeReturningRow {
+                                        target_table: &target_table,
+                                        target_qual: &target_qual,
+                                        images: MutationRowImages {
+                                            old: None,
+                                            new: Some(MutationRowImage {
+                                                storage_table: storage_table.clone(),
+                                                doc_id,
+                                                document: &document,
+                                                metadata: new_tuple_metadata(assignment.rows)?,
+                                            }),
+                                        },
+                                        returning_aliases: &stmt.returning_aliases,
+                                        source_row: &pair.source_row,
+                                        source_schema: source_rows.row_schema(),
+                                        source_relation: returning_source_relation,
+                                        action: "INSERT",
                                     },
-                                    returning_aliases: &stmt.returning_aliases,
-                                    source_row: &pair.source_row,
-                                    source_schema: source_rows.row_schema(),
-                                    source_relation: returning_source_relation,
-                                    action: "INSERT",
-                                },
-                                &stmt.returning,
-                                params,
-                                &snapshot_ctes,
-                            )?)?;
+                                    &stmt.returning,
+                                    params,
+                                    &snapshot_ctes,
+                                )?,
+                                context.mutation.preparation.returning.destination,
+                            )?;
                         }
                         affected += 1;
                         has_mutation = true;
@@ -970,7 +976,6 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }?;
-    statement_end::finish_statement(context, params, &stmt.ctes, Some(&mut ctes))?;
-    Ok(result)
+    };
+    statement_end::finish_statement(context, params, &stmt.ctes, Some(&mut ctes), result)
 }

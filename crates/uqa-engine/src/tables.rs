@@ -216,29 +216,15 @@ impl Engine {
         owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
         catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
     ) -> StorageBackendResult<()> {
-        if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            return self.create_resolved_table(
-                name,
-                analyzer,
-                fts_fields,
-                persistence,
-                on_commit,
-                owner,
-                catalog_oids,
-            );
-        }
-        let name = name.to_string();
-        self.with_implicit_storage_transaction(move |engine| {
-            engine.create_resolved_table(
-                &name,
-                analyzer,
-                fts_fields,
-                persistence,
-                on_commit,
-                owner,
-                catalog_oids,
-            )
-        })
+        self.create_resolved_table(
+            name,
+            analyzer,
+            fts_fields,
+            persistence,
+            on_commit,
+            owner,
+            catalog_oids,
+        )
     }
 
     /// Create a table named through the API, whose name resolves among the durable schemas.
@@ -502,7 +488,7 @@ impl Engine {
         Ok(())
     }
 
-    fn install_vector_field(
+    pub(crate) fn install_vector_field(
         &self,
         table: &str,
         field: FieldName,

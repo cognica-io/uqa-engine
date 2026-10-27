@@ -10,8 +10,8 @@ use uqa_sql::SQLError;
 
 use super::{
     optimize_assignments, optimize_projections, optimize_query, optimize_scalar_slot,
-    optimize_source, optimize_unified_plan, prioritize_access_predicates, AggregateClassifier,
-    CommandPlan, ConflictActionPlan, ExpressionPlan, MergeWhenPlan, OptimizerConfig,
+    optimize_source, prioritize_access_predicates, AggregateClassifier, CommandPlan,
+    ConflictActionPlan, ExpressionPlan, MergeWhenPlan, OptimizerConfig,
 };
 
 #[expect(
@@ -24,22 +24,18 @@ pub(super) fn optimize_command(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     super::subqueries::prune_command(command);
+    let reachable = uqa_sql::semantics::reachable_command_cte_names(command);
+    if let Some(ctes) = command.ctes_mut() {
+        for cte in ctes.iter_mut().filter(|cte| reachable.contains(&cte.name)) {
+            super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
+        }
+    }
     match command {
         CommandPlan::Insert(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             if let Some(source) = &mut plan.source {
                 optimize_query(source, config, aggregates)?;
             }
-            if plan.rows.iter().any(|row| !row.is_empty()) {
-                let values_config = config.for_values()?;
-                for row in &mut plan.rows {
-                    for expression in row {
-                        optimize_scalar_slot(expression, &values_config)?;
-                    }
-                }
-            }
+            super::traversal::optimize_values(&mut plan.rows, config)?;
             if let Some(conflict) = &mut plan.on_conflict {
                 if let ConflictActionPlan::Update {
                     assignments,
@@ -48,7 +44,7 @@ pub(super) fn optimize_command(
                 {
                     optimize_assignments(assignments, config)?;
                     if let Some(predicate) = predicate {
-                        optimize_scalar_slot(predicate, config)?;
+                        super::optimize_qualification(predicate, config)?;
                     }
                 }
             }
@@ -58,54 +54,43 @@ pub(super) fn optimize_command(
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Update(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             if let Some(source) = &mut plan.source {
                 optimize_source(source, config, aggregates)?;
             }
             optimize_assignments(&mut plan.assignments, config)?;
             if let Some(predicate) = &mut plan.predicate {
-                optimize_scalar_slot(predicate, config)?;
+                super::optimize_qualification(predicate, config)?;
                 if config.enable_filter_pushdown {
                     prioritize_access_predicates(predicate);
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            let mut expressions = plan.expressions();
-            if let Some(source) = &plan.source {
-                source.push_expressions(&mut expressions);
-            }
-            let live = super::subqueries::live_slots(expressions)?;
+            let live = super::subqueries::live_slots_with_source(
+                plan.expressions(),
+                plan.source.as_deref(),
+            )?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Delete(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             if let Some(source) = &mut plan.source {
                 optimize_source(source, config, aggregates)?;
             }
             if let Some(predicate) = &mut plan.predicate {
-                optimize_scalar_slot(predicate, config)?;
+                super::optimize_qualification(predicate, config)?;
                 if config.enable_filter_pushdown {
                     prioritize_access_predicates(predicate);
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            let mut expressions = plan.expressions();
-            if let Some(source) = &plan.source {
-                source.push_expressions(&mut expressions);
-            }
-            let live = super::subqueries::live_slots(expressions)?;
+            let live = super::subqueries::live_slots_with_source(
+                plan.expressions(),
+                plan.source.as_deref(),
+            )?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Merge(plan) => {
-            for cte in &mut plan.ctes {
-                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
-            }
             optimize_source(&mut plan.source, config, aggregates)?;
-            optimize_scalar_slot(&mut plan.join_condition, config)?;
+            super::optimize_qualification(&mut plan.join_condition, config)?;
             for clause in &mut plan.when_clauses {
                 match clause {
                     MergeWhenPlan::UpdateMatched {
@@ -117,7 +102,7 @@ pub(super) fn optimize_command(
                         assignments,
                     } => {
                         if let Some(condition) = condition {
-                            optimize_scalar_slot(condition, config)?;
+                            super::optimize_qualification(condition, config)?;
                         }
                         optimize_assignments(assignments, config)?;
                     }
@@ -127,14 +112,14 @@ pub(super) fn optimize_command(
                     | MergeWhenPlan::NothingNotMatched { condition }
                     | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
                         if let Some(condition) = condition {
-                            optimize_scalar_slot(condition, config)?;
+                            super::optimize_qualification(condition, config)?;
                         }
                     }
                     MergeWhenPlan::InsertNotMatched {
                         condition, values, ..
                     } => {
                         if let Some(condition) = condition {
-                            optimize_scalar_slot(condition, config)?;
+                            super::optimize_qualification(condition, config)?;
                         }
                         for value in values {
                             optimize_scalar_slot(value, config)?;
@@ -143,23 +128,20 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            let mut expressions = plan.expressions();
-            plan.source.push_expressions(&mut expressions);
-            let live = super::subqueries::live_slots(expressions)?;
+            let live =
+                super::subqueries::live_slots_with_source(plan.expressions(), Some(&plan.source))?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::DeclareCursor { query, .. } => {
             optimize_query(query, config, aggregates)?;
-        }
-        CommandPlan::Explain { body, .. } => {
-            optimize_unified_plan(body, config, aggregates)?;
         }
         CommandPlan::Call { args: params, .. } => {
             for expression in params {
                 optimize_expression_plan(expression, config, aggregates)?;
             }
         }
-        CommandPlan::CreateTableAs { .. }
+        CommandPlan::Explain { .. }
+        | CommandPlan::CreateTableAs { .. }
         | CommandPlan::CreateMaterializedView { .. }
         | CommandPlan::CreateView { .. }
         | CommandPlan::Execute { .. }
@@ -228,7 +210,8 @@ pub(super) fn optimize_command(
         | CommandPlan::DropTrigger(_)
         | CommandPlan::CreateRule(_)
         | CommandPlan::DropRule(_)
-        | CommandPlan::DoBlock { .. } => {}
+        | CommandPlan::DoBlock { .. }
+        | CommandPlan::Empty => {}
     }
     Ok(())
 }

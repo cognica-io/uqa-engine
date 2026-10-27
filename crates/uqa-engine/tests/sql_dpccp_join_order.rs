@@ -94,7 +94,7 @@ fn engine_uses_dpccp_source_order_and_preserves_join_results() {
     let plan = explain
         .rows
         .iter()
-        .filter_map(|row| match row.get("plan") {
+        .filter_map(|row| match row.get("QUERY PLAN") {
             Some(Value::Str(line)) => Some(line.as_str()),
             _ => None,
         })
@@ -183,7 +183,7 @@ fn dpccp_uses_operator_tree_knn_cardinality_for_join_order() {
     let plan = explain
         .rows
         .iter()
-        .filter_map(|row| match row.get("plan") {
+        .filter_map(|row| match row.get("QUERY PLAN") {
             Some(Value::Str(line)) => Some(line.as_str()),
             _ => None,
         })

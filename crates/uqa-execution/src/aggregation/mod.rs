@@ -13,11 +13,11 @@ use uqa_storage::temporary_file::TemporaryFile as File;
 
 use crate::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, SpillBuffer};
 use uqa_core::{DecimalValue, Value};
-use uqa_sql::expr::{cast_value, value_to_json_text};
+use uqa_sql::expr::cast_value;
 use uqa_sql::plan::QueryBlockPlan;
 use uqa_sql::{SQLError, SQLParam};
 
-use crate::functions::{SQLAggregateFunction, SQLAggregateState};
+use crate::functions::{SQLAggregateFactory, SQLAggregateState};
 
 use crate::scalar::plan::{PlanSubqueryArena, QueryExpressionContext};
 use uqa_sql::expr::core_value_to_json;
@@ -31,6 +31,7 @@ mod array_inputs;
 mod distinct;
 mod executor;
 mod finalize;
+mod observation;
 mod ordering;
 mod output;
 mod partial_state;
@@ -39,6 +40,7 @@ mod projected_input;
 mod registered_buffer;
 mod rewrite;
 mod sort_fallback;
+pub(crate) mod state;
 mod string_agg;
 mod template;
 mod value_buffer;

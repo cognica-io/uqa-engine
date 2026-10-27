@@ -164,7 +164,7 @@ impl RoutineInliningContext<'_> {
     ) -> Result<Option<ScalarExpr>, SQLError> {
         if !definition.is_procedure
             && !definition.returns_set()
-            && definition.output_params().len() <= 1
+            && definition.output_params().nth(1).is_none()
             && !super::routine_returns_anonymous_record(definition)
         {
             let layout = super::result_check::declared_sql_function_result(self.types, definition)?;
@@ -469,7 +469,7 @@ fn eligible_definition(definition: &CreateFunction) -> bool {
         && !definition.security.security_definer
         && !definition.returns_set()
         && definition.config.is_empty()
-        && definition.output_params().len() <= 1
+        && definition.output_params().nth(1).is_none()
         && !matches!(&definition.returns, FunctionReturns::Scalar { type_name }
             if crate::type_resolution::canonical_routine_type_name(type_name) == "record")
 }

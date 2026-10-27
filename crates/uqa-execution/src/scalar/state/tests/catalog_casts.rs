@@ -157,7 +157,7 @@ fn routine_cast_source_metadata_never_reuses_routine_results_or_type_resolution(
                 return_type: Some("chosen".into()),
                 variadic_mode: RoutineVariadicMode::default(),
             })),
-            composite_field: None,
+            value_binding: None,
             resolution_error: None,
             input_collation: None,
         }),

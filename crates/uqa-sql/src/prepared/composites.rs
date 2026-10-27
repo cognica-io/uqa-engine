@@ -76,7 +76,7 @@ impl CompositeInputs {
                     ScalarExpr::Func {
                         binding: Some(binding),
                         ..
-                    } => binding.composite_field.as_ref().map_or(Ok(()), |field| {
+                    } => binding.composite_field().map_or(Ok(()), |field| {
                         capture_descriptor(field.type_oid, types.composite_types(), &mut original)?;
                         capture_type(&field.result_type, types.composite_types(), &mut original)
                     }),
@@ -254,7 +254,7 @@ fn project_plan(
             ..
         } = node
         {
-            if let Some(field) = &mut binding.composite_field {
+            if let Some(field) = binding.composite_field_mut() {
                 if let Some(descriptor) = current.get(&field.type_oid) {
                     let attribute = descriptor
                         .attributes

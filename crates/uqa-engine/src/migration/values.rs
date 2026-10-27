@@ -85,13 +85,29 @@ pub(super) fn integer_to_temporal_value(
         ColumnType::Time | ColumnType::TimePrecision(_) => TemporalValue::Time { micros: value },
         ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => TemporalValue::TimeTz {
             micros: value,
-            offset_minutes: 0,
+            offset_seconds: 0,
         },
-        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => {
-            TemporalValue::Timestamp { micros: value }
-        }
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => TemporalValue::Timestamp {
+            postgres_micros: value
+                .checked_sub(uqa_core::POSTGRES_EPOCH_MICROS)
+                .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
+                .ok_or_else(|| {
+                    PythonMigrationError::Invalid(format!(
+                        "timestamp microseconds {value} out of range"
+                    ))
+                })?,
+        },
         ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
-            TemporalValue::TimestampTz { micros: value }
+            TemporalValue::TimestampTz {
+                postgres_micros: value
+                    .checked_sub(uqa_core::POSTGRES_EPOCH_MICROS)
+                    .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
+                    .ok_or_else(|| {
+                        PythonMigrationError::Invalid(format!(
+                            "timestamp microseconds {value} out of range"
+                        ))
+                    })?,
+            }
         }
         other => {
             return Err(PythonMigrationError::Invalid(format!(

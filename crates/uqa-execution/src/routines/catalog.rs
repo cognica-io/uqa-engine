@@ -45,14 +45,20 @@ pub fn merge_private(
     current: &Arc<RoutineRegistry>,
     committed: Arc<RoutineRegistry>,
     roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    temporary_schema: &str,
 ) -> uqa_storage::StorageBackendResult<Arc<RoutineRegistry>> {
-    let registry = if catalog.map_or(Ok(false), |catalog| {
+    let mut registry = if catalog.map_or(Ok(false), |catalog| {
         catalog.metadata_has_private_changes(FUNCTIONS_METADATA_KEY)
     })? {
         Arc::clone(current)
     } else {
         committed
     };
+    for (name, overloads) in current.iter().filter(|(name, _)| {
+        uqa_sql::schema::namespaces::removal::routine_name_occupies_schema(name, temporary_schema)
+    }) {
+        Arc::make_mut(&mut registry).insert(name.clone(), overloads.clone());
+    }
     for function in registry.values().flatten() {
         uqa_sql::routines::security::binding::validate_routine_authority(&function.def, roles)
             .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))?;
@@ -72,6 +78,7 @@ pub fn persist_sql_functions_snapshot(
     };
     let defs: BTreeMap<String, Vec<CreateFunction>> = registry
         .iter()
+        .filter(|(name, _)| !temporary_routine_name(name))
         .map(|(name, overloads)| {
             (
                 name.clone(),
@@ -87,4 +94,18 @@ pub fn persist_sql_functions_snapshot(
     catalog
         .set_metadata(FUNCTIONS_METADATA_KEY, &json)
         .map_err(|err| SQLError::Internal(format!("persist function catalog: {err}")))
+}
+
+fn temporary_routine_name(name: &str) -> bool {
+    uqa_core::RelationIdentity::from_legacy_name(name).is_ok_and(|identity| {
+        uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&identity.schema)
+    })
+}
+
+pub(super) fn temporary_snapshot(registry: &RoutineRegistry) -> RoutineRegistry {
+    registry
+        .iter()
+        .filter(|(name, _)| temporary_routine_name(name))
+        .map(|(name, overloads)| (name.clone(), overloads.clone()))
+        .collect()
 }

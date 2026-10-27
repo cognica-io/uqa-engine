@@ -283,22 +283,33 @@ impl TemporalValue {
             Self::Time { micros } => format_time(*micros, control),
             Self::TimeTz {
                 micros,
-                offset_minutes,
+                offset_seconds,
             } => {
                 let mut out = ProductionString::new(*control);
                 out.push_str(&format_time(*micros, control)?)?;
-                let sign = if *offset_minutes < 0 { '-' } else { '+' };
-                let abs = offset_minutes.unsigned_abs();
-                let offset = if abs % 60 == 0 {
-                    control.format(format_args!("{sign}{:02}", abs / 60))?
+                let sign = if *offset_seconds < 0 { '-' } else { '+' };
+                let abs = offset_seconds.unsigned_abs();
+                let offset = if abs % 3600 == 0 {
+                    control.format(format_args!("{sign}{:02}", abs / 3600))?
+                } else if abs % 60 == 0 {
+                    control.format(format_args!("{sign}{:02}:{:02}", abs / 3600, abs / 60 % 60))?
                 } else {
-                    control.format(format_args!("{sign}{:02}:{:02}", abs / 60, abs % 60))?
+                    control.format(format_args!(
+                        "{sign}{:02}:{:02}:{:02}",
+                        abs / 3600,
+                        abs / 60 % 60,
+                        abs % 60
+                    ))?
                 };
                 out.push_str(&offset)?;
                 out.finish()
             }
-            Self::Timestamp { micros } => format_timestamp(*micros, false, control),
-            Self::TimestampTz { micros } => format_timestamp(*micros, true, control),
+            Self::Timestamp {
+                postgres_micros: micros,
+            } => format_timestamp(*micros, false, control),
+            Self::TimestampTz {
+                postgres_micros: micros,
+            } => format_timestamp(*micros, true, control),
             Self::Interval {
                 months,
                 days,
@@ -372,7 +383,7 @@ fn format_timestamp(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
     // Every day in the signed microsecond carrier fits in the integer day carrier.
-    let days = (micros.div_euclid(MICROS_PER_DAY)) as i32;
+    let days = micros.div_euclid(MICROS_PER_DAY) as i32 + super::POSTGRES_EPOCH_DAYS;
     let (year, month, day) = super::calendar::to_output_calendar(days);
     let seconds = micros.rem_euclid(MICROS_PER_DAY) / MICROS_PER_SECOND;
     let mut out = ProductionString::new(*control);

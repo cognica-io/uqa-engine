@@ -156,6 +156,12 @@ pub trait RoutineResolution: FunctionTypeResolver {
         false
     }
 
+    /// A registered function's stable output names, available without calling
+    /// it. `None` means its result supplies the descriptor at execution.
+    fn registered_table_function_columns(&self, _name: &str) -> Option<Vec<String>> {
+        None
+    }
+
     fn has_registered_aggregate_function(&self, _name: &str) -> bool {
         false
     }
@@ -243,18 +249,19 @@ pub fn selected_bound_function(
 
 pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
     def.identity_params()
-        .iter()
         .map(|parameter| canonical_routine_type_name(&parameter.type_name))
         .collect()
 }
 
 pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
-    let outputs = def.output_params();
-    match (outputs.as_slice(), &def.returns) {
-        ([output], _) => canonical_routine_type_name(&output.type_name) == "record",
-        ([], FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) => {
-            canonical_routine_type_name(type_name) == "record"
-        }
+    let mut outputs = def.output_params();
+    match (outputs.next(), outputs.next(), &def.returns) {
+        (Some(output), None, _) => canonical_routine_type_name(&output.type_name) == "record",
+        (
+            None,
+            None,
+            FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name },
+        ) => canonical_routine_type_name(type_name) == "record",
         _ => false,
     }
 }
@@ -279,7 +286,7 @@ impl StaticFunctionMatch {
             builtin: false,
             dispatch: None,
             invocation: Some(self.invocation.clone()),
-            composite_field: None,
+            value_binding: None,
             resolution_error: None,
             input_collation: None,
         }

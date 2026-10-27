@@ -29,7 +29,10 @@ pub(super) fn subtract(
 }
 
 pub(super) fn timestamp_micros(infinity: TemporalInfinity) -> i64 {
-    let TemporalValue::Timestamp { micros } = infinity.timestamp() else {
+    let TemporalValue::Timestamp {
+        postgres_micros: micros,
+    } = infinity.timestamp()
+    else {
         unreachable!("timestamp endpoint")
     };
     micros

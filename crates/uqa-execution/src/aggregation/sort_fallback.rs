@@ -158,7 +158,7 @@ pub(super) fn aggregate_sorted_input(
                 if current_key.is_none() {
                     current_key = Some(key);
                     current_accumulators =
-                        instantiate_aggregate_accumulators(&templates, accumulator_budget);
+                        instantiate_aggregate_accumulators(&templates, accumulator_budget)?;
                 }
                 observe_targets(
                     &mut current_accumulators,
@@ -173,7 +173,7 @@ pub(super) fn aggregate_sorted_input(
                 context,
                 statement,
                 &output_plan,
-                current_accumulators,
+                std::mem::take(&mut current_accumulators),
                 &key,
                 output_schema.columns(),
                 params,
@@ -181,7 +181,7 @@ pub(super) fn aggregate_sorted_input(
                 super::output::push_output_row(&mut output, output_schema, &mut pending, row)?;
             }
         } else if statement.group_by.is_empty() {
-            let accumulators = instantiate_aggregate_accumulators(&templates, accumulator_budget);
+            let accumulators = instantiate_aggregate_accumulators(&templates, accumulator_budget)?;
             if let Some(row) = super::output::finish_group(
                 context,
                 statement,
@@ -196,6 +196,10 @@ pub(super) fn aggregate_sorted_input(
         }
         super::output::flush_output_rows(&mut output, output_schema, &mut pending)
     })();
+    let execution = super::state::with_cleanup(
+        execution,
+        super::state::close_accumulators(&mut current_accumulators),
+    );
     let close = sorted.close().map_err(exec_to_sql_error);
     combine_execution_and_close(execution, close, "aggregate sort")?;
     Ok(output)
@@ -244,9 +248,10 @@ pub(super) fn combine_execution_and_close(
     match (execution, close) {
         (Ok(()), Ok(())) => Ok(()),
         (Ok(()), Err(error)) | (Err(error), Ok(())) => Err(error),
-        (Err(execution_error), Err(close_error)) => Err(SQLError::Internal(format!(
-            "{execution_error}; closing {operator} after failure also failed: {close_error}"
-        ))),
+        (Err(execution_error), Err(close_error)) => {
+            Err(execution_error
+                .with_cleanup(close_error, format!("close {operator} after failure")))
+        }
     }
 }
 

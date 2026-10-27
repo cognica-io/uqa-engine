@@ -1,0 +1,84 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "captured_at": "2026-10-24T23:55:31.888804+00:00",
+  "method": "PostgreSQL SQL expressions; SQL arrays, domain-array leaves and catalog-vector leaves",
+  "cases": [
+    {
+      "sql": "SELECT array_dims(v) AS dimensions, cardinality(v)::text AS count, v::text AS value, pg_typeof(v)::text AS type FROM (SELECT ARRAY[ARRAY[1,2]::array_leaf,ARRAY[3]::array_leaf] AS v) s",
+      "rows": [
+        [
+          "[1:2]",
+          "2",
+          "{\"{1,2}\",\"{3}\"}",
+          "array_leaf[]"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT array_dims(v) AS dimensions, cardinality(v)::text AS count, v::text AS value, pg_typeof(v)::text AS type FROM (SELECT '{\"{1,2}\",\"{3}\"}'::array_leaf[] AS v) s",
+      "rows": [
+        [
+          "[1:2]",
+          "2",
+          "{\"{1,2}\",\"{3}\"}",
+          "array_leaf[]"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT array_dims(v) AS dimensions, cardinality(v)::text AS count, v::text AS value, pg_typeof(v)::text AS type FROM (SELECT ARRAY[NULL::array_leaf,ARRAY[]::integer[]::array_leaf] AS v) s",
+      "rows": [
+        [
+          "[1:2]",
+          "2",
+          "{NULL,\"{}\"}",
+          "array_leaf[]"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT array_dims(v) AS dimensions, cardinality(v)::text AS count, v::text AS value, pg_typeof(v)::text AS type FROM (SELECT ARRAY[[ARRAY[1,2]::array_leaf,ARRAY[3]::array_leaf],[ARRAY[]::integer[]::array_leaf, NULL::array_leaf]] AS v) s",
+      "rows": [
+        [
+          "[1:2][1:2]",
+          "4",
+          "{{\"{1,2}\",\"{3}\"},{\"{}\",NULL}}",
+          "array_leaf[]"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT array_dims(v) AS dimensions, cardinality(v)::text AS count, v::text AS value, pg_typeof(v)::text AS type FROM (SELECT '[-2:-1]={\"[4:5]={7,8}\",\"{}\"}'::array_leaf[] AS v) s",
+      "rows": [
+        [
+          "[-2:-1]",
+          "2",
+          "[-2:-1]={\"[4:5]={7,8}\",\"{}\"}",
+          "array_leaf[]"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT array_dims(v) AS dimensions, cardinality(v)::text AS count, v::text AS value, pg_typeof(v)::text AS type FROM (SELECT ARRAY['1 2'::int2vector,''::int2vector] AS v) s",
+      "rows": [
+        [
+          "[1:2]",
+          "2",
+          "{\"1 2\",\"\"}",
+          "int2vector[]"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT array_dims(v) AS dimensions, cardinality(v)::text AS count, v::text AS value, pg_typeof(v)::text AS type FROM (SELECT ARRAY[ARRAY[1,2],ARRAY[3,4]] AS v) s",
+      "rows": [
+        [
+          "[1:2][1:2]",
+          "4",
+          "{{1,2},{3,4}}",
+          "integer[]"
+        ]
+      ]
+    }
+  ]
+}

@@ -41,10 +41,10 @@ impl TemporalIndexDomain {
             Self::Time => TemporalValue::Time { micros: 0 },
             Self::TimeTz => TemporalValue::TimeTz {
                 micros: 0,
-                offset_minutes: 0,
+                offset_seconds: 0,
             },
-            Self::Timestamp => TemporalValue::Timestamp { micros: 0 },
-            Self::TimestampTz => TemporalValue::TimestampTz { micros: 0 },
+            Self::Timestamp => TemporalValue::Timestamp { postgres_micros: 0 },
+            Self::TimestampTz => TemporalValue::TimestampTz { postgres_micros: 0 },
             Self::Interval => TemporalValue::Interval {
                 months: 0,
                 days: 0,

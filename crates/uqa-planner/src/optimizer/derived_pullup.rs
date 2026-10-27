@@ -43,7 +43,7 @@ fn rewrite_plan(plan: &mut UnifiedPlan, context: &Context<'_>) -> Result<(), SQL
             uqa_sql::plan::CommandPlan::CreateView { .. }
             | uqa_sql::plan::CommandPlan::CreateMaterializedView { .. }
             | uqa_sql::plan::CommandPlan::Prepare { .. } => return Ok(()),
-            uqa_sql::plan::CommandPlan::Explain { body, .. } => return rewrite_plan(body, context),
+            uqa_sql::plan::CommandPlan::Explain { .. } => return Ok(()),
             _ => {}
         }
     }
@@ -198,6 +198,7 @@ fn candidate(
         return Ok(None);
     };
     if body.relations_bound != context.relations_bound
+        || body.relation_privilege_subject.is_some()
         || !body.ctes.is_empty()
         || !block.subqueries.is_empty()
         || !matches!(block.compute, ComputePlan::Project)

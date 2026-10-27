@@ -39,6 +39,20 @@ impl Engine {
     }
 }
 impl TableAsTransactions<StatementReadSnapshot> for Engine {
+    fn explain_existing_target(
+        &self,
+        name: &str,
+        if_not_exists: bool,
+        persistence: RelationPersistence,
+    ) -> Result<bool, SQLError> {
+        let scope = super::query_scope::new_for_current_routine(self);
+        uqa_execution::schema::ctas::explain_existing_target(
+            &self.create_table_as_context(&scope),
+            name,
+            if_not_exists,
+            persistence,
+        )
+    }
     fn transaction_is_active(&self) -> bool {
         self.transaction_depth() != 0
     }
@@ -72,13 +86,19 @@ impl TableAsQuerySource for Engine {
     fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError> {
         crate::capabilities::statement_planning::optimize_engine_query(self, plan)
     }
-    fn execute(&self, plan: &QueryPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
+    fn execute(
+        &self,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        measurement: Option<&uqa_execution::query::measurement::QueryMeasurement>,
+    ) -> Result<SQLResult, SQLError> {
         let mut scope = super::query_scope::new_for_current_routine(self);
-        uqa_execution::query::statement::execute_query_plan_with_ctes(
+        uqa_execution::query::statement::execute_query_plan_measured(
             &self.query_execution_context(),
             plan,
             params,
             &mut scope,
+            measurement,
         )
     }
 }
@@ -118,8 +138,15 @@ impl TableAsPublication for Engine {
         column: &str,
         dimensions: u32,
     ) -> Result<bool, SQLError> {
-        Engine::create_vector_field(self, name, column, dimensions)
-            .map_err(|error| storage_error("CREATE TABLE AS vector field", &error))
+        self.install_vector_field(
+            name,
+            column.into(),
+            dimensions,
+            uqa_storage::VectorIndexSpec::BruteForce,
+            false,
+            true,
+        )
+        .map_err(|error| storage_error("CREATE TABLE AS vector field", &error))
     }
     fn publish_columns(&self, name: &str, columns: &[ColumnDef]) -> Result<(), SQLError> {
         let constraints = self
@@ -140,7 +167,13 @@ impl TableAsPublication for Engine {
         document: Document,
         vectors: DocumentVectors,
     ) -> Result<(), SQLError> {
-        self.add_document_with_vector_values(table, id, document, vectors)
+        self.add_document_with_vector_values_inner(
+            table,
+            id,
+            document,
+            vectors,
+            uqa_execution::mutation::publication::InsertedIdentity::Unused,
+        )
     }
 }
 
@@ -216,7 +249,14 @@ impl uqa_execution::schema::table_creation::TableCreationPublication for Engine 
         field: String,
         dimensions: u32,
     ) -> uqa_storage::StorageBackendResult<bool> {
-        Engine::create_vector_field(self, table, field, dimensions)
+        self.install_vector_field(
+            table,
+            field,
+            dimensions,
+            uqa_storage::VectorIndexSpec::BruteForce,
+            false,
+            true,
+        )
     }
     fn install_hierarchy(
         &self,

@@ -289,6 +289,9 @@ impl Engine {
                         self.session.state.set_reset_lock_timeout(milliseconds);
                     }
                 }
+                if definition.name == "track_io_timing" {
+                    self.session.state.set_reset_io_timing(setting == "on");
+                }
                 self.session
                     .parameters
                     .lock()

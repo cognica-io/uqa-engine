@@ -20,8 +20,11 @@ impl uqa_execution::statement::batch::context::BatchTransactions for Engine {
     fn run_transaction_statement(&self, statement: TransactionStmt) -> Result<(), SQLError> {
         Engine::run_transaction_statement(self, statement)
     }
-    fn ensure_transaction_usable(&self) -> Result<(), SQLError> {
-        Engine::ensure_transaction_usable(self)
+    fn with_active_transaction(
+        &self,
+        operation: &mut dyn FnMut() -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.run_existing_transaction_operation(operation, std::convert::identity)
     }
     fn prepare_explicit_statement_snapshot(&self, sets_snapshot: bool) -> Result<(), SQLError> {
         Engine::prepare_explicit_statement_snapshot(self, sets_snapshot)

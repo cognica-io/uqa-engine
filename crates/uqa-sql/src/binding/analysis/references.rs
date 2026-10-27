@@ -282,12 +282,19 @@ fn validate_expression_inner(
                 .resolve_scalar_subquery_type(*subquery, schema, params)
                 .map(drop)
         }
+        ScalarExpr::Param(number) => number
+            .checked_sub(1)
+            .and_then(|index| params.get(index))
+            .map(|_| ())
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "42P02".into(),
+                message: format!("there is no parameter ${number}"),
+            }),
         ScalarExpr::Star
         | ScalarExpr::Default
         | ScalarExpr::Literal(_)
         | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_) => Ok(()),
+        | ScalarExpr::RetainedLiteral(_) => Ok(()),
     }
 }
 

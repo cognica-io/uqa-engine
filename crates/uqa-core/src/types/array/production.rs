@@ -12,6 +12,8 @@ use crate::{
     Value, ValueRetentionError,
 };
 
+mod row_major;
+
 impl ArrayValue {
     pub fn try_new_with_control(
         elements: Produced<Vec<Value>>,
@@ -33,11 +35,8 @@ impl ArrayValue {
         lower_bounds: Option<Produced<Vec<i32>>>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
-        let preserve_empty_dimension = lower_bounds
-            .as_ref()
-            .is_some_and(|bounds| bounds.len() == 1);
-        let Some(dimensions) = shape::produced(&elements, preserve_empty_dimension, control)?
-        else {
+        let rank = lower_bounds.as_ref().map(|bounds| bounds.len());
+        let Some(dimensions) = shape::produced(&elements, rank, control)? else {
             return Ok(None);
         };
         let lower_bounds = match lower_bounds {
@@ -69,7 +68,12 @@ impl ArrayValue {
                 control.combine(bounds_memory, header),
             ),
         };
-        normalize(&mut parts.value.elements, &mut parts.memory, control)?;
+        normalize(
+            &mut parts.value.elements,
+            parts.value.dimensions.len(),
+            &mut parts.memory,
+            control,
+        )?;
         let value = Self {
             storage: Box::new(parts.value),
         };
@@ -84,9 +88,13 @@ struct Parts {
 
 pub(super) fn normalize(
     elements: &mut [Value],
+    rank: usize,
     memory: &mut Option<MemoryReservation>,
     control: &ProductionControl<'_>,
 ) -> Result<(), ValueRetentionError> {
+    if rank <= 1 {
+        return control.check();
+    }
     for value in elements {
         control.check()?;
         if let Value::Array(array) = value {
@@ -102,7 +110,7 @@ pub(super) fn normalize(
             }
         }
         if let Value::List(values) = value {
-            normalize(values, memory, control)?;
+            normalize(values, rank - 1, memory, control)?;
         }
     }
     Ok(())

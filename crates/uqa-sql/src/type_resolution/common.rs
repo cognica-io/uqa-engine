@@ -32,6 +32,23 @@ pub(super) fn unknown_input(mut expression: &ScalarExpr) -> bool {
     )
 }
 
+/// A column or callback whose type is unavailable remains a runtime carrier; it cannot participate in overload selection as an unknown string or NULL literal.
+pub(crate) fn function_arguments_have_runtime_types(
+    arguments: &[ScalarExpr],
+    types: &[Option<ColumnType>],
+) -> Result<bool, SQLError> {
+    let arguments = scalar_call_arguments(arguments)?;
+    assert_eq!(arguments.len(), types.len());
+    Ok(arguments
+        .iter()
+        .zip(types)
+        .any(|(argument, ty)| runtime_input(argument.value, ty.as_ref())))
+}
+
+pub(crate) fn runtime_input(expression: &ScalarExpr, ty: Option<&ColumnType>) -> bool {
+    ty.is_none() && !unknown_input(expression)
+}
+
 /// Decoded function-call argument names, effective overload types, and whether the call used explicit `VARIADIC` syntax.
 #[doc(hidden)]
 pub type FunctionCallArgumentSignature = (Vec<Option<String>>, Vec<Option<ColumnType>>, bool);
@@ -285,6 +302,7 @@ pub(super) fn parameter_type_with_control(
             return Ok(Some(ty.clone_with_control(control)?))
         }
         SQLParam::Vector(values) => u32::try_from(values.len()).ok().map(ColumnType::Vector),
+        SQLParam::TypedTensor(value) => Some(ColumnType::Tensor(value.dimensions())),
         SQLParam::Tensor(values) => values
             .first()
             .and_then(|values| u32::try_from(values.len()).ok())
@@ -307,6 +325,31 @@ pub(crate) fn value_type(value: &Value) -> Option<ColumnType> {
                 .into_uncontrolled()
                 .expect("ordinary value type has no reservation")
         })
+}
+
+/// Observe an untyped host argument using its physical OID or SQL's runtime
+/// carrier rules. This never reads physical payload bytes or reconstructs an
+/// expression's lost declaration/modifiers. Unknown carriers return None.
+pub fn runtime_value_type_with_control(
+    value: &Value,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    if let Value::Datum(datum) = value {
+        if let Some(ty) = crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()) {
+            return Ok(Some(ty.clone_with_control(control)?));
+        }
+        let ty = catalog
+            .map(|catalog| catalog.value_type_by_oid(datum.type_oid()))
+            .transpose()?
+            .flatten();
+        control.check()?;
+        return Ok(ty
+            .map(|ty| ty.retain_external_with_control(control))
+            .transpose()?);
+    }
+    value_type_with_control(value, control)
 }
 
 pub(crate) fn value_type_with_control(

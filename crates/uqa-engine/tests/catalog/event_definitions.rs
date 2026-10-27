@@ -27,3 +27,29 @@ fn event_definitions_match_postgresql_sqlite() {
         &Engine::open(&directory.path().join("event_definitions.db")).unwrap(),
     );
 }
+
+#[test]
+fn event_definitions_match_postgresql_sqlite_key_value() {
+    let directory = tempfile::tempdir().unwrap();
+    verify_event_definitions(
+        &Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(
+                &directory.path().join("event_definitions.db"),
+            )
+            .unwrap(),
+        ))
+        .unwrap(),
+    );
+}
+
+#[test]
+fn event_definitions_match_postgresql_redb() {
+    let directory = tempfile::tempdir().unwrap();
+    verify_event_definitions(
+        &Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(directory.path().join("event_definitions.redb"))
+                .unwrap(),
+        ))
+        .unwrap(),
+    );
+}

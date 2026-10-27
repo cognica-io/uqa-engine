@@ -80,7 +80,8 @@ fn outer_constant(
     let (position, ty) = match expression {
         // A name of the block's own sources shadows the outer scope, and an ambiguous outer name is left to the canonical resolution and its diagnostic.
         ScalarExpr::Column(name)
-            if !own_schema.has_unqualified_column(name)
+            if !own_schema.columns_are_open(None)
+                && !own_schema.has_unqualified_column(name)
                 && !own_schema.column_is_ambiguous(name)
                 && !own_schema.has_qualifier(name)
                 && !outer.column_is_ambiguous(name) =>

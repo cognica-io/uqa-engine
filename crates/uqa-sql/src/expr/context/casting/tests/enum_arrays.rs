@@ -296,7 +296,7 @@ impl crate::assignment::AssignmentContext for EnumCatalog {
     fn evaluate_domain_check(
         &self,
         _: &crate::ast::Expr,
-        _: &crate::ResultRow,
+        _: &dyn crate::expr::RowLookup,
         _: &crate::RowSchema,
     ) -> Result<Value> {
         unreachable!("this domain tests base identity independently of checks")

@@ -87,10 +87,7 @@ pub fn copy_from(
                 .ensure_column(&canonical, column, TableAclPrivilege::Insert)?;
         }
     }
-    let mut bytes = Vec::new();
-    input
-        .read_to_end(&mut bytes)
-        .map_err(|error| copy_io_error("read COPY FROM stream", error))?;
+    let bytes = read_copy_input(input, context.cancellation)?;
     let rows = decode_copy_input(&bytes, &copy.options, &columns)?;
     if rows.is_empty() {
         return Ok(0);
@@ -293,6 +290,45 @@ fn copy_io_error(action: &str, error: std::io::Error) -> SQLError {
     SQLError::Routine {
         sqlstate: "58030".into(),
         message: format!("{action}: {error}"),
+    }
+}
+
+/// The complete input still precedes insertion, but a continuing source cannot defer cancellation
+/// until EOF. Keep this check in the stream owner so every language uses the same boundary.
+fn read_copy_input(
+    input: &mut impl Read,
+    cancellation: &CancellationToken,
+) -> Result<Vec<u8>, SQLError> {
+    let check = || -> Result<(), SQLError> {
+        cancellation.check()?;
+        Ok(uqa_sql::expr::check_statement_cancellation()?)
+    };
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 8192];
+    loop {
+        check()?;
+        let count = match input.read(&mut buffer) {
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(copy_io_error("read COPY FROM stream", error)),
+        };
+        check()?;
+        if count == 0 {
+            return Ok(bytes);
+        }
+        let chunk = buffer.get(..count).ok_or_else(|| {
+            copy_io_error(
+                "read COPY FROM stream",
+                std::io::Error::other("reader returned a count larger than its buffer"),
+            )
+        })?;
+        bytes
+            .try_reserve(chunk.len())
+            .map_err(|_| SQLError::Routine {
+                sqlstate: "53200".into(),
+                message: "out of memory while reading COPY input".into(),
+            })?;
+        bytes.extend_from_slice(chunk);
     }
 }
 

@@ -94,7 +94,7 @@ fn main() {
                 .unwrap_or_else(|error| panic!("TPC-H Q{query_number:02} EXPLAIN: {error}"));
             eprintln!("TPC-H Q{query_number:02} plan:");
             for row in explained.rows {
-                match row.get("plan").expect("EXPLAIN plan column") {
+                match row.get("QUERY PLAN").expect("EXPLAIN plan column") {
                     Value::Str(plan) | Value::FixedChar(plan) => eprintln!("{plan}"),
                     value => panic!("EXPLAIN returned a non-text plan row: {value:?}"),
                 }

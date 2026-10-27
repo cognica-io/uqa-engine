@@ -184,104 +184,111 @@ pub(super) fn finish_group(
     context: &dyn QueryExpressionContext,
     statement: &QueryBlockPlan,
     output_plan: &AggregateOutputPlan,
-    accumulators: Vec<AggregateAccumulator>,
+    mut accumulators: Vec<AggregateAccumulator>,
     group_values: &[Value],
     labels: &[String],
     params: &[SQLParam],
 ) -> Result<Option<Vec<Value>>, SQLError> {
-    if accumulators.len() != output_plan.finalizers.len() {
-        return Err(SQLError::Internal(format!(
-            "aggregate accumulator count {} does not match output plan {}",
-            accumulators.len(),
-            output_plan.finalizers.len()
-        )));
-    }
-    let aggregate_values = output_plan
-        .finalizers
-        .iter()
-        .zip(&accumulators)
-        .map(|(finalizer, accumulator)| {
-            aggregate_value_with_args(
-                &finalizer.name,
-                accumulator,
-                &finalizer.args,
-                uqa_sql::expr::EngineHook::enum_labels(context),
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let hook = context;
-    let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(hook));
-    debug_assert_eq!(labels.len(), statement.projections.len());
-    let mut group_row = None;
-    let mut values = Vec::with_capacity(output_plan.projections.len());
-
-    for projection in &output_plan.projections {
-        match projection {
-            AggregateProjectionPlan::Evaluate(plan) => {
-                let row = plan
-                    .uses_group_row
-                    .then(|| {
-                        group_row.get_or_insert_with(|| {
-                            outer::group_row(statement, group_values, output_plan.outer.as_deref())
-                        })
-                    })
-                    .map(|row| &*row);
-                let lookup = AggregateOutputLookup {
-                    aggregate_values: &aggregate_values,
-                    group_values,
-                    slot_relation: output_plan.slot_relation,
-                    row,
-                };
-                let mut context = ScalarEvalContext::from_row_lookup(&lookup, params)
-                    .with_function_hook(hook)
-                    .with_subquery_runner(&subquery_arena);
-                if let Some(row) = row {
-                    context = context.with_physical_outer_row(&row.schema, &row.row);
-                }
-                values.push(eval_scalar(
-                    &plan.expression,
-                    &context.with_function_states(plan.expression.calls()),
-                )?);
-            }
-            AggregateProjectionPlan::GroupValue(index) => {
-                values.push(group_values.get(*index).cloned().unwrap_or(Value::Null));
-            }
-            AggregateProjectionPlan::Null => values.push(Value::Null),
-            AggregateProjectionPlan::Invalid(index) => {
-                let label = labels.get(*index).map_or("?", String::as_str);
-                return Err(SQLError::Unsupported(format!(
-                    "non-aggregated projection `{label}` must appear in GROUP BY"
-                )));
-            }
+    let result = (|| {
+        if accumulators.len() != output_plan.finalizers.len() {
+            return Err(SQLError::Internal(format!(
+                "aggregate accumulator count {} does not match output plan {}",
+                accumulators.len(),
+                output_plan.finalizers.len()
+            )));
         }
-    }
-
-    if let Some(having) = output_plan.having.as_ref() {
-        let having_row = having.uses_group_row.then(|| {
-            group_row.take().unwrap_or_else(|| {
-                outer::group_row(statement, group_values, output_plan.outer.as_deref())
+        let aggregate_values = output_plan
+            .finalizers
+            .iter()
+            .zip(&accumulators)
+            .map(|(finalizer, accumulator)| {
+                aggregate_value_with_args(
+                    &finalizer.name,
+                    accumulator,
+                    &finalizer.args,
+                    uqa_sql::expr::EngineHook::enum_labels(context),
+                )
             })
-        });
-        let lookup = AggregateOutputLookup {
-            aggregate_values: &aggregate_values,
-            group_values,
-            slot_relation: output_plan.slot_relation,
-            row: having_row.as_ref(),
-        };
-        let mut context = ScalarEvalContext::from_row_lookup(&lookup, params)
-            .with_function_hook(hook)
-            .with_subquery_runner(&subquery_arena);
-        if let Some(row) = having_row.as_ref() {
-            context = context.with_physical_outer_row(&row.schema, &row.row);
+            .collect::<Result<Vec<_>, _>>()?;
+        let hook = context;
+        let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(hook));
+        debug_assert_eq!(labels.len(), statement.projections.len());
+        let mut group_row = None;
+        let mut values = Vec::with_capacity(output_plan.projections.len());
+
+        for projection in &output_plan.projections {
+            match projection {
+                AggregateProjectionPlan::Evaluate(plan) => {
+                    let row = plan
+                        .uses_group_row
+                        .then(|| {
+                            group_row.get_or_insert_with(|| {
+                                outer::group_row(
+                                    statement,
+                                    group_values,
+                                    output_plan.outer.as_deref(),
+                                )
+                            })
+                        })
+                        .map(|row| &*row);
+                    let lookup = AggregateOutputLookup {
+                        aggregate_values: &aggregate_values,
+                        group_values,
+                        slot_relation: output_plan.slot_relation,
+                        row,
+                    };
+                    let mut context = ScalarEvalContext::from_row_lookup(&lookup, params)
+                        .with_function_hook(hook)
+                        .with_subquery_runner(&subquery_arena);
+                    if let Some(row) = row {
+                        context = context.with_physical_outer_row(&row.schema, &row.row);
+                    }
+                    values.push(eval_scalar(
+                        &plan.expression,
+                        &context.with_function_states(plan.expression.calls()),
+                    )?);
+                }
+                AggregateProjectionPlan::GroupValue(index) => {
+                    values.push(group_values.get(*index).cloned().unwrap_or(Value::Null));
+                }
+                AggregateProjectionPlan::Null => values.push(Value::Null),
+                AggregateProjectionPlan::Invalid(index) => {
+                    let label = labels.get(*index).map_or("?", String::as_str);
+                    return Err(SQLError::Unsupported(format!(
+                        "non-aggregated projection `{label}` must appear in GROUP BY"
+                    )));
+                }
+            }
         }
-        if !uqa_sql::expr::truthy(&eval_scalar(
-            &having.expression,
-            &context.with_function_states(having.expression.calls()),
-        )?) {
-            return Ok(None);
+
+        if let Some(having) = output_plan.having.as_ref() {
+            let having_row = having.uses_group_row.then(|| {
+                group_row.take().unwrap_or_else(|| {
+                    outer::group_row(statement, group_values, output_plan.outer.as_deref())
+                })
+            });
+            let lookup = AggregateOutputLookup {
+                aggregate_values: &aggregate_values,
+                group_values,
+                slot_relation: output_plan.slot_relation,
+                row: having_row.as_ref(),
+            };
+            let mut context = ScalarEvalContext::from_row_lookup(&lookup, params)
+                .with_function_hook(hook)
+                .with_subquery_runner(&subquery_arena);
+            if let Some(row) = having_row.as_ref() {
+                context = context.with_physical_outer_row(&row.schema, &row.row);
+            }
+            if !uqa_sql::expr::truthy(&eval_scalar(
+                &having.expression,
+                &context.with_function_states(having.expression.calls()),
+            )?) {
+                return Ok(None);
+            }
         }
-    }
-    Ok(Some(values))
+        Ok(Some(values))
+    })();
+    super::state::with_cleanup(result, super::state::close_accumulators(&mut accumulators))
 }
 
 struct AggregateOutputLookup<'a> {

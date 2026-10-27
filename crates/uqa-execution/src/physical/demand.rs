@@ -113,25 +113,21 @@ impl<'a> OperatorRows<'a> {
     }
 }
 
-impl Iterator for OperatorRows<'_> {
-    type Item = ExecResult<crate::OwnedPhysicalRow>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl crate::SQLRowSource<crate::OwnedPhysicalRow> for OperatorRows<'_> {
+    fn next_row(&mut self) -> Result<Option<crate::OwnedPhysicalRow>, uqa_sql::SQLError> {
         if self.finished {
-            return None;
+            return Ok(None);
         }
-        match self.pending.next_row(self.input.as_mut(), true) {
-            Ok(Some(row)) => Some(Ok(crate::OwnedPhysicalRow::new(
-                self.input.row_schema().clone(),
-                row,
-            ))),
-            Ok(None) => self.finish().err().map(Err),
-            Err(error) => Some(super::with_cleanup(
-                Err(error),
-                self.finish(),
-                "close correlated row source",
-            )),
-        }
+        self.pending
+            .next_row(self.input.as_mut(), true)
+            .map(|row| {
+                row.map(|row| crate::OwnedPhysicalRow::new(self.input.row_schema().clone(), row))
+            })
+            .map_err(super::physical_exec_error)
+    }
+
+    fn close(&mut self) -> Result<(), uqa_sql::SQLError> {
+        self.finish().map_err(super::physical_exec_error)
     }
 }
 

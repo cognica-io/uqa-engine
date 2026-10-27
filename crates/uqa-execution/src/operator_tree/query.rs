@@ -45,14 +45,16 @@ pub struct RetrievalQueryContext<'a> {
     pub graphs: &'a dyn GraphLifecycle,
 }
 impl<'a> RetrievalQueryContext<'a> {
-    /// Lower `expression` on `table`, whose declared columns decide how a predicate on an engine pseudo column lowers. They are read only for an expression that names one.
+    /// Read relation declarations when lowering needs to distinguish stored pseudo columns or composite NULL tests from scalar storage predicates.
     fn lower_relation_where(
         &self,
         table: &str,
         expression: &ScalarExpr,
         params: &[SQLParam],
     ) -> Result<Option<OperatorTree>, SQLError> {
-        let columns = if uqa_sql::retrieval::names_engine_pseudo_column(expression) {
+        let columns = if uqa_sql::retrieval::names_engine_pseudo_column(expression)
+            || super::binding::has_column_null_test(expression)
+        {
             self.trees
                 .driver
                 .relations

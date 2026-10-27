@@ -54,6 +54,16 @@ fn source_projections(insert: &InsertPlan) -> Vec<ScalarExpr> {
         panic!("expected a FROM-less query block")
     };
     assert!(block.from.is_none());
+    let values = insert
+        .rule_values_input
+        .as_ref()
+        .expect("VALUES provenance");
+    assert!(values.is_inline());
+    assert_eq!(
+        values.value_width(block.projections.len()).unwrap(),
+        block.projections.len()
+    );
+    assert!((0..block.projections.len()).all(|position| values.has_written_value(position)));
     block
         .projections
         .iter()

@@ -28,6 +28,22 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    if name == "to_char" && matches!(args.first(), Some(Value::Temporal(_))) {
+        return Some((|| {
+            control.check()?;
+            let [Value::Temporal(value), template] = args else {
+                return Err(SQLError::TypeMismatch("to_char takes 2 args".into()));
+            };
+            if matches!(template, Value::Null) || !value.is_finite() {
+                return Ok(control.finish(Value::Null, control.empty_reservation())?);
+            }
+            let template = value_to_string_with_control(template, control)?;
+            let output =
+                super::super::time::format_temporal_with_control(value, &template, control)?;
+            let (text, memory) = output.into_parts();
+            Ok(control.finish(Value::Str(text), memory)?)
+        })());
+    }
     if name == "timezone" {
         return Some(super::super::time::eval_timezone(args, None, control));
     }
@@ -77,8 +93,16 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                     };
                     return inline(Value::Temporal(infinity.timestamp_tz()));
                 }
+                let postgres_micros = float_to_i64_rounded(
+                    ((secs - (uqa_core::POSTGRES_EPOCH_MICROS / 1_000_000) as f64) * 1e6)
+                        .round_ties_even(),
+                    "timestamp",
+                )?;
+                if !TemporalValue::timestamp_micros_in_range(postgres_micros) {
+                    return Err(datetime_out_of_range("timestamp"));
+                }
                 inline(Value::Temporal(TemporalValue::TimestampTz {
-                    micros: float_to_i64_rounded(secs * 1e6, "timestamp")?,
+                    postgres_micros,
                 }))
             }
             "extract" | "date_part" => {
@@ -126,13 +150,13 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                 let year =
                     i32::try_from(integer(&args[0])?).map_err(|_| datetime_out_of_range("date"))?;
                 let month =
-                    u32::try_from(integer(&args[1])?).map_err(|_| datetime_out_of_range("date"))?;
+                    i32::try_from(integer(&args[1])?).map_err(|_| datetime_out_of_range("date"))?;
                 let day =
-                    u32::try_from(integer(&args[2])?).map_err(|_| datetime_out_of_range("date"))?;
+                    i32::try_from(integer(&args[2])?).map_err(|_| datetime_out_of_range("date"))?;
                 let hour =
-                    u32::try_from(integer(&args[3])?).map_err(|_| datetime_out_of_range("time"))?;
+                    i32::try_from(integer(&args[3])?).map_err(|_| datetime_out_of_range("time"))?;
                 let minute =
-                    u32::try_from(integer(&args[4])?).map_err(|_| datetime_out_of_range("time"))?;
+                    i32::try_from(integer(&args[4])?).map_err(|_| datetime_out_of_range("time"))?;
                 let second = float(&args[5])?;
                 inline(make_timestamp(year, month, day, hour, minute, second)?)
             }
@@ -143,22 +167,10 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
                 let year =
                     i32::try_from(integer(&args[0])?).map_err(|_| datetime_out_of_range("date"))?;
                 let month =
-                    u32::try_from(integer(&args[1])?).map_err(|_| datetime_out_of_range("date"))?;
+                    i32::try_from(integer(&args[1])?).map_err(|_| datetime_out_of_range("date"))?;
                 let day =
-                    u32::try_from(integer(&args[2])?).map_err(|_| datetime_out_of_range("date"))?;
-                let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
-                let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
-                    SQLError::Routine {
-                        sqlstate: "22008".into(),
-                        message: format!(
-                            "date field value out of range: {year:04}-{month:02}-{day:02}"
-                        ),
-                    }
-                })?;
-                inline(Value::Temporal(TemporalValue::Date {
-                    days: i32::try_from(date.signed_duration_since(epoch).num_days())
-                        .map_err(|_| datetime_out_of_range("date"))?,
-                }))
+                    i32::try_from(integer(&args[2])?).map_err(|_| datetime_out_of_range("date"))?;
+                inline(super::super::time::make_date(year, month, day)?)
             }
             "make_interval" => {
                 // make_interval(years, months, weeks, days, hours, mins,

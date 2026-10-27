@@ -62,21 +62,49 @@ impl Engine {
             events: self.event_lifecycle_context(),
             foreign: self,
             table_privileges: self,
-            explain: uqa_planner::explain::run_explain_with_physical,
+            explain: uqa_planner::explain::run_explain_with_control,
             physical_explain: self,
         }
     }
 }
 
 impl context::PhysicalExplainPlanning for Engine {
+    fn explained_plan_estimates(
+        &self,
+        body: &uqa_sql::plan::UnifiedPlan,
+        params: &[uqa_sql::SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        uqa_core::memory::Produced<Vec<uqa_sql::result::explain::ExplainNodeEstimate>>,
+        uqa_sql::SQLError,
+    > {
+        uqa_planner::explain::estimate_plan(
+            self.statement_statistics_context(),
+            &self.statement_planning_context().analysis,
+            body,
+            params,
+            control,
+        )
+    }
+
+    fn plan_explained_statement(
+        &self,
+        body: &uqa_sql::plan::UnifiedPlan,
+    ) -> Result<uqa_sql::plan::UnifiedPlan, uqa_sql::SQLError> {
+        super::statement_planning::optimize_engine_plan(self, body.clone())
+    }
+
     fn physical_explain_plan(
         &self,
         body: &uqa_sql::plan::UnifiedPlan,
         params: &[uqa_sql::SQLParam],
-    ) -> Result<uqa_sql::result::ExplainPhysicalPlan, uqa_sql::SQLError> {
+        costs: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_sql::result::ExplainPhysicalPlan>, uqa_sql::SQLError>
+    {
         let catalog = self.catalog_read_view();
         let resolution = self.session_execution_view().relation_name_resolution();
-        uqa_planner::explain::physical_plan(
+        uqa_planner::explain::physical_plan_with_control(
             uqa_planner::explain::PhysicalExplainContext {
                 retrieval: self,
                 statistics: self,
@@ -97,19 +125,20 @@ impl context::PhysicalExplainPlanning for Engine {
                     },
                     optimizer: &|plan| super::statement_planning::optimize_engine_plan(self, plan),
                 },
-                evaluate: &|expression, params| {
-                    uqa_execution::eval_scalar(
-                        expression,
-                        &uqa_execution::ScalarEvalContext::new(None, params),
-                    )
-                },
+                evaluate: &uqa_execution::eval_constant_scalar_with_control,
             },
             body,
             params,
+            costs,
+            control,
         )
     }
 }
 impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
+    fn io_context(&self) -> uqa_core::io_usage::IOContext {
+        self.runtime.diagnostics.io_context()
+    }
+
     fn regex_cache(&self) -> Option<std::sync::Arc<uqa_sql::expr::RegexCache>> {
         Some(self.session_regex_cache())
     }
@@ -180,12 +209,20 @@ impl Engine {
 }
 
 impl context::StatementDiagnostics for Engine {
+    fn diagnostics_control(
+        &self,
+    ) -> Result<uqa_storage::read_control::StorageReadControl, uqa_sql::SQLError> {
+        self.query_retention_control()
+    }
+
     fn diagnostics_scope(
         &self,
+        timing: Option<bool>,
+        io: uqa_core::io_usage::IOOptions,
     ) -> Result<uqa_execution::query::diagnostics::DiagnosticsScope, uqa_sql::SQLError> {
         self.runtime
             .diagnostics
-            .enter(self.query_retention_control()?)
+            .enter_with_options(self.query_retention_control()?, timing, io)
             .map_err(|error| {
                 uqa_execution::storage_errors::storage_error("retain EXPLAIN diagnostics", &error)
             })

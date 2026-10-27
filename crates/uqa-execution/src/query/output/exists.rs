@@ -21,10 +21,16 @@ pub fn collect_exists_key_operator<'a>(
     evaluator: SharedExpressionEvaluator<'a>,
 ) -> Result<QueryOutput, SQLError> {
     let internal_schema = operator.row_schema().clone();
-    let column_types = projections
-        .iter()
-        .map(|projection| evaluator.expression_type(&projection.expr, operator.row_schema()))
-        .collect::<Result<Vec<_>, _>>()?;
+    let (input, column_types) =
+        crate::physical::construction::OperatorBuild::run(operator, |operator| {
+            projections
+                .iter()
+                .map(|projection| {
+                    evaluator.expression_type(&projection.expr, operator.row_schema())
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+    operator = input;
     let direct_columns = projections
         .iter()
         .map(|projection| DirectColumnKey::compile(&projection.expr))

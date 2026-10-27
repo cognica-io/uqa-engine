@@ -24,24 +24,50 @@ pub fn substitute_expression_inputs(
     super::subqueries::rewrite_expression_with_arena(
         &mut plan.scalar,
         &mut plan.subqueries,
-        &mut |node, arena| {
-            let ScalarExpr::InternalColumn(column) = node else {
-                return Ok(());
-            };
-            let Some(input) = inputs.get(column) else {
-                return Ok(());
-            };
-            let mut replacement = input.scalar.clone();
-            let offset = arena.len();
-            super::rewrite_scalar_expression(&mut replacement, &mut |node| match node {
-                ScalarExpr::ScalarSubquery(id)
-                | ScalarExpr::Exists { subquery: id, .. }
-                | ScalarExpr::InSubquery { subquery: id, .. } => *id += offset,
-                _ => {}
-            });
-            arena.extend(input.subqueries.iter().cloned());
-            *node = replacement;
-            Ok(())
-        },
+        &mut |node, arena| substitute_input(node, arena, inputs),
     )
+}
+
+/// Apply the same input substitution to every native query/command arena.
+pub fn substitute_plan_inputs(
+    plan: &mut super::UnifiedPlan,
+    inputs: &BTreeMap<InternalColumnRef, ExpressionPlan>,
+) -> Result<(), SQLError> {
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    super::subqueries::rewrite_with_arenas(plan, &mut |node, arena| {
+        substitute_input(node, arena, inputs)
+    })
+}
+
+fn substitute_input(
+    node: &mut ScalarExpr,
+    arena: &mut Vec<super::QueryPlan>,
+    inputs: &BTreeMap<InternalColumnRef, ExpressionPlan>,
+) -> Result<(), SQLError> {
+    let ScalarExpr::InternalColumn(column) = node else {
+        return Ok(());
+    };
+    let Some(input) = inputs.get(column) else {
+        return Ok(());
+    };
+    *node = append_expression(arena, input.clone());
+    Ok(())
+}
+
+/// Transfer an expression into another scalar arena while retaining its selected query identities.
+pub(crate) fn append_expression(
+    arena: &mut Vec<super::QueryPlan>,
+    mut input: ExpressionPlan,
+) -> ScalarExpr {
+    let offset = arena.len();
+    super::rewrite_scalar_expression(&mut input.scalar, &mut |node| match node {
+        ScalarExpr::ScalarSubquery(id)
+        | ScalarExpr::Exists { subquery: id, .. }
+        | ScalarExpr::InSubquery { subquery: id, .. } => *id += offset,
+        _ => {}
+    });
+    arena.extend(input.subqueries);
+    input.scalar
 }

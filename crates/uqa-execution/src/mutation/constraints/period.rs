@@ -254,13 +254,18 @@ impl ParentScan<'_> {
         let parent = replacement
             .or_else(|| owned.as_ref().and_then(Option::as_ref))
             .ok_or_else(|| missing_document_error("PERIOD foreign-key parent scan", table, id))?;
-        if !self
-            .ordinary_columns
-            .iter()
-            .zip(self.ordinary_values)
-            .all(|(column, value)| parent.get(column).cloned().unwrap_or(Value::Null) == *value)
-        {
-            return Ok(None);
+        for (column, value) in self.ordinary_columns.iter().zip(self.ordinary_values) {
+            if !uqa_sql::expr::compare_typed_values_with_enum_catalog(
+                parent.get(column).unwrap_or(&Value::Null),
+                value,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+                Some(self.context.values),
+                None,
+            )?
+            .is_eq()
+            {
+                return Ok(None);
+            }
         }
         let period = parent
             .get(self.period_column)

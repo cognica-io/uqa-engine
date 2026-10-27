@@ -36,15 +36,45 @@ pub struct TableFunctionRows {
     pub rows: crate::PhysicalProjectRows,
 }
 
+fn validate_registered_columns(
+    name: &str,
+    declared: Option<&[String]>,
+    actual: &[String],
+) -> Result<(), SQLError> {
+    if declared.is_some_and(|declared| declared != actual) {
+        return Err(SQLError::TypeMismatch(format!(
+            "table function `{name}` returned columns different from its registered descriptor"
+        )));
+    }
+    Ok(())
+}
+
 impl TableFunctionRows {
     pub fn new(columns: Vec<String>, rows: crate::PhysicalProjectRows) -> Self {
         Self { columns, rows }
     }
 
+    /// Transfer rows to an already described source, closing a mismatched scan
+    /// before rejecting its descriptor.
+    pub(crate) fn into_rows(
+        mut self,
+        width: usize,
+        source: &str,
+    ) -> Result<crate::PhysicalProjectRows, SQLError> {
+        if self.columns.len() != width {
+            let error = SQLError::Internal(format!(
+                "{source} produced {} columns for a {width}-column source",
+                self.columns.len(),
+            ));
+            return Err(self.rows.fail(error));
+        }
+        Ok(self.rows)
+    }
+
     pub fn materialized(columns: Vec<String>, rows: Vec<Vec<Value>>) -> Self {
         Self::new(
             columns,
-            Box::new(
+            crate::SQLRowStream::new(
                 rows.into_iter()
                     .map(|values| Ok(crate::PhysicalRow::from_values(values))),
             ),
@@ -90,14 +120,13 @@ pub fn registered_table_function_rows(
 
 pub fn registered_table_function_row_stream(
     name: &str,
-    result: SQLTableFunctionStream,
+    mut result: SQLTableFunctionStream,
     _alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<TableFunctionRows, SQLError> {
     if result.columns.is_empty() {
-        return Err(SQLError::TypeMismatch(format!(
-            "table function `{name}` returned no columns"
-        )));
+        let error = SQLError::TypeMismatch(format!("table function `{name}` returned no columns"));
+        return Err(result.rows.fail(error));
     }
     let expected_width = result.columns.len();
     let columns = result
@@ -114,21 +143,15 @@ pub fn registered_table_function_row_stream(
     let function_name = name.to_string();
     Ok(TableFunctionRows::new(
         columns,
-        Box::new(
-            result
-                .rows
-                .map(move |values| -> crate::ExecResult<crate::PhysicalRow> {
-                    let values = values.map_err(crate::ExecError::from)?;
-                    if values.len() != expected_width {
-                        return Err(SQLError::TypeMismatch(format!(
+        result.rows.map_rows(move |values| {
+            if values.len() != expected_width {
+                return Err(SQLError::TypeMismatch(format!(
                 "table function `{function_name}` row has {} values for {expected_width} columns",
                 values.len()
-            ))
-                        .into());
-                    }
-                    Ok(crate::PhysicalRow::from_values(values))
-                }),
-        ),
+            )));
+            }
+            Ok(crate::PhysicalRow::from_values(values))
+        }),
     ))
 }
 

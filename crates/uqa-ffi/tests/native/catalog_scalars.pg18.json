@@ -1,0 +1,455 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "version",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA IF EXISTS c_scalar_reference CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA c_scalar_reference",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path=c_scalar_reference,pg_catalog",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN c_collated AS text COLLATE \"C\"",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '4294967295'::oid, '4294967295'::xid, ''::void IS NULL, octet_length(('x'::void)::text)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "xid",
+            "?column?",
+            "octet_length"
+          ],
+          "type_oids": [
+            26,
+            28,
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "4294967295",
+              "4294967295",
+              "f",
+              "0"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "xid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 28,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "?column?",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "octet_length",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 23,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT typname, typcollation FROM pg_type WHERE typname IN ('text','name','pg_node_tree','xml','void','oid','xid','_text','c_collated','_c_collated') ORDER BY typname",
+      "command_tags": [
+        "SELECT 10"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "typcollation"
+          ],
+          "type_oids": [
+            19,
+            26
+          ],
+          "rows": [
+            [
+              "_c_collated",
+              "950"
+            ],
+            [
+              "_text",
+              "100"
+            ],
+            [
+              "c_collated",
+              "950"
+            ],
+            [
+              "name",
+              "950"
+            ],
+            [
+              "oid",
+              "0"
+            ],
+            [
+              "pg_node_tree",
+              "100"
+            ],
+            [
+              "text",
+              "100"
+            ],
+            [
+              "void",
+              "0"
+            ],
+            [
+              "xid",
+              "0"
+            ],
+            [
+              "xml",
+              "0"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "typname",
+              "table_oid": 1247,
+              "column_attribute_number": 2,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "typcollation",
+              "table_oid": 1247,
+              "column_attribute_number": 29,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (1::regproc)::oid, (1::regprocedure)::oid, (1::regclass)::oid, (1::regnamespace)::oid, (1::regcollation)::oid, (1::regrole)::oid, (1::regtype)::oid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "oid",
+            "oid",
+            "oid",
+            "oid",
+            "oid",
+            "oid",
+            "oid"
+          ],
+          "type_oids": [
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1",
+              "1",
+              "1",
+              "1",
+              "1"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "oid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 26,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '<?xml version=\"1.0\"?><a>\u4e16\u754c</a><b/>'::xml::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "<?xml version=\"1.0\"?><a>\u4e16\u754c</a><b/>"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "text",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '<a>'::xml",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2200N",
+        "message": "invalid XML content"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT c::integer FROM (VALUES ('\\000'::\"char\"), ('\\001'::\"char\"), ('\\177'::\"char\"), ('\\200'::\"char\"), ('\\377'::\"char\")) AS chars(c)",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ],
+            [
+              "1"
+            ],
+            [
+              "127"
+            ],
+            [
+              "-128"
+            ],
+            [
+              "-1"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "c",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 23,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA c_scalar_reference CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    }
+  ]
+}

@@ -769,49 +769,54 @@ pub fn attach_lock_rows<'a, S: Clone + Send + Sync + 'static>(
     max_rows: Option<u64>,
     recheck_source: Option<LockRowsRecheckSource<S>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let Some(first_clause) = statement.locking.first() else {
-        return Ok(operator);
-    };
-    if ctes.row_lock_recheck_active() {
-        // A tuple-local recheck re-executes the plan below its own LockRows boundary. Locks for the candidate are already held, so nested locking is suppressed while lock identities keep flowing.
-        return Ok(operator);
-    }
-    validate_locking_block_shape(statement, first_clause.strength)?;
-    let Some(from) = statement.from.as_ref() else {
-        return Ok(operator);
-    };
-    let targets = resolve_row_locks(
-        context,
-        from,
-        &statement.locking,
-        statement.r#where.as_ref(),
-        params,
-        ctes,
-    )?;
-    if targets.is_empty() {
-        return Ok(operator);
-    }
-    let mut locked_relations = std::collections::BTreeSet::new();
-    for target in targets.iter().filter(|target| !target.identity_source) {
-        if locked_relations.insert(target.storage_name.clone()) {
-            context.session.lock_relation(
-                &target.storage_name,
-                crate::row_locks::RelationLockMode::RowShare,
-            )?;
+    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+        let Some(first_clause) = statement.locking.first() else {
+            return Ok(());
+        };
+        if ctes.row_lock_recheck_active() {
+            // A tuple-local recheck re-executes the plan below its own LockRows boundary. Locks for the candidate are already held, so nested locking is suppressed while lock identities keep flowing.
+            return Ok(());
         }
-    }
-    // The recheck context is shared per SQL statement through the context session, so every locking scope reaches it: top-level queries, DML sources, DML CTEs, CREATE TABLE AS, prepared execution, and EXPLAIN ANALYZE bodies.
-    let retry_cache = context.session.statement_row_lock_cache()?;
-    Ok(Box::new(LockRows::new(
-        operator,
-        context,
-        params,
-        targets,
-        max_rows,
-        !ctes.lock_identities.retain_after_lock,
-        Some(retry_cache),
-        recheck_source,
-    )))
+        validate_locking_block_shape(statement, first_clause.strength)?;
+        let Some(from) = statement.from.as_ref() else {
+            return Ok(());
+        };
+        let targets = resolve_row_locks(
+            context,
+            from,
+            &statement.locking,
+            statement.r#where.as_ref(),
+            params,
+            ctes,
+        )?;
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let mut locked_relations = std::collections::BTreeSet::new();
+        for target in targets.iter().filter(|target| !target.identity_source) {
+            if locked_relations.insert(target.storage_name.clone()) {
+                context.session.lock_relation(
+                    &target.storage_name,
+                    crate::row_locks::RelationLockMode::RowShare,
+                )?;
+            }
+        }
+        // The recheck context is shared per SQL statement through the context session, so every locking scope reaches it: top-level queries, DML sources, DML CTEs, CREATE TABLE AS, prepared execution, and EXPLAIN ANALYZE bodies.
+        let retry_cache = context.session.statement_row_lock_cache()?;
+        operator.wrap(|input| {
+            Box::new(LockRows::new(
+                input,
+                context,
+                params,
+                targets,
+                max_rows,
+                !ctes.lock_identities.retain_after_lock,
+                Some(retry_cache),
+                recheck_source,
+            ))
+        });
+        Ok(())
+    })
 }
 
 fn validate_lock_relation_aliases(

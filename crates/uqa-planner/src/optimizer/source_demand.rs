@@ -14,9 +14,12 @@ use uqa_sql::plan::AnalyzedSource;
 use uqa_sql::{RowSchema, SQLError};
 
 use super::OptimizerConfig;
-use crate::{AggregateClassifier, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan};
+use crate::{AggregateClassifier, CommandPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan};
 
 type Demand = BTreeSet<usize>;
+
+#[cfg(test)]
+mod tests;
 
 pub(super) fn prune(
     plan: &mut UnifiedPlan,
@@ -28,13 +31,10 @@ pub(super) fn prune(
         aggregates,
         ctes: Vec::new(),
     };
-    let mut result = Ok(());
-    plan.visit_query_roots_mut(&mut |query| {
-        if result.is_ok() {
-            result = context.query(query);
-        }
-    });
-    result
+    match plan {
+        UnifiedPlan::Query(query) => context.query(query),
+        UnifiedPlan::Command(command) => context.command(command),
+    }
 }
 
 struct Context<'a, 'catalog> {
@@ -50,6 +50,117 @@ struct CteDemand {
 }
 
 impl Context<'_, '_> {
+    fn command(&mut self, command: &mut CommandPlan) -> Result<(), SQLError> {
+        if !matches!(
+            command,
+            CommandPlan::Insert(_)
+                | CommandPlan::Update(_)
+                | CommandPlan::Delete(_)
+                | CommandPlan::Merge(_)
+        ) {
+            let mut result = Ok(());
+            command.visit_query_roots_mut(&mut |query| {
+                if result.is_ok() {
+                    result = self.query(query);
+                }
+            });
+            return result;
+        }
+        let owns_scope = !command.ctes().is_empty();
+        if owns_scope {
+            self.ctes.push(
+                command
+                    .ctes()
+                    .iter()
+                    .map(|cte| {
+                        (
+                            cte.name.clone(),
+                            CteDemand {
+                                positions: None,
+                                observed: false,
+                                visible: true,
+                            },
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        if let Some(ctes) = command.ctes_mut() {
+            for index in 0..ctes.len() {
+                let recursive = ctes[index].recursive;
+                for (position, cte) in ctes.iter().enumerate() {
+                    self.ctes
+                        .last_mut()
+                        .expect("command CTE scope")
+                        .get_mut(&cte.name)
+                        .expect("declared CTE")
+                        .visible = recursive || position < index;
+                }
+                match &mut ctes[index].body {
+                    crate::CtePlanBody::Query(query) => self.query(query)?,
+                    crate::CtePlanBody::Command(command) => self.command(command)?,
+                }
+            }
+        }
+        if owns_scope {
+            for demand in self
+                .ctes
+                .last_mut()
+                .expect("command CTE scope")
+                .values_mut()
+            {
+                demand.visible = true;
+            }
+        }
+        for query in command.query_inputs_mut() {
+            self.query(query)?;
+        }
+        if let Some(source) = command.source_input_mut() {
+            self.source_queries(source)?;
+        }
+        if owns_scope {
+            self.ctes.pop();
+        }
+        Ok(())
+    }
+
+    fn source_queries(&mut self, source: &mut SourcePlan) -> Result<(), SQLError> {
+        match source {
+            SourcePlan::Subquery { body, .. } => self.query(body)?,
+            SourcePlan::Table {
+                name,
+                executable_query: Some(body),
+                ..
+            } => {
+                if uqa_sql::semantics::cte_reference_name(name)
+                    .is_some_and(|name| self.visible_cte(&name))
+                {
+                    self.query(body)?;
+                } else {
+                    Context {
+                        config: self.config,
+                        aggregates: self.aggregates,
+                        ctes: Vec::new(),
+                    }
+                    .query(body)?;
+                }
+            }
+            SourcePlan::Join { left, right, .. } => {
+                self.source_queries(left)?;
+                self.source_queries(right)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn visible_cte(&self, name: &str) -> bool {
+        self.ctes
+            .iter()
+            .rev()
+            .any(|scope| scope.get(name).is_some_and(|cte| cte.visible))
+    }
+
     fn query(&mut self, query: &mut QueryPlan) -> Result<(), SQLError> {
         let order = self.push_ctes(query)?;
         let subqueries = match &mut query.root {
@@ -154,10 +265,13 @@ impl Context<'_, '_> {
                             query,
                             &|position| positions.contains(&position),
                             None,
-                            self.aggregates,
-                            routines.map(|context| context.routines),
-                            routines.map(|context| context.volatility),
-                        );
+                            super::OutputPruningContext {
+                                aggregates: self.aggregates,
+                                routines: routines.map(|context| context.routines),
+                                volatility: routines.map(|context| context.volatility),
+                                visible_ctes: &|name| self.visible_cte(name),
+                            },
+                        )?;
                     }
                     self.query(query)?;
                 }
@@ -168,13 +282,7 @@ impl Context<'_, '_> {
                             demand.positions = None;
                         }
                     }
-                    let mut result = Ok(());
-                    command.visit_query_roots_mut(&mut |query| {
-                        if result.is_ok() {
-                            result = self.query(query);
-                        }
-                    });
-                    result?;
+                    self.command(command)?;
                 }
             }
         }
@@ -209,34 +317,65 @@ impl Context<'_, '_> {
             }
         }
         match source {
-            SourcePlan::Subquery { body, .. }
-            | SourcePlan::Table {
+            SourcePlan::Subquery {
+                body,
+                captured_output,
+                ..
+            } => {
+                self.outputs(body, analysis, demand, *captured_output)?;
+                self.query(body)
+            }
+            SourcePlan::Table {
+                name,
                 executable_query: Some(body),
                 ..
             } => {
-                self.outputs(body, analysis, demand);
-                self.query(body)
+                if uqa_sql::semantics::cte_reference_name(name)
+                    .is_some_and(|name| self.visible_cte(&name))
+                {
+                    self.outputs(body, analysis, demand, None)?;
+                    self.query(body)
+                } else {
+                    let mut context = Context {
+                        config: self.config,
+                        aggregates: self.aggregates,
+                        ctes: Vec::new(),
+                    };
+                    context.outputs(body, analysis, demand, None)?;
+                    context.query(body)
+                }
             }
             SourcePlan::Join { .. } => self.join(source, analysis, demand, subqueries),
             _ => Ok(()),
         }
     }
 
-    fn outputs(&self, query: &mut QueryPlan, analysis: &AnalyzedSource, demand: &Demand) {
+    fn outputs(
+        &self,
+        query: &mut QueryPlan,
+        analysis: &AnalyzedSource,
+        demand: &Demand,
+        captured: Option<uqa_sql::ast::InternalRelationId>,
+    ) -> Result<(), SQLError> {
         let routines = self.config.routine_inlining.as_ref();
         super::derived_projection::prune_positions(
             query,
             &|position| {
-                analysis
-                    .schema
-                    .slot(position)
+                captured
+                    .map_or_else(
+                        || analysis.schema.slot(position),
+                        |relation| analysis.schema.internal_slot(relation.column(position)),
+                    )
                     .is_some_and(|slot| demand.contains(&slot))
             },
             None,
-            self.aggregates,
-            routines.map(|context| context.routines),
-            routines.map(|context| context.volatility),
-        );
+            super::OutputPruningContext {
+                aggregates: self.aggregates,
+                routines: routines.map(|context| context.routines),
+                volatility: routines.map(|context| context.volatility),
+                visible_ctes: &|name| self.visible_cte(name),
+            },
+        )
     }
 
     fn join(
@@ -252,6 +391,7 @@ impl Context<'_, '_> {
             on,
             using,
             natural,
+            lateral,
             ..
         } = source
         else {
@@ -296,7 +436,7 @@ impl Context<'_, '_> {
             Some(&children.1),
             subqueries,
             &[],
-            false,
+            *lateral,
         );
         self.source(left, &children.0, &left_demand, subqueries)
     }

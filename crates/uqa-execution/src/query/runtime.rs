@@ -7,8 +7,8 @@
 //! Runtime services consumed by physical query operators and host callbacks.
 
 use crate::functions::{
-    RegisteredSQLFunction, SQLAggregateFunction, SQLFunctionOptions, SQLScalarFunction,
-    SQLTableFunction,
+    RegisteredSQLFunction, SQLAggregateFactory, SQLFunctionContext, SQLFunctionOptions,
+    SQLScalarFunction, SQLTableFunction,
 };
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
@@ -25,12 +25,13 @@ pub trait QueryMemorySettings: Send + Sync {
 pub struct QueryRuntimeView<'a> {
     pub diagnostics: &'a super::diagnostics::QueryDiagnostics,
     pub cancellation: &'a CancellationToken,
+    pub function_context: &'a SQLFunctionContext,
     pub settings: &'a dyn QueryMemorySettings,
     pub scalar_functions:
         &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLScalarFunction>>>,
     pub table_functions: &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>,
     pub aggregate_functions:
-        &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>,
+        &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFactory>>>,
     pub notices: &'a super::NoticeQueue,
 }
 
@@ -86,7 +87,7 @@ impl QueryRuntimeView<'_> {
     pub fn lookup_aggregate_function(
         &self,
         name: &str,
-    ) -> Option<RegisteredSQLFunction<dyn SQLAggregateFunction>> {
+    ) -> Option<RegisteredSQLFunction<dyn SQLAggregateFactory>> {
         self.aggregate_functions
             .read()
             .get(&name.to_ascii_lowercase())

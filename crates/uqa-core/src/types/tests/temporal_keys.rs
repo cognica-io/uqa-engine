@@ -8,6 +8,69 @@
 
 use super::TemporalValue;
 
+#[test]
+fn predecessor_reservations_retain_unix_epochs_and_omit_unrepresentable_values() {
+    use crate::TemporalInfinity;
+    for (value, unix) in [
+        (TemporalValue::parse_timestamp("1970-01-01").unwrap(), 0_i64),
+        (
+            TemporalValue::parse_timestamp("2000-01-01").unwrap(),
+            crate::POSTGRES_EPOCH_MICROS,
+        ),
+        (TemporalInfinity::Negative.timestamp(), i64::MIN),
+        (TemporalInfinity::Positive.timestamp(), i64::MIN + 1),
+    ] {
+        for wrapped in [false, true] {
+            let mut bytes = Vec::new();
+            let write = |part: &[u8]| {
+                bytes.extend_from_slice(part);
+                Ok::<_, ()>(())
+            };
+            let represented = if wrapped {
+                value.write_legacy_reservation_key(write)
+            } else {
+                value.write_unix_reservation_key(write)
+            }
+            .unwrap();
+            assert!(represented);
+            let mut expected = vec![3];
+            expected.extend_from_slice(&unix.to_be_bytes());
+            assert_eq!(bytes, expected);
+        }
+    }
+    for value in [
+        TemporalValue::parse_timestamp("294276-12-31 23:59:59.999999").unwrap(),
+        TemporalValue::parse_time_tz("00:00:00+00:00:01").unwrap(),
+    ] {
+        for wrapped in [false, true] {
+            let mut emitted = false;
+            let write = |_: &[u8]| {
+                emitted = true;
+                Ok::<_, ()>(())
+            };
+            let represented = if wrapped {
+                value.write_legacy_reservation_key(write)
+            } else {
+                value.write_unix_reservation_key(write)
+            }
+            .unwrap();
+            assert!(!represented && !emitted);
+        }
+    }
+    let value = TemporalValue::parse_time_tz("13:00:00+01").unwrap();
+    let mut bytes = Vec::new();
+    assert!(value
+        .write_unix_reservation_key(|part| {
+            bytes.extend_from_slice(part);
+            Ok::<_, ()>(())
+        })
+        .unwrap());
+    let mut expected = vec![2];
+    expected.extend_from_slice(&43_200_000_000_i128.to_be_bytes());
+    expected.extend_from_slice(&(-60_i64).to_be_bytes());
+    assert_eq!(bytes, expected);
+}
+
 fn equality_key(value: &TemporalValue) -> Vec<u8> {
     let mut bytes = Vec::new();
     value
@@ -122,21 +185,29 @@ fn temporal_comparison_keys_follow_native_order_and_sink_failure() {
         },
         TemporalValue::TimeTz {
             micros: 0,
-            offset_minutes: 60,
+            offset_seconds: 3600,
         },
         TemporalValue::TimeTz {
             micros: 43_200_000_000,
-            offset_minutes: 0,
+            offset_seconds: 0,
         },
         TemporalValue::TimeTz {
             micros: 46_800_000_000,
-            offset_minutes: 60,
+            offset_seconds: 3600,
         },
-        TemporalValue::Timestamp { micros: i64::MIN },
-        TemporalValue::Timestamp { micros: 0 },
-        TemporalValue::Timestamp { micros: i64::MAX },
-        TemporalValue::TimestampTz { micros: i64::MIN },
-        TemporalValue::TimestampTz { micros: i64::MAX },
+        TemporalValue::Timestamp {
+            postgres_micros: i64::MIN,
+        },
+        TemporalValue::Timestamp { postgres_micros: 0 },
+        TemporalValue::Timestamp {
+            postgres_micros: i64::MAX,
+        },
+        TemporalValue::TimestampTz {
+            postgres_micros: i64::MIN,
+        },
+        TemporalValue::TimestampTz {
+            postgres_micros: i64::MAX,
+        },
         TemporalValue::Interval {
             months: i32::MIN,
             days: i32::MIN,

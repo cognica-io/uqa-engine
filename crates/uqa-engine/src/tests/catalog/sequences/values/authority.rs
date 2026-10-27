@@ -253,7 +253,11 @@ fn sequence_value_snapshots_preserve_private_roles_sequences_and_temporary_entri
             assert_eq!(engine.nextval("peer_ids").unwrap(), 1);
             sql(&engine, "ROLLBACK TO before_private");
             assert!(engine.nextval("private_ids").is_err());
+            assert!(engine.transaction_failed());
+            sql(&engine, "ROLLBACK TO before_private");
             assert!(engine.nextval("temp_ids").is_err());
+            assert!(engine.transaction_failed());
+            sql(&engine, "ROLLBACK TO before_private");
             assert_eq!(engine.nextval("peer_ids").unwrap(), 2);
             sql(&engine, "ROLLBACK");
             assert_eq!(peer.nextval("peer_ids").unwrap(), 3);

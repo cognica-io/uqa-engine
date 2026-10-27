@@ -385,7 +385,11 @@ pub fn find_foreign_key_parent(
             let Some(document) = context.reads.get_document(&physical_table, doc_id)? else {
                 continue;
             };
-            if foreign_key_parent_values(fk, &document, &lookup.comparison)? == lookup.values {
+            if index_keys::key_values_equal(
+                &foreign_key_parent_values(fk, &document, &lookup.comparison)?,
+                &lookup.values,
+                context.values,
+            )? {
                 return Ok(Some(PhysicalDocumentIdentity {
                     table: physical_table.clone(),
                     doc_id,
@@ -471,6 +475,34 @@ fn validate_not_null_columns(
     }
 
     Ok(())
+}
+
+/// A storage patch checks NULL writes after row selection and locking. Reconstruct a complete image only when a NOT NULL diagnostic needs it, without reevaluating assignments through the general UPDATE path.
+pub(super) fn validate_patch_not_null(
+    context: ConstraintContext<'_>,
+    table: &str,
+    doc_id: uqa_core::DocId,
+    definitions: &[uqa_sql::ast::ColumnDef],
+    columns: &[String],
+    updates: &Document,
+) -> Result<(), SQLError> {
+    if !definitions
+        .iter()
+        .any(|column| column.not_null && matches!(updates.get(&column.name), Some(Value::Null)))
+    {
+        return Ok(());
+    }
+    let mut document = context.reads.get_document(table, doc_id)?.ok_or_else(|| {
+        SQLError::Internal("locked UPDATE target disappeared before constraint validation".into())
+    })?;
+    document.extend(
+        updates
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    let relation = statement_relation(context, table)?;
+    let statement = ConstraintStatement::new(&relation, columns);
+    validate_not_null_columns(context, Some(statement), definitions, table, &document)
 }
 
 /// Lock the referenced row that `local_values` names `FOR KEY SHARE`, following a delete and reinsert or a key change that a wait reveals, and report whether the row exists. `PostgreSQL` 18 holds the lock until the referencing transaction ends; after a wait the READ COMMITTED snapshot is refreshed until the row carrying the key is locked.

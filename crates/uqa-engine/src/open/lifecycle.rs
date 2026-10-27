@@ -54,14 +54,18 @@ impl Engine {
         let session_id = row_locks.allocate_session();
         let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
         let client_level = session.state.client_level();
-        let runtime = super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT, client_level);
+        let runtime = super::QueryRuntime::new(
+            super::SQL_FUNCTION_DEPTH_LIMIT,
+            client_level,
+            session.state.io_timing(),
+        );
         session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::memory(),
             durable: Arc::new(super::DurableCatalogState::new()),
+            extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
-            extensions: super::RuntimeExtensions::new(),
-            epochs: super::EpochCoordinator::new(),
+            epochs: Arc::new(super::EpochCoordinator::new()),
             runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
@@ -113,35 +117,8 @@ impl Engine {
     /// [`Engine::open_compressed_encrypted`] to choose compression for
     /// a new database.
     pub fn open_auto(path: &Path, key: Option<&str>) -> Result<Self, SQLiteError> {
-        use uqa_storage_sqlite::DatabaseFileFormat;
-        let key = match key {
-            Some("") => return Err(SQLiteError::EmptyEncryptionKey),
-            other => other,
-        };
-        match uqa_storage_sqlite::detect_database_file_format(path)? {
-            DatabaseFileFormat::Missing => match key {
-                Some(key) => Self::open_encrypted(path, key),
-                None => Self::open(path),
-            },
-            DatabaseFileFormat::PlainSQLite => match key {
-                Some(_) => Err(SQLiteError::NotEncrypted),
-                None => Self::open(path),
-            },
-            DatabaseFileFormat::CompressedContainer { encrypted: true } => match key {
-                Some(key) => {
-                    Self::open_compressed_encrypted(path, key, SQLiteCompressionOptions::default())
-                }
-                None => Err(SQLiteError::EncryptionKeyRequired),
-            },
-            DatabaseFileFormat::CompressedContainer { encrypted: false } => match key {
-                Some(_) => Err(SQLiteError::NotEncrypted),
-                None => Self::open_compressed(path, SQLiteCompressionOptions::default()),
-            },
-            DatabaseFileFormat::Unrecognized => match key {
-                Some(key) => Self::open_encrypted(path, key),
-                None => Err(SQLiteError::EncryptionKeyRequired),
-            },
-        }
+        let connection = ManagedConnection::open_auto(path, key)?;
+        Self::open_with_connection(&connection)
     }
 
     /// SQLCipher-backed engine. Applies `key` before any catalog
@@ -224,6 +201,12 @@ impl Engine {
     pub fn new_session(&self) -> StorageBackendResult<Self> {
         let _statement = self.lock_statement_gate();
         self.new_sibling_session(false, None)
+    }
+
+    /// Whether these sessions use the same database identity. This reuses the provider-identified coordinator shared by independent opens and sibling sessions; memory engines have independent identities. Providers without stable storage identity can share only through their retained provider or backend owner.
+    #[must_use]
+    pub fn shares_database_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.row_locks, &other.row_locks)
     }
 
     /// Restore an independent internal read view without entering the source statement or acquiring another automatic-maintenance client lease.
@@ -310,12 +293,12 @@ impl Engine {
                 )
             })?
             .change_version()?;
+        let epochs =
+            Arc::get_mut(&mut session.epochs).expect("new session owns its catalog epoch state");
         if storage_version_before_restore == storage_version_after_restore {
-            session
-                .epochs
-                .share_published_from_at(&self.epochs, observed_epochs);
+            epochs.share_published_from_at(&self.epochs, observed_epochs);
         } else {
-            session.epochs.share_published_from(&self.epochs);
+            epochs.share_published_from(&self.epochs);
         }
         // A commit that raced the load advanced a shared publication beyond
         // the generation or storage version captured before the session
@@ -323,6 +306,13 @@ impl Engine {
         // Catalog cells keep independent mutable owners over shared immutable
         // values, so a writer cannot expose uncommitted definitions to siblings.
         session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
+        session
+            .extensions
+            .functions
+            .attach(&session.session, &session.runtime.statement_gate);
+        if internal_read {
+            session.runtime.function_context = Arc::clone(&self.runtime.function_context);
+        }
         if !retained {
             session.synchronize_table_catalog()?;
             session.synchronize_table_data()?;
@@ -423,14 +413,15 @@ impl Engine {
             super::SQL_FUNCTION_DEPTH_LIMIT,
             cancellation,
             client_level,
+            session.state.io_timing(),
         );
         session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: Arc::new(super::DurableCatalogState::new()),
+            extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
-            extensions: super::RuntimeExtensions::new(),
-            epochs: super::EpochCoordinator::new(),
+            epochs: Arc::new(super::EpochCoordinator::new()),
             runtime,
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,

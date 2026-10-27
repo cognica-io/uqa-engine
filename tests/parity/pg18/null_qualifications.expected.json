@@ -1,0 +1,255 @@
+{
+  "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "name": "where",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output(n) SELECT n FROM qual_input WHERE nextval('qual_ticks') > 0 AND NULL::boolean",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "between",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output(n) SELECT n FROM qual_input WHERE nextval('qual_ticks') BETWEEN SYMMETRIC NULL::bigint AND 100",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "update",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "UPDATE qual_input SET n=n+10 WHERE nextval('qual_ticks') > 0 AND NULL::boolean",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "delete",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "DELETE FROM qual_input WHERE nextval('qual_ticks') > 0 AND NULL::boolean",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "having",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output(n) SELECT count(*)::integer FROM qual_input HAVING nextval('qual_ticks') > 0 AND NULL::boolean",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "join",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output(n) SELECT i.n FROM qual_input i JOIN (VALUES(1),(2)) s(n) ON (nextval('qual_ticks') > 0 AND NULL::boolean)",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "or",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output(n) SELECT n FROM qual_input WHERE nextval('qual_ticks') > 0 OR NULL::boolean",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 3,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": [
+          [
+            1,
+            null
+          ],
+          [
+            2,
+            null
+          ],
+          [
+            3,
+            null
+          ]
+        ]
+      }
+    },
+    {
+      "name": "projection",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output SELECT n,(nextval('qual_ticks') > 0 AND NULL::boolean) FROM qual_input",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 3,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": [
+          [
+            1,
+            null
+          ],
+          [
+            2,
+            null
+          ],
+          [
+            3,
+            null
+          ]
+        ]
+      }
+    },
+    {
+      "name": "boolean-test",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output(n) SELECT n FROM qual_input WHERE (nextval('qual_ticks') > 0 AND NULL::boolean) IS NOT FALSE",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 3,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": [
+          [
+            1,
+            null
+          ],
+          [
+            2,
+            null
+          ],
+          [
+            3,
+            null
+          ]
+        ]
+      }
+    },
+    {
+      "name": "not",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_output(n) SELECT n FROM qual_input WHERE NOT (nextval('qual_ticks') > 0 AND NULL::boolean)",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 3,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "conflict",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "INSERT INTO qual_input VALUES(1) ON CONFLICT(n) DO UPDATE SET n=10 WHERE nextval('qual_ticks') > 0 AND NULL::boolean",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "merge-join",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "MERGE INTO qual_input i USING (VALUES(1)) s(n) ON (nextval('qual_ticks') > 0 AND NULL::boolean) WHEN MATCHED THEN UPDATE SET n=10",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "merge-when",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); ",
+      "operation": "MERGE INTO qual_input i USING (VALUES(1)) s(n) ON i.n=s.n WHEN MATCHED AND (nextval('qual_ticks') > 0 AND NULL::boolean) THEN UPDATE SET n=10",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3
+        ],
+        "output": null
+      }
+    },
+    {
+      "name": "rule",
+      "setup": "CREATE TEMP SEQUENCE qual_ticks; CREATE TEMP TABLE qual_input(n integer PRIMARY KEY); INSERT INTO qual_input VALUES(1),(2),(3); CREATE TEMP TABLE qual_output(n integer,b boolean); CREATE RULE route AS ON INSERT TO qual_input WHERE (nextval('qual_ticks') BETWEEN SYMMETRIC NULL::bigint AND 100) DO ALSO INSERT INTO qual_output(n) VALUES(NEW.n)",
+      "operation": "INSERT INTO qual_input VALUES(4)",
+      "observe": "SELECT json_build_object('calls',(SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM qual_ticks),'input',(SELECT json_agg(n ORDER BY n) FROM qual_input),'output',(SELECT json_agg(json_build_array(n,b) ORDER BY n) FROM qual_output))",
+      "expected": {
+        "calls": 0,
+        "input": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "output": null
+      }
+    }
+  ]
+}

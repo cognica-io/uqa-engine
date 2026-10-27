@@ -82,16 +82,25 @@ pub fn single_row_values_query(
             alias: None,
         });
     }
+    let values_input = crate::plan::RuleValuesInput {
+        width: projections.len(),
+        inline: true,
+        defaults: Vec::new(),
+        unresolved: uqa_core::memory::OwnedSet::new(),
+        written: (0..projections.len()).collect(),
+    };
     let source = QueryPlan {
         analyzed_output: None,
         analyzed_source: None,
         analyzed_grouping: None,
+        relation_privilege_subject: None,
         relations_bound: insert.relations_bound,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
+            deferred_outer_rewrites: Vec::new(),
             windows: Vec::new(),
             projections,
-            privilege_columns: std::collections::BTreeSet::default(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             from: None,
             r#where: None,
             compute: ComputePlan::Project,
@@ -114,6 +123,7 @@ pub fn single_row_values_query(
     expanded.rows = Vec::new();
     expanded.columns = columns;
     expanded.source = Some(Box::new(source));
+    expanded.rule_values_input = Some(values_input);
     Ok(Some(expanded))
 }
 

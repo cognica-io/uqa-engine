@@ -58,12 +58,8 @@ struct PrefixState {
 }
 impl PrefixState {
     fn finish(&mut self) -> ExecResult<()> {
-        let result = match self.input.as_mut() {
-            Some(input) if std::mem::take(&mut self.opened) => input.close(),
-            _ => Ok(()),
-        };
-        self.input = None;
-        result
+        self.opened = false;
+        self.input.take().map_or(Ok(()), |mut input| input.close())
     }
     fn extend(&mut self, demand: NonZeroUsize) -> ExecResult<()> {
         if let Some(error) = &self.failure {
@@ -99,6 +95,18 @@ impl PrefixState {
             self.rows.push(&row)?;
         }
         Ok(())
+    }
+}
+
+impl SharedPrefix {
+    /// End the producer at its owning query boundary, independently of how many readers still retain its cached rows.
+    pub(crate) fn close(&self) -> ExecResult<()> {
+        let mut state = self.state.lock();
+        state.finish().map_err(|error| {
+            let error = physical_exec_error(error);
+            state.failure = Some(error.clone());
+            ExecError::SQL(error)
+        })
     }
 }
 impl Drop for PrefixState {

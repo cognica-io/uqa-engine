@@ -38,7 +38,7 @@ pub fn create_domain(
 ) -> Result<(), SQLError> {
     let owner = context.creation.bind_owner()?;
     context.writer.prepare_writer()?;
-    definition.name = context.creation.persistent_name(&definition.name)?;
+    definition.name = context.creation.object_name(&definition.name)?;
     let shell = context.shells.retain(&definition.name, owner.identity())?;
     // DefineDomain: a generated array holding the name moves aside; any other type is a conflict.
     super::types::arrays::displace_array_type(

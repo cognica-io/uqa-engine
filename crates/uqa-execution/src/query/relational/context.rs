@@ -29,6 +29,8 @@ pub trait QueryExpressionFactory<S: Clone + 'static>: Sync {
 
 /// Attach the locking boundary using the caller's relation and transaction lock services.
 pub trait RowLockOperatorFactory<S: Clone + 'static>: Sync {
+    /// Accept ownership of the input, including closing it before returning a
+    /// construction error. Successful construction transfers it to the result.
     fn attach_lock_rows<'a>(
         &'a self,
         operator: Box<dyn PhysicalOperator + 'a>,
@@ -76,13 +78,16 @@ pub fn build_set_projection<'a, S: Clone + 'static>(
     evaluator: SharedExpressionEvaluator<'a>,
     output: SetProjectionOutput,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    let (operator, work_mem) = crate::physical::construction::OperatorBuild::run(operator, |_| {
+        context.runtime.work_mem_bytes()
+    })?;
     crate::query::set_projection::build_set_projection(
         operator,
         context.catalog,
         context.expression_scope(ctes.clone()),
         params,
         evaluator,
-        context.runtime.work_mem_bytes()?,
+        work_mem,
         output,
     )
 }

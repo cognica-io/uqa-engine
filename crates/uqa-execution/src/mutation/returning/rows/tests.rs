@@ -165,3 +165,58 @@ fn returning_rows_release_spills_after_cancellation_and_write_failure() {
     assert_eq!(std::fs::read(&invalid).unwrap(), b"preserve");
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
 }
+
+#[test]
+fn immediate_returning_delivery_retains_no_rows_and_propagates_stop_or_error() {
+    use crate::query::consumer::{QueryConsumerControl, QueryRowConsumer};
+    use std::cell::Cell;
+    struct Receiver {
+        calls: Cell<usize>,
+        fail: bool,
+    }
+    impl QueryRowConsumer for Receiver {
+        fn begin(&self, _: &[String], _: &RowSchema) -> Result<(), SQLError> {
+            Ok(())
+        }
+        fn consume(&self, row: OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {
+            self.calls.set(self.calls.get() + 1);
+            assert_eq!(row.schema.column_type(0), Some(&uqa_sql::ColumnType::Text));
+            if self.fail {
+                Err(SQLError::Routine {
+                    sqlstate: "22000".into(),
+                    message: "receiver failure".into(),
+                })
+            } else {
+                Ok(QueryConsumerControl::Stop)
+            }
+        }
+    }
+    let schema = RowSchema::with_types(vec!["value".into()], vec![Some(uqa_sql::ColumnType::Text)]);
+    for fail in [false, true] {
+        let receiver = Receiver {
+            calls: Cell::new(0),
+            fail,
+        };
+        let destination =
+            crate::mutation::returning::ReturningDestination::new(&receiver, &schema).unwrap();
+        let mut rows = ReturningRows::default();
+        let allocation = allocation_counter::measure(|| {
+            for _ in 0..64 {
+                let row = OwnedPhysicalRow::new(
+                    schema.clone(),
+                    PhysicalRow::from_values(vec![Value::Str("x".repeat(1024 * 1024))]),
+                );
+                let result = rows.push_to(row, Some(destination));
+                if fail {
+                    assert_eq!(result.unwrap_err().sqlstate(), Some("22000"));
+                    break;
+                }
+                result.unwrap();
+            }
+        });
+        assert_eq!(receiver.calls.get(), 1);
+        assert!(rows.is_empty());
+        assert!(rows.into_batches().unwrap().next().is_none());
+        assert!(allocation.bytes_max < 3 * 1024 * 1024, "{allocation:?}");
+    }
+}

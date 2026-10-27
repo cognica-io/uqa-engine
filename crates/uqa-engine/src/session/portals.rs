@@ -590,7 +590,9 @@ impl Engine {
         let mut runtime = QueryRuntime::new(
             self.sql_function_depth_limit(),
             self.session.state.client_level(),
+            self.session.state.io_timing(),
         );
+        runtime.function_context = std::sync::Arc::clone(&self.runtime.function_context);
         runtime.diagnostics = self.runtime.diagnostics.fork();
         runtime.statement_gate = std::sync::Arc::clone(&self.runtime.statement_gate);
         runtime.cancellation = self.runtime.cancellation.clone();
@@ -602,7 +604,7 @@ impl Engine {
             durable: std::sync::Arc::clone(&self.durable),
             session: std::sync::Arc::clone(&self.session),
             extensions: RuntimeExtensions::shared_from(&self.extensions),
-            epochs,
+            epochs: std::sync::Arc::new(epochs),
             runtime,
             row_locks: std::sync::Arc::clone(&self.row_locks),
             statistics: std::sync::Arc::clone(&self.statistics),

@@ -1,0 +1,1062 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "action": "sql",
+      "sql": "SET TIME ZONE 'UTC'",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "timezone",
+      "sql": "SHOW TIME ZONE",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "timezone",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "TimeZone",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "timezone",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SHOW",
+        "columns": [
+          [
+            "TimeZone",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "UTC"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "settings",
+      "sql": "SHOW ALL",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "settings",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "name",
+            25
+          ],
+          [
+            "setting",
+            25
+          ],
+          [
+            "description",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SET work_mem = '4MB'",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SET plan_cache_mode = force_custom_plan",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "typed_show",
+      "sql": "SHOW work_mem",
+      "types": [
+        23
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "typed_show",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "work_mem",
+            25
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "typed_show",
+      "parameters": [
+        "4"
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SHOW",
+        "columns": [
+          [
+            "work_mem",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4MB"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SELECT generic_plans,custom_plans FROM pg_prepared_statements WHERE statement='SHOW work_mem'",
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "generic_plans",
+            20
+          ],
+          [
+            "custom_plans",
+            20
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1",
+            "0"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "snapshot_show",
+      "sql": "SHOW work_mem",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "snapshot_fetch",
+      "sql": "FETCH ALL FROM absent",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SET",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DECLARE c CURSOR FOR SELECT 1::integer AS old",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DECLARE CURSOR",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "fetch",
+      "sql": "FETCH ALL FROM c",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "fetch",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "old",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "CLOSE c",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CLOSE CURSOR",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DECLARE c CURSOR FOR SELECT 'new'::text AS different",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DECLARE CURSOR",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "fetch",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "FETCH 1",
+        "columns": [
+          [
+            "different",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "new"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "fetch",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "old",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DISCARD PLANS",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DISCARD PLANS",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "fetch",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "FETCH 0",
+        "columns": [
+          [
+            "different",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "fetch",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "old",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "move",
+      "sql": "MOVE ALL FROM c",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "move",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "move",
+      "parameters": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "MOVE 0",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "late_fetch",
+      "sql": "FETCH ALL FROM late",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "late_fetch",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DECLARE late CURSOR FOR SELECT 9::integer AS number",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DECLARE CURSOR",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "late_fetch",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "FETCH 1",
+        "columns": [
+          [
+            "number",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "9"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "late_fetch",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "COMMIT",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "COMMIT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "PREPARE inner_query AS SELECT 1::integer AS old",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "PREPARE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "execute",
+      "sql": "EXECUTE inner_query",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "execute",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "old",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "execute",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "old",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "1"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DEALLOCATE inner_query",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DEALLOCATE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "PREPARE inner_query AS SELECT 'new'::text AS different",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "PREPARE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "execute",
+      "parameters": [],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "different",
+            25
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "new"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "execute",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "old",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DEALLOCATE inner_query",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DEALLOCATE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "late_execute",
+      "sql": "EXECUTE absent_query",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "late_execute",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "late_execute",
+      "parameters": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "26000",
+        "message": "prepared statement \"absent_query\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "PREPARE parameter_query(integer) AS SELECT $1 AS value",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "PREPARE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "raw_execute",
+      "sql": "EXECUTE parameter_query($1)",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "raw_execute",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "raw_execute",
+      "parameters": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "typed_execute",
+      "sql": "EXECUTE parameter_query($1)",
+      "types": [
+        23
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "typed_execute",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "typed_execute",
+      "parameters": [
+        "4"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "42P02",
+        "message": "there is no parameter $1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "literal_execute",
+      "sql": "EXECUTE parameter_query(4)",
+      "types": [
+        23
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "describe",
+      "name": "literal_execute",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "literal_execute",
+      "parameters": [
+        "5"
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "4"
+          ]
+        ],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DEALLOCATE parameter_query",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DEALLOCATE",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "missing_show",
+      "sql": "SHOW missing_prepared_setting",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "42704",
+        "message": "unrecognized configuration parameter \"missing_prepared_setting\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    }
+  ]
+}

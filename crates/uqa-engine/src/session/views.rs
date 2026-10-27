@@ -8,9 +8,11 @@
 
 use super::{Engine, SQLError, StoredView, StoredViewKind};
 #[cfg(test)]
-use super::{QueryPlan, RelationIdentity, StorageBackendError, StorageBackendResult};
+use super::{QueryPlan, StorageBackendError, StorageBackendResult};
 #[cfg(test)]
 use uqa_sql::binding::view_dependencies::restoration::bind_stored_view_relations;
+#[cfg(test)]
+use uqa_storage::RelationIdentity;
 
 impl Engine {
     #[cfg(test)]
@@ -57,12 +59,20 @@ impl Engine {
         &self,
         name: &str,
     ) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
-        self.view_definition(name)?
-            .map(|view| self.stored_view_schema(&view))
+        self.with_view_definition(name, |view| self.stored_view_schema(view))?
             .transpose()
     }
 
     pub(crate) fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError> {
+        self.with_view_definition(name, Clone::clone)
+    }
+
+    /// Select the existing immutable catalog owner, then lend the definition without holding a registry lock through the reader.
+    pub(crate) fn with_view_definition<R>(
+        &self,
+        name: &str,
+        read: impl FnOnce(&StoredView) -> R,
+    ) -> Result<Option<R>, SQLError> {
         let Some(resolved) = self
             .try_resolve_view_name(name)
             .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?
@@ -71,10 +81,11 @@ impl Engine {
         };
         let relation = Self::resolved_relation_identity(&resolved)
             .map_err(|err| SQLError::Internal(format!("resolve view `{resolved}`: {err}")))?;
-        if let Some(snapshot) = self.query_view_snapshots.as_ref() {
-            return Ok(snapshot.get(&relation).cloned());
-        }
-        Ok(self.durable.views.read().get(&relation).cloned())
+        let snapshot = self
+            .query_view_snapshots
+            .clone()
+            .unwrap_or_else(|| self.durable.views.snapshot());
+        Ok(snapshot.get(&relation).map(read))
     }
 
     /// Resolve a view only against the live restored registry without starting another registry synchronization pass.
@@ -97,9 +108,12 @@ impl Engine {
     }
 
     pub(crate) fn view_plan(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
-        Ok(self.view_definition(name)?.and_then(|definition| {
-            (definition.kind == StoredViewKind::View).then_some(definition.definition.query)
-        }))
+        Ok(self
+            .with_view_definition(name, |definition| {
+                (definition.kind == StoredViewKind::View)
+                    .then(|| definition.definition.query.clone())
+            })?
+            .flatten())
     }
 
     pub fn list_views(&self) -> Result<Vec<String>, SQLError> {

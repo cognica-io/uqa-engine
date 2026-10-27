@@ -14,8 +14,17 @@ use uqa_sql::{
 
 impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
     pub fn execute_for_output(&mut self, plan: &UnifiedPlan) -> Result<StatementOutput, SQLError> {
+        self.execute_for_output_mode(plan, super::QueryOutputMode::SharedSpill)
+    }
+
+    /// Consumers share the ordinary statement validation, snapshot and completion boundary. RETURNING reaches a consumer before the next mutation row; ordinary result callers retain its bounded spool.
+    pub(crate) fn execute_for_output_mode(
+        &mut self,
+        plan: &UnifiedPlan,
+        mode: super::QueryOutputMode<'_, S>,
+    ) -> Result<StatementOutput, SQLError> {
         let output = match plan {
-            UnifiedPlan::Query(_) => StatementOutput::Query(self.execute_query_to_spill(plan)?),
+            UnifiedPlan::Query(_) => StatementOutput::Query(self.execute_query_output(plan, mode)?),
             UnifiedPlan::Command(command)
                 if matches!(
                     command.as_ref(),
@@ -31,11 +40,38 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                     plan,
                 )?;
                 self.validate_command_target(command)?;
+                let consumer = match mode {
+                    super::QueryOutputMode::RowConsumer(factory) => Some(factory.bind(None)?),
+                    _ => None,
+                };
+                let schema = if consumer.is_some() {
+                    let inputs = self.context.mutations.mutation_initialization_context();
+                    let mut analysis = self.context.mutations.returning_analysis_context();
+                    if let Some(parent) = &self.inherited_ctes {
+                        analysis.scope = parent;
+                    }
+                    crate::mutation::entry::command_returning_schema(
+                        &self.context.mutations.returning_execution_context(),
+                        analysis,
+                        inputs.mutation.scopes,
+                        command,
+                        self.params,
+                    )?
+                } else {
+                    None
+                };
+                let destination = consumer
+                    .as_deref()
+                    .zip(schema.as_ref())
+                    .map(|(consumer, schema)| {
+                        crate::mutation::returning::ReturningDestination::new(consumer, schema)
+                    })
+                    .transpose()?;
                 let result = match command.as_ref() {
-                    CommandPlan::Insert(plan) => self.execute_insert(plan),
-                    CommandPlan::Update(plan) => self.execute_update(plan),
-                    CommandPlan::Delete(plan) => self.execute_delete(plan),
-                    CommandPlan::Merge(plan) => self.execute_merge(plan),
+                    CommandPlan::Insert(plan) => self.execute_insert(plan, destination),
+                    CommandPlan::Update(plan) => self.execute_update(plan, destination),
+                    CommandPlan::Delete(plan) => self.execute_delete(plan, destination),
+                    CommandPlan::Merge(plan) => self.execute_merge(plan, destination),
                     _ => unreachable!("mutation command selected above"),
                 }?;
                 StatementOutput::Mutation(result)

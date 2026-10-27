@@ -42,4 +42,16 @@ impl uqa_sql::semantics::volatility::VolatilityCatalog for Engine {
     fn view_query(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
         self.view_plan(name)
     }
+
+    fn with_view_query(
+        &self,
+        name: &str,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<bool, SQLError>,
+    ) -> Result<Option<bool>, SQLError> {
+        self.with_view_definition(name, |view| {
+            (view.kind == crate::StoredViewKind::View).then(|| read(&view.definition.query))
+        })?
+        .flatten()
+        .transpose()
+    }
 }

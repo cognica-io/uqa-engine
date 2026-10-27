@@ -212,13 +212,19 @@ impl<'a> SetProjection<'a> {
     }
 
     fn start_expansion(&self, input: OwnedPhysicalRow) -> ExecResult<SetExpansion> {
-        let calls = self
-            .plan
-            .calls
-            .iter()
-            .zip(&self.routine_descriptions)
-            .map(|(call, descriptions)| self.call_state(call, &input, descriptions))
-            .collect::<ExecResult<Vec<_>>>()?;
+        let mut calls = Vec::with_capacity(self.plan.calls.len());
+        for (call, descriptions) in self.plan.calls.iter().zip(&self.routine_descriptions) {
+            match self.call_state(call, &input, descriptions) {
+                Ok(state) => calls.push(state),
+                Err(error) => {
+                    return crate::physical::with_cleanup(
+                        Err(error),
+                        super::close_calls(&mut calls),
+                        "close earlier set-returning calls after initialization failure",
+                    )
+                }
+            }
+        }
         let has_set = calls
             .iter()
             .any(|call| matches!(call, SetFunctionState::Set { .. }));
@@ -310,6 +316,12 @@ impl<'a> SetProjection<'a> {
 }
 
 impl SetProjection<'_> {
+    fn close_expansion(&mut self) -> ExecResult<()> {
+        self.expansion
+            .take()
+            .map_or(Ok(()), |mut expansion| expansion.close())
+    }
+
     fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
         let batch_size = demand.map_or(self.output_batch_size, |rows| {
             rows.get().min(self.output_batch_size)
@@ -323,7 +335,7 @@ impl SetProjection<'_> {
                 output.push(row);
                 continue;
             }
-            self.expansion = None;
+            self.close_expansion()?;
             if let Some(input) = self.next_input(demand.is_some())? {
                 self.expansion = Some(self.start_expansion(input)?);
             } else {
@@ -345,7 +357,7 @@ impl PhysicalOperator for SetProjection<'_> {
 
     fn open(&mut self) -> ExecResult<()> {
         self.input = Vec::new().into_iter();
-        self.expansion = None;
+        self.close_expansion()?;
         self.exhausted = false;
         self.child.open()
     }
@@ -360,8 +372,8 @@ impl PhysicalOperator for SetProjection<'_> {
 
     fn close(&mut self) -> ExecResult<()> {
         self.input = Vec::new().into_iter();
-        self.expansion = None;
+        let expansion = self.close_expansion();
         self.exhausted = true;
-        self.child.close()
+        crate::physical::with_cleanup(expansion, self.child.close(), "close set projection input")
     }
 }

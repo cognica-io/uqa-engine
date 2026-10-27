@@ -11,6 +11,9 @@ use super::{
     RoutineOutcome, SQLError, TriggerRoutineContext, Value,
 };
 
+mod descriptor;
+pub(super) use descriptor::RecordVariableDescriptor;
+
 impl<'a> Interpreter<'a> {
     pub(super) fn set_record_target(
         &mut self,
@@ -97,10 +100,13 @@ impl<'a> Interpreter<'a> {
         expr: &Expr,
     ) -> Result<Option<uqa_sql::RowSchema>, SQLError> {
         match expr {
-            Expr::Column(name) | Expr::QualifiedStar(name) => Ok(self
-                .resolver()
-                .lookup(name)
-                .and_then(|index| self.record_schemas.get(&index).cloned())),
+            Expr::Column(name) | Expr::QualifiedStar(name) => {
+                Ok(self.resolver().lookup(name).and_then(|index| {
+                    self.record_descriptors
+                        .get(&index)
+                        .map(|descriptor| descriptor.schema.clone())
+                }))
+            }
             Expr::Cast { expr, ty, .. }
                 if matches!(
                     self.services.expressions.catalog_column_type(ty),
@@ -129,9 +135,9 @@ impl<'a> Interpreter<'a> {
                         .collect::<Result<_, _>>()?,
                 )),
                 _ => Ok(self
-                    .record_schemas
+                    .record_descriptors
                     .get(index)
-                    .map(|schema| schema.column_types().to_vec())),
+                    .map(|descriptor| descriptor.schema.column_types().to_vec())),
             },
         }
     }

@@ -11,8 +11,8 @@ use crate::query::set_projection::SetFunctionRuntime;
 use crate::scalar::PreparedExpressions;
 use std::sync::Arc;
 use uqa_sql::{
-    ast::FunctionBinding, routines::invocation::descriptions::RoutineCallDescriptions, SQLError,
-    SQLParam, ScalarExpr,
+    ast::FunctionBinding, routines::invocation::descriptions::RoutineCallDescriptions, SQLParam,
+    ScalarExpr,
 };
 
 pub(super) struct PreparedFunctionCall {
@@ -69,17 +69,11 @@ pub(super) fn deferred_function_rows<'a>(
     outer_row: Option<crate::OwnedPhysicalRow>,
     width: usize,
 ) -> FunctionRows<'a> {
-    Box::new(
+    crate::SQLRowStream::from_source(
         crate::query::table_functions::DeferredTableFunctionRows::new(move || {
-            let output = runtime.table_function_rows(call.call(), params, outer_row.as_ref())?;
-            if output.columns.len() != width {
-                return Err(SQLError::Internal(format!(
-                    "table function `{}` produced {} columns for a {width}-column source",
-                    call.name,
-                    output.columns.len()
-                )));
-            }
-            Ok(output.rows)
+            runtime
+                .table_function_rows(call.call(), params, outer_row.as_ref())?
+                .into_rows(width, &format!("table function `{}`", call.name))
         }),
     )
 }

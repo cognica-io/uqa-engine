@@ -15,8 +15,10 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{expr::RowLookup, SQLError, SQLParam};
 
+mod outer;
 #[cfg(test)]
 mod tests;
+pub(crate) use outer::with_outer_row;
 
 /// Scalar execution services that can intercept a function requiring its unevaluated argument expressions.
 pub trait ScalarExpressionContext: QueryExpressionContext {

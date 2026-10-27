@@ -23,6 +23,7 @@ fn scrollable(query: &QueryPlan, requested: Option<bool>) -> bool {
         &[],
         &crate::catalog::test_support::empty_scope(),
         requested,
+        uqa_core::memory::ProductionControl::uncontrolled(),
     )
     .unwrap()
 }
@@ -109,7 +110,7 @@ fn default_scroll_follows_outer_ordering_and_cte_materialization() {
 fn inherited_deferred_sources_keep_their_query_traversal() {
     let mut scope = crate::catalog::test_support::empty_scope();
     for cte in query("WITH z AS (SELECT 1), a AS (SELECT * FROM z) SELECT * FROM a").ctes {
-        scope.insert_deferred(cte);
+        scope.insert_deferred(cte.into());
     }
     for (sql, expected) in [
         ("SELECT * FROM a", false),
@@ -117,7 +118,16 @@ fn inherited_deferred_sources_keep_their_query_traversal() {
         ("WITH a AS MATERIALIZED (SELECT 1) SELECT * FROM a", true),
     ] {
         assert_eq!(
-            query_scrollable(&NoRoutines, &NoRoutines, &query(sql), &[], &scope, None).unwrap(),
+            query_scrollable(
+                &NoRoutines,
+                &NoRoutines,
+                &query(sql),
+                &[],
+                &scope,
+                None,
+                uqa_core::memory::ProductionControl::uncontrolled()
+            )
+            .unwrap(),
             expected,
             "{sql}"
         );

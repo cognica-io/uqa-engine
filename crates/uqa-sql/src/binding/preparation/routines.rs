@@ -131,8 +131,29 @@ pub(crate) fn prepare_procedure_call(
     ),
     SQLError,
 > {
+    let declared = super::super::statements::parameter_input_types(params)?;
+    let (schema, input) =
+        read_procedure_inputs(context, overloads, types, plan, &declared, binding)?;
+    Ok((
+        schema.map_or(
+            crate::binding::statements::AnalyzedResult::Command,
+            crate::binding::statements::AnalyzedResult::Schema,
+        ),
+        input.dependencies,
+    ))
+}
+
+/// Infer host parameters and retain CALL constants through the same ordered analysis as procedural calls.
+pub(crate) fn read_procedure_inputs(
+    context: &crate::binding::statements::StatementAnalysisContext<'_>,
+    overloads: &crate::routines::resolution::RoutineOverloadContext<'_>,
+    types: &dyn crate::routines::declaration::RoutineTypeCatalog,
+    plan: &mut UnifiedPlan,
+    declared: &[Option<ColumnType>],
+    binding: &BindingContext<'_>,
+) -> Result<(Option<RowSchema>, super::PreparedInputAnalysis), SQLError> {
     use crate::{
-        ir::{analyze_expression_call_arguments, ScalarExpr},
+        ir::analyze_expression_call_arguments,
         plan::CommandPlan,
         routines::{call::ProcedureCallAnalysis, invocation::call_output_schema},
     };
@@ -142,7 +163,6 @@ pub(crate) fn prepare_procedure_call(
     let CommandPlan::Call { name, args } = command.as_ref() else {
         unreachable!("CALL command")
     };
-    let declared = super::super::statements::parameter_input_types(params)?;
     let mut scope = SchemaScope::for_analysis(binding)?;
     scope.prepared_dependencies =
         Some(crate::prepared::dependencies::PreparedAnalysisDependencies::default());
@@ -151,7 +171,7 @@ pub(crate) fn prepare_procedure_call(
         routines: context.routines,
         scope: &mut scope,
         parameters: ParameterTypes::with_input_constants(
-            &declared,
+            declared,
             Some(context.aliases),
             context.routines.enum_labels(),
             context.routines.catalog_input_functions(),
@@ -159,24 +179,23 @@ pub(crate) fn prepare_procedure_call(
         schema_expression: None,
     };
     analysis.scope.set_placement = crate::semantics::sets::placement::SetPlacement::CallArgument;
-    let resolved = ProcedureCallAnalysis::new(args)?.resolve(name, overloads, &mut |argument| {
-        let scalar = crate::ir::scalar_call_argument(&argument.scalar)?.value;
-        analysis
-            .expression(scalar, &RowSchema::default(), &argument.subqueries)
-            .map(|expression| expression.ty)
-    })?;
+    let call = ProcedureCallAnalysis::new(args)?;
     let (decoded, _) = analyze_expression_call_arguments(args)?;
-    for (argument, target) in decoded.iter().zip(&resolved.invocation.argument_targets) {
-        if matches!(
-            argument.value,
-            ScalarExpr::Literal(uqa_core::Value::Str(_) | uqa_core::Value::Null)
-        ) {
-            let target = types.resolve_catalog_column_type_name(target)?;
-            let mut expression = analysis.expression(argument.value, &RowSchema::default(), &[])?;
-            analysis
-                .parameters
-                .coerce_unknown(&mut expression, &target)?;
-        }
+    let mut expressions = decoded
+        .iter()
+        .map(|argument| analysis.expression(argument.value, &RowSchema::default(), &[]))
+        .collect::<Result<Vec<_>, _>>()?;
+    let argument_types = expressions
+        .iter()
+        .map(|expression| expression.ty.clone())
+        .collect::<Vec<_>>();
+    let resolved = call.resolve_types(name, overloads, &argument_types)?;
+    for (expression, target) in expressions
+        .iter_mut()
+        .zip(&resolved.invocation.argument_targets)
+    {
+        let target = types.resolve_catalog_column_type_name(target)?;
+        analysis.parameters.coerce_unknown(expression, &target)?;
     }
     let schema = call_output_schema(
         types,
@@ -184,8 +203,9 @@ pub(crate) fn prepare_procedure_call(
         &resolved.invocation.parameter_types,
     )?;
     let constants = analysis.parameters.take_input_constants();
-    analysis.parameters.finish()?;
-    constants.apply(plan, context.routines, params)?;
+    let parameter_types = analysis.parameters.finish()?;
+    let params = crate::prepared::analysis_parameters(&parameter_types);
+    constants.apply(plan, context.routines, &params)?;
     let mut dependencies = analysis
         .scope
         .prepared_dependencies
@@ -196,10 +216,10 @@ pub(crate) fn prepare_procedure_call(
     }
     plan.visit_scalar_expressions(&mut |expression| dependencies.include_expression(expression));
     Ok((
-        schema.map_or(
-            crate::binding::statements::AnalyzedResult::Command,
-            crate::binding::statements::AnalyzedResult::Schema,
-        ),
-        dependencies,
+        schema,
+        super::PreparedInputAnalysis {
+            parameter_types,
+            dependencies,
+        },
     ))
 }

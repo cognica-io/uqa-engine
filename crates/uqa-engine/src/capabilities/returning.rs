@@ -43,10 +43,25 @@ impl Engine {
         &self,
     ) -> ReturningExecutionContext<'_, StatementReadSnapshot> {
         ReturningExecutionContext {
+            destination: None,
             rows: self.mutation_row_context(),
             catalog: self,
             routines: self,
             relational: self.relational_context(),
         }
+    }
+}
+
+impl uqa_execution::mutation::returning::ReturningInputs<StatementReadSnapshot> for Engine {
+    fn returning_execution_context(
+        &self,
+    ) -> uqa_execution::mutation::returning::ReturningExecutionContext<'_, StatementReadSnapshot>
+    {
+        Engine::returning_execution_context(self)
+    }
+    fn returning_analysis_context(
+        &self,
+    ) -> uqa_sql::semantics::returning::ReturningAnalysisContext<'_> {
+        Engine::returning_analysis_context(self)
     }
 }

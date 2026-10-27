@@ -1,0 +1,474 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! C session admission and retained-resource leases; SQL and storage remain native owners.
+
+use std::ffi::c_char;
+use std::path::Path;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, OnceLock,
+};
+use uqa_core::{
+    memory::{MemoryBudget, ProductionControl},
+    CancellationToken,
+};
+use uqa_engine::Engine;
+
+use crate::{
+    abi::{
+        UQAOpenFlags, UQA_CAP_INDEPENDENT_SESSIONS, UQA_CAP_PERSISTENCE, UQA_COMPLETION_COMMITTED,
+        UQA_COMPLETION_IN_TRANSACTION, UQA_COMPLETION_NONE, UQA_COMPLETION_PENDING,
+        UQA_COMPLETION_ROLLED_BACK, UQA_COMPLETION_UNKNOWN, UQA_ERROR_BUSY, UQA_ERROR_IO,
+        UQA_ERROR_UNSUPPORTED, UQA_OK, UQA_OPEN_MEMORY, UQA_OPEN_REDB, UQA_OPEN_SQLITE_AUTO,
+        UQA_OPEN_SQLITE_KV, UQA_OPEN_SQLITE_NATIVE, UQA_TRANSACTION_ACTIVE,
+        UQA_TRANSACTION_COMPLETION_PENDING, UQA_TRANSACTION_FAILED, UQA_TRANSACTION_IDLE,
+    },
+    boundary, callback,
+    config::UQAConfig,
+    error::{RetainedError, UQAError},
+    library,
+};
+
+pub struct UQAEngine {
+    pub(crate) session: Arc<Session>,
+}
+
+pub(crate) struct Session {
+    pub(crate) native: Engine,
+    pub(crate) memory: MemoryBudget,
+    pub(crate) cancellation: CancellationToken,
+    pub(crate) sql_notification_error: OnceLock<RetainedError>,
+    persistent: bool,
+    busy: AtomicBool,
+    poisoned: AtomicBool,
+}
+
+impl Session {
+    fn new(native: Engine, persistent: bool, memory_limit: usize) -> Self {
+        let cancellation = native.cancellation_token();
+        Self {
+            native,
+            memory: MemoryBudget::new(memory_limit),
+            cancellation,
+            sql_notification_error: OnceLock::new(),
+            persistent,
+            busy: AtomicBool::new(false),
+            poisoned: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn enter(&self) -> boundary::Result<SessionCall<'_>> {
+        self.enter_inner(false)
+    }
+
+    pub(crate) fn enter_cleanup(&self) -> boundary::Result<SessionCall<'_>> {
+        self.enter_inner(true)
+    }
+
+    pub(crate) fn enter_value(&self) -> boundary::Result<SessionCall<'_>> {
+        if callback::uses_value_scope(self)? {
+            self.check_poison()?;
+            Ok(SessionCall {
+                session: self,
+                release: false,
+            })
+        } else {
+            self.enter()
+        }
+    }
+
+    pub(crate) fn check_poison(&self) -> boundary::Result<()> {
+        if self.poisoned.load(Ordering::Acquire) {
+            return Err(UQAError::state("session is poisoned after a panic"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn poison(&self) {
+        self.poisoned.store(true, Ordering::Release);
+    }
+
+    fn enter_inner(&self, cleanup: bool) -> boundary::Result<SessionCall<'_>> {
+        callback::reject_reentry()?;
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return Err(UQAError::new(
+                UQA_ERROR_BUSY,
+                "session already has an active call",
+            ));
+        }
+        let call = SessionCall {
+            session: self,
+            release: true,
+        };
+        if !cleanup {
+            self.check_poison()?;
+        }
+        Ok(call)
+    }
+
+    pub(crate) fn control(&self) -> ProductionControl<'_> {
+        ProductionControl::new(&self.memory, &self.cancellation, &self.cancellation)
+    }
+
+    pub(crate) fn state(&self) -> u32 {
+        if self.native.pending_transaction_completion().is_some() {
+            UQA_TRANSACTION_COMPLETION_PENDING
+        } else if self.native.transaction_failed() {
+            UQA_TRANSACTION_FAILED
+        } else if self.native.transaction_depth() != 0 {
+            UQA_TRANSACTION_ACTIVE
+        } else {
+            UQA_TRANSACTION_IDLE
+        }
+    }
+
+    pub(crate) fn execute_with_completion<T, E: Into<UQAError>>(
+        &self,
+        operation: impl FnOnce(&Engine) -> Result<T, E>,
+    ) -> boundary::Result<(T, u32)> {
+        use uqa_engine::ExecutionCompletion;
+        let outcome = self.native.execute_with_completion(operation);
+        let completion = match outcome.completion {
+            ExecutionCompletion::None => UQA_COMPLETION_NONE,
+            ExecutionCompletion::Committed => UQA_COMPLETION_COMMITTED,
+            ExecutionCompletion::RolledBack => UQA_COMPLETION_ROLLED_BACK,
+            ExecutionCompletion::Pending => UQA_COMPLETION_PENDING,
+            ExecutionCompletion::InTransaction => UQA_COMPLETION_IN_TRANSACTION,
+            ExecutionCompletion::Unknown => UQA_COMPLETION_UNKNOWN,
+        };
+        outcome
+            .result
+            .map(|value| (value, completion))
+            .map_err(|error| {
+                let mut error = error.into();
+                error.completion = completion;
+                error
+            })
+    }
+
+    pub(crate) fn execute<T, E: Into<UQAError>>(
+        &self,
+        operation: impl FnOnce(&Engine) -> Result<T, E>,
+    ) -> boundary::Result<T> {
+        self.execute_with_completion(operation)
+            .map(|(value, _)| value)
+    }
+}
+
+pub(crate) struct SessionCall<'a> {
+    session: &'a Session,
+    release: bool,
+}
+
+impl Drop for SessionCall<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.session.poison();
+        }
+        if self.release {
+            self.session.busy.store(false, Ordering::Release);
+        }
+    }
+}
+
+fn publish_engine(
+    native: Engine,
+    persistent: bool,
+    limit: usize,
+) -> boundary::Result<*mut UQAEngine> {
+    let session = Arc::new(Session::new(native, persistent, limit));
+    if let Err(error) =
+        session
+            .native
+            .install_sql_function_context(uqa_engine::SQLFunctionContext::new(Arc::downgrade(
+                &session,
+            )))
+    {
+        let error = uqa_sql::SQLError::from(error);
+        return Err(match session.native.close() {
+            Ok(()) => error,
+            Err(cleanup) => error.with_cleanup(
+                cleanup,
+                "close session after callback context installation failed",
+            ),
+        }
+        .into());
+    }
+    // On a recoverable handle-allocation failure, clean up the native session before returning.
+    let handle = boundary::boxed(UQAEngine {
+        session: Arc::clone(&session),
+    });
+    match handle {
+        Ok(handle) => Ok(Box::into_raw(handle)),
+        Err(error) => {
+            session.execute(Engine::close)?;
+            Err(error)
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PersistentBackend {
+    SQLiteNative { auto: bool },
+    SQLiteKeyValue { auto: bool },
+    Redb,
+}
+
+fn sqlite_connection(
+    path: &Path,
+    config: &UQAConfig,
+    auto: bool,
+) -> boundary::Result<uqa_storage_sqlite::ManagedConnection> {
+    use uqa_storage_sqlite::ManagedConnection;
+    let key = config.key.as_ref().map(|key| key.as_str());
+    let native = match (config.trusted_anchor, key, config.compression, auto) {
+        (_, _, Some(_), true) => {
+            return Err(UQAError::invalid(
+                "automatic open detects compression from the database file",
+            ))
+        }
+        (Some(anchor), Some(key), None, true) => {
+            ManagedConnection::open_auto_with_anchor(path, key, anchor.into())
+        }
+        (Some(anchor), Some(key), Some(compression), false) => {
+            ManagedConnection::open_compressed_encrypted_with_anchor(
+                path,
+                key,
+                compression,
+                anchor.into(),
+            )
+        }
+        (Some(_), _, _, _) => {
+            return Err(UQAError::invalid(
+                "a trusted anchor requires encryption and explicit or detected compression",
+            ))
+        }
+        (None, key, None, true) => ManagedConnection::open_auto(path, key),
+        (None, None, None, false) => ManagedConnection::open(path),
+        (None, Some(key), None, false) => ManagedConnection::open_encrypted(path, key),
+        (None, None, Some(compression), false) => {
+            ManagedConnection::open_compressed(path, compression)
+        }
+        (None, Some(key), Some(compression), false) => {
+            ManagedConnection::open_compressed_encrypted(path, key, compression)
+        }
+    };
+    native.map_err(|error| UQAError::display(UQA_ERROR_IO, &error))
+}
+
+fn open(
+    path: &str,
+    config: Option<&UQAConfig>,
+    backend: PersistentBackend,
+) -> boundary::Result<*mut UQAEngine> {
+    if path.is_empty() {
+        return Err(UQAError::invalid("database path must not be empty"));
+    }
+    let defaults = UQAConfig::default();
+    let config = config.unwrap_or(&defaults);
+    let path = Path::new(path);
+    let native = match backend {
+        PersistentBackend::SQLiteNative { auto } => {
+            let connection = sqlite_connection(path, config, auto)?;
+            let provider = uqa_storage_sqlite::SQLiteStorageProvider::new(connection);
+            Engine::from_persistent_provider(Arc::new(provider))
+        }
+        PersistentBackend::SQLiteKeyValue { auto } => {
+            let connection = sqlite_connection(path, config, auto)?;
+            let provider = uqa_storage_sqlite::SQLiteKeyValueStorage::from_connection(connection)
+                .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
+            Engine::from_persistent_provider(Arc::new(provider))
+        }
+        PersistentBackend::Redb => {
+            if config.key.is_some()
+                || config.compression.is_some()
+                || config.trusted_anchor.is_some()
+            {
+                return Err(UQAError::invalid(
+                    "selected storage backend does not support encryption, compression or trusted anchors",
+                ));
+            }
+            let provider = uqa_storage_redb::RedbStorage::open(path)
+                .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
+            Engine::from_persistent_provider(Arc::new(provider))
+        }
+    }
+    .map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
+    publish_engine(native, true, config.memory_limit)
+}
+
+macro_rules! engine_open {
+    ($api:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($api(path: *const c_char, $($size: usize,)? flags: UQAOpenFlags, config: *mut UQAConfig, out: *mut *mut UQAEngine) {
+            let out = boundary::new_handle(out)?;
+            callback::reject_reentry()?;
+            let config = if config.is_null() { None } else { Some(boundary::input(config)?) };
+            if flags == UQA_OPEN_MEMORY {
+                if !path.is_null() $(|| $size != 0)? {
+                    return Err(UQAError::invalid("memory open requires a NULL path"));
+                }
+                let defaults = UQAConfig::default();
+                let config = config.unwrap_or(&defaults);
+                if config.key.is_some() || config.compression.is_some() || config.trusted_anchor.is_some() {
+                    return Err(UQAError::invalid("memory databases do not accept encryption, compression or anchors"));
+                }
+                *out = publish_engine(Engine::new(), false, config.memory_limit)?;
+                return Ok(UQA_OK);
+            }
+            let backend = match flags {
+                UQA_OPEN_SQLITE_NATIVE => PersistentBackend::SQLiteNative { auto: false },
+                UQA_OPEN_REDB => PersistentBackend::Redb,
+                flags if flags == UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteNative { auto: true },
+                UQA_OPEN_SQLITE_KV => PersistentBackend::SQLiteKeyValue { auto: false },
+                flags if flags == UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteKeyValue { auto: true },
+                _ => return Err(UQAError::invalid("open requires exactly one storage flag; SQLITE_AUTO modifies SQLite only")),
+            };
+            let path = boundary::$read(path $(, $size)?)?;
+            *out = open(path, config, backend)?;
+            Ok(UQA_OK)
+        });
+    };
+}
+engine_open!(uqa_engine_open, text);
+engine_open!(uqa_engine_open_n, required_text_n, path_size);
+ffi_fn!(uqa_engine_open_session(source: *mut UQAEngine, out: *mut *mut UQAEngine) {
+    let out = boundary::new_handle(out)?;
+    let session = &boundary::input(source)?.session;
+    let _call = session.enter()?;
+    if !session.persistent { return Err(UQAError::new(UQA_ERROR_UNSUPPORTED, "memory databases do not support independent sessions")); }
+    let native = session.native.new_session().map_err(|error| UQAError::display(UQA_ERROR_IO, &error))?;
+    *out = publish_engine(native, true, session.memory.limit())?;
+    Ok(UQA_OK)
+});
+macro_rules! user_session_open {
+    ($api:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($api(source: *mut UQAEngine, role: *const c_char, $($size: usize,)? out: *mut *mut UQAEngine) {
+            let out = boundary::new_handle(out)?;
+            let role = boundary::$read(role $(, $size)?)?;
+            let session = &boundary::input(source)?.session;
+            let _call = session.enter()?;
+            if !session.persistent { return Err(UQAError::new(UQA_ERROR_UNSUPPORTED, "memory databases do not support independent sessions")); }
+            let native = session.native.new_session_for_user(role)?;
+            *out = publish_engine(native, true, session.memory.limit())?;
+            Ok(UQA_OK)
+        });
+    };
+}
+user_session_open!(uqa_engine_open_session_for_user, text);
+user_session_open!(
+    uqa_engine_open_session_for_user_n,
+    required_text_n,
+    role_size
+);
+ffi_fn!(uqa_engine_get_capabilities(engine: *mut UQAEngine, out: *mut u64) {
+    let out = boundary::output(out)?;
+    let session = &boundary::input(engine)?.session;
+    let _call = session.enter_inner(true)?;
+    *out = library::capabilities() | if session.persistent { UQA_CAP_PERSISTENCE | UQA_CAP_INDEPENDENT_SESSIONS } else { 0 };
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_engine_close(engine: *mut *mut UQAEngine) {
+    if engine.is_null() { return Ok(UQA_OK); }
+    let pointer = *boundary::input(engine)?;
+    if pointer.is_null() { return Ok(UQA_OK); }
+    {
+        let session = &boundary::input(pointer)?.session;
+        let _call = session.enter_inner(true)?;
+        if Arc::strong_count(session) != 1 {
+            return Err(UQAError::new(UQA_ERROR_BUSY, "session still has retained resources"));
+        }
+        session.execute(Engine::close)?;
+    }
+    boundary::release(engine)
+});
+
+macro_rules! transaction_operation {
+    ($name:ident, $operation:ident) => {
+        ffi_fn!($name(engine: *mut UQAEngine) {
+            let session = &boundary::input(engine)?.session;
+            let _call = session.enter()?;
+            session.execute(Engine::$operation)?;
+            Ok(UQA_OK)
+        });
+    };
+}
+transaction_operation!(uqa_transaction_begin, begin);
+transaction_operation!(uqa_transaction_commit, commit);
+transaction_operation!(uqa_transaction_rollback, rollback);
+
+macro_rules! savepoint_operation {
+    ($name:ident, $operation:ident, $read:ident $(, $size:ident)?) => {
+        ffi_fn!($name(engine: *mut UQAEngine, name: *const c_char $(, $size: usize)?) {
+            let name = boundary::$read(name $(, $size)?)?;
+            let session = &boundary::input(engine)?.session;
+            let _call = session.enter()?;
+            session.execute(|native| native.$operation(name))?;
+            Ok(UQA_OK)
+        });
+    };
+}
+savepoint_operation!(uqa_savepoint_create, savepoint, text);
+savepoint_operation!(
+    uqa_savepoint_create_n,
+    savepoint,
+    required_text_n,
+    name_size
+);
+savepoint_operation!(uqa_savepoint_release, release_savepoint, text);
+savepoint_operation!(
+    uqa_savepoint_release_n,
+    release_savepoint,
+    required_text_n,
+    name_size
+);
+savepoint_operation!(uqa_savepoint_rollback, rollback_to_savepoint, text);
+savepoint_operation!(
+    uqa_savepoint_rollback_n,
+    rollback_to_savepoint,
+    required_text_n,
+    name_size
+);
+
+ffi_fn!(uqa_transaction_get_state(engine: *mut UQAEngine, out: *mut u32) {
+    let out = boundary::output(out)?;
+    let session = &boundary::input(engine)?.session;
+    let _call = session.enter_inner(true)?;
+    *out = session.state();
+    Ok(UQA_OK)
+});
+
+pub struct UQACancelHandle(CancellationToken);
+ffi_fn!(uqa_cancel_handle_create(engine: *mut UQAEngine, out: *mut *mut UQACancelHandle) {
+    let out = boundary::new_handle(out)?;
+    let session = &boundary::input(engine)?.session;
+    let _call = session.enter()?;
+    *out = Box::into_raw(boundary::boxed(UQACancelHandle(session.cancellation.clone()))?);
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_cancel_handle_request(handle: *mut UQACancelHandle) {
+    boundary::input(handle)?.0.cancel();
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_cancel_handle_destroy(handle: *mut *mut UQACancelHandle) { boundary::release(handle) });
+ffi_fn!(uqa_engine_reset_cancellation(engine: *mut UQAEngine) {
+    let session = &boundary::input(engine)?.session;
+    let _call = session.enter()?;
+    session.native.reset_cancellation();
+    Ok(UQA_OK)
+});
+ffi_fn!(uqa_engine_check_termination(engine: *mut UQAEngine) {
+    let session = &boundary::input(engine)?.session;
+    let _call = session.enter_inner(true)?;
+    match session.native.session_termination() {
+        Some(error) => Err(error.into()),
+        None => Ok(UQA_OK),
+    }
+});

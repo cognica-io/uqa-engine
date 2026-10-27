@@ -288,6 +288,23 @@ pub fn validate_rule_returning_provider_width(
     Ok(())
 }
 
+/// Describe the stored action in its event namespace, before unevaluated caller inputs replace OLD and NEW. Stored stars keep their creation-time width.
+pub fn rule_action_returning_schema(
+    sources: &dyn super::action_binding::RuleSourceCatalog,
+    context: crate::semantics::returning::ReturningAnalysisContext<'_>,
+    action: &Statement,
+    event: RuleEvent,
+    columns: &[crate::ast::ColumnDef],
+) -> Result<crate::RowSchema, SQLError> {
+    let action_columns = super::action_binding::rule_action_target_columns(sources, action)?;
+    let mut resolver =
+        crate::catalog::events::validation::RuleRowTypeResolver::for_action(columns, event);
+    let bound =
+        super::action_binding::bind_rule_action(sources, action, &action_columns, &mut resolver)?;
+    crate::semantics::returning::dml_statement_returning_schema(context, bound)?
+        .ok_or_else(|| SQLError::Internal("rule action lost its RETURNING descriptor".into()))
+}
+
 pub fn augment_rule_returning_action(
     statement: &mut Statement,
     source_index: Option<Expr>,

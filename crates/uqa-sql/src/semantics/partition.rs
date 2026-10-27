@@ -51,6 +51,20 @@ pub struct PartitionContext<'a> {
     pub schema: &'a dyn SchemaExpressionCatalog,
 }
 
+fn compare_values(
+    context: &PartitionContext<'_>,
+    left: &Value,
+    right: &Value,
+) -> Result<Ordering, SQLError> {
+    crate::expr::compare_typed_values_with_enum_catalog(
+        left,
+        right,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        Some(&crate::expr::EngineValueCatalog(context.assignment)),
+        None,
+    )
+}
+
 mod admission;
 mod bounds;
 mod datum_text;
@@ -367,12 +381,8 @@ fn partition_bound_matches(
                 ));
             };
             for expression in values {
-                if context
-                    .expressions
-                    .evaluate_bound(expression, params)?
-                    .cmp(key)
-                    == Ordering::Equal
-                {
+                let bound = context.expressions.evaluate_bound(expression, params)?;
+                if compare_values(context, &bound, key)?.is_eq() {
                     return Ok(true);
                 }
             }
@@ -414,9 +424,11 @@ fn compare_key_to_bound(
         let ordering = match datum {
             crate::ast::PartitionRangeDatum::MinValue => Ordering::Greater,
             crate::ast::PartitionRangeDatum::MaxValue => Ordering::Less,
-            crate::ast::PartitionRangeDatum::Value(expression) => {
-                key.cmp(&context.expressions.evaluate_bound(expression, params)?)
-            }
+            crate::ast::PartitionRangeDatum::Value(expression) => compare_values(
+                context,
+                key,
+                &context.expressions.evaluate_bound(expression, params)?,
+            )?,
         };
         if ordering != Ordering::Equal {
             return Ok(ordering);

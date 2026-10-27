@@ -272,6 +272,7 @@ impl Engine {
             &current.sql_user_functions,
             snapshot.sql_user_functions,
             &snapshot.roles,
+            &self.temporary_schema_name(),
         )?;
         snapshot.builtin_routine_security = Arc::new(
             uqa_execution::catalog::security::builtin_routines::merge_private(
@@ -798,7 +799,6 @@ impl Engine {
         uqa_execution::catalog::foreign::restoration::retain_session_registry(self);
         self.durable.builtin_routine_security.write().clear();
         self.durable.system_relation_security.write().clear();
-        self.durable.sql_user_functions.write().clear();
         self.durable.models.write().clear();
         self.durable.scoring_params.write().clear();
 

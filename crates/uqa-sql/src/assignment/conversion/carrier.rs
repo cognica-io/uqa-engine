@@ -24,7 +24,7 @@ pub fn normalize_legacy_vector_carrier_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>, SQLError> {
     control.check()?;
-    if matches!(value, Value::Null) {
+    if matches!(value, Value::Null | Value::Datum(_)) {
         return Ok(None);
     }
     match ty {

@@ -17,16 +17,17 @@ pub enum VariadicAnyArguments {
     NullResult,
 }
 
-fn local_name(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    lower
-        .strip_prefix("pg_catalog.")
-        .map_or_else(|| lower.clone(), str::to_owned)
+fn local_name(name: &str) -> std::borrow::Cow<'_, str> {
+    let local = match name.split_once('.') {
+        Some((schema, local)) if schema.eq_ignore_ascii_case("pg_catalog") => local,
+        _ => name,
+    };
+    crate::semantics::lowercase_function_name(local)
 }
 
 /// The number of fixed parameters before the `VARIADIC "any"` parameter, or `None` for any other routine.
 fn fixed_parameters(name: &str) -> Option<usize> {
-    Some(match local_name(name).as_str() {
+    Some(match local_name(name).as_ref() {
         "concat" | "json_build_object" | "json_build_array" | "jsonb_build_object"
         | "jsonb_build_array" | "num_nulls" | "num_nonnulls" => 0,
         "concat_ws" | "format" => 1,
@@ -37,7 +38,7 @@ fn fixed_parameters(name: &str) -> Option<usize> {
 /// Minimum arity across the variadic and nonvariadic overloads. A variadic `"any"` signature requires an argument; JSON builders have zero-argument overloads and `format(text)` omits the variadic tail.
 pub(crate) fn minimum_arguments(name: &str) -> Option<usize> {
     let fixed = fixed_parameters(name)?;
-    Some(match local_name(name).as_str() {
+    Some(match local_name(name).as_ref() {
         "json_build_object" | "json_build_array" | "jsonb_build_object" | "jsonb_build_array" => 0,
         "format" => 1,
         _ => fixed + 1,

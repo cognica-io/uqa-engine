@@ -8,7 +8,6 @@
 use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
-    assignment::MutationAssignmentContext,
     expressions::eval_mutation_expr,
     returning::{
         build_returning_value_row, dml_returning_result, DmlReturningShape,
@@ -20,10 +19,7 @@ use crate::query::{sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use std::collections::BTreeSet;
 use uqa_core::Value;
-use uqa_sql::semantics::view_mutation::{
-    required_view_delete_columns, required_view_update_columns, resolve_view_target,
-    view_qualification_references_target,
-};
+use uqa_sql::semantics::view_mutation::resolve_view_target;
 pub use uqa_sql::semantics::view_mutation::{target_columns, ViewMutationTarget as ViewDmlTarget};
 use uqa_sql::semantics::{
     mutation_qualifiers::validate_dml_expression_qualifiers,
@@ -35,7 +31,14 @@ use uqa_sql::{
 };
 use uqa_storage::document_store::Document;
 
-pub type SourceOutputPruning = fn(&mut QueryPlan, &BTreeSet<usize>, usize);
+pub type SourceOutputPruning = fn(
+    &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    &dyn uqa_sql::routines::RoutineResolution,
+    &mut QueryPlan,
+    &BTreeSet<usize>,
+    usize,
+    &dyn Fn(&str) -> bool,
+) -> Result<(), SQLError>;
 mod checks;
 mod insert;
 mod update_delete;
@@ -59,7 +62,14 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
             .enumerate()
             .filter_map(|(position, column)| required_columns.contains(column).then_some(position))
             .collect::<BTreeSet<_>>();
-        prune_source_outputs(&mut query, &required_positions, target.columns.len());
+        prune_source_outputs(
+            context.source.volatility,
+            context.source.relational.catalog,
+            &mut query,
+            &required_positions,
+            target.columns.len(),
+            &|_| false,
+        )?;
     }
     let privilege_subject = if target.definition.security_invoker() {
         scope.privilege_subject()?.clone()
@@ -125,254 +135,6 @@ fn view_document(target: &ViewDmlTarget, values: &[Value]) -> Result<Document, S
         .cloned()
         .zip(values.iter().cloned())
         .collect())
-}
-
-fn cached_view_document(
-    target: &ViewDmlTarget,
-    values: &[Option<Value>],
-) -> Result<Document, SQLError> {
-    if values.len() != target.columns.len() {
-        return Err(SQLError::Internal(
-            "cached view rule row does not match its declared row type".into(),
-        ));
-    }
-    Ok(target
-        .columns
-        .iter()
-        .cloned()
-        .zip(values)
-        .filter_map(|(column, value)| value.clone().map(|value| (column, value)))
-        .collect())
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "keeps DML row-image inputs aligned"
-)]
-fn evaluate_insert_rule_column<S: Clone + Send + Sync + 'static>(
-    assignment: &MutationAssignmentContext<'_, S>,
-    target: &ViewDmlTarget,
-    positions: &[usize],
-    columns: &[uqa_sql::ast::AssignmentTarget<ScalarExpr>],
-    expressions: &[ScalarExpr],
-    column: &str,
-    values: &mut [Option<Value>],
-    params: &[SQLParam],
-    scope: &CteScope<S>,
-) -> Result<Value, SQLError> {
-    let target_position = target
-        .columns
-        .iter()
-        .position(|candidate| candidate == column)
-        .ok_or_else(|| SQLError::UnknownColumn(column.to_string()))?;
-    if let Some(value) = values[target_position].as_ref() {
-        return Ok(value.clone());
-    }
-    let mut value = Value::Null;
-    for (input_position, _) in positions
-        .iter()
-        .enumerate()
-        .filter(|(_, position)| **position == target_position)
-    {
-        let expression = expressions.get(input_position).ok_or_else(|| {
-            SQLError::Internal("view rule INSERT input lost its expression".into())
-        })?;
-        value = crate::mutation::assignment::eval_typed_assignment(
-            *assignment,
-            scope,
-            crate::mutation::assignment::TypedAssignmentTarget {
-                target: &columns[input_position],
-                ty: target.schema.column_type(target_position),
-                current: Some(&value),
-                final_column_write: !columns[input_position + 1..]
-                    .iter()
-                    .any(|next| next.column == columns[input_position].column),
-            },
-            expression,
-            None,
-            params,
-        )?;
-    }
-    values[target_position] = Some(value.clone());
-    Ok(value)
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "keeps DML row-image inputs aligned"
-)]
-fn evaluate_insert_rule_columns<S: Clone + Send + Sync + 'static>(
-    assignment: &MutationAssignmentContext<'_, S>,
-    target: &ViewDmlTarget,
-    positions: &[usize],
-    columns: &[uqa_sql::ast::AssignmentTarget<ScalarExpr>],
-    expressions: &[ScalarExpr],
-    required: &BTreeSet<String>,
-    values: &mut [Option<Value>],
-    params: &[SQLParam],
-    scope: &CteScope<S>,
-) -> Result<(), SQLError> {
-    for column in required {
-        let _ = evaluate_insert_rule_column(
-            assignment,
-            target,
-            positions,
-            columns,
-            expressions,
-            column,
-            values,
-            params,
-            scope,
-        )?;
-    }
-    Ok(())
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "keeps DML row-image inputs aligned"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves view qualifier and row identity"
-)]
-fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
-    rules: crate::mutation::rules::RuleContext<'_>,
-    returning_context: &crate::mutation::returning::ReturningExecutionContext<'_, S>,
-    read_assignment: &MutationAssignmentContext<'_, S>,
-    stmt: &InsertPlan,
-    target: &ViewDmlTarget,
-    positions: &[usize],
-    columns: &[uqa_sql::ast::AssignmentTarget<ScalarExpr>],
-    implicit_columns: bool,
-    params: &[SQLParam],
-    ctes: &CteScope<S>,
-) -> Result<MutationOutput, SQLError> {
-    let snapshot = ctes.returning_statement_snapshot_scope();
-    for expressions in &stmt.rows {
-        if expressions.len() > columns.len()
-            || (!implicit_columns && expressions.len() != columns.len())
-        {
-            return Err(SQLError::TypeMismatch(format!(
-                "row width {} != column count {}",
-                expressions.len(),
-                columns.len()
-            )));
-        }
-    }
-    let rule_rows = crate::mutation::rules::RuleRows::from_rows(
-        stmt.rows.iter().map(|_| {
-            Ok(crate::mutation::rules::RuleRowImage {
-                new: Some(Document::new()),
-                ..crate::mutation::rules::RuleRowImage::empty()
-            })
-        }),
-        rules.memory.work_mem_bytes()?,
-        rules.cancellation.clone(),
-    )?;
-    let mut rule_batch = crate::mutation::rules::prepare_retained_rule_batch_with_projection(
-        rules,
-        &target.canonical_name,
-        uqa_sql::ast::RuleEvent::Insert,
-        rule_rows,
-        |row_index, side, required| {
-            if matches!(side, crate::mutation::rules::RuleRowSide::Old) {
-                return Ok(crate::mutation::rules::RuleInputProjection::default());
-            }
-            let expressions = stmt
-                .rows
-                .get(row_index)
-                .ok_or_else(|| SQLError::Internal("view rule INSERT lost its input row".into()))?;
-            // The rule owner retains completed condition fields between rule passes.
-            // This callback receives only fields absent from that retained image.
-            let mut values = vec![None; target.columns.len()];
-            let projected = required
-                .iter()
-                .map(|column| {
-                    evaluate_insert_rule_column(
-                        read_assignment,
-                        target,
-                        positions,
-                        columns,
-                        expressions,
-                        column,
-                        &mut values,
-                        params,
-                        &snapshot,
-                    )
-                    .map(|value| {
-                        let position = target.columns.iter().position(|name| name == column);
-                        let ty = position
-                            .and_then(|position| target.schema.column_type(position).cloned());
-                        let collation =
-                            position.and_then(|position| target.schema.column_collation(position));
-                        (column.clone(), value, ty, collation)
-                    })
-                })
-                .collect::<Result<Vec<_>, SQLError>>()?;
-            Ok(crate::mutation::rules::RuleInputProjection::values(
-                projected,
-            ))
-        },
-    )?;
-    let action_columns = rule_batch.missing_action_row_columns()?;
-    rule_batch.supplement_rows_from_iter(stmt.rows.iter().zip(action_columns.reader()?).map(
-        |(expressions, columns_required)| {
-            let [_, required] = columns_required?;
-            let mut values = vec![None; target.columns.len()];
-            evaluate_insert_rule_columns(
-                read_assignment,
-                target,
-                positions,
-                columns,
-                expressions,
-                &required,
-                &mut values,
-                params,
-                &snapshot,
-            )?;
-            Ok(crate::mutation::rules::RuleRowImage {
-                new: Some(cached_view_document(target, &values)?),
-                ..crate::mutation::rules::RuleRowImage::empty()
-            })
-        },
-    ))?;
-    let outcome = rule_batch.execute_actions_with_affected(
-        rules,
-        crate::mutation::rules::RuleReturningRequest::from_plan(
-            &stmt.returning,
-            &stmt.returning_aliases,
-            &stmt.subqueries,
-        ),
-    )?;
-    if let Some(returning) = outcome.returning {
-        return returning.project(
-            *returning_context,
-            DmlReturningShape {
-                table: &target.canonical_name,
-                target_qualifier: &stmt.target_qualifier,
-                aliases: &stmt.returning_aliases,
-                returning: &stmt.returning,
-                params,
-                ctes,
-                supplemental_schema: None,
-            },
-        );
-    }
-    finish_view_dml(
-        returning_context,
-        DmlReturningShape {
-            table: &target.canonical_name,
-            target_qualifier: &stmt.target_qualifier,
-            aliases: &stmt.returning_aliases,
-            returning: &stmt.returning,
-            params,
-            ctes,
-            supplemental_schema: None,
-        },
-        crate::mutation::returning::ReturningRows::default(),
-        outcome.affected_rows,
-    )
 }
 
 fn finish_view_dml<S: Clone + 'static>(

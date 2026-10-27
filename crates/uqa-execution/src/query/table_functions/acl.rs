@@ -92,7 +92,7 @@ pub fn aclexplode_rows(
             ]));
         }
     }
-    Ok(Box::new(rows.into_iter().map(Ok)))
+    Ok(crate::SQLRowStream::new(rows.into_iter().map(Ok)))
 }
 
 fn missing_role(name: &str) -> SQLError {

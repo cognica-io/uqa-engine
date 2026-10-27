@@ -1,0 +1,1266 @@
+{
+  "version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "libxml2": "2.13.9-r2",
+  "cases": [
+    {
+      "mode": "content",
+      "input": "",
+      "notices": [],
+      "output": "",
+      "stored": "",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": " ",
+      "notices": [],
+      "output": " ",
+      "stored": " ",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "\n<root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "\n<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "\n\n<root/>",
+      "notices": [],
+      "output": "\n<root/>",
+      "stored": "\n\n<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "plain text",
+      "notices": [],
+      "output": "plain text",
+      "stored": "plain text",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<root/>tail",
+      "notices": [],
+      "output": "<root/>tail",
+      "stored": "<root/>tail",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a/><b/>",
+      "notices": [],
+      "output": "<a/><b/>",
+      "stored": "<a/><b/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<!-- comment -->",
+      "notices": [],
+      "output": "<!-- comment -->",
+      "stored": "<!-- comment -->",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?instruction value?>",
+      "notices": [],
+      "output": "<?instruction value?>",
+      "stored": "<?instruction value?>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<![CDATA[text]]>",
+      "notices": [],
+      "output": "<![CDATA[text]]>",
+      "stored": "<![CDATA[text]]>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a>&amp;&lt;&gt;&quot;&apos;</a>",
+      "notices": [],
+      "output": "<a>&amp;&lt;&gt;&quot;&apos;</a>",
+      "stored": "<a>&amp;&lt;&gt;&quot;&apos;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a>한글 日本語 é</a>",
+      "notices": [],
+      "output": "<a>한글 日本語 é</a>",
+      "stored": "<a>한글 日本語 é</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a>\r\ntext\rmore</a>",
+      "notices": [],
+      "output": "<a>\r\ntext\rmore</a>",
+      "stored": "<a>\r\ntext\rmore</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a/ >",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: error parsing attribute name\n<a/ >\n  ^\nline 1: Couldn't find end of Start Tag a line 1\n<a/ >\n  ^"
+    },
+    {
+      "mode": "content",
+      "input": "<a>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: Premature end of data in tag a line 1\n<a>\n   ^"
+    },
+    {
+      "mode": "content",
+      "input": "<a></b>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: Opening and ending tag mismatch: a line 1 and b\n<a></b>\n       ^"
+    },
+    {
+      "mode": "content",
+      "input": "<a x='1' x='2'/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: Attribute x redefined\n<a x='1' x='2'/>\n              ^"
+    },
+    {
+      "mode": "content",
+      "input": "<a>&missing;</a>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: Entity 'missing' not defined\n<a>&missing;</a>\n            ^"
+    },
+    {
+      "mode": "content",
+      "input": "<a>&#0;</a>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: xmlParseCharRef: invalid xmlChar value 0\n<a>&#0;</a>\n       ^"
+    },
+    {
+      "mode": "content",
+      "input": "<a>&#x1F642;</a>",
+      "notices": [],
+      "output": "<a>&#x1F642;</a>",
+      "stored": "<a>&#x1F642;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a>\u0001</a>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: PCDATA invalid Char value 1\n<a>\u0001</a>\n   ^"
+    },
+    {
+      "mode": "content",
+      "input": "<a>]]></a>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: Sequence ']]>' not allowed in content\n<a>]]></a>\n   ^"
+    },
+    {
+      "mode": "content",
+      "input": "<ns:root/>",
+      "notices": [],
+      "output": "<ns:root/>",
+      "stored": "<ns:root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a xmlns:xml='wrong'/>",
+      "notices": [],
+      "output": "<a xmlns:xml='wrong'/>",
+      "stored": "<a xmlns:xml='wrong'/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<a xmlns:p='same' xmlns:q='same' p:x='1' q:x='2'/>",
+      "notices": [],
+      "output": "<a xmlns:p='same' xmlns:q='same' p:x='1' q:x='2'/>",
+      "stored": "<a xmlns:p='same' xmlns:q='same' p:x='1' q:x='2'/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0'?><root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0'?>\n<root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0'?>\n<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.1'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.1\"?><root/>",
+      "stored": "<?xml version='1.1'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.2'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.2\"?><root/>",
+      "stored": "<?xml version='1.2'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='bad'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"bad\"?><root/>",
+      "stored": "<?xml version='bad'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version=''?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"\"?><root/>",
+      "stored": "<?xml version=''?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' encoding='UTF-8'?><root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0' encoding='UTF-8'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' encoding='ISO-8859-1'?><a>é</a>",
+      "notices": [],
+      "output": "<a>é</a>",
+      "stored": "<?xml version='1.0' encoding='ISO-8859-1'?><a>é</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' encoding='unknown'?><root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0' encoding='unknown'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' encoding=''?><root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0' encoding=''?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' standalone='yes'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.0\" standalone=\"yes\"?><root/>",
+      "stored": "<?xml version='1.0' standalone='yes'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' standalone='no'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.0\" standalone=\"no\"?><root/>",
+      "stored": "<?xml version='1.0' standalone='no'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' standalone='maybe'?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content: invalid XML declaration",
+      "detail": "standalone accepts only 'yes' or 'no'."
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.0\" standalone=\"yes\"?><root/>",
+      "stored": "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0' standalone='yes' encoding='UTF-8'?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content: invalid XML declaration",
+      "detail": "Parsing XML declaration: '?>' expected."
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0'encoding='UTF-8'?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content: invalid XML declaration",
+      "detail": "Space required."
+    },
+    {
+      "mode": "content",
+      "input": "<?xml?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content: invalid XML declaration",
+      "detail": "Space required."
+    },
+    {
+      "mode": "content",
+      "input": "<?xml encoding='UTF-8'?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content: invalid XML declaration",
+      "detail": "Malformed declaration: missing version."
+    },
+    {
+      "mode": "content",
+      "input": " <?xml version='1.0'?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: XML declaration allowed only at the start of the document\n <?xml version='1.0'?><root/>\n      ^"
+    },
+    {
+      "mode": "content",
+      "input": "<?XML version='1.0'?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: Invalid PI name\n<?XML version='1.0'?><root/>\n     ^"
+    },
+    {
+      "mode": "content",
+      "input": "<?xml-stylesheet href='test'?><root/>",
+      "notices": [],
+      "output": "<?xml-stylesheet href='test'?><root/>",
+      "stored": "<?xml-stylesheet href='test'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xmlé?><root/>",
+      "notices": [
+        {
+          "sqlstate": "01000",
+          "message": "line 1: xmlParsePITarget: invalid name prefix 'xml'\n<?xmlé?><root/>\n       ^"
+        }
+      ],
+      "output": "<?xmlé?><root/>",
+      "stored": "<?xmlé?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "﻿<root/>",
+      "notices": [],
+      "output": "﻿<root/>",
+      "stored": "﻿<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "﻿<?xml version='1.0'?><root/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: XML declaration allowed only at the start of the document\n﻿<?xml version='1.0'?><root/>\n        ^"
+    },
+    {
+      "mode": "content",
+      "input": "<!DOCTYPE a><a/>",
+      "notices": [],
+      "output": "<!DOCTYPE a><a/>",
+      "stored": "<!DOCTYPE a><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<!-- before --><!DOCTYPE a><a/>",
+      "notices": [],
+      "output": "<!-- before --><!DOCTYPE a><a/>",
+      "stored": "<!-- before --><!DOCTYPE a><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?before?><!DOCTYPE a><a/>",
+      "notices": [],
+      "output": "<?before?><!DOCTYPE a><a/>",
+      "stored": "<?before?><!DOCTYPE a><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<!DOCTYPE a><a/><b/>",
+      "notices": [],
+      "sqlstate": "2200N",
+      "message": "invalid XML content",
+      "detail": "line 1: Extra content at the end of the document\n<!DOCTYPE a><a/><b/>\n                ^"
+    },
+    {
+      "mode": "content",
+      "input": "<!DOCTYPE a [<!ENTITY x 'value'>]><a>&x;</a>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ENTITY x 'value'>]><a>&x;</a>",
+      "stored": "<!DOCTYPE a [<!ENTITY x 'value'>]><a>&x;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<!DOCTYPE a [<!ATTLIST a x CDATA 'default'>]><a/>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ATTLIST a x CDATA 'default'>]><a/>",
+      "stored": "<!DOCTYPE a [<!ATTLIST a x CDATA 'default'>]><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<!DOCTYPE a SYSTEM 'file:///uqa-xml-reference-does-not-exist'><a/>",
+      "notices": [],
+      "output": "<!DOCTYPE a SYSTEM 'file:///uqa-xml-reference-does-not-exist'><a/>",
+      "stored": "<!DOCTYPE a SYSTEM 'file:///uqa-xml-reference-does-not-exist'><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<!DOCTYPE a [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><a>&x;</a>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><a>&x;</a>",
+      "stored": "<!DOCTYPE a [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><a>&x;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<!DOCTYPE a [<!ENTITY x SYSTEM 'https://example.invalid/entity'>]><a>&x;</a>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ENTITY x SYSTEM 'https://example.invalid/entity'>]><a>&x;</a>",
+      "stored": "<!DOCTYPE a [<!ENTITY x SYSTEM 'https://example.invalid/entity'>]><a>&x;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0'?>text<a/>",
+      "notices": [],
+      "output": "text<a/>",
+      "stored": "<?xml version='1.0'?>text<a/>",
+      "oid": 142
+    },
+    {
+      "mode": "content",
+      "input": "<?xml version='1.0'?>",
+      "notices": [],
+      "output": "",
+      "stored": "<?xml version='1.0'?>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Document is empty\n\n^"
+    },
+    {
+      "mode": "document",
+      "input": " ",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Start tag expected, '<' not found\n \n ^"
+    },
+    {
+      "mode": "document",
+      "input": "\n<root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "\n<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "\n\n<root/>",
+      "notices": [],
+      "output": "\n<root/>",
+      "stored": "\n\n<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "plain text",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Start tag expected, '<' not found\nplain text\n^"
+    },
+    {
+      "mode": "document",
+      "input": "<root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<root/>tail",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Extra content at the end of the document\n<root/>tail\n       ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a/><b/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Extra content at the end of the document\n<a/><b/>\n    ^"
+    },
+    {
+      "mode": "document",
+      "input": "<!-- comment -->",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Start tag expected, '<' not found\n<!-- comment -->\n                ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?instruction value?>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Start tag expected, '<' not found\n<?instruction value?>\n                     ^"
+    },
+    {
+      "mode": "document",
+      "input": "<![CDATA[text]]>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: StartTag: invalid element name\n<![CDATA[text]]>\n ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a>&amp;&lt;&gt;&quot;&apos;</a>",
+      "notices": [],
+      "output": "<a>&amp;&lt;&gt;&quot;&apos;</a>",
+      "stored": "<a>&amp;&lt;&gt;&quot;&apos;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<a>한글 日本語 é</a>",
+      "notices": [],
+      "output": "<a>한글 日本語 é</a>",
+      "stored": "<a>한글 日本語 é</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<a>\r\ntext\rmore</a>",
+      "notices": [],
+      "output": "<a>\r\ntext\rmore</a>",
+      "stored": "<a>\r\ntext\rmore</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<a/ >",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: error parsing attribute name\n<a/ >\n  ^\nline 1: Couldn't find end of Start Tag a line 1\n<a/ >\n  ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Premature end of data in tag a line 1\n<a>\n   ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a></b>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Opening and ending tag mismatch: a line 1 and b\n<a></b>\n       ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a x='1' x='2'/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Attribute x redefined\n<a x='1' x='2'/>\n              ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a>&missing;</a>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Entity 'missing' not defined\n<a>&missing;</a>\n            ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a>&#0;</a>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: xmlParseCharRef: invalid xmlChar value 0\n<a>&#0;</a>\n       ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a>&#x1F642;</a>",
+      "notices": [],
+      "output": "<a>&#x1F642;</a>",
+      "stored": "<a>&#x1F642;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<a>\u0001</a>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: PCDATA invalid Char value 1\n<a>\u0001</a>\n   ^"
+    },
+    {
+      "mode": "document",
+      "input": "<a>]]></a>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Sequence ']]>' not allowed in content\n<a>]]></a>\n   ^"
+    },
+    {
+      "mode": "document",
+      "input": "<ns:root/>",
+      "notices": [],
+      "output": "<ns:root/>",
+      "stored": "<ns:root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<a xmlns:xml='wrong'/>",
+      "notices": [],
+      "output": "<a xmlns:xml='wrong'/>",
+      "stored": "<a xmlns:xml='wrong'/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<a xmlns:p='same' xmlns:q='same' p:x='1' q:x='2'/>",
+      "notices": [],
+      "output": "<a xmlns:p='same' xmlns:q='same' p:x='1' q:x='2'/>",
+      "stored": "<a xmlns:p='same' xmlns:q='same' p:x='1' q:x='2'/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0'?><root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0'?>\n<root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0'?>\n<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.1'?><root/>",
+      "notices": [
+        {
+          "sqlstate": "01000",
+          "message": "line 1: Unsupported version '1.1'\n<?xml version='1.1'?><root/>\n                   ^"
+        }
+      ],
+      "output": "<?xml version=\"1.1\"?><root/>",
+      "stored": "<?xml version='1.1'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.2'?><root/>",
+      "notices": [
+        {
+          "sqlstate": "01000",
+          "message": "line 1: Unsupported version '1.2'\n<?xml version='1.2'?><root/>\n                   ^"
+        }
+      ],
+      "output": "<?xml version=\"1.2\"?><root/>",
+      "stored": "<?xml version='1.2'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='bad'?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: String not closed expecting \" or '\n<?xml version='bad'?><root/>\n               ^\nline 1: Malformed declaration expecting version\n<?xml version='bad'?><root/>\n               ^\nline 1: Blank needed here\n<?xml version='bad'?><root/>\n               ^\nline 1: parsing XML declaration: '?>' expected\n<?xml version='bad'?><root/>\n               ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version=''?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Malformed declaration expecting version\n<?xml version=''?><root/>\n                ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' encoding='UTF-8'?><root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0' encoding='UTF-8'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' encoding='ISO-8859-1'?><a>é</a>",
+      "notices": [],
+      "output": "<a>é</a>",
+      "stored": "<?xml version='1.0' encoding='ISO-8859-1'?><a>é</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' encoding='unknown'?><root/>",
+      "notices": [],
+      "output": "<root/>",
+      "stored": "<?xml version='1.0' encoding='unknown'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' encoding=''?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Invalid XML encoding name\n<?xml version='1.0' encoding=''?><root/>\n                              ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' standalone='yes'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.0\" standalone=\"yes\"?><root/>",
+      "stored": "<?xml version='1.0' standalone='yes'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' standalone='no'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.0\" standalone=\"no\"?><root/>",
+      "stored": "<?xml version='1.0' standalone='no'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' standalone='maybe'?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: standalone accepts only 'yes' or 'no'\n<?xml version='1.0' standalone='maybe'?><root/>\n                                ^\nline 1: String not closed expecting \" or '\n<?xml version='1.0' standalone='maybe'?><root/>\n                                ^\nline 1: parsing XML declaration: '?>' expected\n<?xml version='1.0' standalone='maybe'?><root/>\n                                ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><root/>",
+      "notices": [],
+      "output": "<?xml version=\"1.0\" standalone=\"yes\"?><root/>",
+      "stored": "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0' standalone='yes' encoding='UTF-8'?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: parsing XML declaration: '?>' expected\n<?xml version='1.0' standalone='yes' encoding='UTF-8'?><root/>\n                                     ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0'encoding='UTF-8'?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Blank needed here\n<?xml version='1.0'encoding='UTF-8'?><root/>\n                   ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: XML declaration allowed only at the start of the document\n<?xml?><root/>\n     ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml encoding='UTF-8'?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Malformed declaration expecting version\n<?xml encoding='UTF-8'?><root/>\n      ^\nline 1: Blank needed here\n<?xml encoding='UTF-8'?><root/>\n      ^"
+    },
+    {
+      "mode": "document",
+      "input": " <?xml version='1.0'?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: XML declaration allowed only at the start of the document\n <?xml version='1.0'?><root/>\n      ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?XML version='1.0'?><root/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Invalid PI name\n<?XML version='1.0'?><root/>\n     ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml-stylesheet href='test'?><root/>",
+      "notices": [],
+      "output": "<?xml-stylesheet href='test'?><root/>",
+      "stored": "<?xml-stylesheet href='test'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xmlé?><root/>",
+      "notices": [
+        {
+          "sqlstate": "01000",
+          "message": "line 1: xmlParsePITarget: invalid name prefix 'xml'\n<?xmlé?><root/>\n       ^"
+        }
+      ],
+      "output": "<?xmlé?><root/>",
+      "stored": "<?xmlé?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "﻿<root/>",
+      "notices": [],
+      "output": "﻿<root/>",
+      "stored": "﻿<root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "﻿<?xml version='1.0'?><root/>",
+      "notices": [],
+      "output": "﻿<?xml version='1.0'?><root/>",
+      "stored": "﻿<?xml version='1.0'?><root/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<!DOCTYPE a><a/>",
+      "notices": [],
+      "output": "<!DOCTYPE a><a/>",
+      "stored": "<!DOCTYPE a><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<!-- before --><!DOCTYPE a><a/>",
+      "notices": [],
+      "output": "<!-- before --><!DOCTYPE a><a/>",
+      "stored": "<!-- before --><!DOCTYPE a><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?before?><!DOCTYPE a><a/>",
+      "notices": [],
+      "output": "<?before?><!DOCTYPE a><a/>",
+      "stored": "<?before?><!DOCTYPE a><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<!DOCTYPE a><a/><b/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Extra content at the end of the document\n<!DOCTYPE a><a/><b/>\n                ^"
+    },
+    {
+      "mode": "document",
+      "input": "<!DOCTYPE a [<!ENTITY x 'value'>]><a>&x;</a>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ENTITY x 'value'>]><a>&x;</a>",
+      "stored": "<!DOCTYPE a [<!ENTITY x 'value'>]><a>&x;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<!DOCTYPE a [<!ATTLIST a x CDATA 'default'>]><a/>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ATTLIST a x CDATA 'default'>]><a/>",
+      "stored": "<!DOCTYPE a [<!ATTLIST a x CDATA 'default'>]><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<!DOCTYPE a SYSTEM 'file:///uqa-xml-reference-does-not-exist'><a/>",
+      "notices": [],
+      "output": "<!DOCTYPE a SYSTEM 'file:///uqa-xml-reference-does-not-exist'><a/>",
+      "stored": "<!DOCTYPE a SYSTEM 'file:///uqa-xml-reference-does-not-exist'><a/>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<!DOCTYPE a [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><a>&x;</a>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><a>&x;</a>",
+      "stored": "<!DOCTYPE a [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><a>&x;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<!DOCTYPE a [<!ENTITY x SYSTEM 'https://example.invalid/entity'>]><a>&x;</a>",
+      "notices": [],
+      "output": "<!DOCTYPE a [<!ENTITY x SYSTEM 'https://example.invalid/entity'>]><a>&x;</a>",
+      "stored": "<!DOCTYPE a [<!ENTITY x SYSTEM 'https://example.invalid/entity'>]><a>&x;</a>",
+      "oid": 142
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0'?>text<a/>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Start tag expected, '<' not found\n<?xml version='1.0'?>text<a/>\n                     ^"
+    },
+    {
+      "mode": "document",
+      "input": "<?xml version='1.0'?>",
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document",
+      "detail": "line 1: Start tag expected, '<' not found\n<?xml version='1.0'?>\n                     ^"
+    }
+  ],
+  "statements": [
+    {
+      "sql": "SELECT oid, typname, typcategory, typcollation, typelem, typarray FROM pg_type WHERE oid IN (142, 143) ORDER BY oid",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [
+        26,
+        19,
+        18,
+        26,
+        26,
+        26
+      ],
+      "rows": [
+        [
+          "142",
+          "xml",
+          "U",
+          "0",
+          "0",
+          "143"
+        ],
+        [
+          "143",
+          "_xml",
+          "A",
+          "0",
+          "142",
+          "0"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT NULL::xml AS absent, '<a/>'::xml AS value, ARRAY['<a/>'::xml, NULL] AS items",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [
+        142,
+        142,
+        143
+      ],
+      "rows": [
+        [
+          null,
+          "<a/>",
+          "{<a/>,NULL}"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT '<a/>'::xml = '<a/>'::xml",
+      "transaction_status": 0,
+      "notices": [],
+      "sqlstate": "42883",
+      "message": "operator does not exist: xml = xml"
+    },
+    {
+      "sql": "SELECT '<a/>'::xml ORDER BY 1",
+      "transaction_status": 0,
+      "notices": [],
+      "sqlstate": "42883",
+      "message": "could not identify an ordering operator for type xml"
+    },
+    {
+      "sql": "SELECT DISTINCT '<a/>'::xml",
+      "transaction_status": 0,
+      "notices": [],
+      "sqlstate": "42883",
+      "message": "could not identify an equality operator for type xml"
+    },
+    {
+      "sql": "SELECT 1::xml",
+      "transaction_status": 0,
+      "notices": [],
+      "sqlstate": "42846",
+      "message": "cannot cast type integer to xml"
+    },
+    {
+      "sql": "SET xmloption TO content",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "CREATE TEMP TABLE xml_values (id integer, value xml, items xml[])",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "INSERT INTO xml_values VALUES (1, 'plain text', ARRAY['<a/>'::xml, 'text'::xml])",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "PREPARE xml_literal AS SELECT 'text'::xml AS value",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "PREPARE xml_runtime(text) AS SELECT $1::xml AS value",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "SET xmloption TO document",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "EXECUTE xml_literal",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [
+        142
+      ],
+      "rows": [
+        [
+          "text"
+        ]
+      ]
+    },
+    {
+      "sql": "EXECUTE xml_runtime('text')",
+      "transaction_status": 0,
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document"
+    },
+    {
+      "sql": "INSERT INTO xml_values SELECT 2, value, items FROM xml_values WHERE id = 1",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "SELECT id, value, items FROM xml_values ORDER BY id",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [
+        23,
+        142,
+        143
+      ],
+      "rows": [
+        [
+          "1",
+          "plain text",
+          "{<a/>,text}"
+        ],
+        [
+          "2",
+          "plain text",
+          "{<a/>,text}"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT '{<a/>,text}'::xml[]",
+      "transaction_status": 0,
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document"
+    },
+    {
+      "sql": "BEGIN",
+      "transaction_status": 2,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "SAVEPOINT keep_xml",
+      "transaction_status": 2,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "SELECT 'text'::xml",
+      "transaction_status": 3,
+      "notices": [],
+      "sqlstate": "2200M",
+      "message": "invalid XML document"
+    },
+    {
+      "sql": "SELECT '<a/>'::xml",
+      "transaction_status": 3,
+      "notices": [],
+      "sqlstate": "25P02",
+      "message": "current transaction is aborted, commands ignored until end of transaction block"
+    },
+    {
+      "sql": "ROLLBACK TO keep_xml",
+      "transaction_status": 2,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "SELECT '<a/>'::xml",
+      "transaction_status": 2,
+      "notices": [],
+      "types": [
+        142
+      ],
+      "rows": [
+        [
+          "<a/>"
+        ]
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "SET xmloption TO content",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [],
+      "rows": []
+    },
+    {
+      "sql": "SELECT '<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>'::xml::text",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [
+        25
+      ],
+      "rows": [
+        [
+          "<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT ARRAY['<?xml version=\"1.0\"?><a/>'::xml, NULL]::text",
+      "transaction_status": 0,
+      "notices": [],
+      "types": [
+        25
+      ],
+      "rows": [
+        [
+          "{<a/>,NULL}"
+        ]
+      ]
+    }
+  ]
+}

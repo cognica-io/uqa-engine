@@ -1,0 +1,739 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "action": "sql",
+      "sql": "CREATE DOMAIN prepared_admission_positive AS integer CHECK (VALUE > 0)",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "CREATE DOMAIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "value",
+      "sql": "SELECT $1::integer AS value",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "empty",
+      "sql": "",
+      "types": [
+        23
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "setting",
+      "sql": "SET work_mem = '4MB'",
+      "types": [
+        23
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "rollback",
+      "sql": "ROLLBACK",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "typed_rollback",
+      "sql": "ROLLBACK",
+      "types": [
+        23
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "domain_rollback",
+      "sql": "ROLLBACK",
+      "types": [
+        "prepared_admission_positive"
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "domain_rollback",
+      "parameters": [
+        "0"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "23514",
+        "message": "value for domain prepared_admission_positive violates check constraint \"prepared_admission_positive_check\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "execute",
+      "name": "domain_rollback",
+      "parameters": [
+        "1"
+      ],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "domain_rollback",
+      "parameters": [
+        "0"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "23514",
+        "message": "value for domain prepared_admission_positive violates check constraint \"prepared_admission_positive_check\"",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "rollback",
+      "parameters": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "SAVEPOINT retry",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SAVEPOINT",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "value",
+      "parameters": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "08P01",
+        "message": "bind message supplies 0 parameters, but prepared statement \"value\" requires 1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "describe",
+      "name": "value",
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "describe",
+      "name": "setting",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "describe",
+      "name": "empty",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "failed_empty",
+      "sql": "",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "failed_rollback",
+      "sql": "ROLLBACK TO SAVEPOINT retry",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "failed_commit",
+      "sql": "COMMIT",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "failed_begin",
+      "sql": "BEGIN",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "failed_show",
+      "sql": "SHOW work_mem",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "value",
+      "parameters": [
+        "1",
+        "2"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "08P01",
+        "message": "bind message supplies 2 parameters, but prepared statement \"value\" requires 1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "value",
+      "parameters": [
+        "1"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "empty",
+      "parameters": [
+        "1"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "typed_rollback",
+      "parameters": [
+        "1"
+      ],
+      "result": {
+        "status": 7,
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "failed_rollback",
+      "parameters": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "value",
+      "parameters": [
+        "7"
+      ],
+      "result": {
+        "status": 2,
+        "sqlstate": "",
+        "message": "",
+        "tag": "SELECT 1",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [],
+        "rows": [
+          [
+            "7"
+          ]
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "value",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [
+          [
+            "value",
+            23
+          ]
+        ],
+        "parameters": [
+          23
+        ],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "setting",
+      "parameters": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "08P01",
+        "message": "bind message supplies 0 parameters, but prepared statement \"setting\" requires 1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "failed_commit",
+      "parameters": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "execute",
+      "name": "empty",
+      "parameters": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "08P01",
+        "message": "bind message supplies 0 parameters, but prepared statement \"empty\" requires 1",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "rollback",
+      "parameters": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "syntax",
+      "sql": "SELECT FROM",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "syntax error at end of input",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "syntax_failed",
+      "sql": "SELECT FROM",
+      "types": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "42601",
+        "message": "syntax error at end of input",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "prepare",
+      "name": "recovery",
+      "sql": "ROLLBACK",
+      "types": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "recovery",
+      "parameters": [],
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "BEGIN",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "BEGIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DEALLOCATE ALL",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DEALLOCATE ALL",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 2
+      }
+    },
+    {
+      "action": "describe",
+      "name": "value",
+      "result": {
+        "status": 7,
+        "sqlstate": "26000",
+        "message": "prepared statement \"value\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "execute",
+      "name": "value",
+      "parameters": [],
+      "result": {
+        "status": 7,
+        "sqlstate": "26000",
+        "message": "prepared statement \"value\" does not exist",
+        "tag": "",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "ROLLBACK",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "ROLLBACK",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    },
+    {
+      "action": "sql",
+      "sql": "DROP DOMAIN prepared_admission_positive",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "tag": "DROP DOMAIN",
+        "columns": [],
+        "parameters": [],
+        "rows": [],
+        "transaction_status": 0
+      }
+    }
+  ]
+}

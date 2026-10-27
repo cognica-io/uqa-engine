@@ -45,6 +45,7 @@ fn diagnostic_execution_reads_live_limits_and_preserves_cancellation() {
     let aggregate_functions = RwLock::default();
     let notices = crate::query::NoticeQueue::default();
     let runtime = QueryRuntimeView {
+        function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         settings: &settings,
         cancellation: &cancellation,

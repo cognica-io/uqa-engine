@@ -100,10 +100,7 @@ fn independent_query(
             }) && block.subqueries.is_empty()
                 && block.windows.is_empty()
                 && block.locking.is_empty()
-                && block
-                    .expressions()
-                    .iter()
-                    .all(|expression| admitted(expression))
+                && block.query_expressions().all(admitted)
         }
         RelationalPlan::SetOp {
             left,
@@ -213,7 +210,7 @@ fn tracked_field(binding: &FunctionBinding, composites: &CompositeInputs) -> boo
         && binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect)
         && binding.invocation.is_none()
         && binding.resolution_error.is_none()
-        && binding.composite_field.as_ref().is_some_and(|field| {
+        && binding.composite_field().is_some_and(|field| {
             composites.tracks_oid(field.type_oid)
                 && (independent_type(&field.result_type)
                     || composites.tracks_type(&field.result_type))
@@ -245,6 +242,8 @@ fn independent_value(value: &Value) -> bool {
         | Value::Decimal(_)
         | Value::Json(_)
         | Value::JsonB(_) => true,
+        Value::Datum(datum) => crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid())
+            .is_some_and(independent_type),
         Value::Array(array) => array.elements().iter().all(independent_value),
         _ => false,
     }

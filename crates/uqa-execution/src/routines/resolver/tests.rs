@@ -35,7 +35,7 @@ impl uqa_sql::assignment::AssignmentContext for Types {
     fn evaluate_domain_check(
         &self,
         _: &uqa_sql::ast::Expr,
-        _: &uqa_sql::ResultRow,
+        _: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         panic!("unexpected domain check")
@@ -73,7 +73,7 @@ fn routine_record_fields_preserve_postgresql_declared_collations() {
     let types = Types::default();
     let names = ["c", "p", "plain", "n"];
     let schema = record_schema();
-    let schemas = HashMap::from([(0, schema.clone()), (1, schema)]);
+    let schemas = HashMap::from([(0, schema.clone().into()), (1, schema.into())]);
     let datums = [
         PLpgSQLDatum::Rec { name: "old".into() },
         PLpgSQLDatum::Rec { name: "new".into() },
@@ -111,7 +111,7 @@ fn routine_record_fields_preserve_postgresql_declared_collations() {
             types: &types,
             datums: &datums,
             values: &values,
-            record_schemas: &schemas,
+            record_descriptors: &schemas,
             bindings: &bindings,
             error: None,
             param_count: 0,
@@ -177,7 +177,7 @@ fn prepared_record_parameters_preserve_selected_types_without_text_resolution() 
     for (ty, text) in [(ColumnType::SmallInteger, false), (ColumnType::Text, true)] {
         let schema =
             RowSchema::with_column_definitions(None, &[ColumnDef::nullable("value", ty.clone())]);
-        let schemas = HashMap::from([(0, schema)]);
+        let schemas = HashMap::from([(0, schema.into())]);
         for index in 0..256 {
             let value = if index % 3 == 0 {
                 Value::Null
@@ -192,7 +192,7 @@ fn prepared_record_parameters_preserve_selected_types_without_text_resolution() 
                 types: &types,
                 datums: &datums,
                 values: &values,
-                record_schemas: &schemas,
+                record_descriptors: &schemas,
                 bindings: &bindings,
                 error: None,
                 param_count: 0,
@@ -237,7 +237,7 @@ fn prepared_scalar_parameters_do_not_resolve_the_selected_type_twice() {
             types: &types,
             datums: &datums,
             values: &values,
-            record_schemas: &schemas,
+            record_descriptors: &schemas,
             bindings: &bindings,
             error: None,
             param_count: 1,

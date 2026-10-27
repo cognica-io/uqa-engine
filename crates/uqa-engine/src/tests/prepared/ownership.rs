@@ -127,7 +127,7 @@ fn memory_relation_publications_reread_prepared_inputs(#[case] change: &str) {
     assert_eq!(
         result.rows[0]["stamp"],
         uqa_core::Value::Temporal(uqa_core::TemporalValue::Timestamp {
-            micros: current_clock
+            postgres_micros: (current_clock) - uqa_core::POSTGRES_EPOCH_MICROS
         })
     );
     assert!(!Arc::ptr_eq(

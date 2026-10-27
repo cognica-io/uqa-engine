@@ -1,0 +1,43 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "source": "pg_catalog.pg_proc",
+  "cases": [
+    {
+      "name": "concat",
+      "volatility": "s"
+    },
+    {
+      "name": "concat_ws",
+      "volatility": "s"
+    },
+    {
+      "name": "format",
+      "volatility": "s"
+    },
+    {
+      "name": "json_build_array",
+      "volatility": "s"
+    },
+    {
+      "name": "json_build_object",
+      "volatility": "s"
+    },
+    {
+      "name": "jsonb_build_array",
+      "volatility": "s"
+    },
+    {
+      "name": "jsonb_build_object",
+      "volatility": "s"
+    },
+    {
+      "name": "num_nonnulls",
+      "volatility": "i"
+    },
+    {
+      "name": "num_nulls",
+      "volatility": "i"
+    }
+  ],
+  "capture_sql": "SELECT json_build_object('postgresql_version', version(), 'source', 'pg_catalog.pg_proc', 'cases', json_agg(row_to_json(p) ORDER BY p.name)) FROM (SELECT DISTINCT proname AS name, provolatile AS volatility FROM pg_catalog.pg_proc WHERE proname IN ('concat', 'concat_ws', 'format', 'json_build_object', 'json_build_array', 'jsonb_build_object', 'jsonb_build_array', 'num_nulls', 'num_nonnulls')) p;"
+}

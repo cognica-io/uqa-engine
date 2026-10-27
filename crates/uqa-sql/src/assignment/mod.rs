@@ -7,7 +7,7 @@
 //! SQL assignment conversion and catalog-defined domain constraints.
 
 use crate::expr::EngineHook;
-use crate::{ast::Expr, catalog::domain::DomainCatalog, ResultRow, RowSchema, SQLError};
+use crate::{ast::Expr, catalog::domain::DomainCatalog, RowSchema, SQLError};
 use uqa_core::Value;
 
 /// Domain metadata and bound check evaluation required by assignment conversion.
@@ -15,7 +15,7 @@ pub trait AssignmentContext: EngineHook + DomainCatalog {
     fn evaluate_domain_check(
         &self,
         expression: &Expr,
-        row: &ResultRow,
+        row: &dyn crate::expr::RowLookup,
         schema: &RowSchema,
     ) -> Result<Value, SQLError>;
 }
@@ -30,4 +30,6 @@ mod tests;
 pub mod routines;
 
 pub mod columns;
+pub mod containers;
+pub mod path;
 pub mod targets;

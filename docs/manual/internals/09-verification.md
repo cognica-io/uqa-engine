@@ -4,6 +4,8 @@ UQA Engine uses layered verification because algebra, SQL compatibility, storage
 
 ## Workspace CI execution
 
+SQL XML input builds a pinned libxml2 parser from the sources in `crates/uqa-sql/vendor/libxml2`, using a C compiler and CMake 3.18 or newer. It links statically and does not require a system libxml2 installation. `python3 scripts/sync-libxml2.py --check` verifies the imported source inventory; the release license checker verifies the upstream notice in SQL and binary binding payloads. XML parser errors and external-resource handlers belong to individual parser contexts.
+
 Pull-request validation runs when a draft becomes ready for review. Keep a related issue group in one draft PR, commit its fixes in logical units, and push progress without starting CI for each commit. Complete focused local tests and review before marking the batch ready; repository checks and each affected product, binding and performance workflow then validate that candidate. After a product correction, return the PR to draft and submit the completed correction batch with another ready transition. A later push does not qualify new code: merge only after checking actual results for the final validation inputs. Main pushes retain their configured workspace and performance checks. This scheduling rule changes when checks run, not their required coverage or acceptance bounds.
 
 Foreign-handler validation runs at the final draft-to-ready transition of a pull request. Keep implementation and review fixes in draft; marking the finished candidate ready selects affected inputs and runs the memory, Arrow and DuckDB configurations on Linux and macOS. Ordinary PR pushes and the subsequent main push do not repeat that matrix. If a product correction is needed afterward, return to draft and qualify the completed candidate at its next ready transition. Before merging, match the six successful configurations to the final input fingerprint; documentation-only updates may reuse completed evidence with identical qualification inputs. Explicit full CI retains its FDW matrix. Event-selection changes are checked by Git-history and workflow-policy tests; any change to the FDW execution definition, including commands, environment, permissions or evidence handling, still selects its matrix. Scheduling-only workflow edits and FDW selector tests use the lightweight PR policy checks instead of triggering the full workspace build on main.
@@ -50,10 +52,10 @@ cargo fmt --all -- --check
 cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
-cargo test --workspace --doc --exclude uqa-node --locked
+cargo test --workspace --doc --exclude uqa-node --exclude uqa-ffi --locked
 ```
 
-The Node.js addon is a `cdylib` with no Rust doctest target. An explicit `--doc` request overrides its `doctest = false` declaration, so documentation-only commands exclude `uqa-node`; the workspace unit tests, native addon builds and JavaScript binding checks still include it.
+The Node.js addon and C binding emit native libraries without a Rust doctest target. An explicit `--doc` request overrides `doctest = false`, so documentation-only commands exclude `uqa-node` and `uqa-ffi`. Workspace tests retain both crates, and the dedicated binding workflows build and execute their actual native artifacts.
 
 The workspace declares `unsafe_code = "deny"` and `unused_must_use = "deny"`. Clippy enables `all` and `pedantic` with an explicit small allowlist in the root manifest.
 

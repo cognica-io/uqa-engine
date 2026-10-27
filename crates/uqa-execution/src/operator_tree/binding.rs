@@ -27,6 +27,42 @@ fn stores_nothing(_: &str) -> bool {
     false
 }
 
+pub(super) fn has_column_null_test(expression: &ScalarExpr) -> bool {
+    let mut found = false;
+    expression.visit(&mut |expression| {
+        found |= matches!(expression, ScalarExpr::IsNull { expr, .. }
+            if matches!(&**expr, ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. }));
+    });
+    found
+}
+
+fn requires_catalog_null_test(
+    columns: &[uqa_sql::ast::ColumnDef],
+    expression: &ScalarExpr,
+) -> bool {
+    let mut required = false;
+    expression.visit(&mut |expression| {
+        let ScalarExpr::IsNull { expr, .. } = expression else {
+            return;
+        };
+        let (ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. }) = &**expr
+        else {
+            return;
+        };
+        if let Some(column) = columns.iter().find(|column| column.name == *name) {
+            let mut ty = &column.ty;
+            while let uqa_sql::ColumnType::Domain { base, .. } = ty {
+                ty = base;
+            }
+            required |= matches!(
+                ty,
+                uqa_sql::ColumnType::Composite(_) | uqa_sql::ColumnType::Record
+            );
+        }
+    });
+    required
+}
+
 /// Preserve the public syntax-lowering API while constructing its physical models in execution.
 pub fn lower_where(expression: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
     retrieval::lower_where(
@@ -77,6 +113,10 @@ impl RetrievalBinding<'_> {
         expression: &ScalarExpr,
         params: &[SQLParam],
     ) -> Result<Option<OperatorTree>, SQLError> {
+        // Scalar null postings cannot answer a composite's current live-field null test. Preserve that operation for SQL's catalog-aware row evaluator.
+        if requires_catalog_null_test(columns, expression) {
+            return Ok(None);
+        }
         let stores = |column: &str| columns.iter().any(|definition| definition.name == column);
         retrieval::lower_where_bound(
             self,

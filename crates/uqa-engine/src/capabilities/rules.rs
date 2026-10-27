@@ -6,25 +6,25 @@
 
 //! Capture rule namespaces and expression scopes for execution.
 use crate::Engine;
-use uqa_core::Value;
 use uqa_execution::{
-    mutation::rules::{RuleContext, RuleExpressions, RuleSecurity, RuleStatements},
+    mutation::rules::{RuleContext, RuleSecurity, RuleStatements},
     statement::plan_executor::StatementOutput,
-    PhysicalRow, RowSchema,
 };
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::{
-    ast::Statement, plan::ExpressionPlan, semantics::rules::analysis::RuleAnalysisContext, SQLError,
-};
+use uqa_sql::{semantics::rules::analysis::RuleAnalysisContext, SQLError};
 impl Engine {
     pub(crate) fn rule_analysis_context(&self) -> RuleAnalysisContext<'_> {
         RuleAnalysisContext {
             rules: self,
             sources: self,
             returning: self,
+            domains: self,
+            composites: uqa_sql::expr::EngineHook::composite_types(self),
         }
     }
-    pub(crate) fn rule_execution_context(&self) -> RuleContext<'_> {
+    pub(crate) fn rule_execution_context(
+        &self,
+    ) -> RuleContext<'_, crate::session::StatementReadSnapshot> {
         let runtime = self.query_runtime_view();
         RuleContext {
             memory: runtime.settings,
@@ -33,9 +33,10 @@ impl Engine {
             binding: self.catalog_routine_analysis_context(),
             security: self,
             statements: self,
-            expressions: self,
             returning: self.returning_analysis_context(),
             assignment: self,
+            projection: None,
+            volatility: self,
         }
     }
 }
@@ -44,41 +45,42 @@ impl RuleSecurity for Engine {
         self.event_lookup_context().rule_privilege_subject(table)
     }
 }
-impl RuleStatements for Engine {
+impl RuleStatements<crate::session::StatementReadSnapshot> for Engine {
     fn execute(
         &self,
-        statement: Statement,
+        action: uqa_sql::semantics::rules::binding::RuleAction,
+        params: &[uqa_sql::SQLParam],
+        inherited_ctes: Option<
+            &uqa_execution::query::CteScope<crate::session::StatementReadSnapshot>,
+        >,
         privilege_subject: &RoleReference,
+        consumer: Option<std::rc::Rc<dyn uqa_execution::query::consumer::QueryRowConsumer + '_>>,
     ) -> Result<StatementOutput, SQLError> {
+        let planning = self.statement_planning_context();
+        let scopes = inherited_ctes.map(|parent| {
+            uqa_sql::binding::statements::InheritedStatementAnalysisScopes {
+                current: planning.analysis.scopes,
+                parent,
+            }
+        });
+        let planning = uqa_planner::statement_planning::executable::StatementPlanningContext {
+            analysis: uqa_sql::binding::statements::StatementAnalysisContext {
+                scopes: scopes
+                    .as_ref()
+                    .map_or(planning.analysis.scopes, |scope| scope),
+                ..planning.analysis
+            },
+            ..planning
+        };
+        let mut compiled = self.compiled_statement_context();
+        compiled.planning = &planning;
         uqa_execution::statement::compiled::execute_output_with_privilege_subject(
-            &self.compiled_statement_context(),
-            statement,
-            &[],
+            &compiled,
+            action,
+            params,
+            inherited_ctes,
             privilege_subject,
-        )
-    }
-}
-impl RuleExpressions for Engine {
-    fn prepare_condition(&self, expression: &mut ExpressionPlan) -> Result<(), SQLError> {
-        uqa_planner::statement_planning::schema_expressions::optimize_rule_condition(
-            &self.statement_planning_context(),
-            expression,
-        )
-    }
-    fn evaluate_stored(
-        &self,
-        expression: &ExpressionPlan,
-        schema: &RowSchema,
-        row: &PhysicalRow,
-        privilege_subject: &RoleReference,
-    ) -> Result<Value, SQLError> {
-        crate::capabilities::query_expressions::eval_stored_expression_plan_with_row(
-            self,
-            expression,
-            schema,
-            row,
-            &[],
-            Some(privilege_subject),
+            consumer,
         )
     }
 }
@@ -86,13 +88,11 @@ impl RuleExpressions for Engine {
 impl Engine {
     pub(crate) fn view_rule_execution_context(
         &self,
-    ) -> uqa_execution::mutation::rules::views::ViewRuleContext<
-        '_,
-        crate::session::StatementReadSnapshot,
-    > {
-        uqa_execution::mutation::rules::views::ViewRuleContext {
+    ) -> uqa_execution::mutation::rules::ViewRuleContext<'_, crate::session::StatementReadSnapshot>
+    {
+        uqa_execution::mutation::rules::ViewRuleContext {
             rules: self.rule_execution_context(),
-            views: self.view_row_context(),
+            views: self.view_rewrite_context(),
         }
     }
 }

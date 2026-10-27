@@ -79,9 +79,10 @@ impl TryFrom<&SQLParam> for SQLParameter {
                     value: value.clone(),
                 })
             }
-            SQLParam::Vector(_) | SQLParam::Tensor(_) | SQLParam::DeferredError { .. } => {
-                Err(HttpEngineError::InvalidParameter)
-            }
+            SQLParam::Vector(_)
+            | SQLParam::Tensor(_)
+            | SQLParam::TypedTensor(_)
+            | SQLParam::DeferredError { .. } => Err(HttpEngineError::InvalidParameter),
         }
     }
 }
@@ -243,5 +244,19 @@ mod tests {
             serde_json::to_value(SQLParameter::try_from(&text).unwrap()).unwrap(),
             json!({"type": "text", "value": "100000000"})
         );
+    }
+
+    #[test]
+    fn packed_tensor_dimensions_require_a_wire_representation() {
+        let parameter = SQLParam::tensor_with_control(
+            &[],
+            3,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .unwrap();
+        assert!(matches!(
+            SQLParameter::try_from(&*parameter),
+            Err(HttpEngineError::InvalidParameter)
+        ));
     }
 }

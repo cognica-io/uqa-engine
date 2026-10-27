@@ -67,12 +67,15 @@ impl<'a> DeferredOperator<'a> {
                 SQLError::Internal("deferred source was already closed or failed".into())
             })?;
             let source = pending()?;
-            if source.row_schema() != &self.schema {
-                return Err(SQLError::Internal(
-                    "deferred source changed its bound row schema".into(),
-                )
-                .into());
-            }
+            let (source, ()) =
+                crate::physical::construction::OperatorBuild::run(source, |source| {
+                    if source.row_schema() != &self.schema {
+                        return Err(SQLError::Internal(
+                            "deferred source changed its bound row schema".into(),
+                        ));
+                    }
+                    Ok(())
+                })?;
             self.inner = Some(source);
             self.inner.as_mut().expect("initialized source").open()?;
             self.failed = false;
@@ -115,7 +118,7 @@ impl PhysicalOperator for DeferredOperator<'_> {
     }
     fn close(&mut self) -> ExecResult<()> {
         self.pending = None;
-        if let Some(inner) = &mut self.inner {
+        if let Some(mut inner) = self.inner.take() {
             inner.close()?;
         }
         Ok(())

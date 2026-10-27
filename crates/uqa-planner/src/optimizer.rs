@@ -46,7 +46,8 @@ pub use api::{
     optimize_with_aggregates_and_statistics, optimize_with_statistics, ConstantEvaluator,
     OptimizerConfig, OptimizerError, OptimizerResult, SourceStatistics,
 };
-pub use derived_projection::prune_outputs as prune_query_outputs;
+pub(crate) use derived_projection::expand_local_stars;
+pub use derived_projection::{prune_outputs as prune_query_outputs, OutputPruningContext};
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 
 use access_path::{choose_access_path, prioritize_access_predicates};
@@ -54,6 +55,7 @@ use command::optimize_command;
 use implicit_fusion::{rewrite_implicit_hybrid_fusion, source_allows_unqualified_signals};
 use join_reorder::reorder_unified_plan_joins;
 pub(crate) use scalar::constants::retain_computed_integer;
+pub(crate) use scalar::optimize_qualification;
 use scalar::{optimize_assignments, optimize_projections, optimize_scalar_slot};
 use traversal::{optimize_query, optimize_source, optimize_unified_plan};
 

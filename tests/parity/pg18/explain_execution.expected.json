@@ -1,0 +1,418 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "capture_command": [
+    "docker",
+    "exec",
+    "-i",
+    "uqa-pg18-projection-reference",
+    "psql",
+    "-U",
+    "postgres",
+    "-XqAt",
+    "-v",
+    "ON_ERROR_STOP=1"
+  ],
+  "collector_sha256": "477f52977964b0a94526732d72f4cee6b0e5572216375fb5104a9cb8282e7e3f",
+  "cases": [
+    {
+      "name": "constant_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT 1",
+      "rows": 1.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "constant_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT 1",
+      "rows": 1.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "empty_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT 1 WHERE false",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "empty_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT 1 WHERE false",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "values_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT * FROM (VALUES (1),(2),(3)) input(n)",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "values_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT * FROM (VALUES (1),(2),(3)) input(n)",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "empty_aggregate_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT count(*) FROM (SELECT 1 WHERE false) input",
+      "rows": 1.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "empty_aggregate_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT count(*) FROM (SELECT 1 WHERE false) input",
+      "rows": 1.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "limit_zero_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT * FROM generate_series(1,3) LIMIT 0",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "limit_zero_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT * FROM generate_series(1,3) LIMIT 0",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "union_all_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "union_all_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "table_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT n FROM measured_input",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "table_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) SELECT n FROM measured_input",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "ctas_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "ctas_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "ctas_empty_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input WHERE false",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "ctas_empty_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input WHERE false",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "ctas_no_data_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input WITH NO DATA",
+      "rows": 0,
+      "loops": 0,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "ctas_no_data_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input WITH NO DATA",
+      "rows": 0,
+      "loops": 0,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "ctas_locked_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input FOR UPDATE",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "ctas_locked_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE TEMP TABLE measured_output AS SELECT n FROM measured_input FOR UPDATE",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "materialized_view_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE MATERIALIZED VIEW measured_output AS VALUES (1),(2),(3)",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "materialized_view_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE MATERIALIZED VIEW measured_output AS VALUES (1),(2),(3)",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "materialized_no_data_untimed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE MATERIALIZED VIEW measured_output AS VALUES (1),(2),(3) WITH NO DATA",
+      "rows": 0,
+      "loops": 0,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "materialized_no_data_timed",
+      "setup": "",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) CREATE MATERIALIZED VIEW measured_output AS VALUES (1),(2),(3) WITH NO DATA",
+      "rows": 0,
+      "loops": 0,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "insert_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) INSERT INTO measured_input VALUES (4),(5)",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "insert_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) INSERT INTO measured_input VALUES (4),(5)",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "insert_returning_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) INSERT INTO measured_input VALUES (4),(5) RETURNING n",
+      "rows": 2.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "insert_returning_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) INSERT INTO measured_input VALUES (4),(5) RETURNING n",
+      "rows": 2.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "update_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) UPDATE measured_input SET n=n+1",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "update_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) UPDATE measured_input SET n=n+1",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "update_returning_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) UPDATE measured_input SET n=n+1 RETURNING n",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "update_returning_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) UPDATE measured_input SET n=n+1 RETURNING n",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "delete_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) DELETE FROM measured_input",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "delete_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) DELETE FROM measured_input",
+      "rows": 0.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "delete_returning_untimed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) DELETE FROM measured_input RETURNING n",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "delete_returning_timed",
+      "setup": "CREATE TEMP TABLE measured_input(n integer); INSERT INTO measured_input VALUES (1),(2),(3);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) DELETE FROM measured_input RETURNING n",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    },
+    {
+      "name": "prepared_untimed",
+      "setup": "PREPARE measured_statement(integer) AS SELECT n FROM generate_series(1,$1) input(n);",
+      "sql": "EXPLAIN (ANALYZE, TIMING FALSE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) EXECUTE measured_statement(3)",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": false,
+      "total": false,
+      "summary": false
+    },
+    {
+      "name": "prepared_timed",
+      "setup": "PREPARE measured_statement(integer) AS SELECT n FROM generate_series(1,$1) input(n);",
+      "sql": "EXPLAIN (ANALYZE, TIMING TRUE, SUMMARY FALSE, BUFFERS FALSE, FORMAT JSON) EXECUTE measured_statement(3)",
+      "rows": 3.0,
+      "loops": 1,
+      "startup": true,
+      "total": true,
+      "summary": false
+    }
+  ]
+}

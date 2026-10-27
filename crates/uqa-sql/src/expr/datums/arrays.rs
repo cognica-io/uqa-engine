@@ -10,7 +10,8 @@ use super::{corrupt, inline, word, Produced, ProductionControl, ProductionVec, S
 use crate::catalog::type_metadata::builtin_scalar_type;
 use uqa_core::ArrayValue;
 
-pub(crate) struct ArrayShape {
+/// Dimensions and lower bounds read from an admitted physical array header.
+pub struct ArrayShape {
     dimensions: [usize; 6],
     bounds: [i32; 6],
     count: usize,
@@ -36,10 +37,10 @@ impl ArrayShape {
         Ok(shape)
     }
 
-    pub(crate) fn dimensions(&self) -> &[usize] {
+    pub fn dimensions(&self) -> &[usize] {
         &self.dimensions[..self.count]
     }
-    pub(crate) fn lower_bounds(&self) -> &[i32] {
+    pub fn lower_bounds(&self) -> &[i32] {
         &self.bounds[..self.count]
     }
 }

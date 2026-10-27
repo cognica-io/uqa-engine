@@ -12,6 +12,7 @@ pub use scope::CteScope;
 pub mod binding;
 mod deferred;
 pub mod diagnostics;
+pub mod measurement;
 pub mod notice_queue;
 pub mod runtime;
 pub use notice_queue::NoticeQueue;

@@ -7,6 +7,7 @@
 use super::*;
 use serde_json::{json, Value as Json};
 
+mod capture;
 mod locking;
 mod metadata;
 
@@ -16,10 +17,10 @@ fn fixture(engine: &Engine) {
 
 fn explain(engine: &Engine, query: &str) -> Json {
     let result = sql(engine, &format!("EXPLAIN (FORMAT JSON) {query}"));
-    let Value::Str(value) = &result.rows[0]["plan"] else {
-        panic!("EXPLAIN must return text")
+    let Value::Json(value) = &result.rows[0]["QUERY PLAN"] else {
+        panic!("EXPLAIN FORMAT JSON must return JSON")
     };
-    serde_json::from_str(value).unwrap()
+    serde_json::from_str::<Json>(value).unwrap()[0].take()
 }
 
 fn nodes(plan: &Json) -> &[Json] {
@@ -72,7 +73,7 @@ fn diskann_explain_reports_the_selected_field_configuration_and_numeric_route() 
     let query =
         "SELECT id FROM diskann_docs d WHERE knn_match(d.embedding,ARRAY[1.0,0.0],2) AND id > 1";
     let plan = explain(&engine, query);
-    assert!(plan["Plan"]
+    assert!(plan["Plan"]["UQA Plan"]
         .as_array()
         .unwrap()
         .iter()
@@ -106,10 +107,9 @@ fn diskann_explain_reports_the_selected_field_configuration_and_numeric_route() 
         0.0
     );
     let text = sql(&engine, &format!("EXPLAIN {query}"));
-    assert!(text
-        .rows
-        .iter()
-        .any(|row| matches!(&row["plan"], Value::Str(line) if line.contains("DiskANN Search"))));
+    assert!(text.rows.iter().any(
+        |row| matches!(&row["QUERY PLAN"], Value::Str(line) if line.contains("DiskANN Search"))
+    ));
     assert_eq!(sql(&engine, query).rows.len(), 1);
 }
 
@@ -123,11 +123,11 @@ fn diskann_explain_defers_volatile_arguments_and_analyze_executes_once() {
     assert_eq!(nodes(&plan)[0]["Argument Status"], "deferred");
     assert_eq!(nodes(&plan)[0]["Estimated Work"], Json::Null);
     let analysis = sql(&engine, &format!("EXPLAIN (ANALYZE, FORMAT JSON) {query}"));
-    let Value::Str(value) = &analysis.rows[0]["plan"] else {
-        panic!("expected EXPLAIN text")
+    let Value::Json(value) = &analysis.rows[0]["QUERY PLAN"] else {
+        panic!("expected EXPLAIN JSON")
     };
     let analysis: Json = serde_json::from_str(value).unwrap();
-    assert_eq!(analysis["Actual Rows"], 1);
+    assert_eq!(analysis[0]["Plan"]["Actual Rows"], 1);
     assert_eq!(
         sql(&engine, "SELECT nextval('explain_calls') AS n").rows[0]["n"],
         Value::Int(2)
@@ -141,11 +141,11 @@ fn diskann_explain_defers_volatile_arguments_and_analyze_executes_once() {
             ],
         )
         .unwrap();
-    let Value::Str(value) = &result.rows[0]["plan"] else {
-        panic!("expected EXPLAIN text")
+    let Value::Json(value) = &result.rows[0]["QUERY PLAN"] else {
+        panic!("expected EXPLAIN JSON")
     };
     assert_eq!(
-        nodes(&serde_json::from_str::<Json>(value).unwrap())[0]["Candidate K"],
+        nodes(&serde_json::from_str::<Json>(value).unwrap()[0])[0]["Candidate K"],
         2
     );
 }

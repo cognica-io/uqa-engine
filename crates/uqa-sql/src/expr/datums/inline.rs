@@ -60,7 +60,9 @@ pub(in crate::expr) fn read(
             .ok_or_else(|| corrupt("invalid inline datum length"))?;
         if matches!(
             ty,
-            ColumnType::DeclaredRange(_) | ColumnType::DeclaredMultirange(_)
+            ColumnType::Composite(_)
+                | ColumnType::DeclaredRange(_)
+                | ColumnType::DeclaredMultirange(_)
         ) {
             let mut bytes = ProductionVec::new(*control);
             bytes.reserve(length)?;

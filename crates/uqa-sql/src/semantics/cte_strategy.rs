@@ -10,14 +10,15 @@ use crate::{
     ast::CteMaterialization,
     plan::{CtePlan, QueryPlan},
     semantics::{
-        cte_definition_references, cte_references_own_name, ordered_plan_ctes,
-        reachable_plan_cte_names, single_reference_plan_cte_names,
+        cte_order::analysis::CteAnalysis,
         volatility::{query_contains_volatile_function, VolatilityCatalog},
     },
     SQLError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
+#[derive(Clone, Copy, Debug)]
 pub struct ScheduledCte<'a> {
     pub plan: &'a CtePlan,
     pub deferred: bool,
@@ -27,98 +28,129 @@ pub fn schedule_plan_ctes<'a>(
     catalog: &dyn VolatilityCatalog,
     plan: &'a QueryPlan,
 ) -> Result<Vec<ScheduledCte<'a>>, SQLError> {
-    let ordered = ordered_plan_ctes(plan)?;
-    let reachable = reachable_plan_cte_names(plan);
-    let single_reference = single_reference_plan_cte_names(plan);
-    Ok(ordered
-        .into_iter()
-        .filter(|cte| reachable.contains(&cte.name))
-        .map(|cte| ScheduledCte {
-            plan: cte,
-            deferred: !cte.body.modifies_data()
-                && !cte_references_own_name(cte)
-                && match cte.materialization {
-                    CteMaterialization::Default => single_reference.contains(&cte.name),
-                    CteMaterialization::Materialized => false,
-                    CteMaterialization::NotMaterialized => true,
-                }
-                && matches!(
-                    cte.body
-                        .query()
-                        .map_or(Ok(true), |query| query_contains_volatile_function(
-                            catalog, query
-                        )),
-                    Ok(false)
-                ),
-        })
-        .collect())
+    Ok(
+        schedule_plan_ctes_with_control(catalog, plan, ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary CTE schedule"),
+    )
 }
 
-/// The materialized WITH items of a statement, split by when they run. `PostgreSQL` runs a data-modifying item while its reader draws rows from it, and once the primary query has finished `ExecPostprocessPlan` runs every item no reader drew from to completion, the last defined first.
+pub fn schedule_plan_ctes_with_control<'a>(
+    catalog: &dyn VolatilityCatalog,
+    plan: &'a QueryPlan,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<ScheduledCte<'a>>>, SQLError> {
+    let analysis = CteAnalysis::query(plan, control)?;
+    let ordered = analysis.order()?;
+    let reachable = analysis.reachable()?;
+    let mut scheduled = ProductionVec::new(control);
+    for index in ordered.iter().copied() {
+        control.check()?;
+        if !reachable[index] {
+            continue;
+        }
+        let cte = &plan.ctes[index];
+        let deferred = !cte.body.modifies_data()
+            && !analysis.recursive(index)
+            && match cte.materialization {
+                CteMaterialization::Default => analysis.single_reference(index),
+                CteMaterialization::Materialized => false,
+                CteMaterialization::NotMaterialized => true,
+            }
+            && matches!(
+                cte.body
+                    .query()
+                    .map_or(Ok(true), |query| query_contains_volatile_function(
+                        catalog, query
+                    )),
+                Ok(false)
+            );
+        scheduled.push_copy(ScheduledCte {
+            plan: cte,
+            deferred,
+        })?;
+    }
+    Ok(scheduled.finish()?)
+}
+
+/// Materialized WITH items split by native execution time: read dependencies precede the primary query; unread mutations finish afterward, last defined first.
+#[derive(Debug)]
 pub struct StatementCteOrder<'a> {
-    /// The items that run before the primary query: the ones it reads, directly or through other items, and the queries that no postponed item reads.
     pub primary: Vec<&'a CtePlan>,
-    /// The items that run once the primary query has finished, each data-modifying item after the items it reads.
     pub postponed: Vec<&'a CtePlan>,
 }
 
-/// Split `scheduled`, the items of `ctes` that a statement materializes in dependency order, into the items that run before its primary query and the items that run after it. `primary_references` names the items the primary query reads.
 pub fn order_statement_ctes<'a>(
     ctes: &'a [CtePlan],
     scheduled: Vec<&'a CtePlan>,
     primary_references: &BTreeSet<String>,
 ) -> StatementCteOrder<'a> {
-    if !scheduled.iter().any(|cte| cte.body.modifies_data()) {
-        return StatementCteOrder {
-            primary: scheduled,
-            postponed: Vec::new(),
-        };
+    order_statement_ctes_with_control(
+        ctes,
+        scheduled,
+        primary_references.iter().map(String::as_str),
+        ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary statement CTE order")
+    .into_uncontrolled()
+    .expect("ordinary statement CTE owner")
+}
+
+/// Allocate dependency and ordering scratch under the invoking owner, retaining both returned arrays with that allowance.
+pub fn order_statement_ctes_with_control<'a, 'n>(
+    ctes: &'a [CtePlan],
+    scheduled: impl IntoIterator<Item = &'a CtePlan>,
+    primary_references: impl IntoIterator<Item = &'n str>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<StatementCteOrder<'a>>, SQLError> {
+    let mut retained = ProductionVec::new(control);
+    for plan in scheduled {
+        retained.push_copy(plan)?;
     }
-    let references = ctes
-        .iter()
-        .enumerate()
-        .map(|(index, cte)| (cte.name.as_str(), cte_definition_references(ctes, index)))
-        .collect::<BTreeMap<_, _>>();
-    // The items `roots` read, directly or through the items they read, with the roots themselves.
-    let read_through = |roots: Vec<String>| {
-        let mut reached = BTreeSet::new();
-        let mut pending = roots;
-        while let Some(name) = pending.pop() {
-            if let Some(names) = references.get(name.as_str()) {
-                pending.extend(
-                    names
-                        .iter()
-                        .filter(|name| !reached.contains(*name))
-                        .cloned(),
-                );
-            }
-            reached.insert(name);
+    let mut primary = ProductionVec::new(control);
+    let mut postponed = ProductionVec::new(control);
+    if retained.iter().any(|cte| cte.body.modifies_data()) {
+        let mut analysis = CteAnalysis::new(ctes, control)?;
+        analysis.set_primary_names(primary_references)?;
+        let read = analysis.closure(analysis.primary_indices())?;
+        let mut deferred = ProductionVec::new(control);
+        for _ in ctes {
+            deferred.push_copy(false)?;
         }
-        reached
-    };
-    let read = read_through(primary_references.iter().cloned().collect());
-    let mut postponed_names = BTreeSet::new();
-    let mut postponed = Vec::new();
-    for item in ctes
-        .iter()
-        .rev()
-        .filter(|cte| cte.body.modifies_data() && !read.contains(&cte.name))
-    {
-        let needed = read_through(vec![item.name.clone()]);
-        for cte in &scheduled {
-            if needed.contains(&cte.name)
-                && !read.contains(&cte.name)
-                && postponed_names.insert(cte.name.clone())
+        for (index, cte) in ctes.iter().enumerate().rev() {
+            control.check()?;
+            if !cte.body.modifies_data() || read[index] {
+                continue;
+            }
+            let needed = analysis.closure(std::iter::once(index))?;
+            for plan in retained.iter().copied() {
+                control.check()?;
+                if let Some(index) = analysis.index(&plan.name) {
+                    if needed[index] && !read[index] && !deferred[index] {
+                        postponed.push_copy(plan)?;
+                        deferred.as_mut_slice()[index] = true;
+                    }
+                }
+            }
+        }
+        for plan in retained.iter().copied() {
+            control.check()?;
+            if !analysis
+                .index(&plan.name)
+                .is_some_and(|index| deferred[index])
             {
-                postponed.push(*cte);
+                primary.push_copy(plan)?;
             }
         }
+    } else {
+        primary = retained;
     }
-    let primary = scheduled
-        .into_iter()
-        .filter(|cte| !postponed_names.contains(&cte.name))
-        .collect();
-    StatementCteOrder { primary, postponed }
+    let (primary, primary_memory) = primary.finish()?.into_parts();
+    let (postponed, postponed_memory) = postponed.finish()?.into_parts();
+    Ok(control.finish(
+        StatementCteOrder { primary, postponed },
+        control.combine(primary_memory, postponed_memory),
+    )?)
 }
 
 #[cfg(test)]

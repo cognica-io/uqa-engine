@@ -56,7 +56,10 @@ mod types;
 
 pub use acl_role_specification::AclRoleSpecification;
 pub use array_access::{ArrayAccess, ArraySliceBounds, MAX_ARRAY_SUBSCRIPT_DIMENSIONS};
-pub use assignment_target::{AssignmentStep, AssignmentTarget, AssignmentTargets};
+pub use assignment_target::{
+    AssignmentBinding, AssignmentPathStep, AssignmentStep, AssignmentTarget, AssignmentTargets,
+    MultipleAssignmentTargets,
+};
 pub use composites::*;
 pub use constraints::*;
 pub use cte::*;
@@ -568,9 +571,8 @@ pub enum Statement {
     /// `EXPLAIN ...`. Carries the inner statement so the engine can
     /// emit the planner output.
     Explain {
-        analyze: bool,
-        verbose: bool,
-        format: Option<String>,
+        #[serde(flatten)]
+        options: crate::explain::ExplainOptions,
         body: Box<Statement>,
     },
     /// `ANALYZE [table]`. The engine refreshes per-column statistics
@@ -693,6 +695,8 @@ pub enum Statement {
         name: String,
         args: Vec<Expr>,
     },
+    /// Empty input retained by host preparation. Ordinary batch parsing returns no statements for this input.
+    Empty,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

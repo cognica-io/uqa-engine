@@ -12,6 +12,18 @@ use crate::{
     SQLError,
 };
 
+/// Retain user-supplied value provenance after a rule rewrites VALUES into a query source.
+pub fn insert_has_written_value(insert: &crate::plan::InsertPlan, position: usize) -> bool {
+    if let Some(values) = &insert.rule_values_input {
+        return values.has_written_value(position);
+    }
+    insert.source.is_some()
+        || insert.rows.iter().any(|row| {
+            row.get(position)
+                .is_some_and(|value| !matches!(value, crate::ScalarExpr::Default))
+        })
+}
+
 /// Stored expressions affected by an UPDATE's target columns. Explicitly assigning an unchanged input still selects its dependents; assigning a generated column to DEFAULT does not select it by itself. Callers with BEFORE ROW UPDATE triggers must recompute every stored expression instead.
 #[must_use]
 pub fn stored_columns_for_update(

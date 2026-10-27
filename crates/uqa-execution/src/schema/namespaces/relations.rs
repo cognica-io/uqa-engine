@@ -242,7 +242,15 @@ impl RelationCreationContext<'_> {
         })?
         .ok_or_else(|| SQLError::Internal("creation namespace lookup returned no target".into()))
     }
-    /// Functions and types resolve authority without retaining relation-creation namespace locks.
+    /// Resolve a schema-owned object's destination, allocating the session namespace for an explicit or search-path `pg_temp` target.
+    pub fn object_name(&self, name: &str) -> Result<String, SQLError> {
+        if self.targets_temporary_namespace(name, RelationPersistence::Permanent)? {
+            self.temporary_name(name)
+        } else {
+            self.persistent_name(name)
+        }
+    }
+    /// Resolve authority in an existing namespace without retaining relation-creation namespace locks.
     pub fn persistent_name(&self, name: &str) -> Result<String, SQLError> {
         let name = self.resolve_persistent_name(name)?;
         self.ensure_create(&name)?;
@@ -284,7 +292,9 @@ impl RelationCreationContext<'_> {
         Err(creation::missing_creation_schema(schema))
     }
     pub fn ensure_create(&self, canonical_name: &str) -> Result<(), SQLError> {
-        creation::ensure_creation_privilege(self.names, &self.schema_privileges(), canonical_name)
+        let identity =
+            RelationIdentity::from_legacy_name(canonical_name).map_err(SQLError::Unsupported)?;
+        self.ensure_namespace_create(&identity.schema)
     }
     pub fn ensure_existing_create(&self, canonical_name: &str) -> Result<(), SQLError> {
         let relation =

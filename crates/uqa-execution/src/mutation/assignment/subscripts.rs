@@ -8,12 +8,10 @@
 
 use super::{MutationAssignmentContext, MutationAssignmentTarget, TypedAssignmentTarget};
 use crate::{mutation::expressions::eval_mutation_expr, query::CteScope, OwnedPhysicalRow};
-use uqa_core::{
-    memory::{Produced, ProductionControl},
-    ArrayAssignmentError, ArrayValue, Value,
-};
+use uqa_core::{memory::ProductionControl, Value};
+use uqa_sql::assignment::containers::assign_array_with_control;
 use uqa_sql::{
-    assignment::{conversion, targets},
+    assignment::{columns::coerce_column_value, targets},
     ast::AssignmentStep,
     ColumnType, SQLError, SQLParam, ScalarExpr,
 };
@@ -88,12 +86,7 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
     } = destination;
     let declared = ty.expect("typed assignment has its declared destination");
     if target.is_whole_column() {
-        return conversion::coerce_assignment_value(
-            services.assignment,
-            value()?,
-            declared,
-            source,
-        );
+        return coerce_column_value(services.assignment, value()?, declared, source);
     }
     let bound = |expr: &ScalarExpr| -> Result<i32, SQLError> {
         let value = eval_mutation_expr(services.expressions, ctes, expr, row, params)?;
@@ -103,12 +96,7 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
                 message: "array subscript in assignment must not be null".into(),
             });
         }
-        let value = conversion::coerce_assignment_value(
-            services.assignment,
-            value,
-            &ColumnType::Integer,
-            None,
-        )?;
+        let value = coerce_column_value(services.assignment, value, &ColumnType::Integer, None)?;
         match value {
             Value::Int(value) => i32::try_from(value).map_err(|_| SQLError::Routine {
                 sqlstate: "22003".into(),
@@ -140,32 +128,20 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
         .indirection
         .iter()
         .any(|step| matches!(step, AssignmentStep::Slice { .. }));
-    let mut bounds = Vec::with_capacity(target.indirection.len());
-    for step in &target.indirection {
-        bounds.push(match step {
-            AssignmentStep::Index(index) => (slice.then_some(1), Some(bound(index)?)),
-            AssignmentStep::Slice { lower, upper } => (
-                lower.as_deref().map(bound).transpose()?,
-                upper.as_deref().map(bound).transpose()?,
-            ),
-            AssignmentStep::Field(_) => {
-                unreachable!("typed array target contains no composite fields")
-            }
-        });
-    }
-    let value =
-        conversion::coerce_assignment_value(services.assignment, value()?, &required, source)?;
+    let bounds = assignment_bounds(&target.indirection, &bound)?;
+    let value = coerce_column_value(services.assignment, value()?, &required, source)?;
     let result = assign_array_with_control(
         current.unwrap_or(&Value::Null),
         &value,
         &bounds,
         slice,
+        Some(&uqa_sql::expr::EngineValueCatalog(services.assignment)),
         &ProductionControl::uncontrolled(),
     )?
     .into_uncontrolled()
     .expect("ordinary array assignment result");
     if final_column_write {
-        conversion::coerce_assignment_value(
+        coerce_column_value(
             services.assignment,
             result,
             declared,
@@ -210,24 +186,36 @@ fn assign_field_value(
             level_bounds.push(Vec::new());
             continue;
         };
-        let slice = level.is_slice();
-        let mut bounds = Vec::with_capacity(steps.len());
-        for step in *steps {
-            bounds.push(match step {
-                AssignmentStep::Index(index) => (slice.then_some(1), Some(bound(index)?)),
-                AssignmentStep::Slice { lower, upper } => (
-                    lower.as_deref().map(bound).transpose()?,
-                    upper.as_deref().map(bound).transpose()?,
-                ),
-                AssignmentStep::Field(_) => {
-                    unreachable!("subscript groups contain no fields")
-                }
-            });
-        }
-        level_bounds.push(bounds);
+        level_bounds.push(assignment_bounds(steps, bound)?);
     }
-    let value = conversion::coerce_assignment_value(assignment, value()?, required, source)?;
-    let result = assign_levels(current, &types, &levels, &level_bounds, value, composites)?;
+    let value = coerce_column_value(assignment, value()?, required, source)?;
+    let binding = uqa_sql::assignment::path::bind(target, &types, composites)?;
+    let path = binding
+        .path
+        .iter()
+        .zip(&level_bounds)
+        .map(|(step, bounds)| {
+            use uqa_sql::{assignment::path::AssignmentContainer, ast::AssignmentPathStep};
+            Ok(match step {
+                AssignmentPathStep::Field { type_oid, number } => AssignmentContainer::Field {
+                    type_oid: *type_oid,
+                    number: *number,
+                },
+                AssignmentPathStep::Subscripts { slice, .. } => {
+                    AssignmentContainer::subscripts(bounds, *slice)?
+                }
+            })
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    let result = uqa_sql::assignment::path::assign_with_control(
+        current,
+        &path,
+        &value,
+        Some(&uqa_sql::expr::EngineValueCatalog(assignment)),
+        &ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary field assignment result");
     if !final_column_write {
         return Ok(result);
     }
@@ -236,234 +224,35 @@ fn assign_field_value(
     while let ColumnType::Domain { base: inner, .. } = base {
         base = inner;
     }
-    conversion::coerce_assignment_value(assignment, result, declared, Some(base))
+    coerce_column_value(assignment, result, declared, Some(base))
 }
 
-fn assign_levels(
-    current: &Value,
-    types: &[ColumnType],
-    levels: &[targets::AssignmentLevel<'_, ScalarExpr>],
-    bounds: &[Vec<(Option<i32>, Option<i32>)>],
-    value: Value,
-    composites: Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog>,
-) -> Result<Value, SQLError> {
-    let Some((level, rest)) = levels.split_first() else {
-        return Ok(value);
-    };
-    match level {
-        targets::AssignmentLevel::Field(field) => {
-            let mut composite = &types[0];
-            while let ColumnType::Domain { base, .. } = composite {
-                composite = base;
-            }
-            let ColumnType::Composite(reference) = composite else {
-                return Err(SQLError::Internal(
-                    "field assignment level lost its composite type".into(),
-                ));
-            };
-            let descriptor = uqa_sql::expr::composites::descriptor(composites, reference.oid)?;
-            let mut fields = match current {
-                Value::Record(fields) => fields.clone(),
-                Value::Null => descriptor
-                    .attributes
-                    .iter()
-                    .map(|attribute| (attribute.name.clone(), Value::Null))
-                    .collect(),
-                other => {
-                    return Err(SQLError::Internal(format!(
-                        "composite column holds a non-composite carrier {other:?}"
-                    )))
+fn assignment_bounds(
+    steps: &[AssignmentStep<ScalarExpr>],
+    bound: &dyn Fn(&ScalarExpr) -> Result<i32, SQLError>,
+) -> Result<Vec<uqa_sql::assignment::containers::SubscriptBound>, SQLError> {
+    let slice = steps
+        .iter()
+        .any(|step| matches!(step, AssignmentStep::Slice { .. }));
+    Ok(uqa_sql::assignment::containers::evaluate_subscript_bounds(
+        steps.len(),
+        slice,
+        &ProductionControl::uncontrolled(),
+        |dimension, upper_bound| match &steps[dimension] {
+            AssignmentStep::Index(index) => {
+                if upper_bound {
+                    bound(index).map(Some)
+                } else {
+                    Ok(Some(1))
                 }
-            };
-            let slot = fields
-                .iter_mut()
-                .find(|(name, _)| name == field)
-                .ok_or_else(|| {
-                    SQLError::Internal(format!("composite value has no field `{field}`"))
-                })?;
-            *slot.1 = assign_levels(slot.1, &types[1..], rest, &bounds[1..], value, composites)?;
-            Ok(Value::Record(fields.with_type_oid(Some(reference.oid))))
-        }
-        targets::AssignmentLevel::Subscripts(_) => {
-            let slice = level.is_slice();
-            let level_bounds = &bounds[0];
-            let value = if rest.is_empty() {
-                value
-            } else {
-                let element = match current {
-                    Value::Array(array) => level_bounds
-                        .iter()
-                        .map(|(_, upper)| *upper)
-                        .collect::<Option<Vec<_>>>()
-                        .and_then(|subscripts| array.element_at(&subscripts).cloned())
-                        .unwrap_or(Value::Null),
-                    _ => Value::Null,
-                };
-                assign_levels(&element, &types[1..], rest, &bounds[1..], value, composites)?
-            };
-            Ok(assign_array_with_control(
-                current,
-                &value,
-                level_bounds,
-                slice,
-                &ProductionControl::uncontrolled(),
-            )?
-            .into_uncontrolled()
-            .expect("ordinary array assignment result"))
-        }
-    }
-}
-
-/// SQL NULL containers become empty arrays before assignment; NULL slice sources preserve that container. Keep production admission through both paths.
-fn assign_array_with_control(
-    current: &Value,
-    value: &Value,
-    bounds: &[(Option<i32>, Option<i32>)],
-    slice: bool,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Value>, SQLError> {
-    control.check()?;
-    let empty = if *current == Value::Null {
-        Some(
-            ArrayValue::try_new_with_control(
-                control.finish(Vec::new(), control.empty_reservation())?,
-                control,
-            )?
-            .expect("empty array"),
-        )
-    } else {
-        None
-    };
-    let array = match current {
-        Value::Null => empty.as_deref().expect("NULL array replacement"),
-        Value::Array(array) => array,
-        _ => {
-            return Err(SQLError::Internal(
-                "declared array column has a nonarray carrier".into(),
-            ))
-        }
-    };
-    if slice && *value == Value::Null {
-        return if let Some(empty) = empty {
-            let (array, memory) = empty.into_parts();
-            Ok(control.finish(Value::Array(array), memory)?)
-        } else {
-            Ok(control.copy_value(current)?)
-        };
-    }
-    let result = if slice {
-        let Value::Array(source) = value else {
-            return Err(SQLError::Internal(
-                "array slice conversion returned a nonarray".into(),
-            ));
-        };
-        array.assign_slice_with_control(bounds, source, control)
-    } else {
-        let mut indexes = [0; 6];
-        if bounds.len() > indexes.len() {
-            return Err(array_error(ArrayAssignmentError::SubscriptCount));
-        }
-        for (index, (_, upper)) in indexes.iter_mut().zip(bounds) {
-            *index =
-                upper.ok_or_else(|| SQLError::Internal("element index lost its bound".into()))?;
-        }
-        array.assign_element_with_control(&indexes[..bounds.len()], value, control)
-    }
-    .map_err(array_error)?;
-    let (array, memory) = result.into_parts();
-    Ok(control.finish(Value::Array(array), memory)?)
-}
-
-fn array_error(error: ArrayAssignmentError) -> SQLError {
-    let code = match &error {
-        ArrayAssignmentError::Retention(_) => {
-            let ArrayAssignmentError::Retention(error) = error else {
-                unreachable!()
-            };
-            return error.into();
-        }
-        ArrayAssignmentError::SizeLimit | ArrayAssignmentError::LowerBound(_) => "54000",
-        ArrayAssignmentError::ElementShape => "42804",
-        _ => "2202E",
-    };
-    SQLError::Diagnostic {
-        sqlstate: code.into(), message: error.to_string(), hint: None,
-        detail: matches!(error, ArrayAssignmentError::MissingBounds).then(|| "When assigning to a slice of an empty array value, slice boundaries must be fully specified.".into()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use uqa_core::{memory::MemoryBudget, CancellationToken};
-
-    #[test]
-    fn null_slice_preserves_existing_values_and_materializes_a_null_container() {
-        let budget = MemoryBudget::new(8192);
-        let token = CancellationToken::new();
-        let control = ProductionControl::new(&budget, &token, &token);
-        let original = Value::Array(
-            ArrayValue::with_lower_bounds(vec![Value::Str("retained".repeat(16))], vec![-3])
-                .unwrap(),
-        );
-        for current in [&Value::Null, &original] {
-            let output = assign_array_with_control(
-                current,
-                &Value::Null,
-                &[(Some(1), Some(2))],
-                true,
-                &control,
-            )
-            .unwrap();
-            assert_eq!(budget.used(), output.reserved_bytes());
-            assert!(output.reserved_bytes() > 0);
-            if *current == Value::Null {
-                let Value::Array(array) = &*output else {
-                    panic!("NULL slice must produce an array");
-                };
-                assert_eq!(array.elements().len(), 0);
-                assert_eq!(array.dimensions().len(), 0);
-            } else {
-                assert_eq!(*output, original);
             }
-            drop(output);
-            assert_eq!(budget.used(), 0);
-        }
-        let refused = MemoryBudget::new(0);
-        let control = ProductionControl::new(&refused, &token, &token);
-        for current in [&Value::Null, &original] {
-            assert_eq!(
-                assign_array_with_control(
-                    current,
-                    &Value::Null,
-                    &[(Some(1), Some(2))],
-                    true,
-                    &control
-                )
-                .unwrap_err()
-                .sqlstate(),
-                Some("53200")
-            );
-            assert_eq!(refused.used(), 0);
-        }
-    }
-
-    #[test]
-    fn cancellation_precedes_null_slice_container_copy_and_keeps_the_original_owner() {
-        let budget = MemoryBudget::new(8192);
-        let original = CancellationToken::new();
-        let invoking = CancellationToken::new();
-        invoking.cancel();
-        let control = ProductionControl::new(&budget, &original, &invoking);
-        let error = assign_array_with_control(
-            &Value::Null,
-            &Value::Null,
-            &[(Some(1), Some(2))],
-            true,
-            &control,
-        )
-        .unwrap_err();
-        assert!(matches!(error, SQLError::Cancelled(_)));
-        assert_eq!(budget.used(), 0);
-    }
+            AssignmentStep::Slice { lower, upper } => if upper_bound { upper } else { lower }
+                .as_deref()
+                .map(bound)
+                .transpose(),
+            AssignmentStep::Field(_) => unreachable!("subscript group"),
+        },
+    )?
+    .into_uncontrolled()
+    .expect("ordinary assignment bounds"))
 }

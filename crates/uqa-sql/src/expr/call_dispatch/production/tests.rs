@@ -138,7 +138,7 @@ fn bound_generated_dispatch_keeps_structural_identity_and_fixed_integer_overflow
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };
@@ -201,16 +201,16 @@ fn retained_field_type_errors_follow_record_nullness_and_release_argument_memory
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     let mut binding = FunctionBinding::dispatched(FunctionDispatch::FieldSelect);
-    binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+    binding.set_composite_field(crate::ast::CompositeFieldBinding {
         collation_oid: None,
         type_oid: 20_001,
         number: 2,
         result_type: crate::ColumnType::Text,
         dropped: false,
         changed_type: Some(crate::ColumnType::Varchar(Some(8))),
-    }));
+    });
     for dropped in [false, true] {
-        binding.composite_field.as_mut().unwrap().dropped = dropped;
+        binding.composite_field_mut().unwrap().dropped = dropped;
         for base in [
             Value::Null,
             Value::Record(vec![("b".into(), Value::Null)].into()),

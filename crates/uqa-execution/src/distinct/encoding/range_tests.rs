@@ -16,7 +16,25 @@ use uqa_sql::{
 
 struct Catalog(Arc<CompositeTypeDescriptor>);
 
+impl uqa_sql::expr::composites::CompositeTypeCatalog for Catalog {
+    fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
+        self.value_composite_type(oid)
+    }
+}
+
 impl SQLValueCatalog for Catalog {
+    fn value_type_by_oid(&self, oid: u32) -> Result<Option<ColumnType>, SQLError> {
+        Ok((oid == self.0.type_oid).then(|| {
+            ColumnType::Composite(uqa_sql::ast::CompositeTypeReference {
+                schema: "public".into(),
+                name: "retained".into(),
+                oid,
+                relation_oid: self.0.relation_oid,
+                array_oid: oid + 2,
+            })
+        }))
+    }
+
     fn enum_label_uncommitted(&self, _: u32) -> bool {
         false
     }
@@ -66,6 +84,65 @@ fn containers(text: &str, oid: u32) -> Vec<Value> {
         ),
         Value::Array(uqa_core::ArrayValue::try_new(vec![row]).unwrap()),
     ]
+}
+
+#[test]
+fn physical_composite_reservations_share_numeric_equality_and_all_predecessor_aliases() {
+    let catalog = Catalog(Arc::new(CompositeTypeDescriptor {
+        type_oid: 16_384,
+        relation_oid: 16_385,
+        dropped: vec![],
+        attributes: vec![CompositeAttribute {
+            name: "n".into(),
+            number: 1,
+            collation_oid: None,
+            ty: ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            },
+        }],
+    }));
+    let control = ProductionControl::uncontrolled();
+    let mut current = None;
+    for text in ["1.0", "1.00", "1.000"] {
+        let logical = Value::Record(uqa_core::RecordValue::from_parts(
+            vec![(
+                "n".into(),
+                Value::Decimal(uqa_core::DecimalValue::parse(text).unwrap()),
+            )],
+            Some(16_384),
+        ));
+        let physical = uqa_sql::expr::composites::retain_value_with_control(
+            control.copy_value(&logical).unwrap(),
+            Some(&catalog),
+            &control,
+        )
+        .unwrap();
+        assert!(matches!(&*physical, Value::Datum(_)));
+        let keys = reservations::canonical_row_lock_keys_with_catalog(
+            std::slice::from_ref(&*physical),
+            &catalog,
+        )
+        .unwrap();
+        let logical_keys =
+            reservations::canonical_row_lock_keys_with_catalog(&[logical], &catalog).unwrap();
+        assert_eq!(keys[0], logical_keys[0]);
+        assert_eq!(
+            reservations::canonical_constraint_key(
+                std::slice::from_ref(&*physical),
+                Some(&catalog)
+            )
+            .unwrap(),
+            keys[0]
+        );
+        if let Some(previous) = current.replace(keys[0].clone()) {
+            assert_eq!(keys[0], previous);
+        }
+        for old in reservations::canonical_row_lock_keys(std::slice::from_ref(&*physical)).unwrap()
+        {
+            assert!(keys.contains(&old));
+        }
+    }
 }
 
 #[test]
@@ -151,7 +228,7 @@ fn range_sql_hash_and_exact_keys_preserve_postgresql_equality_classes() {
 }
 
 #[test]
-fn range_reservations_preserve_deferred_fields_and_existing_nonrange_addresses() {
+fn range_reservations_observe_physical_fields_and_keep_predecessor_addresses() {
     let catalog = Catalog(Arc::new(CompositeTypeDescriptor {
         type_oid: 16_384,
         relation_oid: 16_385,
@@ -167,7 +244,6 @@ fn range_reservations_preserve_deferred_fields_and_existing_nonrange_addresses()
         .unwrap(),
     );
     for value in [
-        deferred.clone(),
         invalid_vector.clone(),
         Value::Int(1),
         Value::Float(0.1),
@@ -183,9 +259,17 @@ fn range_reservations_preserve_deferred_fields_and_existing_nonrange_addresses()
         let values = [value];
         let old = reservations::canonical_row_lock_keys(&values).unwrap();
         let new = reservations::canonical_row_lock_keys_with_catalog(&values, &catalog).unwrap();
-        assert_eq!(new.as_slice(), &old);
+        assert_eq!(new.as_slice(), old.as_slice());
     }
-    for opaque in [deferred, invalid_vector] {
+    let error =
+        reservations::canonical_row_lock_keys_with_catalog(&[deferred], &catalog).unwrap_err();
+    assert!(matches!(error, ExecError::SQL(error) if error.sqlstate() == Some("XX001")));
+    let physical_integer = Value::Datum(uqa_core::DatumValue::new(
+        23,
+        0,
+        7_i32.to_le_bytes().to_vec(),
+    ));
+    for opaque in [physical_integer, invalid_vector] {
         let value = Value::Row(
             uqa_core::RowValue::typed(
                 vec![Value::Str("[1.0,3.00)".into()), opaque],

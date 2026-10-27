@@ -217,3 +217,61 @@ fn bound_columns_do_not_become_competing_open_document_fields() {
     assert!(!projection["d"].contains("price"));
     assert!(projection["d"].contains("payload"));
 }
+
+#[test]
+fn correlated_subqueries_keep_metadata_demands_in_the_owning_source() {
+    let catalog = fixture::Fixture::new();
+    for sql in [
+        "SELECT (SELECT _meta.doc_id), (SELECT _meta.score) FROM items",
+        "SELECT price FROM items WHERE EXISTS (SELECT 1 WHERE _meta.doc_id>0 AND _meta.score=0)",
+        "SELECT price FROM items ORDER BY (SELECT (SELECT _meta.doc_id+_meta.score))",
+        "SELECT sum(price) FILTER (WHERE 1 IN (SELECT _meta.doc_id+_meta.score)) FROM items",
+        "SELECT price FROM items JOIN (VALUES (1)) marker(n) ON marker.n=(SELECT _meta.doc_id+_meta.score)",
+        "SELECT price FROM items CROSS JOIN LATERAL (SELECT _meta.doc_id+_meta.score) derived",
+    ] {
+        let UnifiedPlan::Query(query) =
+            UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("block")
+        };
+        let projection =
+            column_prune_for_stmt(catalog.context(), &block, block.from.as_ref().unwrap())
+                .unwrap()
+                .unwrap();
+        assert!(projection["items"].metadata().includes_doc_id(), "{sql}");
+        assert!(projection["items"].metadata().includes_score(), "{sql}");
+    }
+}
+
+#[test]
+fn a_subquery_local_metadata_alias_does_not_request_outer_metadata() {
+    let catalog = fixture::Fixture::new();
+    let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(
+        uqa_sql::compile(
+            "SELECT (SELECT _meta.doc_id + _meta.score FROM (VALUES (7,8)) _meta(doc_id,score)) FROM items",
+        )
+        .unwrap()
+        .remove(0),
+    ) else {
+        panic!("query")
+    };
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        panic!("block")
+    };
+    block.subqueries[0].analyzed_source =
+        Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+            schema: uqa_sql::RowSchema::with_qualified_types(
+                "_meta",
+                vec!["doc_id".into(), "score".into()],
+                vec![Some(uqa_sql::ColumnType::Integer); 2],
+            ),
+            children: None,
+        }));
+    let projection = column_prune_for_stmt(catalog.context(), block, block.from.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(projection["items"].metadata().is_empty());
+}

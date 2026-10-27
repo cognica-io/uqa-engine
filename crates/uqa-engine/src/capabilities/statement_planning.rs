@@ -96,6 +96,7 @@ impl Engine {
             rules: self,
             views: self.view_rewrite_context(),
             columns: self,
+            volatility: self,
         }
     }
 }

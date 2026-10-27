@@ -55,12 +55,9 @@ pub(crate) fn upgrade_legacy_table_function_binding(
 
 pub fn user_function_output_columns_for(function: &SQLUserFunction) -> Option<Vec<String>> {
     let outputs = function.def.output_params();
-    if outputs.is_empty() {
-        return None;
-    }
+    outputs.clone().next()?;
     Some(
         outputs
-            .iter()
             .enumerate()
             .map(|(position, parameter)| {
                 if parameter.name.is_empty() {
@@ -79,11 +76,11 @@ pub fn user_function_composite_result(
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Result<Option<Arc<crate::expr::composites::CompositeTypeDescriptor>>, SQLError> {
-    let outputs = function.def.output_params();
-    if outputs.len() > 1 {
+    let mut outputs = function.def.output_params();
+    if outputs.clone().nth(1).is_some() {
         return Ok(None);
     }
-    let declared = match (&function.def.returns, outputs.first()) {
+    let declared = match (&function.def.returns, outputs.next()) {
         (_, Some(output)) => Some(output.type_name.as_str()),
         (FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }, None) => {
             Some(type_name.as_str())
@@ -208,10 +205,44 @@ pub fn resolve_table_function_binding(
     }
     let (argument_names, argument_types, explicit_variadic) =
         crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
+    if crate::type_resolution::function_arguments_have_runtime_types(args, &argument_types)? {
+        return Ok(None);
+    }
     resolve_table_function_binding_for_types(
         routines,
         name,
         binding,
+        crate::type_resolution::RoutineCallDescriptor {
+            argument_names: &argument_names,
+            argument_types: &argument_types,
+            explicit_variadic,
+        },
+    )
+}
+
+/// Select a call whose dynamic inputs have now produced values, preserving every statically declared argument type and the original SQL unknown-literal rules.
+pub fn resolve_runtime_table_function_binding(
+    routines: &dyn RoutineResolution,
+    name: &str,
+    args: &[ScalarExpr],
+    values: &[(Option<String>, uqa_core::Value)],
+    input_schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<FunctionBinding>, SQLError> {
+    let (argument_names, mut argument_types, explicit_variadic) =
+        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
+    let arguments = crate::scalar_call_arguments(args)?;
+    assert_eq!(arguments.len(), values.len());
+    for ((argument, ty), (_, value)) in arguments.iter().zip(&mut argument_types).zip(values) {
+        if crate::type_resolution::runtime_input(argument.value, ty.as_ref()) {
+            *ty = crate::type_resolution::value_type(value);
+        }
+    }
+    resolve_table_function_binding_for_types(
+        routines,
+        name,
+        None,
         crate::type_resolution::RoutineCallDescriptor {
             argument_names: &argument_names,
             argument_types: &argument_types,
@@ -416,7 +447,7 @@ pub fn table_function_empty_schema(
     output_width: usize,
     ordinality: bool,
 ) -> Vec<String> {
-    let lower = crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase());
+    let lower = crate::semantics::builtin_function_dispatch_name(name);
     let columns = if lower == "unnest" {
         let width = output_width.max(1);
         let default_column = if width == 1 {
@@ -426,7 +457,7 @@ pub fn table_function_empty_schema(
         };
         vec![default_column.to_string(); width]
     } else {
-        match lower.as_str() {
+        match lower.as_ref() {
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 vec!["key".into(), "value".into()]
             }
@@ -593,9 +624,8 @@ pub fn table_function_column_types(
             user_invocation,
         ))
     } else {
-        let normalized =
-            crate::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-        align(match normalized.as_str() {
+        let normalized = crate::semantics::builtin_function_dispatch_name(name);
+        align(match normalized.as_ref() {
             "pg_listening_channels" => vec![Some(ColumnType::Text)],
             "generate_series" => vec![resolve_table_function_binding(
                 routines,

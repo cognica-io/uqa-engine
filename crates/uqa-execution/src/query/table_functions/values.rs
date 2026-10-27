@@ -39,14 +39,16 @@ pub fn unnest_rows(evaluated: Vec<Value>) -> Result<crate::PhysicalProjectRows, 
         })
         .collect::<Result<Vec<_>, _>>()?;
     let row_count = arrays.iter().map(Vec::len).max().unwrap_or(0);
-    Ok(Box::new((0..row_count).map(move |row_position| {
-        Ok(crate::PhysicalRow::from_values(
-            arrays
-                .iter()
-                .map(|array| array.get(row_position).cloned().unwrap_or(Value::Null))
-                .collect(),
-        ))
-    })))
+    Ok(crate::SQLRowStream::new((0..row_count).map(
+        move |row_position| {
+            Ok(crate::PhysicalRow::from_values(
+                arrays
+                    .iter()
+                    .map(|array| array.get(row_position).cloned().unwrap_or(Value::Null))
+                    .collect(),
+            ))
+        },
+    )))
 }
 
 pub fn generate_series_values(
@@ -207,10 +209,12 @@ pub fn json_each_rows(
             "{name}: argument is not an object"
         )));
     };
-    Ok(Box::new(object.into_iter().map(move |(key, value)| {
-        Ok(crate::PhysicalRow::from_values(vec![
-            Value::Str(key),
-            json_table_value_to_text(&value),
-        ]))
-    })))
+    Ok(crate::SQLRowStream::new(object.into_iter().map(
+        move |(key, value)| {
+            Ok(crate::PhysicalRow::from_values(vec![
+                Value::Str(key),
+                json_table_value_to_text(&value),
+            ]))
+        },
+    )))
 }

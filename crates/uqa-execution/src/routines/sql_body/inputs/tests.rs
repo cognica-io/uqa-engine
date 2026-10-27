@@ -26,6 +26,17 @@ impl FunctionTypeResolver for Catalog {
     }
 }
 impl RoutineResolution for Catalog {}
+impl uqa_sql::prepared::utility::PreparedSessionMetadata for Catalog {
+    fn show_result_schema(&self, _: &str) -> Result<uqa_sql::RowSchema, uqa_sql::SQLError> {
+        panic!("query fixture does not read session utility descriptors");
+    }
+    fn portal_result_schema(&self, _: &str) -> Option<uqa_sql::RowSchema> {
+        panic!("query fixture does not read portal descriptors");
+    }
+    fn prepared_result_schema(&self, _: &str) -> Option<uqa_sql::RowSchema> {
+        panic!("query fixture does not read prepared utility descriptors");
+    }
+}
 impl StatementAnalysisScopes for Catalog {
     fn with_scope(&self, _: StatementAnalysisOperation<'_>) -> Result<(), SQLError> {
         panic!("dependency-free fixture has no catalog freshness callbacks");
@@ -41,7 +52,9 @@ fn context() -> PreparedDefinitionContext<'static> {
     PreparedDefinitionContext {
         types: &Catalog,
         routines: &Catalog,
+        procedures: &Catalog,
         scopes: &Catalog,
+        session: &Catalog,
         aliases: &Catalog,
     }
 }
@@ -237,4 +250,58 @@ fn execution_invalidation_preserves_inputs_and_rejects_reentrant_plan_publicatio
         .statement(identity, 0, &[], &context(), || panic!("inputs survive"))
         .unwrap();
     assert!(Arc::ptr_eq(&statement, &repeated));
+}
+
+impl uqa_sql::routines::declaration::RoutineTypeCatalog for Catalog {
+    fn try_describe_table(&self, _: &str) -> Result<Option<Vec<uqa_sql::ast::ColumnDef>>, String> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_column_type(&self, _: &str) -> Option<uqa_sql::ColumnType> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_column_type_name(
+        &self,
+        _: &str,
+    ) -> Result<uqa_sql::ColumnType, uqa_sql::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<uqa_sql::ColumnType> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn require_type_usage(&self, _: &uqa_sql::ColumnType) -> Result<(), uqa_sql::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn format_type(&self, _: &uqa_sql::ColumnType) -> Result<String, uqa_sql::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+}
+impl uqa_sql::routines::resolution::RoutineOverloadCatalog for Catalog {
+    fn routine_type_snapshot(&self) -> uqa_sql::routines::resolution::RoutineTypeSnapshot {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn routine_search_path(&self) -> Vec<String> {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn has_registered_scalar_function(&self, _: &str) -> bool {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn lookup_sql_routine_candidates(
+        &self,
+        _: &str,
+    ) -> Result<Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>>, uqa_sql::SQLError>
+    {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn lookup_bound_sql_routine_candidates_by_binding(
+        &self,
+        _: &uqa_sql::ast::FunctionBinding,
+    ) -> Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>> {
+        panic!("query fixture does not resolve procedures");
+    }
+    fn lookup_bound_sql_functions_by_binding(
+        &self,
+        _: &uqa_sql::ast::FunctionBinding,
+    ) -> Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>> {
+        panic!("query fixture does not resolve procedures");
+    }
 }

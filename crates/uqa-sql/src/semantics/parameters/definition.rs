@@ -110,6 +110,8 @@ impl ParameterFlags {
     pub const REPORT: Self = Self(1 << 5);
     /// A string value is truncated to the length of an identifier (`GUC_IS_NAME`).
     pub const IS_NAME: Self = Self(1 << 6);
+    /// A nondefault value is reported by `EXPLAIN (SETTINGS)` (`GUC_EXPLAIN`).
+    pub const EXPLAIN: Self = Self(1 << 7);
 
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
@@ -142,14 +144,24 @@ impl ParameterDefinition {
 
     /// The setting a session starts with, as `pg_settings.boot_val` reports it.
     pub fn boot_setting(&self) -> String {
-        match self.kind {
-            ParameterKind::Bool { boot } => if boot { "on" } else { "off" }.into(),
-            ParameterKind::Integer { boot, .. } => boot.to_string(),
+        self.boot_setting_with_control(&uqa_core::memory::ProductionControl::uncontrolled())
+            .expect("ordinary boot setting")
+            .into_uncontrolled()
+            .expect("ordinary boot setting")
+    }
+
+    pub fn boot_setting_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, crate::SQLError> {
+        Ok(match self.kind {
+            ParameterKind::Bool { boot } => control.copy_text(if boot { "on" } else { "off" })?,
+            ParameterKind::Integer { boot, .. } => control.format(format_args!("{boot}"))?,
             ParameterKind::Enum { boot, options } => {
-                super::value::enum_display(options, boot).into()
+                control.copy_text(super::value::enum_display(options, boot))?
             }
-            ParameterKind::String { boot } => boot.into(),
-        }
+            ParameterKind::String { boot } => control.copy_text(boot)?,
+        })
     }
 
     /// The unit of an integer parameter, as `pg_settings.unit` reports it.

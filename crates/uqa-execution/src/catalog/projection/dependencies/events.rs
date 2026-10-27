@@ -146,7 +146,7 @@ impl DependencyBuilder<'_> {
             .all_sql_functions()
             .into_iter()
             .find(|function| {
-                function.def.name == *name && function.def.identity_params().is_empty()
+                function.def.name == *name && function.def.identity_params().next().is_none()
             })
             .and_then(|function| self.objects.routine_oid(function.def.object_id.as_ref()?))
     }

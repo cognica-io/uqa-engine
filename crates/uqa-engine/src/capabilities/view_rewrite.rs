@@ -94,6 +94,10 @@ impl Engine {
     }
 }
 impl ViewPrivilegeCatalog for Engine {
+    fn ensure_query_select(&self, query: &uqa_sql::plan::QueryPlan) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_current_routine(self);
+        uqa_execution::query::privileges::ensure_select_privileges_for_query(query, &scope)
+    }
     fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError> {
         self.view_definition(name)
     }

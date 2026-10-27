@@ -61,17 +61,24 @@ impl PhysicalRowBuffer {
     ) -> Result<bool, SQLError> {
         self.control.cancellation().check()?;
         let key = physical_key(table, doc_id);
-        let present = self
-            .records
-            .snapshot()
-            .and_then(|view| view.get(&key, &self.control))
-            .map_err(|error| storage_error(self.operation, error))?
-            .is_some();
-        if present {
+        if self.contains_key(&key)? {
             return Ok(false);
         }
         self.write_key(&key)?;
         Ok(true)
+    }
+
+    pub(crate) fn contains(&self, table: &str, doc_id: DocId) -> Result<bool, SQLError> {
+        self.control.cancellation().check()?;
+        self.contains_key(&physical_key(table, doc_id))
+    }
+
+    fn contains_key(&self, key: &[u8]) -> Result<bool, SQLError> {
+        self.records
+            .snapshot()
+            .and_then(|view| view.get(key, &self.control))
+            .map(|record| record.is_some())
+            .map_err(|error| storage_error(self.operation, error))
     }
 
     fn write_key(&self, key: &[u8]) -> Result<(), SQLError> {

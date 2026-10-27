@@ -12,6 +12,7 @@ use crate::{
     query::{binding::bind_source_plan_schema, privileges::routine_calls, CteScope},
     RowSchema,
 };
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_sql::{
     ast::ReturningAliases,
     catalog::roles::RoleReference,
@@ -27,10 +28,22 @@ struct Inputs<'a> {
     subqueries: &'a [QueryPlan],
     source: Option<&'a SourcePlan>,
     input: Option<&'a QueryPlan>,
-    expressions: Vec<&'a ScalarExpr>,
+    expressions: Produced<Vec<&'a ScalarExpr>>,
     subject: Option<&'a RoleReference>,
     relations_bound: bool,
-    conflict_update: Vec<&'a ScalarExpr>,
+    insert: Option<&'a InsertPlan>,
+}
+
+impl<'a> Inputs<'a> {
+    fn conflict_update_expressions(&self) -> impl Iterator<Item = &'a ScalarExpr> {
+        self.insert
+            .into_iter()
+            .flat_map(InsertPlan::conflict_update_expressions)
+    }
+
+    fn has_conflict_update(&self) -> bool {
+        self.conflict_update_expressions().next().is_some()
+    }
 }
 
 pub fn insert<S: Clone + Send + Sync + 'static>(
@@ -41,18 +54,20 @@ pub fn insert<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     initialize(
         context,
-        || Inputs {
-            table: &statement.table,
-            qualifier: &statement.target_qualifier,
-            aliases: &statement.returning_aliases,
-            ctes: &statement.ctes,
-            subqueries: &statement.subqueries,
-            source: None,
-            input: statement.source.as_deref(),
-            expressions: statement.expressions(),
-            subject: statement.statement_privilege_subject.as_ref(),
-            relations_bound: statement.relations_bound,
-            conflict_update: statement.conflict_update_expressions(),
+        |control| {
+            Ok(Inputs {
+                table: &statement.table,
+                qualifier: &statement.target_qualifier,
+                aliases: &statement.returning_aliases,
+                ctes: &statement.ctes,
+                subqueries: &statement.subqueries,
+                source: None,
+                input: statement.source.as_deref(),
+                expressions: retained_expressions(control, statement.expressions(), None)?,
+                subject: statement.statement_privilege_subject.as_ref(),
+                relations_bound: statement.relations_bound,
+                insert: Some(statement),
+            })
         },
         params,
         inherited,
@@ -67,18 +82,24 @@ pub fn update<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     initialize(
         context,
-        || Inputs {
-            table: &statement.table,
-            qualifier: &statement.target_qualifier,
-            aliases: &statement.returning_aliases,
-            ctes: &statement.ctes,
-            subqueries: &statement.subqueries,
-            source: statement.source.as_deref(),
-            input: None,
-            expressions: statement.expressions(),
-            subject: statement.statement_privilege_subject.as_ref(),
-            relations_bound: statement.relations_bound,
-            conflict_update: Vec::new(),
+        |control| {
+            Ok(Inputs {
+                table: &statement.table,
+                qualifier: &statement.target_qualifier,
+                aliases: &statement.returning_aliases,
+                ctes: &statement.ctes,
+                subqueries: &statement.subqueries,
+                source: statement.source.as_deref(),
+                input: None,
+                expressions: retained_expressions(
+                    control,
+                    statement.expressions(),
+                    statement.source.as_deref(),
+                )?,
+                subject: statement.statement_privilege_subject.as_ref(),
+                relations_bound: statement.relations_bound,
+                insert: None,
+            })
         },
         params,
         inherited,
@@ -93,18 +114,24 @@ pub fn delete<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     initialize(
         context,
-        || Inputs {
-            table: &statement.table,
-            qualifier: &statement.target_qualifier,
-            aliases: &statement.returning_aliases,
-            ctes: &statement.ctes,
-            subqueries: &statement.subqueries,
-            source: statement.source.as_deref(),
-            input: None,
-            expressions: statement.expressions(),
-            subject: statement.statement_privilege_subject.as_ref(),
-            relations_bound: statement.relations_bound,
-            conflict_update: Vec::new(),
+        |control| {
+            Ok(Inputs {
+                table: &statement.table,
+                qualifier: &statement.target_qualifier,
+                aliases: &statement.returning_aliases,
+                ctes: &statement.ctes,
+                subqueries: &statement.subqueries,
+                source: statement.source.as_deref(),
+                input: None,
+                expressions: retained_expressions(
+                    control,
+                    statement.expressions(),
+                    statement.source.as_deref(),
+                )?,
+                subject: statement.statement_privilege_subject.as_ref(),
+                relations_bound: statement.relations_bound,
+                insert: None,
+            })
         },
         params,
         inherited,
@@ -119,27 +146,50 @@ pub fn merge<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     initialize(
         context,
-        || Inputs {
-            table: &statement.target,
-            qualifier: &statement.target_qualifier,
-            aliases: &statement.returning_aliases,
-            ctes: &statement.ctes,
-            subqueries: &statement.subqueries,
-            source: Some(&statement.source),
-            input: None,
-            expressions: statement.expressions(),
-            subject: statement.statement_privilege_subject.as_ref(),
-            relations_bound: false,
-            conflict_update: Vec::new(),
+        |control| {
+            Ok(Inputs {
+                table: &statement.target,
+                qualifier: &statement.target_qualifier,
+                aliases: &statement.returning_aliases,
+                ctes: &statement.ctes,
+                subqueries: &statement.subqueries,
+                source: Some(&statement.source),
+                input: None,
+                expressions: retained_expressions(
+                    control,
+                    statement.expressions(),
+                    Some(&statement.source),
+                )?,
+                subject: statement.statement_privilege_subject.as_ref(),
+                relations_bound: false,
+                insert: None,
+            })
         },
         params,
         inherited,
     )
 }
 
+fn retained_expressions<'a>(
+    control: ProductionControl<'_>,
+    expressions: impl IntoIterator<Item = &'a ScalarExpr>,
+    source: Option<&'a SourcePlan>,
+) -> Result<Produced<Vec<&'a ScalarExpr>>, SQLError> {
+    let mut retained = ProductionVec::new(control);
+    for expression in expressions {
+        retained.push_copy(expression)?;
+    }
+    if let Some(source) = source {
+        source.try_visit_expressions(&mut |expression| {
+            retained.push_copy(expression).map(|()| true)
+        })?;
+    }
+    Ok(retained.finish()?)
+}
+
 fn initialize<'a, S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    inputs: impl FnOnce() -> Inputs<'a>,
+    inputs: impl FnOnce(ProductionControl<'_>) -> Result<Inputs<'a>, SQLError>,
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
 ) -> Result<(), SQLError> {
@@ -147,10 +197,13 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
     if permissions.unrestricted() {
         return Ok(());
     }
-    let mut inputs = inputs();
-    if let Some(source) = inputs.source {
-        source.push_expressions(&mut inputs.expressions);
-    }
+    let retained = context.query.source.ctes.queries.read_control()?;
+    let control = ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.query.source.ctes.runtime.cancellation,
+    );
+    let inputs = inputs(control)?;
     let mut scope = context
         .mutation
         .scopes
@@ -159,7 +212,7 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
         scope.inherit_cte_bindings(parent);
     }
     for cte in inputs.ctes {
-        scope.insert_deferred(cte.clone());
+        scope.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
     scope.scalar_subqueries = inputs.subqueries.into();
     let mut visible = scope.enter_visible_ctes(inputs.ctes.iter().map(|cte| cte.name.as_str()));
@@ -190,11 +243,10 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
         params,
         scope,
     )?;
-    for expression in &inputs.expressions {
+    for expression in inputs.expressions.iter() {
         let expression_schema = if inputs
-            .conflict_update
-            .iter()
-            .any(|other| std::ptr::eq(*other, *expression))
+            .conflict_update_expressions()
+            .any(|other| std::ptr::eq(other, *expression))
         {
             conflict_schema.as_ref().unwrap_or(&schema)
         } else {
@@ -251,7 +303,7 @@ fn expression_schemas<S: Clone + Send + Sync + 'static>(
         inputs.aliases,
         source.as_ref(),
     );
-    let conflict_schema = (!inputs.conflict_update.is_empty()).then(|| {
+    let conflict_schema = inputs.has_conflict_update().then(|| {
         let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
         RowSchema::join(&schema, &excluded, std::iter::empty::<String>())
     });
@@ -269,7 +321,7 @@ fn generated_columns<S: Clone>(
             inputs.aliases.old.clone(),
             inputs.aliases.new.clone(),
         ]);
-        if !inputs.conflict_update.is_empty() {
+        if inputs.has_conflict_update() {
             qualifiers.insert("excluded".into());
         }
         let mut columns = uqa_sql::semantics::privileges::columns::for_target_expressions(
@@ -295,3 +347,6 @@ fn generated_columns<S: Clone>(
 
 mod explain;
 pub use explain::explain;
+
+#[cfg(test)]
+mod tests;

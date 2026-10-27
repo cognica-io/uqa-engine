@@ -5,7 +5,7 @@
 //
 
 use super::{
-    bind_execute_parameters, ArgumentBindingContext, PreparedArgumentScopes,
+    bind_execute_parameters, bind_host_parameters, ArgumentBindingContext, PreparedArgumentScopes,
     ScopedArgumentOperation,
 };
 use crate::scalar::plan::PhysicalEvalContext;
@@ -19,14 +19,37 @@ use uqa_sql::{
     plan::{CommandPlan, ExpressionPlan, QueryPlan, UnifiedPlan},
     prepared::arguments::ArgumentValidationContext,
     semantics::volatility::VolatilityCatalog,
-    ColumnType, ResultRow, RowSchema, SQLError, SQLParam,
+    ColumnType, RowSchema, SQLError, SQLParam,
 };
 
 #[derive(Default)]
 struct Scopes {
     events: RefCell<Vec<String>>,
+    parameter_counts: RefCell<Vec<usize>>,
     domain: Option<StoredDomain>,
 }
+
+struct Types(Option<ColumnType>);
+impl uqa_sql::FunctionTypeResolver for Types {
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        Ok(self
+            .0
+            .as_ref()
+            .filter(|ty| ty.user_type_identity().as_deref() == Some(name))
+            .cloned())
+    }
+}
+impl uqa_sql::routines::RoutineResolution for Types {}
 impl Scopes {
     fn record(&self, event: &str) {
         self.events.borrow_mut().push(event.into());
@@ -71,12 +94,12 @@ impl AssignmentContext for Scopes {
     fn evaluate_domain_check(
         &self,
         _: &Expr,
-        row: &ResultRow,
+        row: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         self.record("domain");
         Ok(Value::Bool(
-            matches!(row["value"], Value::Int(value) if value > 0),
+            matches!(row.column("value"), Some(Value::Int(value)) if *value > 0),
         ))
     }
 }
@@ -106,8 +129,10 @@ impl PreparedArgumentScopes for Scopes {
         operation: &mut ScopedArgumentOperation<'_>,
     ) -> Result<Vec<SQLParam>, SQLError> {
         self.record("scope");
+        self.parameter_counts.borrow_mut().push(parameters.len());
         let aggregates = |_: &str| false;
         let cast_type = |_: &str| None;
+        let routines = Types(self.domain.as_ref().map(StoredDomain::column_type));
         let mut analyze_type = |argument: &ExpressionPlan| {
             let label = match &argument.scalar {
                 uqa_sql::ScalarExpr::Func { name, .. } => name.as_str(),
@@ -121,7 +146,7 @@ impl PreparedArgumentScopes for Scopes {
                 aggregates: &aggregates,
                 volatility: self,
                 cast_type: &cast_type,
-                routines: &crate::catalog::test_support::NoRoutines,
+                routines: &routines,
                 parameters,
             },
             assignment: self,
@@ -146,22 +171,76 @@ fn bind(
     sql: &str,
     types: Vec<Option<ColumnType>>,
 ) -> Result<Vec<SQLParam>, SQLError> {
-    bind_execute_parameters(scopes, "p", Some(types), &arguments(sql), &[])
+    bind_execute_parameters(scopes, "p", Some(types), &arguments(sql))
+}
+
+#[test]
+fn sql_execute_and_host_binding_capture_distinct_parameter_scopes() {
+    let scopes = Scopes::default();
+    assert!(bind_execute_parameters(
+        &scopes,
+        "p",
+        Some(vec![Some(ColumnType::Integer)]),
+        &arguments("EXECUTE p($1)"),
+    )
+    .is_err());
+    assert_eq!(*scopes.parameter_counts.borrow(), [0]);
+    let bound = bind_host_parameters(
+        &scopes,
+        "p",
+        Some(vec![Some(ColumnType::Integer)]),
+        &[SQLParam::Scalar(Value::Int(7))],
+    )
+    .unwrap();
+    assert_eq!(*scopes.parameter_counts.borrow(), [0, 1]);
+    assert!(matches!(
+        &bound[0],
+        SQLParam::TypedScalar {
+            value: Value::Int(7),
+            ty: ColumnType::Integer,
+        }
+    ));
+}
+
+#[test]
+fn removed_prepared_declarations_reject_null_before_argument_evaluation() {
+    let scopes = Scopes::default();
+    let ty = ColumnType::Enum(uqa_sql::ast::EnumTypeReference {
+        schema: "public".into(),
+        name: "removed".into(),
+        oid: 42000,
+        array_oid: 42001,
+    });
+    let errors = [
+        bind(&scopes, "EXECUTE p(NULL)", vec![Some(ty.clone())]).unwrap_err(),
+        bind_host_parameters(
+            &scopes,
+            "p",
+            Some(vec![Some(ty)]),
+            &[SQLParam::Scalar(Value::Null)],
+        )
+        .unwrap_err(),
+    ];
+    for error in errors {
+        assert_eq!(error.sqlstate(), Some("XX000"));
+        assert_eq!(error.to_string(), "cache lookup failed for type 42000");
+    }
+    assert_eq!(*scopes.events.borrow(), ["scope", "scope"]);
 }
 
 #[test]
 fn missing_parameterless_and_wrong_arity_definitions_do_not_capture_argument_scope() {
     let scopes = Scopes::default();
     let invalid = arguments("EXECUTE p((SELECT 1))");
-    let error = bind_execute_parameters(&scopes, "p", None, &invalid, &[]).unwrap_err();
+    let error = bind_execute_parameters(&scopes, "p", None, &invalid).unwrap_err();
     assert!(matches!(error, SQLError::Routine { sqlstate, .. } if sqlstate == "26000"));
     assert!(
-        bind_execute_parameters(&scopes, "p", Some(Vec::new()), &invalid, &[])
+        bind_execute_parameters(&scopes, "p", Some(Vec::new()), &invalid)
             .unwrap()
             .is_empty()
     );
     let error =
-        bind_execute_parameters(&scopes, "p", Some(vec![None, None]), &invalid, &[]).unwrap_err();
+        bind_execute_parameters(&scopes, "p", Some(vec![None, None]), &invalid).unwrap_err();
     assert!(matches!(error, SQLError::Routine { sqlstate, .. } if sqlstate == "42601"));
     assert!(scopes.events.borrow().is_empty());
 }

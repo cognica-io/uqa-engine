@@ -11,7 +11,6 @@ use crate::SQLError;
 use uqa_core::{TemporalInfinity, TemporalValue};
 
 const EPOCH_DAYS: i32 = 10_957;
-const EPOCH_MICROS: i64 = 946_684_800_000_000;
 
 pub(crate) fn encode(value: &TemporalValue, oid: i64) -> Result<Vec<u8>, SQLError> {
     let (bytes, length) = encode_inline(value, oid)?;
@@ -39,27 +38,30 @@ pub(crate) fn encode_inline(
             bytes[..8].copy_from_slice(&micros.to_le_bytes());
             8
         }
-        (TemporalValue::Timestamp { micros }, 1114)
-        | (TemporalValue::TimestampTz { micros }, 1184) => {
-            let micros = match value.infinity() {
-                Some(TemporalInfinity::Negative) => i64::MIN,
-                Some(TemporalInfinity::Positive) => i64::MAX,
-                None => micros
-                    .checked_sub(EPOCH_MICROS)
-                    .ok_or_else(|| invalid("timestamp Datum overflow"))?,
-            };
+        (
+            TemporalValue::Timestamp {
+                postgres_micros: micros,
+            },
+            1114,
+        )
+        | (
+            TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            },
+            1184,
+        ) => {
             bytes[..8].copy_from_slice(&micros.to_le_bytes());
             8
         }
         (
             TemporalValue::TimeTz {
                 micros,
-                offset_minutes,
+                offset_seconds,
             },
             1266,
         ) => {
-            let offset = offset_minutes
-                .checked_mul(-60)
+            let offset = offset_seconds
+                .checked_neg()
                 .ok_or_else(|| invalid("time zone Datum overflow"))?;
             bytes[..8].copy_from_slice(&micros.to_le_bytes());
             bytes[8..12].copy_from_slice(&offset.to_le_bytes());
@@ -125,23 +127,23 @@ pub(crate) fn decode(bytes: &[u8], oid: i64) -> Result<TemporalValue, SQLError> 
                     infinity.timestamp_tz()
                 });
             }
-            let micros = micros
-                .checked_add(EPOCH_MICROS)
-                .ok_or_else(|| invalid("timestamp Datum overflow"))?;
             if oid == 1114 {
-                TemporalValue::Timestamp { micros }
+                TemporalValue::Timestamp {
+                    postgres_micros: micros,
+                }
             } else {
-                TemporalValue::TimestampTz { micros }
+                TemporalValue::TimestampTz {
+                    postgres_micros: micros,
+                }
             }
         }
         1266 => {
             let seconds = integer(8)?;
-            if seconds % 60 != 0 {
-                return Err(invalid("time zone offset is not a whole minute"));
-            }
             TemporalValue::TimeTz {
                 micros: micros()?,
-                offset_minutes: seconds / -60,
+                offset_seconds: seconds
+                    .checked_neg()
+                    .ok_or_else(|| invalid("time zone Datum overflow"))?,
             }
         }
         1186 => TemporalValue::Interval {

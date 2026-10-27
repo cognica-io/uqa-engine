@@ -41,7 +41,7 @@ impl AssignmentContext for Assignment {
     fn evaluate_domain_check(
         &self,
         _: &Expr,
-        _: &ResultRow,
+        _: &dyn uqa_sql::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         unreachable!()

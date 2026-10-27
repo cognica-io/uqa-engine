@@ -13,11 +13,18 @@ use uqa_core::Value;
 use crate::ast::ColumnType;
 use crate::RowSchema;
 
+mod binary;
 mod labels;
+mod production;
+mod serialization;
 mod text;
+pub use binary::format_postgres_binary_with_catalog_and_control;
 pub use labels::render_result_enum_labels;
+pub use serialization::{encode_postgres_row_with_control, ResultFormat};
 pub use text::format_postgres_text_with_catalog_and_control;
-pub use text::{format_postgres_text, format_postgres_text_with_catalog};
+pub use text::{
+    format_postgres_text, format_postgres_text_with_catalog, format_postgres_text_with_control,
+};
 
 pub type ResultRow = BTreeMap<String, Value>;
 
@@ -240,18 +247,31 @@ mod tests {
 }
 
 pub mod completion;
+pub mod explain;
 pub mod vector;
 
 /// Execution measurements supplied to EXPLAIN rendering.
 pub struct ExplainAnalysis {
+    pub io: uqa_core::io_usage::IOUsage,
+    pub io_timing: bool,
     pub vector_searches: vector::ExplainVectorSearches,
+    pub node_executions: uqa_core::memory::BudgetedVec<explain::ExplainNodeExecution>,
     pub elapsed: std::time::Duration,
-    pub rows: u64,
+    pub root: explain::ExplainNodeMetrics,
     pub affected_rows: u64,
+    pub serialization: explain::ExplainSerializationMetrics,
 }
 
 /// Structured physical-plan output captured before execution. Method-specific properties are rendered by the owning planner; execution only carries this diagnostic result to the renderer.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ExplainPhysicalPlan {
-    pub nodes: Vec<serde_json::Value>,
+    pub nodes: Vec<explain::ExplainValue>,
+    pub estimate: Option<explain::ExplainPlanEstimate>,
+    /// Query and source costs captured together under their original CTE scopes.
+    pub estimates: Vec<explain::ExplainNodeEstimate>,
+    /// Nondefault planning parameters captured from the invoking session before execution.
+    pub settings: Vec<(&'static str, String)>,
+    /// Time spent producing this invocation's optimized plan and physical metadata.
+    pub planning_elapsed: Option<std::time::Duration>,
+    pub planning: Option<explain::ExplainPlanningMetrics>,
 }

@@ -57,7 +57,14 @@ pub fn transform_partition_bound(
             for expression in values {
                 let value = transform_value(context, expression, &key.name, key)?;
                 // Equal constants appear once, as `transformPartitionBound` removes duplicates.
-                if !transformed.contains(&value) {
+                let mut duplicate = false;
+                for existing in &transformed {
+                    if super::compare_values(context, existing, &value)?.is_eq() {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if !duplicate {
                     transformed.push(value);
                 }
             }

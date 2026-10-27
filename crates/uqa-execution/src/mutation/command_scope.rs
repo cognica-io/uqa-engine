@@ -16,6 +16,9 @@ pub trait MutationCommandState {
 }
 /// Capture catalog, namespace, trigger transition, and privilege state for a command.
 pub trait CommandScopeSource<S: Clone> {
+    fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
+    fn cancellation(&self) -> &uqa_core::CancellationToken;
+
     fn command_scope(
         &self,
         privilege_subject: Option<&RoleReference>,

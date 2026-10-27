@@ -70,13 +70,9 @@ pub fn forbidden_command(
             .catalog
             .lookup_prepared(name)
             .map_or(Ok(None), |prepared| forbidden_command(context, &prepared)),
-        CommandPlan::Explain {
-            analyze: true,
-            body,
-            ..
-        } => forbidden_command(context, body),
         // VACUUM's transaction-block prohibition has precedence over read-only validation and is enforced by its executor.
-        CommandPlan::Analyze { .. }
+        CommandPlan::Empty
+        | CommandPlan::Analyze { .. }
         | CommandPlan::LockTable(_)
         | CommandPlan::Vacuum(_)
         | CommandPlan::SetVariable { .. }
@@ -94,7 +90,7 @@ pub fn forbidden_command(
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::Prepare { .. }
         | CommandPlan::Deallocate { .. }
-        | CommandPlan::Explain { analyze: false, .. }
+        | CommandPlan::Explain { .. }
         | CommandPlan::DoBlock { .. }
         | CommandPlan::Call { .. } => Ok(None),
         CommandPlan::CreateTable(_)
@@ -156,7 +152,8 @@ pub fn plan_sets_transaction_snapshot(plan: &UnifiedPlan) -> bool {
         UnifiedPlan::Command(command)
             if matches!(
                 command.as_ref(),
-                CommandPlan::SetVariable { .. }
+                CommandPlan::Empty
+                    | CommandPlan::SetVariable { .. }
                     | CommandPlan::Notify { .. }
                     | CommandPlan::Listen { .. }
                     | CommandPlan::Unlisten { .. }

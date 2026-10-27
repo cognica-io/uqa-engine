@@ -1,0 +1,338 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "declaration": "CREATE TEMP TABLE explain_inputs (id integer PRIMARY KEY, amount integer, label text, items integer[])",
+  "cases": [
+    {
+      "sql": "EXPLAIN SELECT $1::integer + $2 AS total",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN SELECT $1 AS value",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          25
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN INSERT INTO explain_inputs (id, amount, items) VALUES ($1, $2, $3)",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23,
+          1007
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN INSERT INTO explain_inputs (id, amount) SELECT $1, $2",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET amount = $1 WHERE id = $2 RETURNING $3",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23,
+          25
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET items[$1] = $2 WHERE id = $3",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET items[$1:$2] = $3",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23,
+          1007
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN DELETE FROM explain_inputs WHERE id = $1 RETURNING $2",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          25
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN MERGE INTO explain_inputs AS t USING (VALUES ($1::integer)) AS s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = $2 WHEN NOT MATCHED THEN INSERT (id, amount) VALUES (s.id, $3)",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN WITH changed AS (UPDATE explain_inputs SET amount = $1 RETURNING id) SELECT id FROM changed WHERE id = $2",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN WITH source AS (SELECT $1::integer AS amount) UPDATE explain_inputs SET amount = source.amount FROM source WHERE explain_inputs.id = $2",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET amount = (SELECT $1::integer) WHERE id = $2",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN (ANALYZE, FORMAT JSON) INSERT INTO explain_inputs (id, amount) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET amount = $3",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23,
+          23,
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN CREATE TABLE explain_output AS SELECT $1::integer AS value",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN DECLARE explain_cursor CURSOR FOR SELECT $1::integer AS value",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "CREATE TEMP TABLE explain_control AS SELECT $1::integer AS value",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "DECLARE explain_control_cursor CURSOR FOR SELECT $1::integer AS value",
+      "result": {
+        "status": 1,
+        "sqlstate": "",
+        "message": "",
+        "parameters": [
+          23
+        ],
+        "transaction_status": 2
+      }
+    },
+    {
+      "sql": "EXPLAIN SELECT * FROM missing_explain_source WHERE id = $1",
+      "result": {
+        "status": 7,
+        "sqlstate": "42P01",
+        "message": "relation \"missing_explain_source\" does not exist",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE missing_explain_target SET amount = 'bad'::integer",
+      "result": {
+        "status": 7,
+        "sqlstate": "42P01",
+        "message": "relation \"missing_explain_target\" does not exist",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET missing_column = 'bad'::integer",
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET amount = 'bad'::integer WHERE false",
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN INSERT INTO explain_inputs (id, amount) VALUES (1, 'bad')",
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN DELETE FROM explain_inputs WHERE amount = 'bad'",
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET amount = $1 WHERE label = $1",
+      "result": {
+        "status": 7,
+        "sqlstate": "42804",
+        "message": "column \"amount\" is of type integer but expression is of type text",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET amount = $1 RETURNING $1",
+      "result": {
+        "status": 7,
+        "sqlstate": "42804",
+        "message": "column \"amount\" is of type integer but expression is of type text",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN UPDATE explain_inputs SET amount = $1 WHERE false RETURNING 'bad'::integer",
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN INSERT INTO explain_inputs (id, amount) VALUES ($1, $1::text)",
+      "result": {
+        "status": 7,
+        "sqlstate": "42P08",
+        "message": "inconsistent types deduced for parameter $1",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    },
+    {
+      "sql": "EXPLAIN MERGE INTO explain_inputs AS t USING (VALUES (1)) AS s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = 'bad'",
+      "result": {
+        "status": 7,
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\"",
+        "parameters": [],
+        "transaction_status": 3
+      }
+    }
+  ]
+}

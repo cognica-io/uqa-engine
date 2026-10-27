@@ -13,6 +13,7 @@ pub mod catalog;
 pub mod custom;
 pub mod datestyle;
 pub mod definition;
+pub mod explain;
 pub mod identifier_list;
 pub mod intervalstyle;
 pub mod setting;

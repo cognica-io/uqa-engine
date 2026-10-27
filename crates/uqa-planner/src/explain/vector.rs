@@ -6,73 +6,135 @@
 
 //! Actual invocations remain separate from estimated physical plan nodes.
 
-use std::fmt::Write as _;
-use uqa_core::vector_execution::{DiskANNExecutionRoute, VectorSearchOperation};
+use super::properties::{object, Object, Property as P};
+use uqa_core::{
+    memory::{ProductionControl, ProductionString},
+    vector_execution::{DiskANNExecutionRoute, VectorSearchOperation},
+};
 use uqa_sql::{result::vector::ExplainVectorSearch, SQLError};
 
-pub(super) fn record(search: &ExplainVectorSearch) -> serde_json::Value {
+pub(super) fn record<'a>(
+    search: &'a ExplainVectorSearch,
+    control: ProductionControl<'_>,
+) -> Result<P<'a>, SQLError> {
     let work = search.work;
     let traversal = search.traversal;
-    let mut value = serde_json::json!({
-        "Relation": &*search.relation,
-        "Field": &*search.field,
-        "Returned Documents": search.returned_documents,
-        "Index Type": "diskann",
-        "Generation": super::render_generation(search.generation),
-        "Route": match search.route {
-            DiskANNExecutionRoute::Approximate => "approximate",
-            DiskANNExecutionRoute::ExactZeroNorm => "exact zero norm",
-            DiskANNExecutionRoute::ExactNonFiniteNorm => "exact non-finite norm",
-            DiskANNExecutionRoute::ExactThreshold => "exact threshold",
-            DiskANNExecutionRoute::EmptyK => "empty k",
-        },
-        "Traversal": {
-            "Approximate Expansions": traversal.approximate_expansions,
-            "Completion Expansions": traversal.completion_expansions,
-            "PQ Estimates": traversal.pq_estimates,
-            "Beams": traversal.beams,
-        },
-        "Logical Page Reads": {
-            "Requests": work.pages.page_requests,
-            "Cache Hits": work.pages.cache_hits,
-            "Provider Pages": work.pages.provider_pages,
-            "Provider Batches": work.pages.provider_batches,
-        },
-        "Side Entries": work.side_entries,
-        "Scoring": {
-            "Reranked": scoring(work.reranked),
-            "Changed": scoring(work.changed),
-            "Unversioned": scoring(work.unversioned),
-            "Exact": scoring(work.exact),
-        },
-    });
+    let mut database = ProductionString::new(control);
+    for byte in search.generation.database {
+        database.push_str(&control.format(format_args!("{byte:02x}"))?)?;
+    }
+    let generation = search.generation;
+    let mut value = Object::new(control);
+    for (key, property) in [
+        ("Relation", P::Text(&search.relation)),
+        ("Field", P::Text(&search.field)),
+        ("Returned Documents", P::Unsigned(search.returned_documents)),
+        ("Index Type", P::Text("diskann")),
+        (
+            "Generation",
+            object(
+                control,
+                [
+                    ("Database", P::OwnedText(database.finish()?)),
+                    ("Table", P::Unsigned(generation.table)),
+                    ("Index", P::Unsigned(generation.index)),
+                    ("Generation", P::Unsigned(generation.generation)),
+                ],
+            )?,
+        ),
+        (
+            "Route",
+            P::Text(match search.route {
+                DiskANNExecutionRoute::Approximate => "approximate",
+                DiskANNExecutionRoute::ExactZeroNorm => "exact zero norm",
+                DiskANNExecutionRoute::ExactNonFiniteNorm => "exact non-finite norm",
+                DiskANNExecutionRoute::ExactThreshold => "exact threshold",
+                DiskANNExecutionRoute::EmptyK => "empty k",
+            }),
+        ),
+        (
+            "Traversal",
+            object(
+                control,
+                [
+                    (
+                        "Approximate Expansions",
+                        P::Unsigned(traversal.approximate_expansions),
+                    ),
+                    (
+                        "Completion Expansions",
+                        P::Unsigned(traversal.completion_expansions),
+                    ),
+                    ("PQ Estimates", P::Unsigned(traversal.pq_estimates)),
+                    ("Beams", P::Unsigned(traversal.beams)),
+                ],
+            )?,
+        ),
+        (
+            "Logical Page Reads",
+            object(
+                control,
+                [
+                    ("Requests", P::Unsigned(work.pages.page_requests)),
+                    ("Cache Hits", P::Unsigned(work.pages.cache_hits)),
+                    ("Provider Pages", P::Unsigned(work.pages.provider_pages)),
+                    ("Provider Batches", P::Unsigned(work.pages.provider_batches)),
+                ],
+            )?,
+        ),
+        ("Side Entries", P::Unsigned(work.side_entries)),
+        (
+            "Scoring",
+            object(
+                control,
+                [
+                    ("Reranked", scoring(work.reranked, control)?),
+                    ("Changed", scoring(work.changed, control)?),
+                    ("Unversioned", scoring(work.unversioned, control)?),
+                    ("Exact", scoring(work.exact, control)?),
+                ],
+            )?,
+        ),
+    ] {
+        value.insert(key, property)?;
+    }
     match search.operation {
         VectorSearchOperation::KNN { k } => {
-            value["Operation"] = "knn".into();
-            value["Requested K"] = k.into();
+            value.insert("Operation", P::Text("knn"))?;
+            value.insert("Requested K", P::Unsigned(k as u64))?;
         }
         VectorSearchOperation::Threshold { threshold } => {
-            value["Operation"] = "threshold".into();
-            value["Threshold"] = threshold.into();
+            value.insert("Operation", P::Text("threshold"))?;
+            value.insert("Threshold", P::Float(threshold.into()))?;
         }
     }
-    value
+    value.finish()
 }
 
-fn scoring(stats: uqa_core::vector_execution::DiskANNScoringStats) -> serde_json::Value {
-    serde_json::json!({"Documents": stats.documents, "Vectors": stats.vectors})
+fn scoring(
+    stats: uqa_core::vector_execution::DiskANNScoringStats,
+    control: ProductionControl<'_>,
+) -> Result<P<'static>, SQLError> {
+    object(
+        control,
+        [
+            ("Documents", P::Unsigned(stats.documents)),
+            ("Vectors", P::Unsigned(stats.vectors)),
+        ],
+    )
 }
 
 pub(super) fn append_text(
-    text: &mut String,
+    text: &mut ProductionString<'_>,
     analysis: &uqa_sql::result::ExplainAnalysis,
+    control: ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     for search in analysis.vector_searches.iter() {
-        let rendered = serde_json::to_string_pretty(&record(search))
-            .map_err(|error| SQLError::Internal(format!("format vector execution: {error}")))?;
-        text.push_str("\n  Vector Search:");
+        let rendered = super::formats::json(&record(search, control)?, control)?;
+        text.push_str("\n  Vector Search:")?;
         for line in rendered.lines() {
-            let _ = write!(text, "\n    {line}");
+            text.push_str("\n    ")?;
+            text.push_str(line)?;
         }
     }
     Ok(())

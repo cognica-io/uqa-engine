@@ -17,6 +17,9 @@ impl RoutineNameCatalog for Names {
     fn search_path(&self) -> Vec<String> {
         self.0.clone()
     }
+    fn temporary_schema(&self) -> Option<String> {
+        Some("pg_temp_42".into())
+    }
     fn require_schema_usage(&self, _: &str, _: &RoleReference) -> Result<(), SQLError> {
         Ok(())
     }
@@ -29,6 +32,23 @@ impl RoutineNameCatalog for Names {
     fn routine_identity_display(&self, oid: u32) -> Result<String, SQLError> {
         Ok(oid.to_string())
     }
+}
+
+#[test]
+fn temporary_routines_require_explicit_namespace_qualification() {
+    let catalog = Names(vec!["pg_temp".into(), "pg_temp_42".into(), "public".into()]);
+    assert_eq!(
+        routine_lookup_keys(&catalog, "pg_temp.f").unwrap(),
+        ["pg_temp_42.f"]
+    );
+    assert_eq!(
+        routine_lookup_keys(&catalog, "pg_temp_42.f").unwrap(),
+        ["pg_temp_42.f"]
+    );
+    assert_eq!(
+        routine_lookup_keys(&catalog, "f").unwrap(),
+        ["pg_catalog.f", "public.f"]
+    );
 }
 
 #[test]

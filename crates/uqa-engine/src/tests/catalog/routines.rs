@@ -7,3 +7,4 @@
 //! Routine catalog state across reopen.
 
 mod acl_persistence;
+mod temporary;

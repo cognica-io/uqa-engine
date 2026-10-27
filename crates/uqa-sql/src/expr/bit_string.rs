@@ -126,6 +126,32 @@ pub fn input_with_control(
     finish_bits(bytes, length, control)
 }
 
+/// Copy network-order packed input, discarding unused low padding bits as `PostgreSQL`'s binary input does. The span contains exactly the bytes needed for the logical length.
+pub fn from_packed_with_control(
+    input: &[u8],
+    length: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<BitStringValue>> {
+    control.check()?;
+    if length > MAX_BIT_LENGTH || input.len() != length.div_ceil(8) as usize {
+        return Err(error(
+            "22P03",
+            "invalid length in external bit string".into(),
+        ));
+    }
+    let mut bytes = ProductionVec::new(*control);
+    bytes.reserve(input.len())?;
+    bytes.extend_from_slice(input)?;
+    if let Some(last) = bytes
+        .as_mut_slice()
+        .last_mut()
+        .filter(|_| !length.is_multiple_of(8))
+    {
+        *last &= u8::MAX << (8 - length % 8);
+    }
+    finish_bits(bytes, length, control)
+}
+
 /// Apply assignment or explicit-cast length semantics without changing the borrowed source or allocating an unpacked temporary.
 pub fn coerce_with_control(
     value: &BitStringValue,

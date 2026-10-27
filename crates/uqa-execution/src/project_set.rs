@@ -141,7 +141,7 @@ impl PhysicalOperator for ProjectSet<'_> {
 }
 
 /// Owned physical row stream produced for one input row without materializing named maps.
-pub type PhysicalProjectRows = Box<dyn Iterator<Item = ExecResult<PhysicalRow>> + Send>;
+pub type PhysicalProjectRows = crate::SQLRowStream<'static, PhysicalRow>;
 
 /// Engine seam for set-returning projections that keep rows in their physical layout.
 pub trait PhysicalSetProjector: Send {
@@ -201,6 +201,12 @@ impl<'a> PhysicalProjectSet<'a> {
 }
 
 impl PhysicalProjectSet<'_> {
+    fn close_projection(&mut self) -> ExecResult<()> {
+        self.projected
+            .take()
+            .map_or(Ok(()), |mut rows| rows.close().map_err(Into::into))
+    }
+
     fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
         let batch_size = demand.map_or(DEFAULT_BATCH_SIZE, |rows| {
             rows.get().min(DEFAULT_BATCH_SIZE)
@@ -243,7 +249,7 @@ impl PhysicalOperator for PhysicalProjectSet<'_> {
 
     fn open(&mut self) -> ExecResult<()> {
         self.input = Vec::new().into_iter();
-        self.projected = None;
+        self.close_projection()?;
         self.exhausted = false;
         self.child.open()
     }
@@ -258,9 +264,9 @@ impl PhysicalOperator for PhysicalProjectSet<'_> {
 
     fn close(&mut self) -> ExecResult<()> {
         self.input = Vec::new().into_iter();
-        self.projected = None;
+        let projected = self.close_projection();
         self.exhausted = true;
-        self.child.close()
+        crate::physical::with_cleanup(projected, self.child.close(), "close projection input")
     }
 }
 
@@ -345,9 +351,11 @@ mod tests {
         let child = TableScan::from_physical_rows(input_schema, vec![input_row]);
         let projector = |row: OwnedPhysicalRow| -> ExecResult<PhysicalProjectRows> {
             let slot = row.schema.physical_slot(1).unwrap();
-            Ok(Box::new(std::iter::once(Ok(row.row.project_with_values(
-                [RowProjectionValue::InputSlot(slot)],
-            )))))
+            Ok(crate::SQLRowStream::new(std::iter::once(Ok(row
+                .row
+                .project_with_values([RowProjectionValue::InputSlot(
+                    slot,
+                )])))))
         };
         let output_schema = RowSchema::new(vec!["value".into()]);
         let mut project =

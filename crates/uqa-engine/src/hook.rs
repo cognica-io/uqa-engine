@@ -12,6 +12,38 @@ use uqa_sql::SQLError;
 use super::Engine;
 
 impl uqa_sql::expr::EngineHook for Engine {
+    fn construct_range(
+        &self,
+        oid: u32,
+        bounds: uqa_sql::expr::RangeBoundsInput,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        uqa_execution::catalog::range_type::input::construct_range(
+            &self.range_input_context(&self.catalog_read_view(), self),
+            oid,
+            bounds,
+            control,
+        )
+    }
+
+    fn construct_multirange(
+        &self,
+        oid: u32,
+        members: &[Value],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        uqa_execution::catalog::range_type::input::construct_multirange(
+            &self.range_input_context(&self.catalog_read_view(), self),
+            oid,
+            members,
+            control,
+        )
+    }
+
+    fn sql_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
+    }
+
     fn read_range_input(
         &self,
         oid: u32,
@@ -59,6 +91,17 @@ impl uqa_sql::expr::EngineHook for Engine {
         target: &uqa_sql::ast::ColumnType,
     ) -> Result<Option<Value>, SQLError> {
         uqa_sql::assignment::domain::cast_domain_value(self, value, source, target)
+    }
+    fn cast_domain_with_control(
+        &self,
+        value: &Value,
+        source: Option<&str>,
+        target: &uqa_sql::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Value>>, SQLError> {
+        uqa_sql::assignment::domain::cast_domain_value_with_control(
+            self, value, source, target, control,
+        )
     }
     fn resolve_type_name(
         &self,

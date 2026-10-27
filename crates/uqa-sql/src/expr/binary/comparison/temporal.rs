@@ -44,8 +44,12 @@ pub(super) fn compare(
             let TemporalValue::Date { days } = date else {
                 unreachable!("date comparison operand")
             };
-            let (TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros }) =
-                timestamp
+            let (TemporalValue::Timestamp {
+                postgres_micros: micros,
+            }
+            | TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            }) = timestamp
             else {
                 unreachable!("timestamp comparison operand")
             };
@@ -63,7 +67,7 @@ pub(super) fn compare(
                 0
             };
             let instant = (i128::from(seconds) - i128::from(offset)) * 1_000_000;
-            instant.cmp(&i128::from(*micros))
+            (instant - i128::from(uqa_core::POSTGRES_EPOCH_MICROS)).cmp(&i128::from(*micros))
         }
     };
     Ok(Some(if reversed { order.reverse() } else { order }))

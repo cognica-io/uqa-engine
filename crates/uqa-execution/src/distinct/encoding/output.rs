@@ -28,6 +28,7 @@ pub(super) trait KeyOutput {
     }
 
     fn encoded_range_field(&mut self) {}
+    fn decoded_physical_value(&mut self) {}
 
     fn legacy_numeric_reservation(&self) -> bool {
         false
@@ -36,6 +37,13 @@ pub(super) trait KeyOutput {
     fn legacy_temporal_reservation(&self) -> bool {
         false
     }
+
+    fn unix_temporal_reservation(&self) -> bool {
+        false
+    }
+
+    fn omit_reservation(&mut self) {}
+    fn encoded_temporal(&mut self, _value: &uqa_core::TemporalValue) {}
 
     fn check(&self) -> ExecResult<()> {
         if let Some(control) = self.control() {

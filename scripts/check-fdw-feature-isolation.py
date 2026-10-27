@@ -12,7 +12,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NATIVE_PACKAGES = ("uqa-engine", "uqa", "uqa-cli", "uqa-python", "uqa-node", "uqa-api", "uqa-pg-server")
+NATIVE_PACKAGES = ("uqa-engine", "uqa", "uqa-cli", "uqa-python", "uqa-node", "uqa-api", "uqa-pg-server", "uqa-ffi")
 DEFAULT_PACKAGES = (*NATIVE_PACKAGES, "uqa-execution", "uqa-wasm")
 EXTERNAL = {"uqa-fdw", "duckdb", "libduckdb-sys", "uqa-duckdb", "uqa-libduckdb-sys",
             "arrow-array", "arrow-ipc", "arrow-schema"}
@@ -34,13 +34,14 @@ def verify(package, *, default=True, features=(), target=None):
     for line in output.splitlines():
         if line.startswith("uqa-fdw "):
             handler_features.update(line.split("|", 1)[1].removesuffix(" (*)").split(","))
-    if handler_features & {"arrow", "duckdb"} != selected:
-        raise RuntimeError(f"{package}: handler features {handler_features} differ from {selected}")
+    handlers = selected & {"arrow", "duckdb"}
+    if handler_features & {"arrow", "duckdb"} != handlers:
+        raise RuntimeError(f"{package}: handler features {handler_features} differ from {handlers}")
     expected = {"uqa-fdw"}
     native = target != "wasm32-unknown-emscripten"
     if "duckdb" in selected and native:
         expected |= {"uqa-duckdb", "uqa-libduckdb-sys", "arrow-array", "arrow-schema"}
-    if ("arrow" in selected and native) or package == "uqa-api":
+    if ("arrow" in selected and native) or package == "uqa-api" or (package == "uqa-ffi" and "arrow-export" in selected):
         # The fluent API already provides Arrow/Parquet result conversion independently of FDWs.
         expected |= {"arrow-array", "arrow-ipc", "arrow-schema"}
     if packages & EXTERNAL != expected:
@@ -56,6 +57,9 @@ def main():
         for features in (("arrow",), ("duckdb",), ("arrow", "duckdb")):
             verify(package, default=False, features=features)
     verify("uqa-engine", default=False, features=("uqa-fdw/arrow",))
+    for defaults in (False, True):
+        for handlers in ((), ("arrow",), ("duckdb",), ("arrow", "duckdb")):
+            verify("uqa-ffi", default=defaults, features=("arrow-export", *handlers))
     verify("uqa-fdw")
     for package in ("uqa-fdw", "uqa-engine"):
         for features in ((), ("arrow",), ("duckdb",), ("arrow", "duckdb")):

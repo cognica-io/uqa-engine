@@ -1,0 +1,9 @@
+# Empty prepared-message reference
+
+The reference is PostgreSQL 18.4 (`Debian 18.4-1.pgdg13+1`, aarch64), captured on 2026-10-24 through libpq's `PQprepare`, `PQdescribePrepared`, `PQexecPrepared`, and `PQexec`. The capture creates no durable objects. Prepared definitions, settings, transactions, and savepoints belong to one disposable connection. The protocol contracts are described in [PostgreSQL 18 message flow](https://www.postgresql.org/docs/18/protocol-flow.html) and [libpq execution functions](https://www.postgresql.org/docs/18/libpq-exec.html).
+
+Run `PG_PREPARED_CONNECTION='dbname=postgres user=postgres' python3 tests/parity/pg18/capture_prepared_empty_oracle.py > tests/parity/pg18/prepared_empty_oracle.expected.json` against an explicit disposable PostgreSQL 18 reference. The script verifies the server version and captures all twenty-four operations in order, including descriptors, parameter OIDs, completion tags, rows, SQLSTATE, primary messages, and transaction status. It does not infer expected results from UQA.
+
+The fixture covers empty and comment-only inputs, declared but unused parameters, generic planning under `force_custom_plan`, the absence of a transaction snapshot after empty preparation and execution, preparation and description during an aborted transaction, execution rejection, empty Simple Query behavior, error precedence for multiple prepared commands, and savepoint recovery. Engine's `tests::prepared::empty` replays every operation against memory and native SQLite and compares every captured result field; the C11/C++17 prepared client additionally exercises the C ABI's binding, result, error, and finalize contracts.
+
+Capture script SHA-256: `3e8a15a606bd10c502d47e79d0e7fbe01a3679fb89de62ce7f1a603978312424`. Expected fixture SHA-256: `5516fba665bf5328afa51e40dd9c3c4f56cc88bc1afad4b43bca8d5a1aa3b7b3`.

@@ -31,7 +31,7 @@ pub fn quote_ident(ident: &str) -> String {
         .expect("ordinary quoted identifier")
 }
 
-pub(crate) fn quote_ident_with_control(
+pub fn quote_ident_with_control(
     ident: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
@@ -59,7 +59,7 @@ pub(crate) fn quote_ident_with_control(
 }
 
 /// Single-quote with doubled quotes; backslashes select the escaped-literal form.
-pub(in crate::expr) fn quote_literal_with_control(
+pub fn quote_literal_with_control(
     text: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {

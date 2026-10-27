@@ -29,6 +29,18 @@ pub struct MutationStatementContext<'a, S: Clone + 'static> {
 impl<S: Clone + 'static> Copy for MutationStatementContext<'_, S> {}
 
 impl<'a, S: Clone + 'static> MutationStatementContext<'a, S> {
+    pub fn with_destination<'b>(
+        self,
+        destination: Option<crate::mutation::returning::ReturningDestination<'b>>,
+    ) -> MutationStatementContext<'b, S>
+    where
+        'a: 'b,
+    {
+        let mut context = self;
+        context.mutation.preparation.returning.destination = destination;
+        context
+    }
+
     pub fn insert_source(&self) -> InsertSourceContext<'a, S> {
         InsertSourceContext {
             rows: self.mutation.preparation,

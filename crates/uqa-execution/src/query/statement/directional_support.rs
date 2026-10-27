@@ -6,10 +6,7 @@
 
 //! Backward traversal support derived from query operators and CTE scheduling.
 
-use crate::{
-    query::{cte::strategy::schedule_plan_ctes, CteScope},
-    BackwardScanSupport,
-};
+use crate::{query::CteScope, BackwardScanSupport};
 use std::{borrow::Cow, collections::BTreeMap};
 use uqa_sql::{
     ast::SetOpKind,
@@ -30,11 +27,13 @@ pub fn query_plan_backward_scan_support<S: Clone>(
     plan: &QueryPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<BackwardScanSupport, SQLError> {
     TraversalAnalysis {
         routines,
         volatility,
         params,
+        control,
     }
     .query(plan, ctes, &BTreeMap::new())
 }
@@ -43,6 +42,7 @@ struct TraversalAnalysis<'a> {
     routines: &'a dyn RoutineResolution,
     volatility: &'a dyn VolatilityCatalog,
     params: &'a [SQLParam],
+    control: uqa_core::memory::ProductionControl<'a>,
 }
 
 impl TraversalAnalysis<'_> {
@@ -54,7 +54,12 @@ impl TraversalAnalysis<'_> {
     ) -> Result<BackwardScanSupport, SQLError> {
         let mut ctes = Cow::Borrowed(ctes);
         let mut support = Cow::Borrowed(inherited);
-        for scheduled in schedule_plan_ctes(self.volatility, plan)? {
+        let scheduled = uqa_sql::semantics::cte_strategy::schedule_plan_ctes_with_control(
+            self.volatility,
+            plan,
+            self.control,
+        )?;
+        for scheduled in scheduled.iter() {
             let cte = scheduled.plan;
             let traversal = if scheduled.deferred {
                 let query = cte
@@ -67,7 +72,8 @@ impl TraversalAnalysis<'_> {
             };
             support.to_mut().insert(cte.name.clone(), traversal);
             // Retain declaration-order schemas without executing or materializing a CTE.
-            ctes.to_mut().insert_deferred(cte.clone());
+            ctes.to_mut()
+                .insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &self.control)?);
         }
         match &plan.root {
             RelationalPlan::Values { .. } => Ok(BackwardScanSupport::Native),
@@ -104,7 +110,7 @@ impl TraversalAnalysis<'_> {
         }
         let returns_set = projections_return_set(self.routines, block);
         if !block.order_by.is_empty()
-            && has_effective_ordering(self.routines, block, self.params, ctes)?
+            && has_effective_ordering(self.routines, block, self.params, ctes, self.control)?
         {
             if returns_set && !ordered_set_projection(self.routines, block, self.params, ctes)? {
                 return Ok(BackwardScanSupport::Unsupported);

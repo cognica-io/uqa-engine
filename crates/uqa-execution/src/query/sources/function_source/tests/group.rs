@@ -101,15 +101,16 @@ fn correlated_groups_prepare_once_and_keep_live_values_padding_and_ordinality() 
             .unwrap();
         assert_eq!(preparations.get(), 2);
         assert_eq!(observer.calls.load(Ordering::Relaxed), value as usize * 2);
-        let rows = crate::physical::demand::OperatorRows::open(operator)
-            .unwrap()
-            .map(|row| {
-                let row = row.unwrap();
-                (0..5)
-                    .map(|position| row.physical_value_at(position).unwrap().clone())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
+        let rows = crate::SQLRowStream::from_source(
+            crate::physical::demand::OperatorRows::open(operator).unwrap(),
+        )
+        .map(|row| {
+            let row = row.unwrap();
+            (0..5)
+                .map(|position| row.physical_value_at(position).unwrap().clone())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
         assert_eq!(
             rows,
             vec![
@@ -209,4 +210,57 @@ fn correlated_group_scope_change_during_preparation_prevents_publication() {
     );
     assert!(group.description.get().is_none());
     assert_eq!(observer.calls.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn correlated_group_construction_closes_owned_scans_and_keeps_cleanup_errors() {
+    struct Source(Arc<std::sync::atomic::AtomicUsize>);
+    impl crate::SQLRowSource<PhysicalRow> for Source {
+        fn next_row(&mut self) -> Result<Option<PhysicalRow>, SQLError> {
+            panic!("construction must not consume the scan")
+        }
+        fn close(&mut self) -> Result<(), SQLError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(SQLError::Routine {
+                sqlstate: "58030".into(),
+                message: "correlated scan cleanup failed".into(),
+            })
+        }
+    }
+    for reject_second in [true, false] {
+        let runtime: Arc<dyn SetFunctionRuntime> = Arc::new(Runtime::default());
+        let group = PreparedFunctionGroup::default();
+        let closes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let result = group.build(&source(), &[], false, &runtime, &outer(1), |source| {
+            if reject_second && source.name == "one_payload" {
+                return Err(SQLError::Routine {
+                    sqlstate: "22012".into(),
+                    message: "second initialization failed".into(),
+                });
+            }
+            Ok(InitializedFunctionSource {
+                columns: vec!["value".into()],
+                schema: RowSchema::with_types(
+                    vec!["value".into()],
+                    vec![Some(ColumnType::Integer)],
+                ),
+                rows: crate::SQLRowStream::from_source(Source(Arc::clone(&closes))),
+                prepared: None,
+            })
+        });
+        let error = result.err().expect("member or alias validation must fail");
+        assert_eq!(
+            error.sqlstate(),
+            Some(if reject_second { "22012" } else { "42P10" })
+        );
+        assert!(error
+            .detail()
+            .unwrap()
+            .contains("correlated scan cleanup failed"));
+        assert_eq!(
+            closes.load(Ordering::SeqCst),
+            if reject_second { 1 } else { 2 }
+        );
+        assert!(group.description.get().is_none());
+    }
 }

@@ -36,7 +36,7 @@ pub(super) fn uses_ordered_arguments(
 
 pub(super) fn is_ordered_set(name: &str) -> bool {
     matches!(
-        crate::semantics::builtin_function_dispatch_name(name).as_str(),
+        crate::semantics::builtin_function_dispatch_name(name).as_ref(),
         "mode" | "percentile_cont" | "percentile_disc"
     )
 }
@@ -56,7 +56,7 @@ pub(super) fn resolve(
     let mut kinds = Vec::new();
     for declaration in catalog::SIGNATURES.lines() {
         let mut fields = declaration.split('|');
-        if fields.next() != Some(lower.as_str()) {
+        if fields.next() != Some(lower.as_ref()) {
             continue;
         }
         let [arguments_text, result, proc_kind, aggregate_kind, direct] =
@@ -96,7 +96,7 @@ pub(super) fn resolve(
     }
     // These ordinary text declarations share the same candidate ranking; no
     // unknown input is read until the selected call has passed its modifiers.
-    if matches!(lower.as_str(), "lower" | "upper" | "initcap") {
+    if matches!(lower.as_ref(), "lower" | "upper" | "initcap") {
         declarations.push(BuiltinFunctionOverload {
             variadic: false,
             name: format!("pg_catalog.{lower}"),

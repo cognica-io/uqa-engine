@@ -153,3 +153,29 @@ fn dropping_a_partial_owned_traversal_frees_each_remaining_value_once() {
     drop(first);
     assert_eq!(drops.load(Ordering::Relaxed), 512);
 }
+
+#[test]
+fn owned_sets_preserve_ordered_sequence_storage_and_exact_node_ownership() {
+    let reference = std::collections::BTreeSet::from(["a", "b", "z"]);
+    let mut set: OwnedSet<String> = serde_json::from_str(r#"["z","a","b","a"]"#).unwrap();
+    assert_eq!(
+        serde_json::to_string(&set).unwrap(),
+        serde_json::to_string(&reference).unwrap()
+    );
+    assert_eq!(set.allocated_bytes(), 3 * OwnedSet::<String>::entry_bytes());
+    assert!(set.remove("b"));
+    assert!(!set.remove("b"));
+    assert_eq!(set.allocated_bytes(), 2 * OwnedSet::<String>::entry_bytes());
+    set.extend(["c".to_owned(), "a".to_owned()]);
+    assert_eq!(
+        set.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["a", "c", "z"]
+    );
+    assert_eq!(set.allocated_bytes(), 3 * OwnedSet::<String>::entry_bytes());
+    let copied = set.clone();
+    set.clear();
+    assert!(set.is_empty());
+    assert_eq!(set.allocated_bytes(), 0);
+    assert_eq!(copied.len(), 3);
+    assert!(serde_json::from_str::<OwnedSet<String>>(r#"["a",1]"#).is_err());
+}

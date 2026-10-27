@@ -162,7 +162,6 @@ pub fn routine_statement_composite_dependencies(
     }
     super::stored_routines::mark_catalog_statement_relations_bound(&mut plan)?;
     let params = crate::routines::body_parameters::sql_body_parameters(definition)
-        .into_iter()
         .map(|parameter| {
             routines.resolve_type_name(&parameter.type_name).map(|ty| {
                 ty.map_or_else(

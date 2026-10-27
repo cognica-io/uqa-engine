@@ -8,9 +8,9 @@
 
 use super::TemporalValue;
 
-// Unix microseconds at i64::MAX still denote a finite PostgreSQL instant. Both timestamp sentinels therefore occupy the unrepresentable lower range; PostgreSQL Datum conversion owns the different 2000-epoch sentinel bytes.
+// Timestamp payloads use PostgreSQL's epoch and the same two reserved endpoints.
 const TIMESTAMP_NEGATIVE_INFINITY: i64 = i64::MIN;
-const TIMESTAMP_POSITIVE_INFINITY: i64 = i64::MIN + 1;
+const TIMESTAMP_POSITIVE_INFINITY: i64 = i64::MAX;
 
 /// `PostgreSQL`'s two infinite temporal endpoints. Time-of-day types have neither endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,13 +54,13 @@ impl TemporalInfinity {
 
     pub const fn timestamp(self) -> TemporalValue {
         TemporalValue::Timestamp {
-            micros: self.timestamp_micros(),
+            postgres_micros: self.timestamp_micros(),
         }
     }
 
     pub const fn timestamp_tz(self) -> TemporalValue {
         TemporalValue::TimestampTz {
-            micros: self.timestamp_micros(),
+            postgres_micros: self.timestamp_micros(),
         }
     }
 
@@ -87,10 +87,10 @@ impl TemporalValue {
         match self {
             Self::Date { days: i32::MIN }
             | Self::Timestamp {
-                micros: TIMESTAMP_NEGATIVE_INFINITY,
+                postgres_micros: TIMESTAMP_NEGATIVE_INFINITY,
             }
             | Self::TimestampTz {
-                micros: TIMESTAMP_NEGATIVE_INFINITY,
+                postgres_micros: TIMESTAMP_NEGATIVE_INFINITY,
             }
             | Self::Interval {
                 months: i32::MIN,
@@ -99,10 +99,10 @@ impl TemporalValue {
             } => Some(Negative),
             Self::Date { days: i32::MAX }
             | Self::Timestamp {
-                micros: TIMESTAMP_POSITIVE_INFINITY,
+                postgres_micros: TIMESTAMP_POSITIVE_INFINITY,
             }
             | Self::TimestampTz {
-                micros: TIMESTAMP_POSITIVE_INFINITY,
+                postgres_micros: TIMESTAMP_POSITIVE_INFINITY,
             }
             | Self::Interval {
                 months: i32::MAX,
@@ -155,12 +155,12 @@ mod tests {
             ),
             (
                 TemporalInfinity::Negative.timestamp(),
-                TemporalValue::Timestamp { micros: 0 },
+                TemporalValue::Timestamp { postgres_micros: 0 },
                 TemporalInfinity::Positive.timestamp(),
             ),
             (
                 TemporalInfinity::Negative.timestamp_tz(),
-                TemporalValue::TimestampTz { micros: 0 },
+                TemporalValue::TimestampTz { postgres_micros: 0 },
                 TemporalInfinity::Positive.timestamp_tz(),
             ),
             (
@@ -200,12 +200,16 @@ mod tests {
             }
         }
         for finite in [
-            TemporalValue::Timestamp { micros: i64::MAX },
-            TemporalValue::TimestampTz { micros: i64::MAX },
+            TemporalValue::Timestamp {
+                postgres_micros: i64::MAX - 1,
+            },
+            TemporalValue::TimestampTz {
+                postgres_micros: i64::MAX - 1,
+            },
             TemporalValue::Time { micros: i64::MAX },
             TemporalValue::TimeTz {
                 micros: i64::MIN,
-                offset_minutes: 0,
+                offset_seconds: 0,
             },
             TemporalValue::Interval {
                 months: i32::MAX,
@@ -221,11 +225,17 @@ mod tests {
             assert!(finite.is_finite());
         }
         assert!(
-            TemporalValue::Timestamp { micros: i64::MAX } < TemporalInfinity::Positive.timestamp()
+            TemporalValue::Timestamp {
+                postgres_micros: i64::MAX - 1
+            } < TemporalInfinity::Positive.timestamp()
         );
         assert!(
-            key(&TemporalValue::Timestamp { micros: i64::MAX }, false)
-                < key(&TemporalInfinity::Positive.timestamp(), false)
+            key(
+                &TemporalValue::Timestamp {
+                    postgres_micros: i64::MAX - 1
+                },
+                false
+            ) < key(&TemporalInfinity::Positive.timestamp(), false)
         );
         assert!(!TemporalValue::timestamp_micros_in_range(
             TIMESTAMP_NEGATIVE_INFINITY

@@ -8,6 +8,41 @@ use super::{ParameterAssignment::*, ParameterScopes};
 use std::collections::BTreeMap;
 
 #[test]
+fn explain_settings_follow_native_parameter_flags_and_effective_values() {
+    use super::{
+        catalog::parameter_definitions, definition::ParameterFlags, setting::ParameterSetting,
+    };
+    let marked: Vec<_> = parameter_definitions()
+        .iter()
+        .filter(|definition| definition.has_flag(ParameterFlags::EXPLAIN))
+        .map(|definition| definition.name)
+        .collect();
+    assert_eq!(
+        marked,
+        [
+            "enable_indexonlyscan",
+            "plan_cache_mode",
+            "search_path",
+            "work_mem"
+        ]
+    );
+    for definition in parameter_definitions() {
+        let mut setting = ParameterSetting {
+            definition,
+            setting: definition.boot_setting(),
+            reset_setting: definition.boot_setting(),
+            source: "session",
+        };
+        assert!(!setting.is_explain_setting(), "{}", definition.name);
+        if definition.name == "work_mem" {
+            setting.setting = "64".into();
+            assert!(setting.is_explain_setting());
+            assert_eq!(setting.shown(), "64kB");
+        }
+    }
+}
+
+#[test]
 fn configured_local_and_unconfigured_local_have_different_restore_boundaries() {
     let mut parameters = ParameterScopes::default();
     let scope = parameters.enter_function();

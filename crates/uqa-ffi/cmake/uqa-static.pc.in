@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: UQA static
+Description: Unified Query Algebra embedded C static library
+Version: @UQA_VERSION@
+Libs: @UQA_PKG_CONFIG_STATIC_LIBRARY@ @UQA_PKG_CONFIG_NATIVE_LIBRARIES@
+Cflags: -I${includedir}

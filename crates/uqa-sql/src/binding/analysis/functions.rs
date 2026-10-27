@@ -168,7 +168,10 @@ pub(super) fn validate_scalar_function(
         return Ok(());
     }
     crate::scalar_call_arguments(args)?;
-    if routines.has_registered_scalar_function(&identity) {
+    if routines.has_registered_scalar_function(&identity)
+        || (binding.is_none_or(|binding| binding.builtin)
+            && routines.has_registered_table_function(&identity))
+    {
         return Ok(());
     }
     if validate_fixed_builtin(name, binding, args, schema, params, resolver)? {
@@ -187,12 +190,12 @@ pub(super) fn validate_scalar_function(
         return Err(undefined_function(name, args, schema, params, resolver));
     }
     if matches!(
-        lower.as_str(),
+        lower.as_ref(),
         "uuid_extract_version" | "uuid_extract_timestamp"
     ) {
         return validate_uuid_extraction_function(name, args, schema, params, resolver);
     }
-    if binding.is_none() && matches!(lower.as_str(), "array_sort" | "array_reverse") {
+    if binding.is_none() && matches!(lower.as_ref(), "array_sort" | "array_reverse") {
         crate::scalar_type_with_resolver(expression, schema, params, resolver)?;
         return Ok(());
     }
@@ -206,7 +209,7 @@ pub(super) fn validate_scalar_function(
     if resolve_sql_function(routines, name, binding, args, schema, params, resolver)?.is_some() {
         return Ok(());
     }
-    if builtin_function_type_with_resolver(&lower, args, order_by, schema, params, resolver)?
+    if builtin_function_type_with_resolver(name, args, order_by, schema, params, resolver)?
         .is_some()
     {
         return Ok(());
@@ -500,7 +503,7 @@ fn window_call_kind(
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<WindowCallKind>, SQLError> {
     let lower = crate::semantics::builtin_function_dispatch_name(name);
-    let kind = match (lower.as_str(), args.len()) {
+    let kind = match (lower.as_ref(), args.len()) {
         ("row_number" | "rank" | "dense_rank" | "percent_rank" | "cume_dist", 0)
         | ("lag" | "lead", 1..=3)
         | ("first_value" | "last_value" | "ntile", 1)
@@ -528,7 +531,7 @@ fn window_call_kind(
     }
     // The built-in window and ordered-set functions have no other signatures; only a user routine can take these arguments.
     if matches!(
-        lower.as_str(),
+        lower.as_ref(),
         "row_number"
             | "rank"
             | "dense_rank"

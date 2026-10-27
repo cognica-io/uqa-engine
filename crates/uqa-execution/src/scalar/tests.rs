@@ -108,7 +108,7 @@ fn set_returning_built_ins_fail_before_scalar_arguments_are_evaluated() {
         builtin: true,
         dispatch: None,
         invocation: None,
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };

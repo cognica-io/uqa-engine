@@ -382,8 +382,9 @@ static void record_matching_string(pgssConstLocations *jstate, const char *str)
 		RecordConstLocation(jstate, loc - jstate->query - 1);
 }
 
-static bool const_record_walker(Node *node, pgssConstLocations *jstate)
+static bool const_record_walker(Node *node, void *context)
 {
+	pgssConstLocations *jstate = context;
 	bool result;
 	MemoryContext normalize_context = CurrentMemoryContext;
 

@@ -108,6 +108,24 @@ impl<S: Clone> CteScope<S> {
         })
     }
 
+    /// Enter the namespace and relation authority retained by one query, including rewritten inputs nested under a different statement owner.
+    pub fn enter_query_plan_scope(
+        &mut self,
+        plan: &QueryPlan,
+    ) -> Result<QueryPlanScope<'_, S>, SQLError> {
+        let mut lookup = self.enter_relation_lookup_mode(plan.relations_bound)?;
+        let previous_subject = match &plan.relation_privilege_subject {
+            Some(subject) => {
+                QueryPrivilege::Restore(lookup.privilege_subject.replace(subject.clone()))
+            }
+            None => QueryPrivilege::Unchanged,
+        };
+        Ok(QueryPlanScope {
+            lookup,
+            previous_subject,
+        })
+    }
+
     pub fn insert_shared(&mut self, name: String, rows: crate::SharedSpill) {
         self.insert_rows(name, crate::query::cte::rows::CteRows::Complete(rows));
     }
@@ -120,15 +138,15 @@ impl<S: Clone> CteScope<S> {
         self.rows.insert(name, rows);
     }
 
-    pub fn insert_deferred(&mut self, plan: CtePlan) {
+    pub fn insert_deferred(&mut self, plan: uqa_sql::plan::RetainedCtePlan) {
         self.insert_preparation_cte(plan, true);
     }
 
-    pub fn remove_deferred(&mut self, name: &str) -> Option<CtePlan> {
+    pub fn remove_deferred(&mut self, name: &str) -> Option<uqa_sql::plan::RetainedCtePlan> {
         self.non_returning_ctes.remove(name);
         self.definition_scopes.remove(name);
         self.folded_ctes.remove(name);
-        self.deferred_ctes.remove(name).map(Arc::unwrap_or_clone)
+        self.deferred_ctes.remove(name)
     }
 
     /// Return a folded definition without consuming its lexical binding. A single syntactic reference can be built again by a recursive working-table iteration or a correlated consumer. Materialized producers replace the definition explicitly when installed.
@@ -149,10 +167,10 @@ impl<S: Clone> CteScope<S> {
     pub fn deferred_reference(&self, reference: &str) -> Option<&CtePlan> {
         self.deferred_ctes
             .get(&uqa_sql::semantics::cte_reference_name(reference)?)
-            .map(Arc::as_ref)
+            .map(AsRef::as_ref)
     }
 
-    pub fn deferred_ctes(&self) -> &BTreeMap<String, Arc<CtePlan>> {
+    pub fn deferred_ctes(&self) -> &BTreeMap<String, uqa_sql::plan::RetainedCtePlan> {
         &self.deferred_ctes
     }
 
@@ -181,7 +199,18 @@ impl<S: Clone> CteScope<S> {
         self.rows.remove(name)
     }
 
-    /// Bind the scalar-subquery arena owned by one query block. The guard restores the parent arena on success, error, or panic so nested and lateral query execution cannot resolve a child slot in its parent.
+    /// Enter a query block's scalar arena and the outer substitutions owned by its FROM expressions.
+    pub fn enter_query_block(
+        &mut self,
+        block: &uqa_sql::plan::QueryBlockPlan,
+    ) -> ScalarSubqueryScope<'_, S> {
+        let mut scope = self.enter_scalar_subqueries(&block.subqueries);
+        scope.source_outer_rewrites = (!block.deferred_outer_rewrites.is_empty())
+            .then(|| block.deferred_outer_rewrites.as_slice().into());
+        scope
+    }
+
+    /// Bind the scalar-subquery arena owned by one query block. The guard restores the parent arena and correlated row binding on success, error, or panic so nested and lateral query execution cannot resolve a child slot in its parent.
     pub fn enter_scalar_subqueries(
         &mut self,
         subqueries: &[QueryPlan],
@@ -192,11 +221,15 @@ impl<S: Clone> CteScope<S> {
             .fetch_add(1, Ordering::Relaxed);
         let previous_arena = std::mem::replace(&mut self.scalar_subquery_arena, next_arena);
         let previous_lock_identities = self.lock_identities;
+        let previous_outer_row = self.outer_row_binding();
+        let previous_source_rewrites = self.source_outer_rewrites.clone();
         ScalarSubqueryScope {
             ctes: self,
             previous: Some(previous),
             previous_arena,
             previous_lock_identities,
+            previous_outer_row,
+            previous_source_rewrites,
         }
     }
 
@@ -216,11 +249,15 @@ impl<S: Clone> CteScope<S> {
 
     /// Whether `name` resolves to a CTE in this scope: a name declared by an enclosing query's WITH list, or one whose rows or deferred plan are bound in the scope, which is how a DML statement's own WITH list reaches the query it drives.
     pub fn is_visible_cte(&self, name: &str) -> bool {
-        uqa_sql::semantics::cte_reference_name(name).is_some_and(|name| {
-            self.visible_cte_names.contains(&name)
-                || self.rows.contains_key(&name)
-                || self.deferred_ctes.contains_key(&name)
-        })
+        uqa_sql::semantics::cte_reference_name(name)
+            .is_some_and(|name| self.contains_cte_name(&name))
+    }
+
+    /// Test an already decoded, unqualified identifier without applying SQL name parsing a second time.
+    pub fn contains_cte_name(&self, name: &str) -> bool {
+        self.visible_cte_names.contains(name)
+            || self.rows.contains_key(name)
+            || self.deferred_ctes.contains_key(name)
     }
 
     pub fn returning_statement_snapshot_scope(&self) -> Self {
@@ -305,11 +342,44 @@ impl<S: Clone> Drop for RelationLookupScope<'_, S> {
     }
 }
 
+pub struct QueryPlanScope<'a, S: Clone> {
+    lookup: RelationLookupScope<'a, S>,
+    previous_subject: QueryPrivilege,
+}
+
+enum QueryPrivilege {
+    Unchanged,
+    Restore(Option<RoleReference>),
+}
+
+impl<S: Clone> std::ops::Deref for QueryPlanScope<'_, S> {
+    type Target = CteScope<S>;
+    fn deref(&self) -> &Self::Target {
+        &self.lookup
+    }
+}
+
+impl<S: Clone> std::ops::DerefMut for QueryPlanScope<'_, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.lookup
+    }
+}
+
+impl<S: Clone> Drop for QueryPlanScope<'_, S> {
+    fn drop(&mut self) {
+        if let QueryPrivilege::Restore(previous) = &mut self.previous_subject {
+            self.lookup.privilege_subject = previous.take();
+        }
+    }
+}
+
 pub struct ScalarSubqueryScope<'a, S: Clone> {
     ctes: &'a mut CteScope<S>,
     previous: Option<Arc<[QueryPlan]>>,
     previous_arena: u64,
     previous_lock_identities: LockIdentityOptions,
+    previous_outer_row: Option<Arc<crate::OwnedPhysicalRow>>,
+    previous_source_rewrites: Option<Arc<[uqa_sql::semantics::view_rewrite::DeferredOuterRewrite]>>,
 }
 
 impl<S: Clone> std::ops::Deref for ScalarSubqueryScope<'_, S> {
@@ -332,6 +402,9 @@ impl<S: Clone> Drop for ScalarSubqueryScope<'_, S> {
             self.ctes.scalar_subqueries = previous;
             self.ctes.scalar_subquery_arena = self.previous_arena;
             self.ctes.lock_identities = self.previous_lock_identities;
+            self.ctes
+                .restore_outer_row_binding(self.previous_outer_row.take());
+            self.ctes.source_outer_rewrites = std::mem::take(&mut self.previous_source_rewrites);
         }
     }
 }

@@ -22,6 +22,26 @@ pub trait CatalogSession: Sync {
     fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError>;
     /// Every parameter that `SHOW ALL` and `pg_settings` report, in name order.
     fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting>;
+    /// Native sessions override this boundary to read only selected planning parameters. An external implementation may supply its existing settings snapshot.
+    fn explain_settings(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        uqa_core::memory::Produced<uqa_sql::semantics::parameters::explain::ExplainSettings>,
+        SQLError,
+    > {
+        let settings = self.parameter_settings();
+        uqa_sql::semantics::parameters::explain::capture(
+            &|definition, control| {
+                settings
+                    .iter()
+                    .find(|setting| setting.definition.name == definition.name)
+                    .map(|setting| control.copy_text(&setting.setting).map_err(Into::into))
+                    .transpose()
+            },
+            control,
+        )
+    }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata>;
     fn cursors(&self) -> Vec<CursorMetadata>;
 }

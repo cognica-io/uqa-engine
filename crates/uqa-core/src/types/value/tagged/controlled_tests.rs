@@ -272,7 +272,7 @@ fn invalid_tags_keep_original_payloads_and_cancellation_releases_only_the_input(
         "array",
         [
             ("values", Value::List(vec![Value::Array(inner)])),
-            ("lower_bounds", Value::List(vec![Value::Int(1)])),
+            ("lower_bounds", Value::List(vec![Value::Int(1); 3])),
         ],
     );
     let memory = MemoryBudget::new(1 << 20);

@@ -47,6 +47,10 @@ pub mod term_key;
 pub mod transaction;
 pub mod vector_index;
 
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support;
+
 pub use backend::{
     CommittedDataRevision, PersistentStorageBackend, PersistentStorageIdentity,
     PersistentStorageProvider, PersistentStorageSession, StorageBackendError, StorageBackendResult,

@@ -335,8 +335,13 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
             DuckValue::Time64(TimeUnit::Microsecond, *micros)
         }
         Value::Temporal(
-            TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
-        ) => DuckValue::Timestamp(TimeUnit::Microsecond, *micros),
+            TemporalValue::Timestamp {
+                postgres_micros: micros,
+            }
+            | TemporalValue::TimestampTz {
+                postgres_micros: micros,
+            },
+        ) => DuckValue::Timestamp(TimeUnit::Microsecond, postgres_to_duck_timestamp(*micros)?),
         Value::Temporal(TemporalValue::Interval {
             months,
             days,
@@ -392,6 +397,21 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
     })
 }
 
+fn postgres_to_duck_timestamp(postgres_micros: i64) -> Result<i64, FDWError> {
+    match postgres_micros {
+        i64::MIN => Ok(-i64::MAX),
+        i64::MAX => Ok(i64::MAX),
+        value => value
+            .checked_add(uqa_core::POSTGRES_EPOCH_MICROS)
+            .filter(|value| *value != i64::MAX && *value != -i64::MAX)
+            .ok_or_else(|| {
+                FDWError::UnsupportedValue(
+                    "timestamp exceeds DuckDB's Unix microsecond carrier".into(),
+                )
+            }),
+    }
+}
+
 fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Result<Value, FDWError> {
     use ::duckdb::types::Value as DuckValue;
     Ok(match value {
@@ -425,7 +445,7 @@ fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Result<Value, FDWError> {
             })?)
         }
         DuckValue::Timestamp(unit, v) => Value::Temporal(TemporalValue::Timestamp {
-            micros: duck_time_to_micros(unit, v, "timestamp")?,
+            postgres_micros: duck_timestamp_micros(unit, v)?,
         }),
         DuckValue::Text(v) | DuckValue::Enum(v) => Value::Str(v),
         DuckValue::Blob(v) => Value::Bytes(v),
@@ -490,6 +510,30 @@ fn duck_value_key_to_string(value: ::duckdb::types::Value) -> Result<String, FDW
     }
 }
 
+fn duck_timestamp_micros(unit: ::duckdb::types::TimeUnit, value: i64) -> Result<i64, FDWError> {
+    use ::duckdb::types::TimeUnit;
+    if value == i64::MAX {
+        return Ok(i64::MAX);
+    }
+    if value == -i64::MAX {
+        return Ok(i64::MIN);
+    }
+    let unix_micros = match unit {
+        TimeUnit::Second => i128::from(value) * 1_000_000,
+        TimeUnit::Millisecond => i128::from(value) * 1_000,
+        TimeUnit::Microsecond => i128::from(value),
+        TimeUnit::Nanosecond => i128::from(duck_time_to_micros(unit, value, "timestamp")?),
+    };
+    i64::try_from(unix_micros - i128::from(uqa_core::POSTGRES_EPOCH_MICROS))
+        .ok()
+        .filter(|micros| TemporalValue::timestamp_micros_in_range(*micros))
+        .ok_or_else(|| {
+            FDWError::UnsupportedValue(format!(
+                "DuckDB timestamp value {value} is outside UQA's microsecond range"
+            ))
+        })
+}
+
 fn duck_time_to_micros(
     unit: ::duckdb::types::TimeUnit,
     value: i64,
@@ -528,6 +572,37 @@ pub enum DuckDBPrepareError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timestamp_parameters_and_results_preserve_both_epochs_and_infinities() {
+        use ::duckdb::types::{TimeUnit, Value as DuckValue};
+        let connection = ::duckdb::Connection::open_in_memory().unwrap();
+        for source in [
+            "1970-01-01 00:00:00",
+            "1969-12-31 23:59:59.999999",
+            "2000-01-01 00:00:00",
+            "infinity",
+            "-infinity",
+        ] {
+            let expected = Value::Temporal(TemporalValue::parse_timestamp(source).unwrap());
+            let parameter = uqa_value_to_duck_value(&expected).unwrap();
+            let returned: DuckValue = connection
+                .query_row(
+                    "SELECT CAST(? AS TIMESTAMP)",
+                    ::duckdb::params![parameter],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(duck_value_to_uqa(returned).unwrap(), expected, "{source}");
+        }
+        let value =
+            duck_value_to_uqa(DuckValue::Timestamp(TimeUnit::Second, 9_224_318_015_999)).unwrap();
+        let Value::Temporal(value) = value else {
+            panic!("timestamp carrier");
+        };
+        assert_eq!(value.to_sql_string(), "294276-12-31 23:59:59");
+        assert!(uqa_value_to_duck_value(&Value::Temporal(value)).is_err());
+    }
     use crate::{ColumnDef, ColumnType};
     use std::collections::BTreeMap;
 
@@ -668,7 +743,7 @@ mod tests {
         assert!(duck_value_to_uqa(::duckdb::types::Value::UBigInt(u64::MAX)).is_err());
         assert!(duck_value_to_uqa(::duckdb::types::Value::Timestamp(
             ::duckdb::types::TimeUnit::Second,
-            i64::MAX,
+            i64::MAX - 1,
         ))
         .is_err());
         let nanos_error = duck_value_to_uqa(::duckdb::types::Value::Timestamp(

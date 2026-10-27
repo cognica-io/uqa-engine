@@ -4,10 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Deadlines served by one timer thread for the process, as `PostgreSQL`'s timeout handler serves `statement_timeout` and the session timeouts: a deadline cancels a token when it passes, and a scheduled action runs when its time comes.
+//! Deadlines share a timer thread retained by their tokens and scheduled actions. The final owner stops and joins the worker; a later owner can start a new service.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use super::{CancellationReason, TokenState};
@@ -75,28 +76,90 @@ impl PendingCancellation {
 struct DeadlineQueue {
     next_id: u64,
     pending: BTreeMap<(Instant, u64), Pending>,
+    stopped: bool,
 }
 
-struct DeadlineService {
+struct DeadlineWorker {
     queue: Mutex<DeadlineQueue>,
     changed: Condvar,
 }
 
-fn service() -> &'static DeadlineService {
-    static SERVICE: OnceLock<DeadlineService> = OnceLock::new();
-    SERVICE.get_or_init(|| {
-        std::thread::Builder::new()
-            .name("uqa-deadlines".into())
-            .spawn(|| service().run())
-            .expect("start the deadline timer thread");
-        DeadlineService {
-            queue: Mutex::new(DeadlineQueue::default()),
-            changed: Condvar::new(),
-        }
-    })
+/// The worker owns only its queue, so it cannot keep its callers alive.
+pub(super) struct DeadlineService {
+    state: Arc<DeadlineWorker>,
+    worker: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl std::fmt::Debug for DeadlineService {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DeadlineService")
+            .finish_non_exhaustive()
+    }
+}
+
+pub(super) fn service() -> Arc<DeadlineService> {
+    static SERVICE: Mutex<Weak<DeadlineService>> = Mutex::new(Weak::new());
+    let mut current = SERVICE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(service) = current.upgrade() {
+        return service;
+    }
+    let service = DeadlineService::start();
+    *current = Arc::downgrade(&service);
+    service
 }
 
 impl DeadlineService {
+    fn start() -> Arc<Self> {
+        let state = Arc::new(DeadlineWorker {
+            queue: Mutex::new(DeadlineQueue::default()),
+            changed: Condvar::new(),
+        });
+        let running = Arc::clone(&state);
+        let worker = std::thread::Builder::new()
+            .name("uqa-deadlines".into())
+            .spawn(move || running.run())
+            .expect("start the deadline timer thread");
+        Arc::new(Self {
+            state,
+            worker: Mutex::new(Some(worker)),
+        })
+    }
+
+    pub(super) fn schedule(
+        self: &Arc<Self>,
+        after: Duration,
+        action: impl FnOnce() + Send + 'static,
+    ) -> ScheduledAction {
+        ScheduledAction {
+            key: self.state.insert(after, Pending::Run(Box::new(action))),
+            service: Arc::clone(self),
+        }
+    }
+}
+
+impl Drop for DeadlineService {
+    fn drop(&mut self) {
+        self.state.lock().stopped = true;
+        self.state.changed.notify_one();
+        if let Some(worker) = self
+            .worker
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            // An action may release the last owner on this worker. It returns
+            // to the stopped queue itself, without trying to join its own thread.
+            if worker.thread().id() != std::thread::current().id() {
+                let _ = worker.join();
+            }
+        }
+    }
+}
+
+impl DeadlineWorker {
     fn lock(&self) -> MutexGuard<'_, DeadlineQueue> {
         self.queue
             .lock()
@@ -107,6 +170,9 @@ impl DeadlineService {
     fn run(&self) {
         let mut queue = self.lock();
         loop {
+            if queue.stopped {
+                return;
+            }
             let now = Instant::now();
             let Some((&(at, id), _)) = queue.pending.first_key_value() else {
                 queue = self
@@ -145,7 +211,11 @@ impl DeadlineService {
 
     /// Remove a queued deadline; `false` when the timer has already dequeued it.
     fn remove(&self, key: (Instant, u64)) -> bool {
-        self.lock().pending.remove(&key).is_some()
+        let pending = self.lock().pending.remove(&key);
+        self.changed.notify_one();
+        // Captured values may own other scheduled actions. Drop them only
+        // after releasing the queue lock, because their cleanup removes them.
+        pending.is_some()
     }
 }
 
@@ -153,6 +223,7 @@ impl DeadlineService {
 #[must_use = "a deadline is disarmed when it is dropped"]
 pub struct CancellationDeadline {
     key: (Instant, u64),
+    service: Arc<DeadlineService>,
     token: Arc<TokenState>,
     cancellation: Arc<PendingCancellation>,
 }
@@ -168,8 +239,12 @@ impl CancellationDeadline {
             reason,
             phase: Mutex::new(CancellationPhase::Armed),
         });
+        let service = Arc::clone(token.deadlines.get_or_init(service));
         Self {
-            key: service().insert(after, Pending::Cancel(Arc::clone(&cancellation))),
+            key: service
+                .state
+                .insert(after, Pending::Cancel(Arc::clone(&cancellation))),
+            service,
             token: Arc::clone(token),
             cancellation,
         }
@@ -179,7 +254,7 @@ impl CancellationDeadline {
 impl Drop for CancellationDeadline {
     fn drop(&mut self) {
         self.cancellation.disarm(&self.token);
-        service().remove(self.key);
+        self.service.state.remove(self.key);
     }
 }
 
@@ -187,104 +262,19 @@ impl Drop for CancellationDeadline {
 #[must_use = "a scheduled action is canceled when it is dropped"]
 pub struct ScheduledAction {
     key: (Instant, u64),
+    service: Arc<DeadlineService>,
 }
 
 impl Drop for ScheduledAction {
     fn drop(&mut self) {
-        service().remove(self.key);
+        self.service.state.remove(self.key);
     }
 }
 
 /// Run `action` once `after` has passed, unless the returned handle is dropped first.
 pub fn schedule(after: Duration, action: impl FnOnce() + Send + 'static) -> ScheduledAction {
-    ScheduledAction {
-        key: service().insert(after, Pending::Run(Box::new(action))),
-    }
+    service().schedule(after, action)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cancel::{CancellationToken, QueryCancelled};
-
-    fn dequeue(deadline: &CancellationDeadline) -> Pending {
-        service()
-            .lock()
-            .pending
-            .remove(&deadline.key)
-            .expect("armed deadline")
-    }
-
-    #[test]
-    fn dropped_dequeued_deadline_cannot_cancel_the_next_statement() {
-        let token = CancellationToken::new();
-        let deadline = token.deadline(
-            Duration::from_secs(3_600),
-            CancellationReason::StatementTimeout,
-        );
-        let pending = dequeue(&deadline);
-        drop(deadline);
-
-        let next = token.deadline(
-            Duration::from_secs(3_600),
-            CancellationReason::StatementTimeout,
-        );
-        pending.fire();
-        assert_eq!(token.check(), Ok(()));
-
-        dequeue(&next).fire();
-        assert_eq!(
-            token.check(),
-            Err(QueryCancelled::new(CancellationReason::StatementTimeout))
-        );
-        drop(next);
-        assert_eq!(token.check(), Ok(()));
-    }
-
-    #[test]
-    fn fired_deadline_drop_preserves_an_unrelated_cancellation() {
-        let token = CancellationToken::new();
-        let deadline = token.deadline(
-            Duration::from_secs(3_600),
-            CancellationReason::StatementTimeout,
-        );
-        token.cancel();
-        dequeue(&deadline).fire();
-        drop(deadline);
-        assert_eq!(token.check(), Err(QueryCancelled::USER_REQUEST));
-    }
-
-    #[test]
-    fn disarmed_dequeued_session_deadline_cannot_terminate_the_session() {
-        let token = CancellationToken::new();
-        let deadline = token.deadline(
-            Duration::from_secs(3_600),
-            CancellationReason::IdleSessionTimeout,
-        );
-        let pending = dequeue(&deadline);
-        drop(deadline);
-        pending.fire();
-        assert_eq!(token.termination(), None);
-        assert_eq!(token.check(), Ok(()));
-    }
-
-    #[test]
-    fn fired_session_deadline_remains_terminal_after_drop_and_reset() {
-        let token = CancellationToken::new();
-        let deadline = token.deadline(
-            Duration::from_secs(3_600),
-            CancellationReason::IdleSessionTimeout,
-        );
-        dequeue(&deadline).fire();
-        drop(deadline);
-        token.reset();
-        assert_eq!(
-            token.termination(),
-            Some(CancellationReason::IdleSessionTimeout)
-        );
-        assert_eq!(
-            token.check(),
-            Err(QueryCancelled::new(CancellationReason::IdleSessionTimeout))
-        );
-    }
-}
+mod tests;

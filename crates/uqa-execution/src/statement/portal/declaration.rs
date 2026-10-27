@@ -88,14 +88,11 @@ fn open_plpgsql_command_portal<S: Clone + Send + Sync + 'static>(
         | CommandPlan::Merge(_) => cursor_command_returning_schema(inputs, command, params)?,
         CommandPlan::Call { name, args } => analyze_call_result_schema(inputs, name, args, params)?,
         CommandPlan::ShowVariable { name } => {
-            let columns = crate::statement::show::show_columns(inputs.session, name)?;
-            let types = vec![Some(uqa_sql::ColumnType::Text); columns.len()];
-            Some(crate::RowSchema::with_types(columns, types))
+            Some(crate::statement::show::show_schema(inputs.session, name)?)
         }
-        CommandPlan::Explain { body, format, .. } => {
+        CommandPlan::Explain { body, options, .. } => {
             validate_explain_cursor_body(inputs, params, body)?;
-            let result = (inputs.explain)(body, false, format.as_deref(), None)?;
-            Some(result.row_schema().into_owned())
+            Some(options.result_schema()?)
         }
         _ => None,
     }
@@ -187,6 +184,13 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
     let ctes = inputs.queries.statement_scope(None);
     let schema = analyze_query_plan_schema(inputs.routines, query, params, &ctes, None)?;
     validate_query_row_locks(inputs.queries.row_lock_context(), query, params)?;
+    let query_context = inputs.queries.query_context();
+    let retained = query_context.source.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        query_context.source.ctes.runtime.cancellation,
+    );
     inputs
         .state
         .open_pending_session_portal(SessionPortalDeclaration {
@@ -202,6 +206,7 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
                     params,
                     &ctes,
                     scroll,
+                    control,
                 )?,
                 created_at_micros: inputs.created_at_micros,
             },
@@ -219,12 +224,13 @@ fn query_scrollable<S: Clone>(
     params: &[SQLParam],
     ctes: &crate::query::CteScope<S>,
     requested: Option<bool>,
+    control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
     if let Some(requested) = requested {
         return Ok(requested);
     }
     Ok(!query_has_row_locks(query)
-        && query_plan_backward_scan_support(routines, volatility, query, params, ctes)?
+        && query_plan_backward_scan_support(routines, volatility, query, params, ctes, control)?
             == BackwardScanSupport::Native)
 }
 
@@ -236,7 +242,7 @@ fn cursor_command_returning_schema<S: Clone + 'static>(
     command: &CommandPlan,
     params: &[SQLParam],
 ) -> Result<Option<crate::RowSchema>, SQLError> {
-    crate::mutation::entry::cursor_command_returning_schema(
+    crate::mutation::entry::command_returning_schema(
         &inputs.returning.returning_execution_context(),
         inputs.returning.returning_analysis_context(),
         inputs.command_scopes,

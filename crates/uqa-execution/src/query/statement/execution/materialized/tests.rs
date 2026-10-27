@@ -305,6 +305,7 @@ fn collect_input_with_cancellation(
     cancellation: &uqa_core::CancellationToken,
 ) -> Result<crate::query::output::QueryOutput, uqa_sql::SQLError> {
     let runtime = QueryRuntimeView {
+        function_context: &crate::functions::SQLFunctionContext::empty(),
         diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         cancellation,
         settings: &Services,

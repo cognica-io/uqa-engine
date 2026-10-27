@@ -13,13 +13,12 @@ use crate::{
     },
     SQLError,
 };
-use std::collections::{BTreeMap, BTreeSet};
-use uqa_core::Value;
-pub fn can_patch_update_without_full_row(
+use std::collections::BTreeSet;
+pub fn can_patch_update_without_full_row<'a>(
     catalog: &dyn ConstraintCatalog,
     table: &str,
     referrers: &dyn ReferentialCatalog,
-    updates: &BTreeMap<String, Value>,
+    update_columns: impl IntoIterator<Item = &'a str>,
 ) -> Result<bool, SQLError> {
     if catalog
         .try_check_constraint_definitions(table)
@@ -29,20 +28,7 @@ pub fn can_patch_update_without_full_row(
     {
         return Ok(false);
     }
-    let update_keys: BTreeSet<&str> = updates.keys().map(String::as_str).collect();
-    if catalog
-        .try_describe_table(table)
-        .map_err(|err| dml_storage_error("UPDATE", err))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
-        .iter()
-        .any(|col| {
-            col.not_null
-                && col.auto_increment.is_none()
-                && matches!(updates.get(&col.name), Some(Value::Null))
-        })
-    {
-        return Ok(false);
-    }
+    let update_keys: BTreeSet<&str> = update_columns.into_iter().collect();
     if catalog
         .enforced_keys(table)
         .map_err(|err| dml_storage_error("UPDATE", err))?

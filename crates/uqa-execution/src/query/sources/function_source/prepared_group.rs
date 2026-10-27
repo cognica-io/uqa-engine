@@ -95,7 +95,7 @@ impl PreparedFunctionGroup {
             outer,
             initialize,
         )?;
-        let operator = match retained {
+        let mut operator = match retained {
             Some(saved) => {
                 RowsFromOperator::with_schema(operators, *ordinality, saved.rows_schema.clone())
             }
@@ -118,7 +118,17 @@ impl PreparedFunctionGroup {
             },
             |saved| saved.columns.clone(),
         );
-        validate_table_function_alias_count(qualifier, columns.len(), column_aliases.len())?;
+        if let Err(error) =
+            validate_table_function_alias_count(qualifier, columns.len(), column_aliases.len())
+        {
+            return Err(match operator.close() {
+                Ok(()) => error,
+                Err(cleanup) => error.with_cleanup(
+                    crate::physical::physical_exec_error(cleanup),
+                    "close correlated ROWS FROM after alias validation failure",
+                ),
+            });
+        }
         if retained.is_none()
             && members.len() == functions.len()
             && functions
@@ -164,7 +174,7 @@ fn initialize_members<'a>(
     outer: &crate::OwnedPhysicalRow,
     mut initialize: impl FnMut(&FunctionSource<'_>) -> Result<InitializedFunctionSource<'a>, SQLError>,
 ) -> Result<InitializedMembers<'a>, SQLError> {
-    let mut operators = Vec::with_capacity(functions.len());
+    let mut operators: Vec<Box<dyn PhysicalOperator + 'a>> = Vec::with_capacity(functions.len());
     let mut members = Vec::with_capacity(functions.len());
     for (index, function) in functions.iter().enumerate() {
         let source = FunctionSource::group_member(function);
@@ -184,7 +194,17 @@ fn initialize_members<'a>(
                     prepared: None,
                 }
             }
-            None => initialize(&source)?,
+            None => match initialize(&source) {
+                Ok(initialized) => initialized,
+                Err(mut error) => {
+                    for operator in &mut operators {
+                        if let Err(cleanup) = operator.close() {
+                            error = error.with_cleanup(crate::physical::physical_exec_error(cleanup), "close earlier correlated ROWS FROM member after initialization failure");
+                        }
+                    }
+                    return Err(error);
+                }
+            },
         };
         if let Some(call) = &initialized.prepared {
             members.push(PreparedMember {

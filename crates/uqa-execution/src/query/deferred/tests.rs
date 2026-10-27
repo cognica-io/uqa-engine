@@ -173,3 +173,51 @@ fn failed_operator_initialization_cannot_be_pulled_and_is_still_closed() {
     assert_eq!(opened.load(Ordering::SeqCst), 1);
     assert_eq!(closed.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn rejected_deferred_descriptor_closes_the_created_input_once() {
+    struct Input<'a> {
+        schema: RowSchema,
+        closed: &'a AtomicUsize,
+    }
+    impl PhysicalOperator for Input<'_> {
+        fn row_schema(&self) -> &RowSchema {
+            &self.schema
+        }
+        fn open(&mut self) -> ExecResult<()> {
+            panic!("descriptor rejected before open")
+        }
+        fn next(&mut self) -> ExecResult<Option<Batch>> {
+            panic!("descriptor rejected before pull")
+        }
+        fn close(&mut self) -> ExecResult<()> {
+            assert_eq!(self.closed.fetch_add(1, Ordering::SeqCst), 0);
+            Err(SQLError::Routine {
+                sqlstate: "58030".into(),
+                message: "deferred input close failed".into(),
+            }
+            .into())
+        }
+    }
+    let closed = AtomicUsize::new(0);
+    let mut operator = DeferredOperator::new(
+        RowSchema::default(),
+        Box::new(|| {
+            Ok(Box::new(Input {
+                schema: RowSchema::new(vec!["unexpected".into()]),
+                closed: &closed,
+            }))
+        }),
+    );
+    operator.open().unwrap();
+    let error = crate::physical::physical_exec_error(operator.next().unwrap_err());
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(error.to_string().contains("changed its bound row schema"));
+    assert!(error
+        .detail()
+        .unwrap()
+        .contains("deferred input close failed"));
+    operator.close().unwrap();
+    operator.close().unwrap();
+    assert_eq!(closed.load(Ordering::SeqCst), 1);
+}

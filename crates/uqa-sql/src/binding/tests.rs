@@ -307,10 +307,12 @@ fn joined_catalog_query() -> QueryPlan {
         analyzed_output: None,
         analyzed_source: None,
         analyzed_grouping: None,
+        relation_privilege_subject: None,
         relations_bound: false,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
-            privilege_columns: std::collections::BTreeSet::default(),
+            deferred_outer_rewrites: Vec::new(),
+            privilege_columns: uqa_core::memory::OwnedSet::new(),
             windows: Vec::new(),
             projections: vec![
                 ProjectionPlan {

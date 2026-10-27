@@ -16,7 +16,30 @@ use uqa_sql::{plan::ExpressionPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
 mod context;
 pub use context::{ArgumentBindingContext, PreparedArgumentScopes, ScopedArgumentOperation};
 
+/// SQL EXECUTE analyzes its written arguments in an independent parameter namespace.
 pub fn bind_execute_parameters(
+    scopes: &dyn PreparedArgumentScopes,
+    name: &str,
+    types: Option<Vec<Option<ColumnType>>>,
+    arguments: &[ExpressionPlan],
+) -> Result<Vec<SQLParam>, SQLError> {
+    bind_parameter_expressions(scopes, name, types, arguments, &[])
+}
+
+/// Coerce supplied host values against the retained definition's parameter types.
+pub(crate) fn bind_host_parameters(
+    scopes: &dyn PreparedArgumentScopes,
+    name: &str,
+    types: Option<Vec<Option<ColumnType>>>,
+    parameters: &[SQLParam],
+) -> Result<Vec<SQLParam>, SQLError> {
+    let arguments = (1..=parameters.len())
+        .map(|index| ExpressionPlan::lower(uqa_sql::ast::Expr::Param(index)))
+        .collect::<Vec<_>>();
+    bind_parameter_expressions(scopes, name, types, &arguments, parameters)
+}
+
+fn bind_parameter_expressions(
     scopes: &dyn PreparedArgumentScopes,
     name: &str,
     types: Option<Vec<Option<ColumnType>>>,
@@ -28,7 +51,17 @@ pub fn bind_execute_parameters(
         return Ok(Vec::new());
     }
     scopes.with_scope(outer_parameters, &mut |context| {
-        bind_arguments(context, arguments, &types)
+        let types =
+            uqa_sql::params::bind_declared_parameter_types(&types, context.validation.routines)?;
+        let sources = if outer_parameters.is_empty() {
+            None
+        } else {
+            Some(uqa_sql::params::bind_parameter_types(
+                outer_parameters,
+                context.validation.routines,
+            )?)
+        };
+        bind_arguments(context, arguments, &types, sources.as_deref())
     })
 }
 
@@ -42,6 +75,7 @@ fn bind_arguments(
     context: ArgumentBindingContext<'_>,
     arguments: &[ExpressionPlan],
     types: &[Option<ColumnType>],
+    host_types: Option<&[Option<ColumnType>]>,
 ) -> Result<Vec<SQLParam>, SQLError> {
     // Resolve names, types, and constant input conversions before evaluating
     // expressions that can consume sequence values or otherwise change state.
@@ -52,7 +86,9 @@ fn bind_arguments(
         .map(|(index, (argument, target))| {
             validate_argument(context.validation.aggregates, argument)?;
             reject_set_argument(&context.validation, argument)?;
-            let source = if matches!(
+            let source = if let Some(host_types) = host_types {
+                host_types[index].clone()
+            } else if matches!(
                 argument.scalar,
                 ScalarExpr::Literal(Value::Str(_) | Value::Null)
             ) {

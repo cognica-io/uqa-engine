@@ -675,8 +675,38 @@ fn analyze_query_plan(
     universe: &mut SourceLineage,
     required: &mut BTreeSet<BaseColumn>,
 ) -> Result<(), SQLError> {
+    let mut root_ctes = ctes.reborrow();
+    root_ctes.resolution.lookup_mode = if plan.relations_bound {
+        crate::catalog::resolution::RelationLookupMode::Bound
+    } else {
+        crate::catalog::resolution::RelationLookupMode::Dynamic
+    };
+    if let Some(subject) = &plan.relation_privilege_subject {
+        root_ctes.relation_privilege_subject = Some(subject.clone());
+        let mut owned_universe = SourceLineage::default();
+        let mut owned_required = BTreeSet::new();
+        analyze_query_plan_in_scope(
+            plan,
+            &root_ctes,
+            outer_scopes,
+            &mut owned_universe,
+            &mut owned_required,
+        )?;
+        return ensure_required_select(&owned_universe, &owned_required, &root_ctes);
+    }
+    analyze_query_plan_in_scope(plan, &root_ctes, outer_scopes, universe, required)
+}
+
+fn analyze_query_plan_in_scope(
+    plan: &QueryPlan,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
+    outer_scopes: &[&SourceLineage],
+    universe: &mut SourceLineage,
+    required: &mut BTreeSet<BaseColumn>,
+) -> Result<(), SQLError> {
     let reachable = crate::semantics::reachable_plan_cte_names(plan);
-    let mut preceding_ctes = ctes.reborrow();
+    let mut root_ctes = ctes.reborrow();
+    let mut preceding_ctes = root_ctes.reborrow();
     for cte in &plan.ctes {
         if reachable.contains(&cte.name) {
             let mut definition_ctes = preceding_ctes.reborrow();
@@ -691,7 +721,6 @@ fn analyze_query_plan(
         }
         preceding_ctes.insert_deferred_ref(cte);
     }
-    let mut root_ctes = ctes.reborrow();
     for cte in &plan.ctes {
         root_ctes.insert_deferred_ref(cte);
     }
@@ -748,6 +777,16 @@ fn analyze_query_plan(
             Ok(())
         }
     }
+}
+
+pub fn ensure_select_privileges_for_query(
+    query: &QueryPlan,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
+) -> Result<(), SQLError> {
+    let mut universe = SourceLineage::default();
+    let mut required = BTreeSet::new();
+    analyze_query_plan(query, ctes, &[], &mut universe, &mut required)?;
+    ensure_required_select(&universe, &required, ctes)
 }
 
 pub fn ensure_select_privileges_for_query_block(

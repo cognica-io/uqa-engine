@@ -28,6 +28,10 @@ pub(super) struct ArrayLiteralParser<'a, 'control> {
 }
 
 impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
+    pub(super) fn rank(&self) -> usize {
+        self.rank
+    }
+
     pub(super) fn new(source: &'a str, control: ProductionControl<'control>) -> Self {
         Self {
             control,

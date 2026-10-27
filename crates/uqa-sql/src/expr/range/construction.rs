@@ -13,6 +13,46 @@ use uqa_core::memory::{MemoryReservation, Produced, ProductionVec};
 
 mod ordering;
 
+/// A host constructor supplies already converted endpoints. An absent bound is unbounded; an empty range invokes neither endpoint input nor canonical support.
+pub enum RangeBoundsInput {
+    Empty,
+    Bounds {
+        lower: Produced<Option<Value>>,
+        upper: Produced<Option<Value>>,
+        lower_inclusive: bool,
+        upper_inclusive: bool,
+    },
+}
+
+impl RangeBoundsInput {
+    pub fn construct_with_operations<O: RangeConstruction + ?Sized>(
+        self,
+        operations: &O,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<CanonicalRange<O::Identity>>> {
+        control.check()?;
+        match self {
+            Self::Empty => Ok(control.finish(
+                CanonicalRange::empty(operations.identity()),
+                control.empty_reservation(),
+            )?),
+            Self::Bounds {
+                lower,
+                upper,
+                lower_inclusive,
+                upper_inclusive,
+            } => range_from_bounds_with_operations(
+                lower,
+                upper,
+                lower_inclusive,
+                upper_inclusive,
+                operations,
+                control,
+            ),
+        }
+    }
+}
+
 /// Operations selected by the range definition, independently of its endpoint layout. Invocation state and effects belong to the caller; observation never uses this interface.
 pub trait RangeConstruction {
     type Identity: Copy + Eq;

@@ -19,6 +19,9 @@ pub fn analyze_prepared_command_schema(
     params: &[SQLParam],
     ctes: &super::BindingContext,
 ) -> Result<Option<RowSchema>, SQLError> {
+    if let CommandPlan::Explain { options, .. } = command {
+        return options.result_schema().map(Some);
+    }
     if command.mutation_target().is_none() {
         return Ok(None);
     }

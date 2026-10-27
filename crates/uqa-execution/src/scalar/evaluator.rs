@@ -13,7 +13,7 @@ use uqa_core::{
 };
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{truthy, IntegerWidth};
-use uqa_sql::{SQLError, SQLParam};
+use uqa_sql::{schema::ScalarTypeSchema, ColumnType, SQLError, SQLParam};
 
 use super::call_arguments::eval_call_arguments_with_control;
 use super::context::ScalarEvalContext;
@@ -47,6 +47,37 @@ pub(super) fn eval_scalar_inner(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
+    let value = evaluate_expression(expression, context, control)?;
+    // Capture catalog-bearing leaves and callback results before a later operand can change their layout. Constructors already retain their children as they are produced.
+    if matches!(
+        expression,
+        ScalarExpr::Literal(_)
+            | ScalarExpr::TypedLiteral { .. }
+            | ScalarExpr::Column(_)
+            | ScalarExpr::Position(_)
+            | ScalarExpr::InternalColumn(_)
+            | ScalarExpr::QualifiedColumn { .. }
+            | ScalarExpr::QualifiedStar(_)
+            | ScalarExpr::Param(_)
+            | ScalarExpr::Func { .. }
+            | ScalarExpr::ScalarSubquery(_)
+    ) {
+        if let Some(engine) = context.function_hook() {
+            return uqa_sql::expr::composites::retain_value_with_control(
+                value,
+                engine.composite_types(),
+                control,
+            );
+        }
+    }
+    Ok(value)
+}
+
+fn evaluate_expression(
+    expression: &ScalarExpr,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     match expression {
         ScalarExpr::RetainedLiteral(literal) => {
             super::retained::evaluate(literal, context, control)
@@ -154,14 +185,14 @@ fn evaluate_qualified_whole_row(
         let row = context
             .row_lookup()
             .ok_or_else(|| SQLError::Internal("whole-row reference without row context".into()))?;
-        return materialize_qualified_whole_row(schema, row, qualifier);
+        return materialize_qualified_whole_row(schema, row, qualifier, context.function_hook());
     }
     if let Some((schema, row)) = context
         .physical_outer_row()
         .filter(|(schema, _)| schema.has_qualifier(qualifier))
     {
         let view = schema.view(row);
-        return materialize_qualified_whole_row(schema, &view, qualifier);
+        return materialize_qualified_whole_row(schema, &view, qualifier, context.function_hook());
     }
     Err(SQLError::UnknownTable(qualifier.to_string()))
 }
@@ -170,6 +201,7 @@ fn materialize_qualified_whole_row(
     schema: &crate::RowSchema,
     row: &dyn uqa_sql::expr::RowLookup,
     qualifier: &str,
+    engine: Option<&dyn uqa_sql::expr::EngineHook>,
 ) -> Result<Value, SQLError> {
     if let Some(marker) = schema.whole_row_presence(qualifier) {
         match row.internal_column(marker) {
@@ -178,11 +210,11 @@ fn materialize_qualified_whole_row(
             _ => {
                 return Err(SQLError::Internal(format!(
                     "whole-row presence for {qualifier} is unavailable or invalid"
-                )))
+                )));
             }
         }
     }
-    schema
+    let fields = schema
         .qualified_star_position_layout(qualifier)
         .into_iter()
         .filter(|(column, logical, _, _)| {
@@ -218,8 +250,30 @@ fn materialize_qualified_whole_row(
                 })?;
             Ok((column, value))
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|fields| Value::Record(fields.into()))
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    if let (Some(ColumnType::Composite(reference)), Some(engine)) =
+        (schema.whole_row_type(qualifier), engine)
+    {
+        let catalog = engine.composite_types();
+        let descriptor = uqa_sql::expr::composites::descriptor(catalog, reference.oid)?;
+        if descriptor.attributes.len() != fields.len() {
+            return Err(SQLError::Internal(
+                "whole-row layout does not match its declared composite".into(),
+            ));
+        }
+        // Relation aliases name lookup slots; the tuple retains its catalog's attribute names and physical layout.
+        let control = ProductionControl::uncontrolled();
+        let mut fields = fields.into_iter();
+        return uqa_sql::expr::composites::constructor::construct_current_with_control(
+            &descriptor,
+            catalog,
+            &control,
+            |_| Ok(control.finish(fields.next().expect("validated whole-row width").1, None)?),
+        )?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary whole-row retention".into()));
+    }
+    Ok(Value::Record(fields.into()))
 }
 
 fn eval_parameter(

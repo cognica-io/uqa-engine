@@ -21,8 +21,10 @@ mod call;
 mod cast_compatibility;
 mod checksum;
 mod common;
+pub(crate) use common::{function_arguments_have_runtime_types, runtime_input};
 pub(crate) mod concatenation;
 pub(crate) use common::literal_input_type_with_control;
+pub use common::runtime_value_type_with_control;
 pub(crate) use common::select_common_input_type_in_with_control;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
@@ -70,7 +72,8 @@ mod routine_signature;
 mod scalar_input;
 mod stored_constants;
 pub use scalar_input::{
-    scalar_array_element_oid_with_control, scalar_cast_source_type_name_with_control,
+    scalar_array_element_oid_with_control, scalar_array_element_type_with_control,
+    scalar_array_input_type_with_control, scalar_cast_source_type_name_with_control,
     scalar_integer_operation_width, scalar_integer_operation_width_with_control,
     scalar_operand_type_name, scalar_operand_type_name_with_control,
     scalar_operand_type_with_engine_and_control, scalar_record_field_type_with_control,

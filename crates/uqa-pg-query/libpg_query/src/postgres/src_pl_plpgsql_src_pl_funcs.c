@@ -610,12 +610,14 @@ plpgsql_statement_tree_walker_impl(PLpgSQL_stmt *stmt,
  * Within the recursion, local_dnos is a Bitmapset of dnos of variables
  * known to be declared within the current exception level.
  **********************************************************************/
-static void mark_stmt(PLpgSQL_stmt *stmt, Bitmapset *local_dnos);
-static void mark_expr(PLpgSQL_expr *expr, Bitmapset *local_dnos);
+static void mark_stmt(PLpgSQL_stmt *stmt, void *context);
+static void mark_expr(PLpgSQL_expr *expr, void *context);
 
 static void
-mark_stmt(PLpgSQL_stmt *stmt, Bitmapset *local_dnos)
+mark_stmt(PLpgSQL_stmt *stmt, void *context)
 {
+	Bitmapset *local_dnos = context;
+
 	if (stmt == NULL)
 		return;
 	if (stmt->cmd_type == PLPGSQL_STMT_BLOCK)
@@ -653,8 +655,10 @@ mark_stmt(PLpgSQL_stmt *stmt, Bitmapset *local_dnos)
 }
 
 static void
-mark_expr(PLpgSQL_expr *expr, Bitmapset *local_dnos)
+mark_expr(PLpgSQL_expr *expr, void *context)
 {
+	Bitmapset *local_dnos = context;
+
 	/*
 	 * If this expression has an assignment target, check whether the target
 	 * is local, and mark the expression accordingly.

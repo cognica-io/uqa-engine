@@ -54,6 +54,116 @@ impl RoutineTypeCatalog for Catalog {
     fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
         Ok(ty.sql_name())
     }
+
+    fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
+        Some(self)
+    }
+}
+
+impl uqa_sql::expr::composites::CompositeTypeCatalog for Catalog {
+    fn composite_type(
+        &self,
+        oid: u32,
+    ) -> Result<Option<std::sync::Arc<uqa_sql::expr::composites::CompositeTypeDescriptor>>, SQLError>
+    {
+        use uqa_sql::expr::composites::{CompositeAttribute, CompositeTypeDescriptor};
+        Ok((oid == 20_001).then(|| {
+            std::sync::Arc::new(CompositeTypeDescriptor {
+                type_oid: oid,
+                relation_oid: 20_002,
+                dropped: Vec::new(),
+                attributes: [("a", ColumnType::Integer), ("b", ColumnType::Text)]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (name, ty))| CompositeAttribute {
+                        name: name.into(),
+                        ty,
+                        collation_oid: None,
+                        number: index as i16 + 1,
+                    })
+                    .collect(),
+            })
+        }))
+    }
+}
+
+#[test]
+fn physical_composite_constant_fields_fold_with_their_selected_type() {
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let fields = vec![
+        ("a".into(), Value::Int(7)),
+        ("b".into(), Value::Str("tail".into())),
+    ];
+    let value = Value::Record(uqa_core::RecordValue::from_parts(
+        fields.clone(),
+        Some(20_001),
+    ));
+    let value = uqa_sql::expr::composites::retain_value_with_control(
+        control.copy_value(&value).unwrap(),
+        Some(&Catalog),
+        &control,
+    )
+    .unwrap()
+    .into_uncontrolled()
+    .unwrap();
+    let ty = ColumnType::Composite(uqa_sql::ast::CompositeTypeReference {
+        schema: "public".into(),
+        name: "pair".into(),
+        oid: 20_001,
+        relation_oid: 20_002,
+        array_oid: 20_003,
+    });
+    let literal = ScalarExpr::TypedLiteral {
+        value,
+        ty: ty.catalog_name(),
+        bound_type: Some(ty),
+        parameter_index: None,
+        collation_oid: None,
+        composite_source: None,
+    };
+    for ((name, expected), (number, result_type)) in fields
+        .into_iter()
+        .zip([(1, ColumnType::Integer), (2, ColumnType::Text)])
+    {
+        let mut call = bound_call(
+            "field selection",
+            vec![literal.clone(), ScalarExpr::Literal(Value::Str(name))],
+        );
+        let ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } = &mut call
+        else {
+            unreachable!()
+        };
+        binding.dispatch = Some(uqa_sql::ast::FunctionDispatch::FieldSelect);
+        binding.set_composite_field(uqa_sql::ast::CompositeFieldBinding {
+            type_oid: 20_001,
+            number,
+            result_type: result_type.clone(),
+            collation_oid: None,
+            dropped: false,
+            changed_type: None,
+        });
+        let folded = fold_authorized_literal(
+            call,
+            |_| panic!("selected physical constant"),
+            None,
+            Some(&Catalog),
+            None,
+        )
+        .unwrap();
+        let ScalarExpr::TypedLiteral {
+            value: Value::Datum(datum),
+            bound_type,
+            ..
+        } = folded
+        else {
+            panic!("typed physical field")
+        };
+        assert_eq!(bound_type, Some(result_type));
+        assert_eq!(uqa_sql::expr::datums::read(&datum).unwrap(), expected);
+    }
 }
 
 impl FunctionTypeResolver for Catalog {

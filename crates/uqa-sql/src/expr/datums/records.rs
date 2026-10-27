@@ -13,28 +13,108 @@ use crate::catalog::type_metadata::{pg_type_align, pg_type_len, pg_type_oid};
 use crate::expr::SQLValueCatalog;
 use crate::ColumnType;
 
+pub(super) fn null_test(
+    bytes: &[u8],
+    mut descriptor: std::sync::Arc<crate::expr::composites::CompositeTypeDescriptor>,
+    catalog: &dyn SQLValueCatalog,
+    negated: bool,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let type_oid =
+        word(bytes.get(4..).unwrap_or_default()).ok_or_else(|| corrupt("invalid record header"))?;
+    if type_oid != descriptor.type_oid {
+        descriptor = catalog
+            .value_composite_type(type_oid)?
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("type with OID {type_oid} does not exist"),
+            })?;
+    }
+    let layout = RecordLayout::read(bytes)?;
+    for attribute in &descriptor.attributes {
+        control.check()?;
+        let number = usize::try_from(attribute.number)
+            .ok()
+            .filter(|number| *number != 0)
+            .ok_or_else(|| corrupt("invalid record attribute number"))?;
+        let is_null = number > layout.count
+            || layout
+                .bitmap
+                .is_some_and(|bitmap| bitmap[(number - 1) / 8] & (1 << ((number - 1) % 8)) == 0);
+        if is_null == negated {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 pub(super) fn read(
     bytes: &[u8],
     catalog: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    read_with_lookup(bytes, None, control, |type_oid| {
+        catalog
+            .map(|catalog| catalog.value_composite_type(type_oid))
+            .transpose()
+            .map(Option::flatten)
+    })
+}
+
+pub(super) fn read_with_lookup(
+    bytes: &[u8],
+    field: Option<&str>,
+    control: &ProductionControl<'_>,
+    lookup: impl FnOnce(
+        u32,
+    ) -> Result<
+        Option<std::sync::Arc<crate::expr::composites::CompositeTypeDescriptor>>,
+        SQLError,
+    >,
+) -> Result<Produced<Value>, SQLError> {
     control.check()?;
     let type_oid =
         word(bytes.get(4..).unwrap_or_default()).ok_or_else(|| corrupt("invalid record header"))?;
-    let descriptor = catalog
-        .map(|catalog| catalog.value_composite_type(type_oid))
-        .transpose()?
-        .flatten()
-        .ok_or_else(|| SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("type with OID {type_oid} does not exist"),
-        })?;
+    let descriptor = lookup(type_oid)?.ok_or_else(|| SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("type with OID {type_oid} does not exist"),
+    })?;
+    let layout = RecordLayout::read(bytes)?;
+    let selected = if let Some(field) = field {
+        let Some((_, attribute)) = descriptor.attribute(field) else {
+            return Ok(control.finish(Value::Null, control.empty_reservation())?);
+        };
+        let number = usize::try_from(attribute.number)
+            .ok()
+            .filter(|number| *number != 0)
+            .ok_or_else(|| corrupt("invalid record attribute number"))?;
+        if number > layout.count
+            || layout
+                .bitmap
+                .is_some_and(|bitmap| bitmap[(number - 1) / 8] & (1 << ((number - 1) % 8)) == 0)
+        {
+            return Ok(control.finish(Value::Null, control.empty_reservation())?);
+        }
+        Some(number)
+    } else {
+        None
+    };
+    deform(bytes, type_oid, &descriptor, layout, selected, control)
+}
+
+fn deform(
+    bytes: &[u8],
+    type_oid: u32,
+    descriptor: &crate::expr::composites::CompositeTypeDescriptor,
+    layout: RecordLayout<'_>,
+    selected: Option<usize>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     let RecordLayout {
         count,
         mut offset,
         bitmap,
-    } = RecordLayout::read(bytes)?;
-
+    } = layout;
     let mut backing = ProductionVec::new(*control);
     backing.reserve(
         bytes
@@ -52,9 +132,11 @@ pub(super) fn read(
     }
     let backing = DatumValue::with_control(type_oid, 0, backing.finish()?, control)?;
     let mut fields = ProductionVec::new(*control);
-    fields.reserve(descriptor.attributes.len())?;
+    if selected.is_none() {
+        fields.reserve(descriptor.attributes.len())?;
+    }
     let mut live = descriptor.attributes.iter().peekable();
-    for number in 1..=count {
+    for number in 1..=selected.unwrap_or(count) {
         control.check()?;
         let attribute = live
             .peek()
@@ -81,7 +163,9 @@ pub(super) fn read(
             if length != -1 || backing.bytes().get(offset) == Some(&0) {
                 offset = super::inline::align(offset, alignment)?;
             }
-            if let Some(attribute) = attribute {
+            if let Some(attribute) =
+                attribute.filter(|_| selected.is_none_or(|selected| selected == number))
+            {
                 let mut ty = &attribute.ty;
                 while let ColumnType::Domain { base, .. } = ty {
                     ty = base;
@@ -90,6 +174,9 @@ pub(super) fn read(
                     pg_type_oid(ty) as u32,
                     u32::try_from(offset).map_err(|_| corrupt("invalid record length"))?,
                 )))?;
+            }
+            if selected == Some(number) {
+                return Ok(value);
             }
             let length = if length == -1 {
                 stored_length(backing.bytes().get(offset..).unwrap_or_default())?
@@ -101,7 +188,9 @@ pub(super) fn read(
                 .ok_or_else(|| corrupt("invalid record length"))?;
         }
         if let Some(attribute) = attribute {
-            push_field(&mut fields, &attribute.name, value, control)?;
+            if selected.is_none() {
+                push_field(&mut fields, &attribute.name, value, control)?;
+            }
             live.next();
         }
     }

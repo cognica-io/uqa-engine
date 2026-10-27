@@ -35,13 +35,27 @@ fn tagged_temporal_value(tag: &str, map: &BTreeMap<String, Value>) -> Option<Tem
         }),
         "time_tz" if map.len() == 3 => Some(TemporalValue::TimeTz {
             micros: int_field(map, "micros")?,
-            offset_minutes: int_field(map, "offset_minutes")?,
+            offset_seconds: int_field::<i32>(map, "offset_minutes")?.checked_mul(60)?,
+        }),
+        "time_tz_seconds" if map.len() == 3 => Some(TemporalValue::TimeTz {
+            micros: int_field(map, "micros")?,
+            offset_seconds: int_field(map, "offset_seconds")?,
         }),
         "timestamp" if map.len() == 2 => Some(TemporalValue::Timestamp {
-            micros: int_field(map, "micros")?,
+            postgres_micros: crate::types::temporal::serialization::legacy_timestamp(int_field(
+                map, "micros",
+            )?)?,
         }),
         "timestamp_tz" if map.len() == 2 => Some(TemporalValue::TimestampTz {
-            micros: int_field(map, "micros")?,
+            postgres_micros: crate::types::temporal::serialization::legacy_timestamp(int_field(
+                map, "micros",
+            )?)?,
+        }),
+        "postgres_timestamp" if map.len() == 2 => Some(TemporalValue::Timestamp {
+            postgres_micros: int_field(map, "postgres_micros")?,
+        }),
+        "postgres_timestamp_tz" if map.len() == 2 => Some(TemporalValue::TimestampTz {
+            postgres_micros: int_field(map, "postgres_micros")?,
         }),
         "interval" if map.len() == 4 => Some(TemporalValue::Interval {
             months: int_field(map, "months")?,
@@ -117,7 +131,7 @@ fn convert(
                 }
             }
         }
-        "datum" if map.len() == 4 => {
+        "datum" if map.len() == 4 || (map.len() == 5 && map.contains_key("record_fields")) => {
             return decoded_datum(&map, workspace).map(Value::Datum);
         }
         "array" if map.len() == 3 || (map.len() == 4 && map.contains_key("element_type_oid")) => {
@@ -168,7 +182,51 @@ fn decoded_datum(
     };
     let bytes = decode_hex_bytes(hex, workspace)?.ok_or_else(malformed)?;
     workspace.reserve(size_of::<Vec<u8>>() + 2 * size_of::<usize>())?;
-    Ok(crate::DatumValue::new(type_oid, offset, bytes))
+    let datum = crate::DatumValue::new(type_oid, offset, bytes);
+    let Some(fields) = map.get("record_fields") else {
+        return Ok(datum);
+    };
+    let Value::List(fields) = fields else {
+        return Err(malformed());
+    };
+    let mut decoded = workspace.vector(fields.len())?;
+    for field in fields {
+        workspace.check()?;
+        let Value::Map(field) = field else {
+            return Err(malformed());
+        };
+        let Some(Value::Bool(dropped)) = field.get("dropped") else {
+            return Err(malformed());
+        };
+        if field.len() != 7 {
+            return Err(malformed());
+        }
+        let type_oid = int_field(field, "type_oid").ok_or_else(malformed)?;
+        let Some(Value::Str(name)) = field.get("name") else {
+            return Err(malformed());
+        };
+        workspace.reserve(name.len())?;
+        let name = name.clone();
+        let type_modifier = int_field(field, "type_modifier").ok_or_else(malformed)?;
+        let collation_oid = match field.get("collation_oid") {
+            Some(Value::Null) => None,
+            Some(_) => Some(int_field(field, "collation_oid").ok_or_else(malformed)?),
+            None => return Err(malformed()),
+        };
+        let length = int_field(field, "length").ok_or_else(malformed)?;
+        let alignment = int_field(field, "alignment").ok_or_else(malformed)?;
+        decoded.push(crate::RecordDatumField {
+            name,
+            type_oid,
+            type_modifier,
+            collation_oid,
+            length,
+            alignment,
+            dropped: *dropped,
+        });
+    }
+    workspace.reserve(size_of::<Vec<crate::RecordDatumField>>() + 2 * size_of::<usize>())?;
+    Ok(datum.with_record_fields(decoded))
 }
 
 fn enum_carrier_fields(map: &BTreeMap<String, Value>) -> bool {

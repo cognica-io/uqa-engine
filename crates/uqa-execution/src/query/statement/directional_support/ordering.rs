@@ -30,6 +30,7 @@ pub(super) fn has_effective_ordering<S: Clone>(
     block: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
     let output = output_expressions(routines, block, params, ctes)?;
     for order in &block.order_by {
@@ -40,6 +41,7 @@ pub(super) fn has_effective_ordering<S: Clone>(
             block.from.as_ref(),
             params,
             ctes,
+            control,
         )? {
             return Ok(true);
         }

@@ -58,6 +58,15 @@ impl CatalogSession for Engine {
     fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
         self.session_execution_view().parameter_settings()
     }
+    fn explain_settings(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        uqa_core::memory::Produced<uqa_sql::semantics::parameters::explain::ExplainSettings>,
+        SQLError,
+    > {
+        self.session_execution_view().explain_settings(control)
+    }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         self.session_execution_view().prepared_statements()
     }
@@ -81,6 +90,15 @@ impl CatalogSession for SessionExecutionView<'_> {
     }
     fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
         SessionExecutionView::parameter_settings(self)
+    }
+    fn explain_settings(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        uqa_core::memory::Produced<uqa_sql::semantics::parameters::explain::ExplainSettings>,
+        SQLError,
+    > {
+        SessionExecutionView::explain_settings(self, control)
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         SessionExecutionView::prepared_statements(self)

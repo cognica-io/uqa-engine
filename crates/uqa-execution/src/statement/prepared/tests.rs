@@ -93,7 +93,9 @@ fn register(registry: &Registry) -> Result<(), SQLError> {
             analysis: PreparedDefinitionContext {
                 types: &NoRoutines,
                 routines: &NoRoutines,
+                procedures: &NoRoutines,
                 scopes: registry,
+                session: &NoRoutines,
                 aliases: &NoRoutines,
             },
             aggregates: registry,

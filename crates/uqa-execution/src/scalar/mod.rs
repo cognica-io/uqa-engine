@@ -39,3 +39,12 @@ mod tests;
 pub fn eval_constant_scalar(expression: &ScalarExpr) -> Result<uqa_core::Value, uqa_sql::SQLError> {
     eval_scalar(expression, &ScalarEvalContext::new(None, &[]))
 }
+
+/// Evaluate a planning constant with bound parameters and the statement's original allowance. This context has no row, query runner or runtime callbacks.
+pub fn eval_constant_scalar_with_control(
+    expression: &ScalarExpr,
+    params: &[uqa_sql::SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<uqa_core::Value>, uqa_sql::SQLError> {
+    evaluator::eval_scalar_inner(expression, &ScalarEvalContext::new(None, params), control)
+}

@@ -751,7 +751,7 @@ impl<'a> QueryBuilder<'a> {
         let result = self.engine.sql(&format!("EXPLAIN {stmt}"), &[])?;
         let mut out = String::new();
         for row in &result.rows {
-            if let Some(Value::Str(line)) = row.get("plan") {
+            if let Some(Value::Str(line)) = row.get("QUERY PLAN") {
                 if !out.is_empty() {
                     out.push('\n');
                 }

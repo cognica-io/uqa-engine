@@ -8,8 +8,30 @@ use super::order_statement_ctes;
 use crate::plan::{CommandPlan, CtePlan, UnifiedPlan};
 use crate::semantics::{primary_command_cte_references, primary_query_cte_references};
 
+mod control;
+
 fn names(ctes: &[&CtePlan]) -> Vec<String> {
     ctes.iter().map(|cte| cte.name.clone()).collect()
+}
+
+#[test]
+fn command_reachability_preserves_effects_and_resolves_lexical_dependencies() {
+    for (sql, expected) in [
+        ("WITH unused AS (SELECT random()) INSERT INTO target VALUES(7)", vec![]),
+        ("WITH a AS (VALUES(1)),b AS (SELECT * FROM a) INSERT INTO target SELECT * FROM b", vec!["a", "b"]),
+        ("WITH RECURSIVE a AS (SELECT * FROM b),b AS (VALUES(1)) INSERT INTO target SELECT * FROM a", vec!["a", "b"]),
+        ("WITH a AS (VALUES(1)),b AS (INSERT INTO target SELECT * FROM a) UPDATE target SET n=7", vec!["a", "b"]),
+        ("WITH a AS (VALUES(1)) DELETE FROM target USING a WHERE target.n=a.column1", vec!["a"]),
+        ("WITH a AS (VALUES(1)) MERGE INTO target USING a ON true WHEN MATCHED THEN DELETE", vec!["a"]),
+        ("WITH a AS (VALUES(1)) INSERT INTO target WITH a AS (VALUES(2)) SELECT * FROM a", vec![]),
+        ("WITH a AS (VALUES(1)) INSERT INTO target WITH a AS (SELECT * FROM a) SELECT * FROM a", vec!["a"]),
+        ("WITH a AS (VALUES(1)),b AS (INSERT INTO target WITH a AS (VALUES(2)) SELECT * FROM a) INSERT INTO target VALUES(3)", vec!["b"]),
+        ("WITH \"Quoted Name\" AS (VALUES(1)) INSERT INTO target SELECT * FROM \"Quoted Name\"", vec!["Quoted Name"]),
+    ] {
+        let UnifiedPlan::Command(command) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0)) else { panic!("command"); };
+        let actual = crate::semantics::reachable_command_cte_names(&command);
+        assert_eq!(actual.iter().map(String::as_str).collect::<Vec<_>>(), expected, "{sql}");
+    }
 }
 
 #[test]
@@ -40,7 +62,7 @@ fn statement_order(sql: &str) -> (Vec<String>, Vec<String>) {
             let CommandPlan::Insert(plan) = command.as_ref() else {
                 panic!("expected an INSERT statement: {sql}");
             };
-            let references = primary_command_cte_references(&plan.ctes, &plan.query_inputs(), None);
+            let references = primary_command_cte_references(&plan.ctes, plan.query_inputs(), None);
             let order = order_statement_ctes(&plan.ctes, plan.ctes.iter().collect(), &references);
             (names(&order.primary), names(&order.postponed))
         }

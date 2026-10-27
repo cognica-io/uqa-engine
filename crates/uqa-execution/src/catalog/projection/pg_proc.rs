@@ -275,11 +275,11 @@ fn build_pg_proc_rows(
         };
         let input_params = def.identity_params();
         let defaults = input_params
-            .iter()
+            .clone()
             .filter(|parameter| parameter.default.is_some())
             .count();
         let argument_defaults = input_params
-            .iter()
+            .clone()
             .filter(|_| with_defaults)
             .filter_map(|parameter| {
                 parameter
@@ -307,7 +307,7 @@ fn build_pg_proc_rows(
             str_value(uqa_sql::catalog::node_tree::Field::List(argument_defaults).to_string())
         };
         let argument_type_oids = input_params
-            .iter()
+            .clone()
             .map(|parameter| int_value(catalog_routine_type_oid(catalog, &parameter.type_name)))
             .collect::<Vec<_>>();
         let has_non_input_mode = def
@@ -425,7 +425,10 @@ fn build_pg_proc_rows(
             ),
             (
                 "pronargs",
-                int_value(catalog_usize(input_params.len(), "pg_proc argument count")?),
+                int_value(catalog_usize(
+                    def.identity_arity(),
+                    "pg_proc argument count",
+                )?),
             ),
             (
                 "pronargdefaults",

@@ -26,10 +26,7 @@ fn cte_plan_has_row_locks(body: &crate::plan::CtePlanBody) -> bool {
                 .ctes()
                 .iter()
                 .any(|cte| cte_plan_has_row_locks(&cte.body))
-                || command
-                    .query_inputs()
-                    .into_iter()
-                    .any(query_plan_has_row_locks)
+                || command.query_inputs().any(query_plan_has_row_locks)
                 || command
                     .source_input()
                     .is_some_and(source_plan_has_row_locks)

@@ -233,7 +233,7 @@ fn is_constant(
             && order_by.is_empty()
             && !uqa_sql::semantics::is_builtin_aggregate(expression)
             && !uqa_sql::semantics::sets::validation::builtin_returns_set(
-                &uqa_sql::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
+                &uqa_sql::semantics::builtin_function_dispatch_name(name),
             )
             && uqa_sql::semantics::volatility::builtin_function_volatility(
                 name,
@@ -489,7 +489,7 @@ fn composite_constant_field(
         return None;
     };
     let resolved;
-    let field = if let Some(field) = binding.composite_field.as_deref() {
+    let field = if let Some(field) = binding.composite_field() {
         field
     } else {
         let descriptor =
@@ -511,28 +511,9 @@ fn composite_constant_field(
     if reference.oid != field.type_oid {
         return None;
     }
-    let value = match value {
-        Value::Null => Value::Null,
-        Value::Record(fields) => {
-            if fields.type_oid().is_some_and(|oid| oid != reference.oid) {
-                return None;
-            }
-            if field.dropped {
-                Value::Null
-            } else {
-                if let Err(error) = uqa_sql::expr::composites::validate_field_result(field) {
-                    return Some(Err(error));
-                }
-                match uqa_sql::expr::datums::copy_constant_field(
-                    fields.iter().find(|(key, _)| key.as_str() == name)?.1,
-                    &field.result_type,
-                ) {
-                    Ok(value) => value,
-                    Err(error) => return Some(Err(error)),
-                }
-            }
-        }
-        _ => return None,
+    let value = match composites::constant_field(value, name, field, types)? {
+        Ok(value) => value,
+        Err(error) => return Some(Err(error)),
     };
     if composite_source.is_some() {
         // Copying a selected constant can fail during planning. Keep the immutable source afterward so later descriptor changes still recompute its byte position.
@@ -576,7 +557,7 @@ fn strict_null_expression(expression: &ScalarExpr) -> Result<bool, SQLError> {
             uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
                 == Some(true)
                 && !uqa_sql::semantics::sets::validation::builtin_returns_set(
-                    &uqa_sql::semantics::builtin_function_dispatch_name(&name.to_ascii_lowercase()),
+                    &uqa_sql::semantics::builtin_function_dispatch_name(name),
                 )
                 && args.iter().try_fold(false, |found, argument| {
                     Ok::<_, SQLError>(found || null(argument)?)

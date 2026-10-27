@@ -1,0 +1,208 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "capture_command": [
+    "docker",
+    "exec",
+    "-i",
+    "uqa-pg18-projection-reference",
+    "psql",
+    "-U",
+    "postgres",
+    "-XqAt",
+    "-v",
+    "ON_ERROR_STOP=1"
+  ],
+  "collector_sha256": "f387b1ccd6513a993832ebde9d99c2500d1510f3641bcec507892a38c3a00a06",
+  "cases": [
+    {
+      "name": "folded_repeated",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS NOT MATERIALIZED (VALUES (1),(2),(3)) SELECT a.column1 FROM x a CROSS JOIN x b",
+      "rows": 9,
+      "cte_rows": []
+    },
+    {
+      "name": "folded_definition_scope",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS MATERIALIZED (VALUES (1),(2),(3)) SELECT * FROM (WITH a AS NOT MATERIALIZED (SELECT * FROM x), x AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM x CROSS JOIN a) s",
+      "rows": 6,
+      "cte_rows": [
+        {
+          "relation": "x",
+          "rows": 2
+        },
+        {
+          "relation": "x",
+          "rows": 3
+        }
+      ]
+    },
+    {
+      "name": "quoted",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH \"Quoted Name\" AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM \"Quoted Name\"",
+      "rows": 2,
+      "cte_rows": [
+        {
+          "relation": "Quoted Name",
+          "rows": 2
+        }
+      ]
+    },
+    {
+      "name": "escaped_quote",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH \"quoted\"\"name\" AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM \"quoted\"\"name\"",
+      "rows": 2,
+      "cte_rows": [
+        {
+          "relation": "quoted\"name",
+          "rows": 2
+        }
+      ]
+    },
+    {
+      "name": "quoted_dot",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH \"a.b\" AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM \"a.b\"",
+      "rows": 2,
+      "cte_rows": [
+        {
+          "relation": "a.b",
+          "rows": 2
+        }
+      ]
+    },
+    {
+      "name": "recursive_forward",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH RECURSIVE a AS MATERIALIZED (SELECT * FROM b), b AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM a",
+      "rows": 2,
+      "cte_rows": [
+        {
+          "relation": "a",
+          "rows": 2
+        },
+        {
+          "relation": "b",
+          "rows": 2
+        }
+      ]
+    },
+    {
+      "name": "unused",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH unused AS MATERIALIZED (VALUES (1),(2)) SELECT 7",
+      "rows": 1,
+      "cte_rows": []
+    },
+    {
+      "name": "unused_volatile",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH unused AS MATERIALIZED (SELECT random()) SELECT 7",
+      "rows": 1,
+      "cte_rows": []
+    },
+    {
+      "name": "preceding_scope",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS MATERIALIZED (VALUES (1),(2),(3)) SELECT * FROM (WITH a AS MATERIALIZED (SELECT * FROM x), x AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM x CROSS JOIN a) s",
+      "rows": 6,
+      "cte_rows": [
+        {
+          "relation": "a",
+          "rows": 3
+        },
+        {
+          "relation": "x",
+          "rows": 2
+        },
+        {
+          "relation": "x",
+          "rows": 3
+        }
+      ]
+    },
+    {
+      "name": "shadow",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS MATERIALIZED (VALUES (1),(2),(3)) SELECT * FROM (WITH x AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM x) local_x CROSS JOIN x",
+      "rows": 6,
+      "cte_rows": [
+        {
+          "relation": "x",
+          "rows": 2
+        },
+        {
+          "relation": "x",
+          "rows": 3
+        }
+      ]
+    },
+    {
+      "name": "dependency",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH a AS MATERIALIZED (VALUES (1),(2)), b AS MATERIALIZED (SELECT * FROM a) SELECT * FROM b",
+      "rows": 2,
+      "cte_rows": [
+        {
+          "relation": "a",
+          "rows": 2
+        },
+        {
+          "relation": "b",
+          "rows": 2
+        }
+      ]
+    },
+    {
+      "name": "repeated",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS MATERIALIZED (VALUES (1),(2),(3)) SELECT * FROM x a CROSS JOIN x b",
+      "rows": 9,
+      "cte_rows": [
+        {
+          "relation": "x",
+          "rows": 3
+        },
+        {
+          "relation": "x",
+          "rows": 3
+        }
+      ]
+    },
+    {
+      "name": "blocking_repeated",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS MATERIALIZED (SELECT * FROM (VALUES (1),(2),(3)) AS v(n) ORDER BY n) SELECT a.n FROM x a CROSS JOIN x b",
+      "rows": 9,
+      "cte_rows": [
+        {
+          "relation": "x",
+          "rows": 3
+        },
+        {
+          "relation": "x",
+          "rows": 3
+        }
+      ]
+    },
+    {
+      "name": "scalar",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS MATERIALIZED (VALUES (1),(2),(3)) SELECT (SELECT count(*) FROM x)",
+      "rows": 1,
+      "cte_rows": [
+        {
+          "relation": "x",
+          "rows": 3
+        }
+      ]
+    },
+    {
+      "name": "nested_dependency",
+      "sql": "EXPLAIN (FORMAT JSON, SUMMARY FALSE, COSTS TRUE) WITH x AS MATERIALIZED (VALUES (1),(2),(3)), a AS MATERIALIZED (WITH x AS MATERIALIZED (VALUES (1),(2)) SELECT * FROM x) SELECT * FROM a CROSS JOIN x",
+      "rows": 6,
+      "cte_rows": [
+        {
+          "relation": "a",
+          "rows": 2
+        },
+        {
+          "relation": "x",
+          "rows": 2
+        },
+        {
+          "relation": "x",
+          "rows": 3
+        }
+      ]
+    }
+  ]
+}

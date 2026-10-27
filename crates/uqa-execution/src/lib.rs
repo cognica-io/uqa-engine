@@ -72,6 +72,8 @@ pub mod operator_tree;
 pub mod parallel;
 pub mod physical;
 pub mod project_set;
+pub mod row_stream;
+pub use row_stream::{SQLRowSource, SQLRowStream};
 pub mod projected_predicate;
 pub mod projected_row;
 pub mod relational;
@@ -120,10 +122,10 @@ pub use relational::{
     SharedRowPredicate, Sort, SortKey, Window, WindowExecutor, WindowKind,
 };
 pub use scalar::{
-    eval_call_arguments, eval_generated_scalar_with_control, eval_scalar, scalar_call_argument,
-    scalar_call_arguments, validate_scalar_call_arguments, ScalarCallArgument, ScalarEvalContext,
-    ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner, ScalarWindowFrame,
-    ScalarWindowSpec, SubqueryId, SubqueryResult,
+    eval_call_arguments, eval_constant_scalar_with_control, eval_generated_scalar_with_control,
+    eval_scalar, scalar_call_argument, scalar_call_arguments, validate_scalar_call_arguments,
+    ScalarCallArgument, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder,
+    ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec, SubqueryId, SubqueryResult,
 };
 pub use scan::{PhysicalRowIteratorScan, RowIteratorScan, RowSource, TableScan};
 pub use scope_overlay::ScopeOverlay;

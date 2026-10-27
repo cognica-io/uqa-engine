@@ -9,6 +9,11 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "temporary_namespace_oids/lifetime.rs"]
+mod lifetime;
+#[path = "temporary_namespace_oids/types.rs"]
+mod types;
+
 fn int(engine: &Engine, sql: &str) -> i64 {
     let result = engine.sql(sql, &[]).unwrap();
     assert_eq!(result.rows.len(), 1, "{sql}");

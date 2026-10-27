@@ -4,40 +4,51 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! When the WITH items of a statement whose WITH modifies data run, as `PostgreSQL`'s executor runs them.
+//! Schedule mandatory WITH writes under the invoking query's retained allowance.
 
 use super::{install_scheduled_ctes, CteExecutionContext};
 use crate::query::CteScope;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    RelationName,
+};
 use uqa_sql::{
     plan::CtePlan,
     semantics::{
-        cte_strategy::{order_statement_ctes, ScheduledCte},
-        order_cte_plans,
+        cte_strategy::{order_statement_ctes_with_control, ScheduledCte},
+        order_cte_plans_with_control,
     },
     SQLError, SQLParam, ScalarExpr,
 };
 
-/// Materialize `scheduled`, the items of `ctes` that a statement materializes, when the statement's WITH modifies data: the items its primary query reads run now, and the scope keeps the others for [`finish_statement_ctes`], which runs them once the primary query has finished, as `ExecPostprocessPlan` does. `primary_references` names the items the primary query reads. A statement whose WITH only reads materializes every item now.
+/// Materialize the selected WITH items in their native before/after-primary order. The root-reference producer borrows definition names under the same allowance.
 pub fn materialize_statement_ctes<'a, S: Clone>(
     context: CteExecutionContext<'_, S>,
     ctes: &'a [CtePlan],
-    scheduled: Vec<&'a CtePlan>,
-    primary_references: impl FnOnce() -> BTreeSet<String>,
+    scheduled: impl IntoIterator<Item = &'a CtePlan>,
+    primary_references: impl FnOnce(ProductionControl<'_>) -> Result<Produced<Vec<&'a str>>, SQLError>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
     output_filters: &BTreeMap<String, (String, ScalarExpr)>,
 ) -> Result<(), SQLError> {
+    let retained = context.queries.read_control()?;
+    let control = ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.runtime.cancellation,
+    );
+    let mut selected = ProductionVec::new(control);
+    for plan in scheduled {
+        selected.push_copy(ScheduledCte {
+            plan,
+            deferred: false,
+        })?;
+    }
     install_statement_ctes(
         context,
         ctes,
-        scheduled
-            .into_iter()
-            .map(|plan| ScheduledCte {
-                plan,
-                deferred: false,
-            })
-            .collect(),
+        &selected,
         primary_references,
         params,
         scope,
@@ -48,25 +59,40 @@ pub fn materialize_statement_ctes<'a, S: Clone>(
 pub(crate) fn install_statement_ctes<'a, S: Clone>(
     context: CteExecutionContext<'_, S>,
     ctes: &'a [CtePlan],
-    scheduled: Vec<ScheduledCte<'a>>,
-    primary_references: impl FnOnce() -> BTreeSet<String>,
+    scheduled: &[ScheduledCte<'a>],
+    primary_references: impl FnOnce(ProductionControl<'_>) -> Result<Produced<Vec<&'a str>>, SQLError>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
     output_filters: &BTreeMap<String, (String, ScalarExpr)>,
 ) -> Result<(), SQLError> {
     if !scheduled.iter().any(|cte| cte.plan.body.modifies_data()) {
-        return install_scheduled_ctes(context, scheduled, params, scope, output_filters);
+        return install_scheduled_ctes(
+            context,
+            scheduled.iter().copied(),
+            params,
+            scope,
+            output_filters,
+        );
     }
-    let folded = scheduled
-        .iter()
-        .filter(|cte| cte.deferred)
-        .map(|cte| cte.plan.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let order = order_statement_ctes(
-        ctes,
-        order_cte_plans(scheduled.iter().map(|cte| cte.plan).collect())?,
-        &primary_references(),
+    let retained = context.queries.read_control()?;
+    let control = ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.runtime.cancellation,
     );
+    let mut folded = ProductionVec::new(control);
+    for cte in scheduled.iter().filter(|cte| cte.deferred) {
+        folded.push_copy(RelationName::decoded(&cte.plan.name))?;
+    }
+    folded.as_mut_slice().sort_unstable();
+    let ordered = order_cte_plans_with_control(scheduled.iter().map(|cte| cte.plan), control)?;
+    let primary = primary_references(control)?;
+    let order = order_statement_ctes_with_control(
+        ctes,
+        ordered.iter().copied(),
+        primary.iter().copied(),
+        control,
+    )?;
     let commands = match scope.statement_commands() {
         Some(commands) => std::sync::Arc::clone(commands),
         None => {
@@ -75,17 +101,22 @@ pub(crate) fn install_statement_ctes<'a, S: Clone>(
             commands
         }
     };
+    let is_folded = |plan: &CtePlan| {
+        folded
+            .binary_search(&RelationName::decoded(&plan.name))
+            .is_ok()
+    };
     commands.begin_data_modifying_with(
         order
             .postponed
-            .into_iter()
-            .map(|plan| (plan.clone(), folded.contains(plan.name.as_str())))
+            .iter()
+            .map(|plan| ((*plan).clone(), is_folded(plan)))
             .collect(),
     );
     install_scheduled_ctes(
         context,
-        order.primary.into_iter().map(|plan| ScheduledCte {
-            deferred: folded.contains(plan.name.as_str()),
+        order.primary.iter().map(|plan| ScheduledCte {
+            deferred: is_folded(plan),
             plan,
         }),
         params,
@@ -94,26 +125,38 @@ pub(crate) fn install_statement_ctes<'a, S: Clone>(
     )
 }
 
-/// Materialize the WITH items of a data-modifying statement as [`materialize_statement_ctes`] does; `primary_references` names the items the statement's own clauses read.
-pub fn materialize_command_ctes<S: Clone>(
+/// Materialize the reachable definitions of a mutation, including every mandatory writer.
+pub fn materialize_command_ctes<'a, S: Clone>(
     context: CteExecutionContext<'_, S>,
-    ctes: &[CtePlan],
-    primary_references: impl FnOnce() -> BTreeSet<String>,
+    ctes: &'a [CtePlan],
+    primary_references: impl FnOnce(ProductionControl<'_>) -> Result<Produced<Vec<&'a str>>, SQLError>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
 ) -> Result<(), SQLError> {
+    let retained = context.queries.read_control()?;
+    let control = ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.runtime.cancellation,
+    );
+    let primary = primary_references(control)?;
+    let reachable = uqa_sql::semantics::reachable_statement_ctes_with_control(
+        ctes,
+        primary.iter().copied(),
+        control,
+    )?;
     materialize_statement_ctes(
         context,
         ctes,
-        ctes.iter().collect(),
-        primary_references,
+        reachable.iter().copied(),
+        |_| Ok(primary),
         params,
         scope,
         &BTreeMap::new(),
     )
 }
 
-/// Run the items a statement kept for after its primary query, in the order [`materialize_statement_ctes`] kept them.
+/// Run the definitions retained for after the primary query, in their native dependency order.
 pub fn finish_statement_ctes<S: Clone>(
     context: CteExecutionContext<'_, S>,
     params: &[SQLParam],

@@ -52,7 +52,11 @@ pub fn evaluate_with_state(
         ));
     };
     let descriptor = super::descriptor(engine.composite_types(), reference.oid)?;
-    construct_with_state(binding, arguments, &descriptor, control, state, evaluate)
+    let value = construct_with_state(binding, arguments, &descriptor, control, state, evaluate)?;
+    let Value::Record(record) = &*value else {
+        unreachable!("named composite producer");
+    };
+    super::retention::retain_record(record, &descriptor, engine.composite_types(), control)
 }
 
 /// Form a row using a resolved descriptor, after checking all surviving argument types and before evaluating any argument.
@@ -108,6 +112,35 @@ pub fn construct_with_state(
             }
         }
     }
+    produce(descriptor, control, state, |_, attribute| {
+        match binding.attributes.binary_search(&attribute.number) {
+            Ok(index) => evaluate(index),
+            Err(_) => Ok(control.finish(Value::Null, control.empty_reservation())?),
+        }
+    })
+}
+
+/// Construct a newly admitted record from exactly the current live attributes. The caller binds and coerces each positional input; no stored-expression binding is required.
+pub fn construct_current_with_control(
+    descriptor: &super::CompositeTypeDescriptor,
+    catalog: Option<&dyn super::CompositeTypeCatalog>,
+    control: &ProductionControl<'_>,
+    mut evaluate: impl FnMut(usize) -> Result<Produced<Value>, SQLError>,
+) -> Result<Produced<Value>, SQLError> {
+    let value = produce(descriptor, control, None, |index, _| evaluate(index))?;
+    let Value::Record(record) = &*value else {
+        unreachable!("named composite producer")
+    };
+    super::retention::retain_record(record, descriptor, catalog, control)
+}
+
+fn produce(
+    descriptor: &super::CompositeTypeDescriptor,
+    control: &ProductionControl<'_>,
+    state: Option<&CompositeConstructorState>,
+    mut evaluate: impl FnMut(usize, &super::CompositeAttribute) -> Result<Produced<Value>, SQLError>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
     let shared = state.and_then(|state| state.shared(descriptor));
     let mut names = ProductionVec::new(*control);
     let mut values = ProductionVec::new(*control);
@@ -115,11 +148,8 @@ pub fn construct_with_state(
     if shared.is_none() {
         names.reserve(descriptor.attributes.len())?;
     }
-    for attribute in &descriptor.attributes {
-        let value = match binding.attributes.binary_search(&attribute.number) {
-            Ok(index) => evaluate(index)?,
-            Err(_) => control.finish(Value::Null, control.empty_reservation())?,
-        };
+    for (index, attribute) in descriptor.attributes.iter().enumerate() {
+        let value = evaluate(index, attribute)?;
         if shared.is_none() {
             names.push_produced(control.copy_text(&attribute.name)?)?;
         }
@@ -255,17 +285,30 @@ mod tests {
         })
         .unwrap();
         assert_eq!(evaluated, vec![0, 2]);
-        assert_eq!(
-            *value,
-            Value::Record(
-                vec![
-                    ("a1".into(), Value::Int(0)),
-                    ("a3".into(), Value::Int(2)),
-                    ("a4".into(), Value::Null)
-                ]
-                .into()
+        let Value::Datum(datum) = &*value else {
+            panic!("retained constructor output");
+        };
+        assert_eq!(datum.type_oid(), 20_001);
+        for (name, expected) in [
+            ("a1", Value::Int(0)),
+            ("a3", Value::Int(2)),
+            ("a4", Value::Null),
+        ] {
+            let field = crate::expr::datums::read_composite_field_with_control(
+                datum,
+                name,
+                Some(&Catalog),
+                &control,
             )
-        );
+            .unwrap();
+            let decoded = match &*field {
+                Value::Datum(datum) => {
+                    crate::expr::datums::read_with_control(datum, &control).unwrap()
+                }
+                value => control.copy_value(value).unwrap(),
+            };
+            assert_eq!(*decoded, expected);
+        }
         assert!(budget.used() > 0);
         drop(value);
         assert_eq!(budget.used(), 0);

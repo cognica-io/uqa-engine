@@ -24,13 +24,13 @@ use crate::{
     SharedExpressionEvaluator,
 };
 
-pub(crate) use encoding::canonical_row_lock_keys_with_catalog;
 pub use encoding::{
     btree_input_binary_key_with_catalog_and_control, canonical_row_key, canonical_row_key_budgeted,
     canonical_row_key_with_catalog_and_control, canonical_typed_row_key_with_catalog_and_control,
     hash_canonical_row, hash_canonical_row_with_enum_catalog,
     record_image_key_with_catalog_and_control, try_pack_compact_text_pair,
 };
+pub(crate) use encoding::{canonical_constraint_key, canonical_row_lock_keys_with_catalog};
 pub(crate) use encoding::{encode_key, EncodedKey};
 pub(crate) use encoding::{
     encode_sql_key_with_types_and_catalog, encode_typed_non_null_key, hash_typed_row_with_catalog,

@@ -13,6 +13,7 @@ use super::ordering::{
     output_selection_positions, FinalProjectionExecution,
 };
 use super::{build_set_projection, RelationalContext, RelationalResjunk};
+use crate::physical::construction::OperatorBuild;
 use crate::query::projection::{physical_projections, physical_work_mem_bytes};
 use crate::query::CteScope;
 use crate::window::{
@@ -25,62 +26,63 @@ use uqa_sql::semantics::sets::validation::projections_may_return_set;
 use uqa_sql::{FunctionTypeResolver, SQLError, SQLParam, ScalarExpr};
 
 pub(super) fn attach_window_output<'a, S: Clone + 'static>(
-    mut operator: Box<dyn PhysicalOperator + 'a>,
+    operator: Box<dyn PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     resjunk: &mut RelationalResjunk,
     type_resolver: &dyn FunctionTypeResolver,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let mut plan = prepare_window_plan(&statement.projections);
-    let input = operator.row_schema().clone();
-    let keys = plan.take_set_returning_keys(&mut |expression| {
-        uqa_sql::semantics::sets::validation::expression_may_return_set(
-            execution.context.catalog,
-            type_resolver,
-            expression,
-            &input,
-            execution.params,
-        )
-    })?;
-    if !keys.is_empty() {
-        // Set-returning partition and ordering keys expand the input rows before the windows see them.
-        operator = build_set_projection(
-            operator,
-            execution.context,
-            execution.params,
-            execution.ctes,
-            Arc::clone(&execution.evaluator),
-            crate::query::set_projection::SetProjectionOutput {
-                projections: keys
-                    .iter()
-                    .cloned()
-                    .map(|(column, expression)| {
-                        (crate::ProjectionTarget::Internal(column), expression)
-                    })
-                    .collect(),
-                pass_through: true,
-                batch_size: crate::DEFAULT_BATCH_SIZE,
-            },
-        )?;
-    }
-    let window = WindowOutput {
-        work_mem_bytes: physical_work_mem_bytes(execution.runtime)?,
-        schema: plan.output_schema(type_resolver, operator.row_schema(), execution.params)?,
-        plan,
-        keys,
-    };
-    if statement.order_by.is_empty() {
-        attach_unordered_output(operator, statement, resjunk, window, execution)
-    } else {
-        attach_ordered_output(
-            operator,
-            statement,
-            resjunk,
-            type_resolver,
-            window,
-            execution,
-        )
-    }
+    OperatorBuild::build(operator, |operator| {
+        let mut plan = prepare_window_plan(&statement.projections);
+        let input = operator.row_schema().clone();
+        let keys = plan.take_set_returning_keys(&mut |expression| {
+            uqa_sql::semantics::sets::validation::expression_may_return_set(
+                execution.context.catalog,
+                type_resolver,
+                expression,
+                &input,
+                execution.params,
+            )
+        })?;
+        if !keys.is_empty() {
+            // Set-returning partition and ordering keys expand the input rows before the windows see them.
+            operator.attach(|input| {
+                build_set_projection(
+                    input,
+                    execution.context,
+                    execution.params,
+                    execution.ctes,
+                    Arc::clone(&execution.evaluator),
+                    crate::query::set_projection::SetProjectionOutput {
+                        projections: keys
+                            .iter()
+                            .cloned()
+                            .map(|(column, expression)| {
+                                (crate::ProjectionTarget::Internal(column), expression)
+                            })
+                            .collect(),
+                        pass_through: true,
+                        batch_size: crate::DEFAULT_BATCH_SIZE,
+                    },
+                )
+            })?;
+        }
+        let window = WindowOutput {
+            work_mem_bytes: physical_work_mem_bytes(execution.runtime)?,
+            schema: plan.output_schema(type_resolver, operator.row_schema(), execution.params)?,
+            plan,
+            keys,
+        };
+        if statement.order_by.is_empty() {
+            operator.attach(|input| {
+                attach_unordered_output(input, statement, resjunk, window, execution)
+            })
+        } else {
+            operator.attach(|input| {
+                attach_ordered_output(input, statement, resjunk, type_resolver, window, execution)
+            })
+        }
+    })
 }
 
 /// The prepared window calls of a query block and the rows they produce.
@@ -103,130 +105,150 @@ impl WindowOutput {
 
 /// Without `ORDER BY`, the target list replaces each row as the window results arrive.
 fn attach_unordered_output<'a, S: Clone + 'static>(
-    mut operator: Box<dyn PhysicalOperator + 'a>,
+    operator: Box<dyn PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     resjunk: &mut RelationalResjunk,
     window: WindowOutput,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let mut projections = physical_projections(window.plan.projections());
-    let output_columns = order_projection(&statement.projections, operator.row_schema())?
-        .1
-        .into_iter()
-        .enumerate()
-        .map(|(position, (output, _))| (output, ScalarExpr::Position(position)))
-        .collect::<Vec<_>>();
-    resjunk.distinct_on.extend(append_distinct_set_projections(
-        statement,
-        &output_columns,
-        &mut projections,
-    )?);
-    window.read_keys(&mut projections);
-    operator = window_operator(
-        operator,
-        window,
-        (execution.context, execution.params, execution.ctes),
-    );
-    attach_final_projection_order(
-        operator,
-        (statement, &output_columns),
-        projections,
-        execution,
-    )
+    OperatorBuild::build(operator, |operator| {
+        let mut projections = physical_projections(window.plan.projections());
+        let output_columns = order_projection(&statement.projections, operator.row_schema())?
+            .1
+            .into_iter()
+            .enumerate()
+            .map(|(position, (output, _))| (output, ScalarExpr::Position(position)))
+            .collect::<Vec<_>>();
+        resjunk.distinct_on.extend(append_distinct_set_projections(
+            statement,
+            &output_columns,
+            &mut projections,
+        )?);
+        window.read_keys(&mut projections);
+        operator.wrap(|input| {
+            window_operator(
+                input,
+                window,
+                (execution.context, execution.params, execution.ctes),
+            )
+        });
+        operator.attach(|input| {
+            attach_final_projection_order(
+                input,
+                (statement, &output_columns),
+                projections,
+                execution,
+            )
+        })
+    })
 }
 
 /// With `ORDER BY`, the target list is appended to each row so the sort can read source columns the SELECT list leaves out, and the output columns are selected after sorting.
 fn attach_ordered_output<'a, S: Clone + 'static>(
-    mut operator: Box<dyn PhysicalOperator + 'a>,
+    operator: Box<dyn PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     resjunk: &mut RelationalResjunk,
     type_resolver: &dyn FunctionTypeResolver,
     window: WindowOutput,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let FinalProjectionExecution {
-        context,
-        params,
-        ctes,
-        runtime,
-        evaluator,
-    } = execution;
-    let (mut physical, output) = order_projection(window.plan.projections(), &window.schema)?;
-    let order_output = output.clone();
-    resjunk.distinct_on.extend(append_distinct_set_projections(
-        statement,
-        &order_output,
-        &mut physical,
-    )?);
-    let (order_statement, order_columns) = prepare_order_set_projections(
-        context.catalog,
-        type_resolver,
-        statement,
-        &order_output,
-        &mut physical,
-        &window.schema,
-        params,
-    )?;
-    resjunk.order_by.extend(order_columns);
-    window.read_keys(&mut physical);
-    let order_statement = order_statement.as_ref().unwrap_or(statement);
-    operator = window_operator(operator, window, (context, params, ctes));
-    if ctes.streams_command_progress() {
-        operator = attach_streaming_order_projection(
-            operator,
-            order_statement,
-            &order_output,
-            physical,
-            FinalProjectionExecution {
-                context,
-                params,
-                ctes,
-                runtime,
-                evaluator,
-            },
-        )?;
-    } else {
-        operator = if projections_may_return_set(
-            context.catalog,
-            type_resolver,
-            &physical,
-            operator.row_schema(),
-            params,
-        )? {
-            build_set_projection(
-                operator,
-                context,
-                params,
-                ctes,
-                Arc::clone(&evaluator),
-                crate::query::set_projection::SetProjectionOutput {
-                    projections: physical,
-                    pass_through: true,
-                    batch_size: crate::DEFAULT_BATCH_SIZE,
-                },
-            )?
-        } else {
-            Box::new(
-                Project::appending_target_evaluator(operator, physical, Arc::clone(&evaluator))
-                    .with_memory_budget(runtime.work_mem_bytes()?),
-            )
-        };
-        operator = attach_order_limit(
-            operator,
-            order_statement,
-            &order_output,
+    OperatorBuild::build(operator, |operator| {
+        let FinalProjectionExecution {
             context,
             params,
             ctes,
             runtime,
             evaluator,
-            None,
+        } = execution;
+        let (mut physical, output) = order_projection(window.plan.projections(), &window.schema)?;
+        let order_output = output.clone();
+        resjunk.distinct_on.extend(append_distinct_set_projections(
+            statement,
+            &order_output,
+            &mut physical,
+        )?);
+        let (order_statement, order_columns) = prepare_order_set_projections(
+            context.catalog,
+            type_resolver,
+            statement,
+            &order_output,
+            &mut physical,
+            &window.schema,
+            params,
         )?;
-    }
-    let output = output_selection_positions(operator.row_schema(), output)?;
-    Ok(Box::new(ColumnSelection::with_physical_positions(
-        operator, output,
-    )))
+        resjunk.order_by.extend(order_columns);
+        window.read_keys(&mut physical);
+        let order_statement = order_statement.as_ref().unwrap_or(statement);
+        operator.wrap(|input| window_operator(input, window, (context, params, ctes)));
+        if ctes.streams_command_progress() {
+            operator.attach(|input| {
+                attach_streaming_order_projection(
+                    input,
+                    order_statement,
+                    &order_output,
+                    physical,
+                    FinalProjectionExecution {
+                        context,
+                        params,
+                        ctes,
+                        runtime,
+                        evaluator,
+                    },
+                )
+            })?;
+        } else {
+            if projections_may_return_set(
+                context.catalog,
+                type_resolver,
+                &physical,
+                operator.row_schema(),
+                params,
+            )? {
+                operator.attach(|input| {
+                    build_set_projection(
+                        input,
+                        context,
+                        params,
+                        ctes,
+                        Arc::clone(&evaluator),
+                        crate::query::set_projection::SetProjectionOutput {
+                            projections: physical,
+                            pass_through: true,
+                            batch_size: crate::DEFAULT_BATCH_SIZE,
+                        },
+                    )
+                })?;
+            } else {
+                let work_mem = runtime.work_mem_bytes()?;
+                operator.wrap(|input| {
+                    Box::new(
+                        Project::appending_target_evaluator(
+                            input,
+                            physical,
+                            Arc::clone(&evaluator),
+                        )
+                        .with_memory_budget(work_mem),
+                    )
+                });
+            }
+            operator.attach(|input| {
+                attach_order_limit(
+                    input,
+                    order_statement,
+                    &order_output,
+                    context,
+                    params,
+                    ctes,
+                    runtime,
+                    evaluator,
+                    None,
+                )
+            })?;
+        }
+        let output = output_selection_positions(operator.row_schema(), output)?;
+        operator.wrap(|input| Box::new(ColumnSelection::with_physical_positions(input, output)));
+        Ok(())
+    })
 }
 
 /// The window operator over `operator`'s rows, appending one column per window call.

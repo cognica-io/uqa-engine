@@ -76,6 +76,13 @@ pub trait AggregateExecutor: Send {
     /// boundary, but physical operators must not create an unbounded result
     /// vector first.
     fn finish(&mut self) -> ExecResult<crate::spill::SpillBuffer>;
+
+    /// Release retained state after completion or early termination. Cleanup
+    /// errors must reach the statement before it can report success or commit.
+    /// Repeated calls must not release the same resources again.
+    fn close(&mut self) -> ExecResult<()> {
+        Ok(())
+    }
 }
 
 pub struct HashAggregate<'a> {
@@ -229,7 +236,11 @@ impl PhysicalOperator for HashAggregate<'_> {
 
     fn close(&mut self) -> ExecResult<()> {
         self.output = None;
-        self.child.close()
+        let executor = self
+            .executor
+            .as_mut()
+            .map_or(Ok(()), |executor| executor.close());
+        crate::physical::with_cleanup(executor, self.child.close(), "close aggregate input")
     }
 }
 

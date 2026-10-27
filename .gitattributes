@@ -20,6 +20,9 @@ UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt text eol=lf
 scripts/install-usql.sh text eol=lf
 scripts/install-usql.ps1 text eol=lf
 scripts/usql-release/licenses/*.txt -text -whitespace linguist-vendored
+scripts/c-bindings/licenses/*.txt -text -whitespace linguist-vendored
+scripts/c-bindings/licenses/sources.json text eol=lf
+crates/uqa-ffi/include/uqa/*.h text eol=lf
 scripts/fixtures/usql-release/rows.arrow binary
 crates/uqa-sql/THIRD-PARTY/POSTGRESQL-SORT-NOTICE.txt text eol=lf
 crates/uqa-pg-regex/THIRD-PARTY/POSTGRESQL-REGEX-NOTICE.txt text eol=lf
@@ -36,6 +39,10 @@ crates/uqa-pg-query/src/node_structs.rs linguist-generated
 # Imported PostgreSQL 18.4 regular expression engine. Keep upstream bytes on
 # every checkout; SHA256SUMS verifies this tree.
 crates/uqa-pg-regex/postgres/** -text -whitespace linguist-vendored
+
+# Imported XML parser bytes are checked against SHA256SUMS on every platform.
+crates/uqa-sql/vendor/libxml2/** -text -whitespace linguist-vendored
+crates/uqa-sql/THIRD-PARTY/LIBXML2-NOTICE.txt -text -whitespace linguist-vendored
 
 # Imported morphology dictionaries and notices retain their exact upstream contents.
 # The resource manifest verifies their hashes across platforms.
@@ -64,5 +71,9 @@ benchmarks/nori/**/*.json text eol=lf
 benchmarks/nori/**/*.jsonl text eol=lf
 
 # Reference-oracle fixtures are generated from pinned inputs.
+tests/parity/pg18/capture_xml_input.py text eol=lf
+tests/parity/pg18/xml_input.expected.json text eol=lf
+tests/parity/pg18/capture_explain_options.py text eol=lf
+tests/parity/pg18/explain_options.expected.json text eol=lf
 tests/parity/nori/*_expected.jsonl linguist-generated
 tests/parity/kuromoji/*_expected.jsonl linguist-generated

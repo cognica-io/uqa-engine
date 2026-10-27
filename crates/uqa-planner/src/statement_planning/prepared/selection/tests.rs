@@ -14,6 +14,7 @@ use uqa_sql::{
     ColumnType, RowSchema, ScalarExpr,
 };
 mod fixtures;
+mod utility;
 use fixtures::NoRoutines;
 
 struct Inputs {
@@ -69,7 +70,9 @@ impl Inputs {
             analysis: PreparedDefinitionContext {
                 types: &NoRoutines,
                 routines: &NoRoutines,
+                procedures: &NoRoutines,
                 scopes: self,
+                session: &NoRoutines,
                 aliases: &NoRoutines,
             },
             optimization: self,
@@ -122,7 +125,10 @@ fn temporal_inputs(plan: &UnifiedPlan) -> Vec<i64> {
     let mut values = Vec::new();
     plan.clone().rewrite_scalar_expressions(&mut |expression| {
         if let ScalarExpr::TypedLiteral {
-            value: Value::Temporal(uqa_core::TemporalValue::Timestamp { micros }),
+            value:
+                Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                    postgres_micros: micros,
+                }),
             ..
         } = expression
         {
@@ -174,6 +180,7 @@ impl PreparedPlanOptimization for Inputs {
         Ok(crate::plan_cost::PlanCost {
             rows: 1.0,
             execution: if generic { 10_000.0 } else { 1.0 },
+            startup: 0.0,
             relations: 0,
         })
     }
@@ -412,14 +419,17 @@ fn invalidation_reads_original_inputs_and_only_publishes_successful_analysis() {
         let mut values = Vec::new();
         selected.rewrite_scalar_expressions(&mut |expression| {
             if let ScalarExpr::TypedLiteral {
-                value: Value::Temporal(uqa_core::TemporalValue::Timestamp { micros }),
+                value:
+                    Value::Temporal(uqa_core::TemporalValue::Timestamp {
+                        postgres_micros: micros,
+                    }),
                 ..
             } = expression
             {
                 values.push(*micros);
             }
         });
-        assert_eq!(values, [expected]);
+        assert_eq!(values, [expected - uqa_core::POSTGRES_EPOCH_MICROS]);
         assert!(!inputs.entry.borrow().as_ref().unwrap().needs_analysis);
     }
     let identity = {
@@ -454,7 +464,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
         let _clock = uqa_sql::expr::TransactionClockScope::enter(190_123_456_789);
         assert_eq!(
             temporal_inputs(&inputs.select().unwrap().unwrap()),
-            [90_123_456_789]
+            [90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
         );
     }
     assert_eq!(
@@ -471,7 +481,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
         let _clock = uqa_sql::expr::TransactionClockScope::enter(290_123_456_789);
         assert_eq!(
             temporal_inputs(&inputs.select().unwrap().unwrap()),
-            [290_123_456_789]
+            [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
         );
     }
     assert_eq!(
@@ -495,7 +505,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
     assert!(Arc::ptr_eq(&updated.source_plan, &original.source_plan));
     assert_eq!(
         temporal_inputs(updated.plan.as_ref().unwrap()),
-        [290_123_456_789]
+        [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     let current_path = updated.effective_search_path.as_ref().unwrap();
     assert_eq!(
@@ -523,7 +533,7 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
     let _clock = uqa_sql::expr::TransactionClockScope::enter(390_123_456_789);
     assert_eq!(
         temporal_inputs(&inputs.select().unwrap().unwrap()),
-        [290_123_456_789]
+        [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     assert!(Arc::ptr_eq(
         &inputs.entry.borrow().as_ref().unwrap().logical_plan,
@@ -557,7 +567,7 @@ fn changed_namespace_descriptor_failure_does_not_publish_the_new_analysis() {
         assert_eq!(entry.effective_search_path, original.effective_search_path);
         assert_eq!(
             temporal_inputs(entry.plan.as_ref().unwrap()),
-            [90_123_456_789]
+            [90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
         );
         assert_eq!(entry.generic_cost, original.generic_cost);
         assert_eq!(entry.generic_plans, original.generic_plans);
@@ -574,7 +584,7 @@ fn changed_namespace_descriptor_failure_does_not_publish_the_new_analysis() {
     inputs.entry.borrow_mut().as_mut().unwrap().result_schema = original.result_schema;
     assert_eq!(
         temporal_inputs(&inputs.select().unwrap().unwrap()),
-        [290_123_456_789]
+        [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     assert_eq!(inputs.entry.borrow().as_ref().unwrap().generic_plans, 1);
 }
@@ -601,10 +611,81 @@ fn namespace_read_failure_does_not_reuse_or_publish_the_cached_plan() {
     assert_eq!(entry.effective_search_path, original.effective_search_path);
     assert_eq!(
         temporal_inputs(entry.plan.as_ref().unwrap()),
-        [90_123_456_789]
+        [90_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
     assert_eq!(entry.generic_cost, original.generic_cost);
     assert_eq!(entry.generic_plans, original.generic_plans);
     assert_eq!(entry.custom_plans, original.custom_plans);
     assert_eq!(entry.total_custom_cost, original.total_custom_cost);
+}
+
+#[test]
+fn description_reanalysis_preserves_usage_without_building_a_plan() {
+    let inputs = Inputs::default();
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    entry.invalidate();
+    let source = entry.source_plan.clone();
+    let counts = (
+        entry.generic_plans,
+        entry.custom_plans,
+        entry.total_custom_cost,
+    );
+    let analysis = describe_entry(&inputs.context().analysis, &entry)
+        .unwrap()
+        .unwrap();
+    entry.record_analysis(analysis);
+    assert!(Arc::ptr_eq(&source, &entry.source_plan));
+    assert!(!entry.needs_analysis);
+    assert!(entry.plan.is_none());
+    assert!(entry.generic_cost.is_none());
+    assert_eq!(
+        (
+            entry.generic_plans,
+            entry.custom_plans,
+            entry.total_custom_cost
+        ),
+        counts
+    );
+    assert!(!inputs
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event.starts_with("optimize") || *event == "publish"));
+}
+
+#[test]
+fn description_rejects_changed_shape_before_publication() {
+    let inputs = Inputs::default();
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    entry.invalidate();
+    entry.result_schema = Some(RowSchema::with_types(
+        vec!["changed".into()],
+        vec![Some(ColumnType::Text)],
+    ));
+    let original = entry.logical_plan.clone();
+    let error = describe_entry(&inputs.context().analysis, &entry)
+        .err()
+        .unwrap();
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert!(Arc::ptr_eq(&original, &entry.logical_plan));
+    assert!(entry.needs_analysis);
+    assert!(!inputs
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event.starts_with("optimize") || *event == "publish"));
+}
+
+#[test]
+fn no_data_description_never_reanalyzes() {
+    let inputs = Inputs::default();
+    let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
+    entry.invalidate();
+    entry.result_schema = None;
+    inputs.fail_binding.set(true);
+    assert!(describe_entry(&inputs.context().analysis, &entry)
+        .unwrap()
+        .is_none());
+    assert!(inputs.events.borrow().is_empty());
+    assert!(entry.needs_analysis);
 }

@@ -19,9 +19,11 @@ from collections import Counter
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PATH_MODULE = re.compile(r'#\[path\s*=\s*"([^"]+)"\]')
+# Keep flags inside their own inline or shell command, including quoted commands in script arrays.
+COMMAND_ARGUMENTS = r"(?:(?!\bcargo[ \t]+test\b)[^\n`;&|])*?"
 CARGO_TEST_TARGET = re.compile(
-    r"cargo\s+test\b[^\n]*?(?:-p|--package)\s+([A-Za-z0-9_-]+)"
-    r"[^\n]*?--test\s+([A-Za-z0-9_-]+)"
+    r"cargo[ \t]+test\b" + COMMAND_ARGUMENTS + r"(?:-p|--package)[ \t]+([A-Za-z0-9_-]+)"
+    + COMMAND_ARGUMENTS + r"--test[ \t]+([A-Za-z0-9_-]+)"
 )
 COMMAND_SUFFIXES = {".md", ".py", ".sh", ".toml", ".yaml", ".yml"}
 

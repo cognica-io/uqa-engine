@@ -8,6 +8,7 @@
 
 use super::{Collector, Scope};
 use crate::filter_pushdown::push_derived_output_filter;
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_sql::{
     ast::OperatorJoinRelations,
     plan::{source_projection::QualifierFilters, QueryPlan, SourcePlan},
@@ -15,28 +16,43 @@ use uqa_sql::{
     SQLError, ScalarExpr,
 };
 
-fn output_aliases(declared: &[String], range: &[String]) -> Vec<String> {
-    range
-        .iter()
-        .chain(declared.iter().skip(range.len()))
-        .cloned()
-        .collect()
+fn output_aliases(
+    declared: &[String],
+    range: &[String],
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<String>>, SQLError> {
+    let mut aliases = ProductionVec::new(control);
+    for name in range.iter().chain(declared.iter().skip(range.len())) {
+        aliases.push_produced(control.copy_text(name)?)?;
+    }
+    Ok(aliases.finish()?)
 }
 
-impl Collector<'_> {
+impl Collector<'_, '_, '_> {
     pub(super) fn source(
         &mut self,
         source: &SourcePlan,
         filters: Option<&QualifierFilters>,
-        scope: &Scope,
+        scope: &Scope<'_>,
         path: &str,
     ) -> Result<(), SQLError> {
+        self.control.check()?;
         match source {
             SourcePlan::RetainedRows(_) => Ok(()),
             SourcePlan::Table { .. } => self.table_source(source, filters, scope, path),
             SourcePlan::Join { left, right, .. } => {
-                self.source(left, filters, scope, &format!("{path}/Left"))?;
-                self.source(right, filters, scope, &format!("{path}/Right"))
+                self.source(
+                    left,
+                    filters,
+                    scope,
+                    &self.control.format(format_args!("{path}/Left"))?,
+                )?;
+                self.source(
+                    right,
+                    filters,
+                    scope,
+                    &self.control.format(format_args!("{path}/Right"))?,
+                )
             }
             SourcePlan::Subquery {
                 body,
@@ -46,7 +62,7 @@ impl Collector<'_> {
             } => self.derived_query(
                 body,
                 scope,
-                &format!("{path}/Source"),
+                &self.control.format(format_args!("{path}/Source"))?,
                 alias.as_deref().unwrap_or_default(),
                 column_aliases,
                 filters,
@@ -59,7 +75,9 @@ impl Collector<'_> {
                     self.operator_join(
                         function.relations.as_ref(),
                         &function.args,
-                        &format!("{path}/Function {index}"),
+                        &self
+                            .control
+                            .format(format_args!("{path}/Function {index}"))?,
                     )?;
                 }
                 Ok(())
@@ -71,7 +89,7 @@ impl Collector<'_> {
     fn derived_query(
         &mut self,
         query: &QueryPlan,
-        scope: &Scope,
+        scope: &Scope<'_>,
         path: &str,
         qualifier: &str,
         aliases: &[String],
@@ -96,11 +114,11 @@ impl Collector<'_> {
         &mut self,
         source: &SourcePlan,
         filters: Option<&QualifierFilters>,
-        scope: &Scope,
+        scope: &Scope<'_>,
         path: &str,
     ) -> Result<(), SQLError> {
         let SourcePlan::Table {
-            executable_query: _,
+            executable_query,
             name,
             qualifier,
             alias,
@@ -111,15 +129,18 @@ impl Collector<'_> {
         else {
             unreachable!()
         };
+        let executable_query = executable_query.as_deref();
         let qualifier = alias.as_deref().unwrap_or(qualifier);
-        if let Some(cte) = cte_reference_name(name).and_then(|name| scope.get(&name)) {
+        if let Some(cte) = cte_reference_name(name).and_then(|name| scope.get(name.as_str())) {
             if let Some(cte) = cte {
-                if let Some(query) = cte.plan.body.query() {
-                    let aliases = output_aliases(&cte.plan.columns, column_aliases);
+                if let Some(query) = executable_query.or_else(|| cte.plan.body.query()) {
+                    let aliases = output_aliases(&cte.plan.columns, column_aliases, self.control)?;
                     self.derived_query(
                         query,
                         &cte.outer,
-                        &format!("{path}/CTE {}", cte.plan.name),
+                        &self
+                            .control
+                            .format(format_args!("{path}/CTE {}", cte.plan.name))?,
                         qualifier,
                         &aliases,
                         filters,
@@ -138,11 +159,12 @@ impl Collector<'_> {
                 let aliases = output_aliases(
                     view.output_columns.as_deref().unwrap_or(&[]),
                     column_aliases,
-                );
+                    self.control,
+                )?;
                 self.derived_query(
-                    &view.query,
-                    &Scope::new(),
-                    &format!("{path}/View {name}"),
+                    executable_query.unwrap_or(&view.query),
+                    &Scope::new(self.scope_memory),
+                    &self.control.format(format_args!("{path}/View {name}"))?,
                     qualifier,
                     &aliases,
                     filters,
@@ -212,7 +234,7 @@ impl Collector<'_> {
                         relation,
                         relation,
                         predicate,
-                        &format!("{path}/{side} operand"),
+                        &self.control.format(format_args!("{path}/{side} operand"))?,
                     )?;
                 }
             }

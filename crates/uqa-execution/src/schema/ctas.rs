@@ -18,11 +18,17 @@ use uqa_sql::{
 use uqa_storage::document_store::Document;
 
 pub mod entry;
+mod source;
 
 /// Optimize and execute at the call boundary so writer promotion cannot leave a stale query generation.
 pub trait TableAsQuerySource {
     fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError>;
-    fn execute(&self, plan: &QueryPlan, params: &[SQLParam]) -> Result<SQLResult, SQLError>;
+    fn execute(
+        &self,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        measurement: Option<&crate::query::measurement::QueryMeasurement>,
+    ) -> Result<SQLResult, SQLError>;
 }
 pub trait TableAsNamespace {
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError>;
@@ -69,6 +75,8 @@ pub struct CreateTableAsExecution<'a> {
     pub persistence: uqa_sql::ast::RelationPersistence,
     pub on_commit: uqa_sql::ast::OnCommitAction,
     pub query: &'a uqa_sql::plan::QueryPlan,
+    /// EXPLAIN's selected execution; the original query still supplies the declared schema.
+    pub explained: Option<crate::query::measurement::ExplainedQuery<'a>>,
     pub params: &'a [SQLParam],
 }
 
@@ -112,19 +120,13 @@ pub fn run_create_table_as<S: Clone>(
     // create_ctas_internal describes the relation before a source tuple is read.
     validate_create_table_as_columns(context.routines, &columns)?;
     context.creation.retain_owner(&owner)?;
-    let executable = if execution.with_no_data {
-        None
-    } else {
-        Some(context.queries.optimize(execution.query)?)
-    };
-    let executable = executable.as_ref().unwrap_or(execution.query);
+    let source = source::SelectedSource::new(context.queries, execution)?;
     // A locking source must acquire and recheck every tuple before this session promotes its deferred backend transaction. Promoting first would invert the global writer and tuple-lock order against a concurrent updater. The target is checked again after promotion so a concurrent relation create still wins atomically.
-    let locking_result =
-        if !execution.with_no_data && crate::query::locking::query_has_row_locks(executable) {
-            Some(context.queries.execute(executable, execution.params)?)
-        } else {
-            None
-        };
+    let locking_result = if !execution.with_no_data && source.has_row_locks() {
+        Some(source.execute()?)
+    } else {
+        None
+    };
     if !temporary {
         context.namespace.prepare_writer()?;
     }
@@ -142,7 +144,7 @@ pub fn run_create_table_as<S: Clone>(
     } else if let Some(result) = locking_result {
         Some(result)
     } else {
-        Some(context.queries.execute(executable, execution.params)?)
+        Some(source.execute()?)
     };
     if let Some(result) = &result {
         if result.columns.len() != columns.len() {
@@ -196,14 +198,37 @@ fn should_skip_existing_create_table_as<S: Clone>(
     name: &str,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<bool, SQLError> {
+    existing_target(context, name, execution.name, execution.if_not_exists)
+}
+
+/// EXPLAIN observes destination collisions before optimizing or running the source, including when ANALYZE is absent.
+pub fn explain_existing_target<S: Clone>(
+    context: &CreateTableAsContext<'_, S>,
+    name: &str,
+    if_not_exists: bool,
+    persistence: RelationPersistence,
+) -> Result<bool, SQLError> {
+    let temporary = context
+        .creation
+        .targets_temporary_namespace(name, persistence)?;
+    let resolved = create_table_as_target_name(&context.creation, name, temporary)?;
+    existing_target(context, &resolved, name, if_not_exists)
+}
+
+fn existing_target<S: Clone>(
+    context: &CreateTableAsContext<'_, S>,
+    name: &str,
+    requested_name: &str,
+    if_not_exists: bool,
+) -> Result<bool, SQLError> {
     if !context.namespace.relation_exists(name)? {
         return Ok(false);
     }
     context
         .notices
         .push(uqa_sql::schema::table_creation::existing_create_as_target(
-            execution.name,
-            execution.if_not_exists,
+            requested_name,
+            if_not_exists,
         )?);
     Ok(true)
 }

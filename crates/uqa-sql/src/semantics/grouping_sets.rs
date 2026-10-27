@@ -64,6 +64,16 @@ pub struct AnalyzedGroupingSets {
 }
 
 impl AnalyzedGroupingSets {
+    pub(crate) fn copy_with(
+        &self,
+        copying: &mut crate::plan::copy::Copying<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            original_count: self.original_count,
+            retained: copying.map(self.retained.iter(), |_, position| Ok(*position))?,
+        })
+    }
+
     /// Remove only sets that were equal before optimization, preserving multiplicity when distinct expressions later fold to the same value.
     pub fn apply(self, block: &mut QueryBlockPlan) -> Result<(), SQLError> {
         if !block.group_distinct || block.grouping_sets.len() != self.original_count {

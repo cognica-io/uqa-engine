@@ -1,0 +1,144 @@
+{
+  "source": "Independent PostgreSQL 18 instance",
+  "version": "PostgreSQL 18.4 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "captured_at": "2026-10-25T01:00:47.628208+00:00",
+  "cases": [
+    {
+      "case": "int4",
+      "expression": "int4range(1,4,'(]')::text",
+      "result": {
+        "value": "[2,5)"
+      }
+    },
+    {
+      "case": "int8",
+      "expression": "int8range(9223372036854775805,9223372036854775806,'[]')::text",
+      "result": {
+        "value": "[9223372036854775805,9223372036854775807)"
+      }
+    },
+    {
+      "case": "numeric",
+      "expression": "numrange(1.2300,9.870,'[]')::text",
+      "result": {
+        "value": "[1.2300,9.870]"
+      }
+    },
+    {
+      "case": "date",
+      "expression": "daterange('2020-01-01','2020-01-03','[]')::text",
+      "result": {
+        "value": "[2020-01-01,2020-01-04)"
+      }
+    },
+    {
+      "case": "timestamp",
+      "expression": "tsrange('2020-01-01 01:02:03.123456','2020-01-02 03:04:05','[]')::text",
+      "result": {
+        "value": "[\"2020-01-01 01:02:03.123456\",\"2020-01-02 03:04:05\"]"
+      }
+    },
+    {
+      "case": "timestamptz",
+      "expression": "tstzrange('2020-01-01 01:00:00+02','2020-01-02 03:00:00+03','[)')::text",
+      "result": {
+        "value": "[\"2019-12-31 23:00:00+00\",\"2020-01-02 00:00:00+00\")"
+      }
+    },
+    {
+      "case": "unbounded",
+      "expression": "int4range(NULL,NULL,'[]')::text",
+      "result": {
+        "value": "(,)"
+      }
+    },
+    {
+      "case": "empty",
+      "expression": "int4range(1,1,'()')::text",
+      "result": {
+        "value": "empty"
+      }
+    },
+    {
+      "case": "point",
+      "expression": "numrange(1.2300,1.2300,'[]')::text",
+      "result": {
+        "value": "[1.2300,1.2300]"
+      }
+    },
+    {
+      "case": "infinite",
+      "expression": "daterange('-infinity','infinity','[]')::text",
+      "result": {
+        "value": "[-infinity,infinity]"
+      }
+    },
+    {
+      "case": "multirange",
+      "expression": "int4multirange(int4range(10,11,'[]'), int4range(3,6), int4range(1,3), int4range(9,10), 'empty'::int4range)::text",
+      "result": {
+        "value": "{[1,6),[9,12)}"
+      }
+    },
+    {
+      "case": "empty_multi",
+      "expression": "int4multirange()::text",
+      "result": {
+        "value": "{}"
+      }
+    },
+    {
+      "case": "reverse",
+      "expression": "int4range(4,1)::text",
+      "result": {
+        "sqlstate": "22000",
+        "message": "range lower bound must be less than or equal to range upper bound"
+      }
+    },
+    {
+      "case": "overflow",
+      "expression": "int4range(2147483647,2147483647,'[]')::text",
+      "result": {
+        "sqlstate": "22003",
+        "message": "integer out of range"
+      }
+    },
+    {
+      "case": "null_member",
+      "expression": "int4multirange(VARIADIC ARRAY[NULL::int4range])::text",
+      "result": {
+        "sqlstate": "22004",
+        "message": "multirange values cannot contain null members"
+      }
+    },
+    {
+      "case": "wrong_member",
+      "expression": "1::int4range::text",
+      "result": {
+        "sqlstate": "42846",
+        "message": "cannot cast type integer to int4range"
+      }
+    }
+  ],
+  "domain_setup": "\nCREATE TEMP SEQUENCE c_range_calls;\nCREATE DOMAIN pg_temp.c_counted_range AS int4range CHECK (nextval('pg_temp.c_range_calls') > 0 AND NOT isempty(VALUE));\nCREATE DOMAIN pg_temp.c_counted_multi AS int4multirange CHECK (nextval('pg_temp.c_range_calls') > 0 AND NOT isempty(VALUE));\nCREATE TEMP TABLE held(v pg_temp.c_counted_range);\nINSERT INTO held VALUES (int4range(1,5,'[)'));\nSELECT json_build_object('operation','range construction','calls',currval('pg_temp.c_range_calls'),'value',(SELECT v::text FROM held));\nSELECT json_build_object('operation','multirange construction','value',int4multirange(v)::pg_temp.c_counted_multi::text) FROM held;\nSELECT json_build_object('operation','after multirange construction','calls',currval('pg_temp.c_range_calls'));\nDO $$ BEGIN PERFORM 'empty'::pg_temp.c_counted_range; EXCEPTION WHEN check_violation THEN NULL; END $$;\nSELECT json_build_object('operation','failed empty range domain check','calls',currval('pg_temp.c_range_calls'),'sqlstate','23514');\n",
+  "domain_effects": [
+    {
+      "operation": "range construction",
+      "calls": 1,
+      "value": "[1,5)"
+    },
+    {
+      "operation": "multirange construction",
+      "value": "{[1,5)}"
+    },
+    {
+      "operation": "after multirange construction",
+      "calls": 2
+    },
+    {
+      "operation": "failed empty range domain check",
+      "calls": 3,
+      "sqlstate": "23514"
+    }
+  ]
+}

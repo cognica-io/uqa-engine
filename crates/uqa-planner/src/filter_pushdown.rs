@@ -34,6 +34,10 @@ pub fn qualifier_filters_for_stmt(
     from: &SourcePlan,
     scope: FilterPushdownScope<'_>,
 ) -> Result<Option<QualifierFilters>, SQLError> {
+    // Column ownership is not fixed until the native source supplies its descriptor.
+    if !stmt.deferred_outer_rewrites.is_empty() {
+        return Ok(None);
+    }
     let Some(filter) = stmt.r#where.as_ref() else {
         return Ok(None);
     };

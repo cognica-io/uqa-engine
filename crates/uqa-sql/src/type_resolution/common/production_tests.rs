@@ -8,6 +8,74 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn host_carrier_types_reuse_runtime_rules_without_reading_physical_values() {
+    struct Catalog;
+    impl crate::expr::SQLValueCatalog for Catalog {
+        fn enum_type_labels(
+            &self,
+            _: u32,
+        ) -> Result<Option<std::sync::Arc<crate::expr::enums::EnumTypeLabels>>, SQLError> {
+            Ok(None)
+        }
+        fn enum_label_uncommitted(&self, _: u32) -> bool {
+            false
+        }
+        fn enum_type_name(&self, _: u32) -> Result<Option<String>, SQLError> {
+            Ok(None)
+        }
+        fn has_enum_types(&self) -> bool {
+            false
+        }
+        fn value_type_by_oid(&self, _: u32) -> Result<Option<ColumnType>, SQLError> {
+            Ok(Some(ColumnType::Array(Box::new(ColumnType::Integer))))
+        }
+    }
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (value, expected) in [
+        (Value::Null, None),
+        (Value::Int(1), Some(ColumnType::Integer)),
+        (Value::Int(i64::MAX), Some(ColumnType::BigInteger)),
+        (Value::Json("{}".into()), Some(ColumnType::Json)),
+        // Deliberately unreadable payload: type observation must remain lazy.
+        (
+            Value::Datum(uqa_core::DatumValue::new(2950, u32::MAX, vec![])),
+            Some(ColumnType::Uuid),
+        ),
+    ] {
+        let actual = runtime_value_type_with_control(&value, None, &control).unwrap();
+        assert_eq!(actual.as_deref(), expected.as_ref());
+    }
+    let value = Value::Datum(uqa_core::DatumValue::new(80_001, u32::MAX, vec![]));
+    let ty = runtime_value_type_with_control(&value, Some(&Catalog), &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(*ty, ColumnType::Array(Box::new(ColumnType::Integer)));
+    assert!(budget.used() > 0);
+    drop(ty);
+    assert_eq!(budget.used(), 0);
+    let empty = MemoryBudget::new(0);
+    assert_eq!(
+        runtime_value_type_with_control(
+            &value,
+            Some(&Catalog),
+            &ProductionControl::new(&empty, &token, &token)
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("53200")
+    );
+    token.cancel();
+    assert_eq!(
+        runtime_value_type_with_control(&Value::Null, None, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+}
+
+#[test]
 fn collated_unknown_inputs_charge_name_selection_to_common_type_allowance() {
     let crate::Statement::Select(query) = crate::compile("SELECT 'x' COLLATE \"C\"")
         .unwrap()

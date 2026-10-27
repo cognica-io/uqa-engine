@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL-compatible UUID parsing, generation, and extraction.
+//! `PostgreSQL`-compatible UUID parsing, generation, and extraction.
 
 use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,7 +63,12 @@ pub(super) fn extract_uuid_timestamp(
         7 => uuid_v7_unix_micros(&bytes),
         _ => return Ok(Value::Null),
     }?;
-    Ok(Value::Temporal(TemporalValue::TimestampTz { micros }))
+    let postgres_micros = micros
+        .checked_sub(uqa_core::POSTGRES_EPOCH_MICROS)
+        .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?;
+    Ok(Value::Temporal(TemporalValue::TimestampTz {
+        postgres_micros,
+    }))
 }
 
 pub(super) fn generate_random_uuid() -> Result<String> {
@@ -103,13 +108,13 @@ fn generate_uuid_v7_at_clock(
     let now_micros = now_nanos.div_euclid(NANOS_PER_MICROSECOND);
     let sub_microsecond_nanos = now_nanos.rem_euclid(NANOS_PER_MICROSECOND);
     let timestamp_micros = match shift {
-        None => now_micros,
+        None => now_micros - uqa_core::POSTGRES_EPOCH_MICROS,
         Some(TemporalValue::Interval {
             months,
             days,
             micros,
         }) => timestamp_tz_plus_interval(
-            now_micros,
+            now_micros - uqa_core::POSTGRES_EPOCH_MICROS,
             IntervalFields {
                 months: *months,
                 days: *days,
@@ -124,16 +129,9 @@ fn generate_uuid_v7_at_clock(
             )));
         }
     };
-    let timestamp = TemporalValue::TimestampTz {
-        micros: timestamp_micros,
-    };
     // uuidv7_interval adds the Unix epoch to PostgreSQL's raw timestamp after
     // arithmetic, including its infinity bit patterns, with signed wrapping.
-    let unix_micros = match timestamp.infinity() {
-        Some(uqa_core::TemporalInfinity::Positive) => i64::MAX.wrapping_add(946_684_800_000_000),
-        Some(uqa_core::TemporalInfinity::Negative) => i64::MIN.wrapping_add(946_684_800_000_000),
-        None => timestamp_micros,
-    };
+    let unix_micros = timestamp_micros.wrapping_add(uqa_core::POSTGRES_EPOCH_MICROS);
     // PostgreSQL truncates signed division toward zero before narrowing the
     // millisecond and fractional parts to the generator's unsigned arguments.
     let unix_millis = (unix_micros / 1_000).cast_unsigned();
@@ -152,7 +150,11 @@ pub fn parse_uuid_bytes(text: &str) -> Result<[u8; 16]> {
     parse_uuid_bytes_with_control(text, &ProductionControl::uncontrolled())
 }
 
-fn parse_uuid_bytes_with_control(text: &str, control: &ProductionControl<'_>) -> Result<[u8; 16]> {
+/// Parse `PostgreSQL` UUID input under the invoking cancellation scope without allocating a payload.
+pub fn parse_uuid_bytes_with_control(
+    text: &str,
+    control: &ProductionControl<'_>,
+) -> Result<[u8; 16]> {
     control.check()?;
     let digits = text
         .strip_prefix('{')
@@ -278,7 +280,8 @@ pub(crate) fn format_uuid(bytes: [u8; 16]) -> String {
         .expect("ordinary UUID text")
 }
 
-pub(super) fn format_uuid_with_control(
+/// Format network-order UUID octets as canonical text under the original production allowance.
+pub fn format_uuid_with_control(
     bytes: [u8; 16],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {

@@ -36,6 +36,13 @@ fn dependencies_follow_bound_relations_through_views_ctes_and_write_targets() {
         ("SELECT (SELECT id FROM base)", vec![101]),
         ("SELECT id FROM outer_view", vec![101, 201, 202]),
         ("SELECT id FROM materialized", vec![203]),
+        ("EXPLAIN SELECT id FROM outer_view", vec![101, 201, 202]),
+        ("EXPLAIN UPDATE base SET id='2'", vec![101]),
+        ("EXPLAIN DELETE FROM base WHERE id=1", vec![101]),
+        (
+            "EXPLAIN WITH source AS (SELECT id FROM outer_view) UPDATE base SET id=source.id FROM source",
+            vec![101, 201, 202],
+        ),
     ] {
         let (_, dependencies) = analyze(sql);
         assert_eq!(

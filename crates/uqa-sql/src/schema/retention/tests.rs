@@ -342,15 +342,15 @@ fn composite_field_metadata_retains_its_complete_result_type_and_releases_on_fai
     let name = spare_text("domain", 8193);
     let changed_name = spare_text("replacement", 16_385);
     let payload =
-        size_of::<crate::ast::CompositeFieldBinding>() + name.capacity() + changed_name.capacity();
-    binding.composite_field = Some(Box::new(crate::ast::CompositeFieldBinding {
+        size_of::<crate::ast::FunctionValueBinding>() + name.capacity() + changed_name.capacity();
+    binding.set_composite_field(crate::ast::CompositeFieldBinding {
         collation_oid: None,
         type_oid: 20001,
         number: 2,
         result_type: ColumnType::Named(name),
         dropped: true,
         changed_type: Some(ColumnType::Named(changed_name)),
-    }));
+    });
     let mut source = columns("CREATE TABLE t(v integer)");
     source[0].generated = Some(GeneratedColumn {
         kind: GeneratedColumnKind::Stored,

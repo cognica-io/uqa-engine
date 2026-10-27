@@ -9,14 +9,32 @@
 use crate::{AggregateClassifier, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use std::collections::BTreeSet;
 use uqa_core::Value;
-use uqa_sql::{ast::FunctionVolatility, RowSchema, ScalarExpr};
+use uqa_sql::{ast::FunctionVolatility, RowSchema, SQLError, ScalarExpr};
+
+/// Catalog and lexical inputs for removing an unobserved output without losing its effects.
+#[derive(Clone, Copy)]
+pub struct OutputPruningContext<'a> {
+    pub aggregates: &'a dyn AggregateClassifier,
+    pub routines: Option<&'a dyn uqa_sql::routines::RoutineResolution>,
+    pub volatility: Option<&'a dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
+    pub visible_ctes: &'a dyn Fn(&str) -> bool,
+}
+
+impl<'a> OutputPruningContext<'a> {
+    pub fn new(aggregates: &'a dyn AggregateClassifier) -> Self {
+        Self {
+            aggregates,
+            routines: None,
+            volatility: None,
+            visible_ctes: &|_| false,
+        }
+    }
+}
 
 pub(super) fn prune(
     block: &mut QueryBlockPlan,
-    aggregates: &dyn AggregateClassifier,
-    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
-    volatility: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
-) {
+    context: OutputPruningContext<'_>,
+) -> Result<(), SQLError> {
     let Some(SourcePlan::Subquery {
         body,
         alias,
@@ -24,14 +42,14 @@ pub(super) fn prune(
         ..
     }) = &block.from
     else {
-        return;
+        return Ok(());
     };
     if !block.subqueries.is_empty() {
-        return;
+        return Ok(());
     }
     let mut required = BTreeSet::new();
     let mut all = false;
-    for expression in block.expressions() {
+    block.visit_expressions(&mut |expression| {
         super::output_demand::visit(expression, &mut |part| match part {
             ScalarExpr::Column(name) => {
                 if alias.as_deref() == Some(name.as_str())
@@ -55,9 +73,9 @@ pub(super) fn prune(
             ScalarExpr::Star | ScalarExpr::Position(_) => all = true,
             _ => {}
         });
-    }
+    });
     if all {
-        return;
+        return Ok(());
     }
     let aliases = column_aliases.clone();
     let Some(SourcePlan::Subquery { body, .. }) = &mut block.from else {
@@ -68,10 +86,8 @@ pub(super) fn prune(
         &aliases,
         &|name| required.contains(name),
         None,
-        aggregates,
-        routines,
-        volatility,
-    );
+        context,
+    )
 }
 
 fn has_named_output(query: &QueryPlan, aliases: &[String], name: &str) -> bool {
@@ -104,16 +120,14 @@ pub fn prune_outputs(
     aliases: &[String],
     required: &dyn Fn(&str) -> bool,
     schema: Option<&RowSchema>,
-    aggregates: &dyn AggregateClassifier,
-    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
-    volatility: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
-) {
+    context: OutputPruningContext<'_>,
+) -> Result<(), SQLError> {
     let names = schema
         .or(query.analyzed_output.as_ref())
         .map(|schema| schema.columns().to_vec())
         .or_else(|| uqa_sql::semantics::query_plan_output_columns(query));
     let Some(names) = names else {
-        return;
+        return Ok(());
     };
     let demanded = names
         .iter()
@@ -124,48 +138,45 @@ pub fn prune_outputs(
         query,
         &|position| demanded.get(position).copied().unwrap_or(true),
         schema,
-        aggregates,
-        routines,
-        volatility,
-    );
+        context,
+    )
 }
 
 pub(super) fn prune_positions(
     query: &mut QueryPlan,
     required: &dyn Fn(usize) -> bool,
     schema: Option<&RowSchema>,
-    aggregates: &dyn AggregateClassifier,
-    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
-    volatility: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
-) {
+    context: OutputPruningContext<'_>,
+) -> Result<(), SQLError> {
     if query.analyzed_output.is_none() {
         if let Some(schema) = schema {
             query.analyzed_output = Some(schema.clone());
             if let RelationalPlan::QueryBlock(block) = &mut query.root {
-                block.compute = block.compute_kind(aggregates);
+                block.compute = block.compute_kind(context.aggregates);
             }
         }
     }
     if matches!(query.root, RelationalPlan::SetOp { .. }) {
-        super::union_projection::prune(query, required, aggregates, routines, volatility);
-        return;
+        return super::union_projection::prune(query, required, context);
     }
     let schema = schema.or(query.analyzed_output.as_ref());
     let RelationalPlan::QueryBlock(inner) = &mut query.root else {
-        return;
+        return Ok(());
     };
     if inner.distinct || !inner.distinct_on.is_empty() || !inner.windows.is_empty() {
-        return;
+        return Ok(());
     }
     if !expand_local_stars(inner, query.analyzed_source.as_deref(), schema) {
-        return;
+        return Ok(());
     }
+    let visible_ctes =
+        |name: &str| query.ctes.iter().any(|cte| cte.name == name) || (context.visible_ctes)(name);
     let mut replacements = Vec::new();
     for (index, projection) in inner.projections.iter().enumerate() {
         if required(index)
             || needed_by_ordering(inner, index)
             || needed_by_grouping(inner, index, query.analyzed_source.as_deref())
-            || !removable(&projection.expr, aggregates)
+            || !removable(&projection.expr, &inner.subqueries, context, &visible_ctes)?
         {
             continue;
         }
@@ -216,9 +227,10 @@ pub(super) fn prune_positions(
         }
         projection.expr = expression;
     }
+    Ok(())
 }
 
-fn expand_local_stars(
+pub(crate) fn expand_local_stars(
     inner: &mut QueryBlockPlan,
     source: Option<&uqa_sql::plan::AnalyzedSource>,
     schema: Option<&RowSchema>,
@@ -294,8 +306,14 @@ fn needed_by_ordering(block: &QueryBlockPlan, index: usize) -> bool {
     })
 }
 
-fn removable(expression: &ScalarExpr, aggregates: &dyn AggregateClassifier) -> bool {
+fn removable(
+    expression: &ScalarExpr,
+    subqueries: &[QueryPlan],
+    context: OutputPruningContext<'_>,
+    visible_ctes: &dyn Fn(&str) -> bool,
+) -> Result<bool, SQLError> {
     let mut removable = true;
+    let mut contains_subquery = false;
     expression.visit(&mut |part| match part {
         ScalarExpr::Func {
             name,
@@ -308,7 +326,7 @@ fn removable(expression: &ScalarExpr, aggregates: &dyn AggregateClassifier) -> b
                 return;
             }
             let name = uqa_sql::semantics::builtin_function_dispatch_name(name);
-            if aggregates.is_registered_aggregate(&name)
+            if context.aggregates.is_registered_aggregate(&name)
                 || uqa_sql::semantics::sets::validation::builtin_returns_set(&name)
                 || binding.as_ref().is_none_or(|binding| !binding.builtin)
                 || uqa_sql::semantics::volatility::builtin_function_volatility(
@@ -326,14 +344,26 @@ fn removable(expression: &ScalarExpr, aggregates: &dyn AggregateClassifier) -> b
         {
             removable = false;
         }
-        ScalarExpr::WindowCall { .. }
-        | ScalarExpr::CompositeRow { .. }
-        | ScalarExpr::ScalarSubquery(_)
+        ScalarExpr::WindowCall { .. } | ScalarExpr::CompositeRow { .. } => removable = false,
+        ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
-        | ScalarExpr::InSubquery { .. } => removable = false,
+        | ScalarExpr::InSubquery { .. } => contains_subquery = true,
         _ => {}
     });
-    removable
+    if !removable || !contains_subquery {
+        return Ok(removable);
+    }
+    match context.volatility {
+        Some(catalog) => Ok(
+            !uqa_sql::semantics::volatility::scalar_in_scope_contains_volatile_function(
+                catalog,
+                expression,
+                subqueries,
+                visible_ctes,
+            )?,
+        ),
+        None => Ok(false),
+    }
 }
 
 #[cfg(test)]
@@ -344,6 +374,118 @@ mod tests {
         fn is_registered_aggregate(&self, _: &str) -> bool {
             false
         }
+    }
+
+    struct Catalog;
+    impl uqa_sql::semantics::volatility::VolatilityCatalog for Catalog {
+        fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+            None
+        }
+        fn routine_volatilities(
+            &self,
+            _: &str,
+            _: Option<&uqa_sql::ast::FunctionBinding>,
+        ) -> Option<Vec<FunctionVolatility>> {
+            None
+        }
+        fn view_query(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
+            if name == "broken" {
+                return Err(SQLError::Internal("catalog lookup failed".into()));
+            }
+            if name != "shadow" {
+                return Ok(None);
+            }
+            let crate::UnifiedPlan::Query(query) = crate::UnifiedPlan::lower(
+                uqa_sql::compile("SELECT nextval('effects')")
+                    .unwrap()
+                    .remove(0),
+            ) else {
+                unreachable!();
+            };
+            Ok(Some(*query))
+        }
+    }
+
+    #[test]
+    fn discarded_derived_subqueries_keep_their_lexical_scope_and_effects() {
+        for (sql, outer_cte, removed) in [
+            ("SELECT 7,(SELECT 1/0)", false, true),
+            (
+                "SELECT (SELECT nextval('effects')),(SELECT 1/0)",
+                false,
+                true,
+            ),
+            ("SELECT 7,(SELECT nextval('effects'))", false, false),
+            (
+                "SELECT 7,(WITH shadow AS (VALUES(1/0)) SELECT * FROM shadow)",
+                false,
+                true,
+            ),
+            ("SELECT 7,(SELECT * FROM shadow)", true, true),
+            ("SELECT 7,(SELECT * FROM shadow)", false, false),
+        ] {
+            let crate::UnifiedPlan::Query(mut query) =
+                crate::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+            else {
+                panic!("query");
+            };
+            query.analyzed_output = Some(RowSchema::with_types(
+                vec!["used".into(), "unused".into()],
+                vec![Some(uqa_sql::ColumnType::Integer); 2],
+            ));
+            prune_positions(
+                &mut query,
+                &|position| position == 0,
+                None,
+                OutputPruningContext {
+                    volatility: Some(&Catalog),
+                    visible_ctes: &|name| outer_cte && name == "shadow",
+                    ..OutputPruningContext::new(&NoAggregates)
+                },
+            )
+            .unwrap();
+            let RelationalPlan::QueryBlock(block) = &query.root else {
+                unreachable!();
+            };
+            assert_eq!(
+                matches!(
+                    block.projections[1].expr,
+                    ScalarExpr::TypedLiteral {
+                        value: Value::Null,
+                        ..
+                    }
+                ),
+                removed,
+                "{sql}, outer CTE={outer_cte}"
+            );
+        }
+    }
+
+    #[test]
+    fn discarded_derived_subquery_catalog_failure_is_not_hidden() {
+        let crate::UnifiedPlan::Query(mut query) = crate::UnifiedPlan::lower(
+            uqa_sql::compile("SELECT (SELECT * FROM broken)")
+                .unwrap()
+                .remove(0),
+        ) else {
+            panic!("query");
+        };
+        let before = query.clone();
+        let error = prune_positions(
+            &mut query,
+            &|_| false,
+            None,
+            OutputPruningContext {
+                volatility: Some(&Catalog),
+                ..OutputPruningContext::new(&NoAggregates)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "internal error: catalog lookup failed");
+        assert_eq!(
+            serde_json::to_value(query).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
     }
 
     #[test]
@@ -369,10 +511,9 @@ mod tests {
                 &mut query,
                 &|_| false,
                 Some(&output),
-                &NoAggregates,
-                None,
-                None,
-            );
+                OutputPruningContext::new(&NoAggregates),
+            )
+            .unwrap();
             let RelationalPlan::QueryBlock(block) = &query.root else {
                 panic!("block");
             };
@@ -407,10 +548,9 @@ mod tests {
             &mut query,
             &|position| position == 1,
             None,
-            &NoAggregates,
-            None,
-            None,
-        );
+            OutputPruningContext::new(&NoAggregates),
+        )
+        .unwrap();
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block");
         };
@@ -448,10 +588,9 @@ mod tests {
             &["selected".into(), "unused".into()],
             &|name| name == "selected",
             Some(&schema),
-            &NoAggregates,
-            None,
-            None,
-        );
+            OutputPruningContext::new(&NoAggregates),
+        )
+        .unwrap();
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block");
         };
@@ -471,7 +610,7 @@ mod tests {
         assert_eq!(block.projections[1].alias.as_deref(), Some("second"));
         assert_eq!(
             block.privilege_columns,
-            BTreeSet::from([uqa_sql::ColumnIdentity::unqualified("b")])
+            uqa_core::memory::OwnedSet::from([uqa_sql::ColumnIdentity::unqualified("b")])
         );
     }
 
@@ -522,7 +661,7 @@ mod tests {
                 RowSchema::with_types(vec!["v".into()], vec![Some(uqa_sql::ColumnType::Text)]);
             inner.projections[0].expr =
                 uqa_sql::bind_type_introspection(inner.projections[0].expr.clone(), &schema, &[]);
-            prune(block, &NoAggregates, None, None);
+            prune(block, OutputPruningContext::new(&NoAggregates)).unwrap();
             let Some(SourcePlan::Subquery { body, .. }) = &block.from else {
                 unreachable!()
             };
@@ -543,7 +682,7 @@ mod tests {
             if pruned {
                 assert_eq!(
                     inner.privilege_columns,
-                    BTreeSet::from([uqa_sql::ColumnIdentity::unqualified("v")])
+                    uqa_core::memory::OwnedSet::from([uqa_sql::ColumnIdentity::unqualified("v")])
                 );
                 assert_eq!(inner.projections[0].alias.as_deref(), Some("x"));
                 assert_eq!(
@@ -581,7 +720,7 @@ mod tests {
             let RelationalPlan::QueryBlock(outer) = &mut query.root else {
                 panic!("outer block");
             };
-            prune(outer, &NoAggregates, None, None);
+            prune(outer, OutputPruningContext::new(&NoAggregates)).unwrap();
             let Some(SourcePlan::Subquery { body, .. }) = &outer.from else {
                 panic!("derived source");
             };

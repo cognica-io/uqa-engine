@@ -89,6 +89,34 @@ fn lift(query: &mut QueryPlan) {
 }
 
 #[test]
+fn relation_authority_boundaries_retain_their_query_and_qualification() {
+    for predicate in ["k>0", "nextval('effect')>k"] {
+        let mut query = analyzed(
+            "SELECT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
+            predicate,
+        );
+        let RelationalPlan::QueryBlock(root) = &mut query.root else {
+            panic!("root")
+        };
+        let Some(SourcePlan::Subquery { body, .. }) = &mut root.from else {
+            panic!("source")
+        };
+        body.relation_privilege_subject = Some("input_reader".into());
+        let before = serde_json::to_value(&query).unwrap();
+        lift(&mut query);
+        predicates::push(
+            &mut query,
+            &Context {
+                routines: &Catalog,
+                volatility: &Catalog,
+                relations_bound: false,
+            },
+        );
+        assert_eq!(serde_json::to_value(&query).unwrap(), before);
+    }
+}
+
+#[test]
 fn volatile_and_subquery_qualifications_precede_pure_outputs() {
     for predicate in ["nextval('effect')%2=0", "k=(SELECT 2)"] {
         let mut query = analyzed(

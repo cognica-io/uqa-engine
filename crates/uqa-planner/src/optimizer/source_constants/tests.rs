@@ -25,8 +25,16 @@ impl uqa_sql::semantics::volatility::VolatilityCatalog for Views {
         None
     }
 
-    fn view_query(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
-        Ok((name == "literal_view").then(|| self.0.clone()))
+    fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+        panic!("constant inspection must borrow the retained view")
+    }
+
+    fn with_view_query(
+        &self,
+        name: &str,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<bool, SQLError>,
+    ) -> Result<Option<bool>, SQLError> {
+        (name == "literal_view").then(|| read(&self.0)).transpose()
     }
 }
 
@@ -117,5 +125,71 @@ fn source_constants_preserve_resolved_unknown_output_types() {
             "{source}"
         );
         assert_eq!(serde_json::to_value(&block.from).unwrap(), original_source);
+    }
+}
+
+#[test]
+fn view_constant_inspection_does_not_copy_unrelated_predicate_payloads() {
+    for definition in [
+        "SELECT 1 AS x WHERE 'payload' = 'x'",
+        "SELECT 1 AS x FROM underlying_table WHERE 'payload' = 'x'",
+        "WITH t AS (SELECT 'payload') SELECT 1 AS x",
+    ] {
+        let measure = |bytes| {
+            let mut views = Views(query(definition));
+            views.0.rewrite_scalar_expressions(&mut |expression| {
+                if let ScalarExpr::Literal(uqa_core::Value::Str(text)) = expression {
+                    if text == "payload" {
+                        *text = "x".repeat(bytes);
+                    }
+                }
+            });
+            let mut plan = query("SELECT x FROM literal_view");
+            let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+                panic!("query block")
+            };
+            let source = serde_json::to_value(&block.from).unwrap();
+            let allocations = allocation_counter::measure(|| {
+                propagate_source_constants(block, None, Some(&views)).unwrap();
+            });
+            assert_eq!(serde_json::to_value(&block.from).unwrap(), source);
+            (allocations.count_total, allocations.bytes_total)
+        };
+        assert_eq!(measure(1), measure(4 * 1024 * 1024), "{definition}");
+    }
+}
+
+#[test]
+fn borrowed_view_constants_keep_partial_aliases_and_ambiguous_output_names() {
+    for (columns, aliases, expected) in [
+        (
+            vec!["catalog_a", "catalog_b"],
+            vec!["renamed"],
+            [true, true],
+        ),
+        (vec!["renamed", "renamed"], vec![], [false, false]),
+    ] {
+        let views = Views(query("SELECT 1 AS a, 2 AS b"));
+        let mut plan = query("SELECT q.renamed, q.catalog_b FROM literal_view q");
+        let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+            panic!("query block")
+        };
+        let Some(SourcePlan::Table {
+            bound_columns,
+            column_aliases,
+            ..
+        }) = &mut block.from
+        else {
+            panic!("view source")
+        };
+        *bound_columns = Some(columns.into_iter().map(String::from).collect());
+        *column_aliases = aliases.into_iter().map(String::from).collect();
+        propagate_source_constants(block, None, Some(&views)).unwrap();
+        for (projection, expected) in block.projections.iter().zip(expected) {
+            assert_eq!(
+                matches!(projection.expr, ScalarExpr::TypedLiteral { .. }),
+                expected
+            );
+        }
     }
 }

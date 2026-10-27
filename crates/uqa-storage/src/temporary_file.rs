@@ -16,6 +16,7 @@ use chacha20poly1305::{
 };
 use cipher::zeroize::Zeroize;
 use parking_lot::Mutex;
+use uqa_core::io_usage::{BlockClass, BlockOperation, IOContext};
 
 const BLOCK_BYTES: usize = 16 * 1024;
 const NONCE_BYTES: usize = 24;
@@ -216,6 +217,8 @@ impl<const BYTES: usize> Owner<BYTES> {
     fn read_block(&mut self, block: u64) -> io::Result<[u8; BYTES]> {
         let mut plaintext = [0_u8; BYTES];
         if block < self.length.div_ceil(BYTES as u64) {
+            let observation =
+                IOContext::block_operation(BlockClass::Temporary, BlockOperation::Read, 1);
             #[cfg(test)]
             {
                 self.faults.read_blocks += 1;
@@ -241,6 +244,9 @@ impl<const BYTES: usize> Owner<BYTES> {
                 ));
             }
             file.read_exact(&mut plaintext[..populated])?;
+            if let Some(observation) = observation {
+                observation.complete();
+            }
             self.cipher
                 .decrypt_inout_detached(
                     nonce.into(),
@@ -285,6 +291,8 @@ impl<const BYTES: usize> Owner<BYTES> {
         header[..NONCE_BYTES].copy_from_slice(&nonce);
         header[NONCE_BYTES..NONCE_BYTES + LENGTH_BYTES].copy_from_slice(&length.to_le_bytes());
         header[NONCE_BYTES + LENGTH_BYTES..].copy_from_slice(&tag);
+        let observation =
+            IOContext::block_operation(BlockClass::Temporary, BlockOperation::Write, 1);
         if !existing {
             // The owner lock and logical length hide a fresh block until its entire extent succeeds. Its initial selector can accompany the ciphertext; there is no earlier slot to preserve. Keep the unused slot sparse instead of writing a whole block of padding.
             self.file
@@ -295,7 +303,11 @@ impl<const BYTES: usize> Owner<BYTES> {
                 IoSlice::new(&header),
                 IoSlice::new(&ciphertext[..populated]),
             ])?;
-            return self.extend_physical(record_offset::<BYTES>(block + 1)?);
+            self.extend_physical(record_offset::<BYTES>(block + 1)?)?;
+            if let Some(observation) = observation {
+                observation.complete();
+            }
+            return Ok(());
         }
         // A replacement reaches the inactive slot before its one-byte publication marker. Failed short writes leave the authoritative slot unchanged, including the prefix retained by append rollback.
         self.file
@@ -308,7 +320,11 @@ impl<const BYTES: usize> Owner<BYTES> {
         self.file
             .as_file_mut()
             .seek(SeekFrom::Start(record_offset::<BYTES>(block)?))?;
-        self.write_physical(&[next])
+        self.write_physical(&[next])?;
+        if let Some(observation) = observation {
+            observation.complete();
+        }
+        Ok(())
     }
 
     fn write_physical(&mut self, bytes: &[u8]) -> io::Result<()> {

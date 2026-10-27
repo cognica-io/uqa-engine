@@ -4,11 +4,20 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! CTE scope, reachability, and dependency ordering.
+//! Ordinary name-returning adapters for the shared borrowed CTE analysis.
 
-use crate::plan::{CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, SourcePlan};
+use super::cte_order::{
+    analysis::CteAnalysis,
+    order_cte_plans_with_control,
+    references::{self, External, Selection},
+};
+use crate::plan::{CommandPlan, CtePlan, CtePlanBody, QueryPlan, SourcePlan};
 use crate::SQLError;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{cell::RefCell, collections::BTreeSet};
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    RelationIdentity, RelationName,
+};
 
 /// Decode a source reference into a CTE identifier. Qualified relations never resolve to CTEs.
 pub fn cte_reference_name(reference: &str) -> Option<String> {
@@ -17,138 +26,224 @@ pub fn cte_reference_name(reference: &str) -> Option<String> {
 }
 
 pub fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
-    let targets = plan
-        .ctes
-        .iter()
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    if targets.is_empty() {
+    reachable_statement_cte_names(&plan.ctes, primary_query_cte_references(plan))
+}
+
+/// The WITH items a command reads, plus every data-modifying item and their dependencies.
+pub fn reachable_command_cte_names(command: &CommandPlan) -> BTreeSet<String> {
+    reachable_statement_cte_names(
+        command.ctes(),
+        primary_command_cte_references(
+            command.ctes(),
+            command.query_inputs(),
+            command.source_input(),
+        ),
+    )
+}
+
+/// Resolve the shared dependency closure. Unreferenced SELECT items do not run, even when they contain volatile functions.
+pub fn reachable_statement_cte_names(
+    ctes: &[CtePlan],
+    mut reachable: BTreeSet<String>,
+) -> BTreeSet<String> {
+    if ctes.is_empty() {
         return BTreeSet::new();
     }
-
-    let mut reachable = plan
-        .ctes
-        .iter()
-        .filter(|cte| cte.body.modifies_data())
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    collect_target_cte_references_from_root(&plan.root, &targets, &BTreeSet::new(), &mut reachable);
-
-    let mut expanded = BTreeSet::new();
-    loop {
-        let pending = plan
-            .ctes
-            .iter()
+    let mut analysis = CteAnalysis::new(ctes, ProductionControl::uncontrolled())
+        .expect("ordinary CTE dependencies");
+    analysis
+        .set_primary_names(reachable.iter().map(String::as_str))
+        .expect("ordinary CTE roots");
+    let selected = analysis.reachable().expect("ordinary CTE reachability");
+    reachable.extend(
+        ctes.iter()
             .enumerate()
-            .filter(|(_, cte)| reachable.contains(&cte.name) && !expanded.contains(&cte.name))
-            .collect::<Vec<_>>();
-        if pending.is_empty() {
-            break;
-        }
-        for (index, cte) in pending {
-            expanded.insert(cte.name.clone());
-            let visible_dependencies = if cte.recursive {
-                targets.clone()
-            } else {
-                plan.ctes[..index]
-                    .iter()
-                    .map(|dependency| dependency.name.clone())
-                    .collect::<BTreeSet<_>>()
-            };
-            collect_target_cte_references_from_body(
-                &cte.body,
-                &visible_dependencies,
-                &BTreeSet::new(),
-                &mut reachable,
-            );
-        }
-    }
+            .filter(|(index, _)| selected[*index])
+            .map(|(_, cte)| cte.name.clone()),
+    );
     reachable
 }
 
-/// The WITH items of `ctes` that the definition of the item at `index` names: the items defined before it, or any item of a recursive list.
+/// The WITH items visible to and named by one definition, respecting nested WITH scopes.
 pub fn cte_definition_references(ctes: &[CtePlan], index: usize) -> BTreeSet<String> {
     let cte = &ctes[index];
-    let visible = if cte.recursive {
-        ctes.iter()
-    } else {
-        ctes[..index].iter()
-    }
-    .map(|cte| cte.name.clone())
-    .collect::<BTreeSet<_>>();
-    let mut references = BTreeSet::new();
-    collect_target_cte_references_from_body(&cte.body, &visible, &BTreeSet::new(), &mut references);
-    references
+    let ceiling = if cte.recursive { ctes.len() } else { index };
+    collect_names(
+        ctes[..ceiling].iter().map(|cte| cte.name.as_str()),
+        |external| {
+            references::body(
+                &cte.body,
+                external,
+                ProductionControl::uncontrolled(),
+                Selection::Reachable,
+            )
+        },
+    )
 }
 
-/// The WITH items of `plan` that its primary query names outside the items' own definitions.
+/// The WITH items that the primary query names outside the items' own definitions.
 pub fn primary_query_cte_references(plan: &QueryPlan) -> BTreeSet<String> {
-    let targets = plan
-        .ctes
+    primary_query_cte_references_with_control(plan, ProductionControl::uncontrolled())
+        .expect("ordinary CTE references")
         .iter()
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut references = BTreeSet::new();
-    if !targets.is_empty() {
-        collect_target_cte_references_from_root(
-            &plan.root,
-            &targets,
-            &BTreeSet::new(),
-            &mut references,
-        );
-    }
-    references
+        .map(|name| (*name).to_owned())
+        .collect()
 }
 
-/// The WITH items of a data-modifying statement that its own clauses name: the queries and the source relation it evaluates in the scope of `ctes`.
-pub fn primary_command_cte_references(
+pub fn primary_query_cte_references_with_control<'p>(
+    plan: &'p QueryPlan,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<&'p str>>, SQLError> {
+    collect_names_with_control(
+        plan.ctes.iter().map(|cte| cte.name.as_str()),
+        |external| references::query_root(&plan.root, external, control, Selection::Reachable),
+        control,
+    )
+}
+
+/// The WITH items named by a command's own query arenas and source input.
+pub fn primary_command_cte_references<'a>(
     ctes: &[CtePlan],
-    queries: &[&QueryPlan],
+    queries: impl IntoIterator<Item = &'a QueryPlan>,
     source: Option<&SourcePlan>,
 ) -> BTreeSet<String> {
-    let targets = ctes
-        .iter()
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut references = BTreeSet::new();
-    if targets.is_empty() {
-        return references;
-    }
-    for query in queries {
-        collect_target_cte_references_from_nested_query(
-            query,
-            &targets,
-            &BTreeSet::new(),
-            &mut references,
-        );
-    }
-    if let Some(source) = source {
-        collect_target_cte_references_from_source(
-            source,
-            &targets,
-            &BTreeSet::new(),
-            &mut references,
-        );
-    }
-    references
+    primary_command_cte_references_with_control(
+        ctes,
+        queries,
+        source,
+        ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary CTE references")
+    .iter()
+    .map(|name| (*name).to_owned())
+    .collect()
 }
 
-/// Only a recursive WITH item can reference its own binding. An ordinary definition can read a same-name enclosing CTE or catalog relation.
+pub fn primary_command_cte_references_with_control<'p, 'q>(
+    ctes: &'p [CtePlan],
+    queries: impl IntoIterator<Item = &'q QueryPlan>,
+    source: Option<&SourcePlan>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<&'p str>>, SQLError> {
+    collect_names_with_control(
+        ctes.iter().map(|cte| cte.name.as_str()),
+        |external| {
+            references::command_root(queries, source, external, control, Selection::Reachable)
+        },
+        control,
+    )
+}
+
+pub fn reachable_statement_ctes_with_control<'p, 'n>(
+    ctes: &'p [CtePlan],
+    primary: impl IntoIterator<Item = &'n str>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<&'p CtePlan>>, SQLError> {
+    let mut analysis = CteAnalysis::new(ctes, control)?;
+    analysis.set_primary_names(primary)?;
+    let selected = analysis.reachable()?;
+    let mut plans = ProductionVec::new(control);
+    for (index, plan) in ctes.iter().enumerate() {
+        control.check()?;
+        if selected[index] {
+            plans.push_copy(plan)?;
+        }
+    }
+    Ok(plans.finish()?)
+}
+
+/// Only recursive definitions can reference their own binding.
 pub fn cte_references_own_name(cte: &CtePlan) -> bool {
-    if !cte.recursive {
-        return false;
-    }
-    let targets = BTreeSet::from([cte.name.clone()]);
-    let mut references = BTreeSet::new();
-    collect_target_cte_references_from_body(&cte.body, &targets, &BTreeSet::new(), &mut references);
-    references.contains(&cte.name)
+    cte_references_own_name_with_control(cte, ProductionControl::uncontrolled())
+        .expect("ordinary CTE self reference")
 }
 
-/// The already-visible CTE bindings read by a definition, respecting its nested WITH scopes.
+pub fn cte_references_own_name_with_control(
+    cte: &CtePlan,
+    control: ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    control.check()?;
+    if !cte.recursive {
+        return Ok(false);
+    }
+    let found = std::cell::Cell::new(false);
+    references::body(
+        &cte.body,
+        &|reference| {
+            control.check()?;
+            if RelationIdentity::borrowed_reference(reference).is_some_and(|reference| {
+                reference.schema.is_none() && reference.name == RelationName::decoded(&cte.name)
+            }) {
+                found.set(true);
+            }
+            Ok(())
+        },
+        control,
+        Selection::Reachable,
+    )?;
+    Ok(found.get())
+}
+
+/// Already-visible bindings read by a definition, respecting nested WITH scopes.
 pub fn cte_external_references(body: &CtePlanBody, visible: &BTreeSet<String>) -> BTreeSet<String> {
-    let mut references = BTreeSet::new();
-    collect_target_cte_references_from_body(body, visible, &BTreeSet::new(), &mut references);
-    references
+    collect_names(visible.iter().map(String::as_str), |external| {
+        references::body(
+            body,
+            external,
+            ProductionControl::uncontrolled(),
+            Selection::Reachable,
+        )
+    })
+}
+
+fn collect_names<'a>(
+    names: impl Iterator<Item = &'a str>,
+    visit: impl FnOnce(&External<'_>) -> Result<(), SQLError>,
+) -> BTreeSet<String> {
+    collect_names_with_control(names, visit, ProductionControl::uncontrolled())
+        .expect("ordinary CTE references")
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect()
+}
+
+fn collect_names_with_control<'p>(
+    names: impl Iterator<Item = &'p str>,
+    visit: impl FnOnce(&External<'_>) -> Result<(), SQLError>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<&'p str>>, SQLError> {
+    let mut retained = ProductionVec::new(control);
+    let mut selected = ProductionVec::new(control);
+    let mut result = ProductionVec::new(control);
+    for name in names {
+        retained.push_copy((RelationName::decoded(name), name))?;
+        selected.push_copy(false)?;
+    }
+    if retained.is_empty() {
+        return Ok(result.finish()?);
+    }
+    retained
+        .as_mut_slice()
+        .sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let selected = RefCell::new(selected);
+    visit(&|reference| {
+        control.check()?;
+        if let Some(reference) = RelationIdentity::borrowed_reference(reference)
+            .filter(|reference| reference.schema.is_none())
+        {
+            if let Ok(index) = retained.binary_search_by(|(name, _)| name.cmp(&reference.name)) {
+                selected.borrow_mut().as_mut_slice()[index] = true;
+            }
+        }
+        Ok(())
+    })?;
+    for ((_, name), selected) in retained.iter().zip(selected.into_inner().iter()) {
+        control.check()?;
+        if *selected {
+            result.push_copy(*name)?;
+        }
+    }
+    Ok(result.finish()?)
 }
 
 pub fn ordered_plan_ctes(plan: &QueryPlan) -> Result<Vec<&CtePlan>, SQLError> {
@@ -156,389 +251,32 @@ pub fn ordered_plan_ctes(plan: &QueryPlan) -> Result<Vec<&CtePlan>, SQLError> {
 }
 
 pub fn ordered_cte_plans(ctes: &[CtePlan]) -> Result<Vec<&CtePlan>, SQLError> {
-    order_cte_plans(ctes.iter().collect())
+    Ok(
+        order_cte_plans_with_control(ctes, ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary CTE order"),
+    )
 }
 
 pub fn order_cte_plans(plans: Vec<&CtePlan>) -> Result<Vec<&CtePlan>, SQLError> {
-    if !plans.iter().any(|cte| cte.recursive) {
+    if !plans.iter().any(|plan| plan.recursive) {
         return Ok(plans);
     }
-    let targets = plans
-        .iter()
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    let dependencies = plans
-        .iter()
-        .map(|cte| {
-            let mut references = BTreeSet::new();
-            collect_target_cte_references_from_body(
-                &cte.body,
-                &targets,
-                &BTreeSet::new(),
-                &mut references,
-            );
-            references.remove(&cte.name);
-            references
-        })
-        .collect::<Vec<_>>();
-    let mut emitted = BTreeSet::new();
-    let mut ordered = Vec::with_capacity(plans.len());
-    let mut remaining = (0..plans.len()).collect::<BTreeSet<_>>();
-    while !remaining.is_empty() {
-        let ready = remaining
-            .iter()
-            .copied()
-            .find(|index| dependencies[*index].is_subset(&emitted));
-        let Some(index) = ready else {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "mutual recursion between WITH items is not implemented".into(),
-            });
-        };
-        remaining.remove(&index);
-        emitted.insert(plans[index].name.clone());
-        ordered.push(plans[index]);
-    }
-    Ok(ordered)
+    Ok(
+        order_cte_plans_with_control(plans, ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary CTE order"),
+    )
 }
 
-/// Return CTEs with exactly one syntactic reference to their own binding. Nested same-name definitions do not add consumers of the enclosing definition.
+/// Definitions with exactly one syntactic reference to their own binding, including references in unread nested definitions.
 pub fn single_reference_plan_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
-    let targets = plan
-        .ctes
+    let analysis = CteAnalysis::query(plan, ProductionControl::uncontrolled())
+        .expect("ordinary CTE reference counts");
+    plan.ctes
         .iter()
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut counts = targets
-        .iter()
-        .map(|name| (name.clone(), 0usize))
-        .collect::<BTreeMap<_, _>>();
-    let mut visible = if plan.ctes.iter().any(|cte| cte.recursive) {
-        targets.clone()
-    } else {
-        BTreeSet::new()
-    };
-    for cte in &plan.ctes {
-        count_cte_body_references(&cte.body, &visible, &mut counts);
-        visible.insert(cte.name.clone());
-    }
-    count_relational_cte_references(&plan.root, &targets, &mut counts);
-    counts
-        .into_iter()
-        .filter_map(|(name, count)| (count == 1).then_some(name))
+        .enumerate()
+        .filter(|(index, _)| analysis.single_reference(*index))
+        .map(|(_, cte)| cte.name.clone())
         .collect()
-}
-
-fn count_plan_cte_references(
-    plan: &QueryPlan,
-    targets: &BTreeSet<String>,
-    counts: &mut BTreeMap<String, usize>,
-) {
-    let visible = count_nested_cte_definitions(&plan.ctes, targets, counts);
-    count_relational_cte_references(&plan.root, &visible, counts);
-}
-
-fn count_nested_cte_definitions(
-    ctes: &[CtePlan],
-    targets: &BTreeSet<String>,
-    counts: &mut BTreeMap<String, usize>,
-) -> BTreeSet<String> {
-    let mut visible = targets.clone();
-    if ctes.iter().any(|cte| cte.recursive) {
-        for cte in ctes {
-            visible.remove(&cte.name);
-        }
-    }
-    for cte in ctes {
-        count_cte_body_references(&cte.body, &visible, counts);
-        visible.remove(&cte.name);
-    }
-    visible
-}
-
-fn count_cte_body_references(
-    body: &CtePlanBody,
-    targets: &BTreeSet<String>,
-    counts: &mut BTreeMap<String, usize>,
-) {
-    match body {
-        CtePlanBody::Query(query) => count_plan_cte_references(query, targets, counts),
-        CtePlanBody::Command(command) => {
-            let visible = count_nested_cte_definitions(command.ctes(), targets, counts);
-            for query in command.query_inputs() {
-                count_plan_cte_references(query, &visible, counts);
-            }
-            if let Some(source) = command.source_input() {
-                count_source_cte_references(source, &visible, counts);
-            }
-        }
-    }
-}
-
-fn count_relational_cte_references(
-    plan: &RelationalPlan,
-    targets: &BTreeSet<String>,
-    counts: &mut BTreeMap<String, usize>,
-) {
-    match plan {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = &block.from {
-                count_source_cte_references(source, targets, counts);
-            }
-            for subquery in &block.subqueries {
-                count_plan_cte_references(subquery, targets, counts);
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            count_plan_cte_references(left, targets, counts);
-            count_plan_cte_references(right, targets, counts);
-            for subquery in subqueries {
-                count_plan_cte_references(subquery, targets, counts);
-            }
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for subquery in subqueries {
-                count_plan_cte_references(subquery, targets, counts);
-            }
-        }
-    }
-}
-
-fn count_source_cte_references(
-    source: &SourcePlan,
-    targets: &BTreeSet<String>,
-    counts: &mut BTreeMap<String, usize>,
-) {
-    match source {
-        crate::plan::SourcePlan::RetainedRows(_) => {}
-        SourcePlan::Table { name, .. } => {
-            if let Some(name) = cte_reference_name(name).filter(|name| targets.contains(name)) {
-                *counts.entry(name).or_default() += 1;
-            }
-        }
-        SourcePlan::Join { left, right, .. } => {
-            count_source_cte_references(left, targets, counts);
-            count_source_cte_references(right, targets, counts);
-        }
-        SourcePlan::Subquery { body, .. } => {
-            count_plan_cte_references(body, targets, counts);
-        }
-        SourcePlan::Values { .. }
-        | SourcePlan::Function { .. }
-        | SourcePlan::FunctionGroup { .. } => {}
-    }
-}
-
-fn collect_target_cte_references_from_root(
-    root: &RelationalPlan,
-    targets: &BTreeSet<String>,
-    shadowed: &BTreeSet<String>,
-    references: &mut BTreeSet<String>,
-) {
-    match root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = &block.from {
-                collect_target_cte_references_from_source(source, targets, shadowed, references);
-            }
-            for subquery in &block.subqueries {
-                collect_target_cte_references_from_nested_query(
-                    subquery, targets, shadowed, references,
-                );
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            collect_target_cte_references_from_nested_query(left, targets, shadowed, references);
-            collect_target_cte_references_from_nested_query(right, targets, shadowed, references);
-            for subquery in subqueries {
-                collect_target_cte_references_from_nested_query(
-                    subquery, targets, shadowed, references,
-                );
-            }
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for subquery in subqueries {
-                collect_target_cte_references_from_nested_query(
-                    subquery, targets, shadowed, references,
-                );
-            }
-        }
-    }
-}
-
-fn collect_target_cte_references_from_source(
-    source: &SourcePlan,
-    targets: &BTreeSet<String>,
-    shadowed: &BTreeSet<String>,
-    references: &mut BTreeSet<String>,
-) {
-    match source {
-        crate::plan::SourcePlan::RetainedRows(_) => {}
-        SourcePlan::Table { name, .. } => {
-            if let Some(name) = cte_reference_name(name)
-                .filter(|name| targets.contains(name) && !shadowed.contains(name))
-            {
-                references.insert(name);
-            }
-        }
-        SourcePlan::Join { left, right, .. } => {
-            collect_target_cte_references_from_source(left, targets, shadowed, references);
-            collect_target_cte_references_from_source(right, targets, shadowed, references);
-        }
-        SourcePlan::Subquery { body, .. } => {
-            collect_target_cte_references_from_nested_query(body, targets, shadowed, references);
-        }
-        SourcePlan::Values { .. }
-        | SourcePlan::Function { .. }
-        | SourcePlan::FunctionGroup { .. } => {}
-    }
-}
-
-fn collect_target_cte_references_from_command_root(
-    command: &CommandPlan,
-    targets: &BTreeSet<String>,
-    shadowed: &BTreeSet<String>,
-    references: &mut BTreeSet<String>,
-) {
-    for query in command.query_inputs() {
-        collect_target_cte_references_from_nested_query(query, targets, shadowed, references);
-    }
-    if let Some(source) = command.source_input() {
-        collect_target_cte_references_from_source(source, targets, shadowed, references);
-    }
-}
-
-fn collect_target_cte_references_from_body(
-    body: &CtePlanBody,
-    targets: &BTreeSet<String>,
-    shadowed: &BTreeSet<String>,
-    references: &mut BTreeSet<String>,
-) {
-    let CtePlanBody::Command(command) = body else {
-        if let CtePlanBody::Query(query) = body {
-            collect_target_cte_references_from_nested_query(query, targets, shadowed, references);
-        }
-        return;
-    };
-    let locals = command
-        .ctes()
-        .iter()
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut reachable = command
-        .ctes()
-        .iter()
-        .filter(|cte| cte.body.modifies_data())
-        .map(|cte| cte.name.clone())
-        .collect::<BTreeSet<_>>();
-    collect_target_cte_references_from_command_root(
-        command,
-        &locals,
-        &BTreeSet::new(),
-        &mut reachable,
-    );
-    let mut expanded = BTreeSet::new();
-    loop {
-        let pending = command
-            .ctes()
-            .iter()
-            .enumerate()
-            .filter(|(_, cte)| reachable.contains(&cte.name) && !expanded.contains(&cte.name))
-            .collect::<Vec<_>>();
-        if pending.is_empty() {
-            break;
-        }
-        for (index, cte) in pending {
-            expanded.insert(cte.name.clone());
-            let visible = if cte.recursive {
-                locals.clone()
-            } else {
-                command.ctes()[..index]
-                    .iter()
-                    .map(|cte| cte.name.clone())
-                    .collect()
-            };
-            collect_target_cte_references_from_body(
-                &cte.body,
-                &visible,
-                &BTreeSet::new(),
-                &mut reachable,
-            );
-        }
-    }
-    let mut root_shadowed = shadowed.clone();
-    root_shadowed.extend(locals.iter().cloned());
-    collect_target_cte_references_from_command_root(command, targets, &root_shadowed, references);
-    let mut preceding = shadowed.clone();
-    for cte in command.ctes() {
-        if reachable.contains(&cte.name) {
-            let definition = if cte.recursive {
-                shadowed.union(&locals).cloned().collect()
-            } else {
-                preceding.clone()
-            };
-            collect_target_cte_references_from_body(&cte.body, targets, &definition, references);
-        }
-        preceding.insert(cte.name.clone());
-    }
-}
-
-fn collect_target_cte_references_from_nested_query(
-    plan: &QueryPlan,
-    targets: &BTreeSet<String>,
-    shadowed: &BTreeSet<String>,
-    references: &mut BTreeSet<String>,
-) {
-    let local_reachable = reachable_plan_cte_names(plan);
-    let mut root_shadowed = shadowed.clone();
-    root_shadowed.extend(
-        plan.ctes
-            .iter()
-            .map(|cte| cte.name.clone())
-            .filter(|name| targets.contains(name)),
-    );
-    collect_target_cte_references_from_root(&plan.root, targets, &root_shadowed, references);
-    let recursive_scope = plan.ctes.iter().any(|cte| cte.recursive).then(|| {
-        plan.ctes
-            .iter()
-            .map(|cte| cte.name.clone())
-            .collect::<BTreeSet<_>>()
-    });
-    let mut preceding = BTreeSet::new();
-    for cte in &plan.ctes {
-        if local_reachable.contains(&cte.name) {
-            let mut definition_shadowed = shadowed.clone();
-            if let Some(recursive_scope) = recursive_scope.as_ref() {
-                definition_shadowed.extend(
-                    recursive_scope
-                        .iter()
-                        .filter(|name| targets.contains(*name))
-                        .cloned(),
-                );
-            } else {
-                definition_shadowed.extend(
-                    preceding
-                        .iter()
-                        .filter(|name| targets.contains(*name))
-                        .cloned(),
-                );
-            }
-            collect_target_cte_references_from_body(
-                &cte.body,
-                targets,
-                &definition_shadowed,
-                references,
-            );
-        }
-        preceding.insert(cte.name.clone());
-    }
 }

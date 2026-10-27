@@ -99,9 +99,8 @@ impl SequenceValueTransactions for Engine {
         &self,
         operation: SequenceValueOperation<'_>,
     ) -> Result<i64, SequenceValueError> {
-        // Query workers already belong to the caller's transaction and must not reenter its thread-owned statement gate.
+        // SQL workers run inside the parent statement's admitted operation. Its owner receives their errors and unwinds only after execution joins them; a worker must neither reenter the statement gate nor roll back a transaction still used by its siblings. Direct value calls enter that same ownership boundary in with_sequence_value_session.
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()?;
             operation()
         } else {
             self.transaction_with_error(|_| operation(), SequenceValueError::from)
@@ -149,13 +148,18 @@ impl Engine {
             .load(std::sync::atomic::Ordering::Relaxed)
             == 0
             && self.session.row_lock_statements.lock().is_empty();
-        if outside_statement && self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(|error| error.to_string())?;
-            self.prepare_explicit_statement_snapshot(true)
-                .map_err(|error| error.to_string())?;
-        }
-        operation(self.sequence_value_context()).map_err(|error| error.to_string())
+        let run = |engine: &Self| {
+            if outside_statement {
+                engine.prepare_explicit_statement_snapshot(true)?;
+            }
+            operation(engine.sequence_value_context())
+        };
+        let result = if self.transaction_depth() != 0 {
+            self.run_existing_transaction_operation(|| run(self), SequenceValueError::from)
+        } else {
+            self.transaction_with_error(run, SequenceValueError::from)
+        };
+        result.map_err(|error| error.to_string())
     }
 
     pub fn nextval(&self, name: &str) -> Result<i64, String> {

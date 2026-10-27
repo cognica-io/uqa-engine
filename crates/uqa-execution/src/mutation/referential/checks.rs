@@ -87,10 +87,33 @@ impl ForeignKeyCheck {
     }
 }
 
-fn referencing_key_changed(columns: &[String], old: &Document, new: &Document) -> bool {
-    columns
-        .iter()
-        .any(|column| old.get(column) != new.get(column))
+fn referencing_key_changed(
+    columns: &[String],
+    old: &Document,
+    new: &Document,
+    catalog: &dyn uqa_sql::expr::SQLValueCatalog,
+) -> Result<bool, SQLError> {
+    for column in columns {
+        let left = old.get(column).unwrap_or(&Value::Null);
+        let right = new.get(column).unwrap_or(&Value::Null);
+        if matches!((left, right), (Value::Null, Value::Null)) {
+            continue;
+        }
+        if matches!(left, Value::Null)
+            || matches!(right, Value::Null)
+            || !uqa_sql::expr::compare_typed_values_with_enum_catalog(
+                left,
+                right,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+                Some(catalog),
+                None,
+            )?
+            .is_eq()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Referenced-key triggers observe representation changes even when SQL equality holds, so actions propagate numeric scale, signed zero and nested stored values. Referencing-row checks keep their equality rule.
@@ -120,7 +143,12 @@ pub fn referencing_checks(
     let mut checks = Vec::new();
     for (ordinal, foreign_key) in foreign_keys.into_iter().enumerate() {
         if !foreign_key.enforced
-            || old.is_some_and(|old| !referencing_key_changed(&foreign_key.local_columns, old, new))
+            || old
+                .map(|old| {
+                    referencing_key_changed(&foreign_key.local_columns, old, new, context.values)
+                })
+                .transpose()?
+                == Some(false)
         {
             continue;
         }

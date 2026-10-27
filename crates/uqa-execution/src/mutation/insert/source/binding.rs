@@ -16,10 +16,12 @@ pub trait InsertSelectBinding<S: Clone + 'static> {
         &'a self,
         snapshot: Option<&S>,
         consumer: Rc<InsertSelectConsumer<S>>,
+        destination: Option<crate::mutation::returning::ReturningDestination<'a>>,
     ) -> Result<Rc<dyn QueryRowConsumer + 'a>, SQLError>;
 }
 pub struct InsertSelectOutput<'a, S: Clone + 'static> {
     pub binding: &'a dyn InsertSelectBinding<S>,
+    pub destination: Option<crate::mutation::returning::ReturningDestination<'a>>,
     pub consumer: Rc<InsertSelectConsumer<S>>,
 }
 impl<'consumer, S: Clone + 'static> QueryConsumerFactory<'consumer, S>
@@ -29,6 +31,7 @@ impl<'consumer, S: Clone + 'static> QueryConsumerFactory<'consumer, S>
         self: Rc<Self>,
         generation: Option<&S>,
     ) -> Result<Rc<dyn QueryRowConsumer + 'consumer>, SQLError> {
-        self.binding.bind(generation, Rc::clone(&self.consumer))
+        self.binding
+            .bind(generation, Rc::clone(&self.consumer), self.destination)
     }
 }

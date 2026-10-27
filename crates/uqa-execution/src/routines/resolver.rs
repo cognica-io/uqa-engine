@@ -55,43 +55,66 @@ impl DatumResolver<'_> {
             }
             .filter(|ty| !matches!(ty, ColumnType::AnyArray | ColumnType::Record)),
             PLpgSQLDatum::RecField { parent, field } => self.record_field_type(*parent, field),
-            PLpgSQLDatum::Rec { .. } | PLpgSQLDatum::Row { .. } => None,
+            PLpgSQLDatum::Rec { .. } => match &self.values[index] {
+                Value::Datum(datum) => self
+                    .types
+                    .resolve_type_oid(datum.type_oid())
+                    .map_err(SQLError::Internal)?,
+                _ => None,
+            },
+            PLpgSQLDatum::Row { .. } => None,
         })
     }
 
     fn record_field_type(&self, parent: usize, field: &str) -> Option<ColumnType> {
-        let (index, _) = self.record_field(parent, field)?;
-        self.record_schemas
-            .get(&parent)?
-            .column_types()
-            .get(index)?
-            .clone()
+        let descriptor = self.record_descriptors.get(&parent)?;
+        descriptor
+            .schema
+            .column_type(descriptor.field_index(field)?)
+            .cloned()
     }
 
-    fn record_field(&self, parent: usize, field: &str) -> Option<(usize, &Value)> {
-        let Value::Record(fields) = &self.values[parent] else {
-            return None;
+    fn resolved_record_field(
+        &self,
+        parent: usize,
+        field: &str,
+    ) -> Result<Option<TypedVariable>, SQLError> {
+        let descriptor = self.record_descriptors.get(&parent);
+        let selected = match &self.values[parent] {
+            Value::Record(fields) => fields
+                .iter()
+                .enumerate()
+                .find_map(|(index, (name, value))| (name == field).then(|| (index, value.clone()))),
+            Value::Datum(_) => {
+                let descriptor = descriptor.ok_or_else(|| {
+                    SQLError::Internal("physical record has no assignment descriptor".into())
+                })?;
+                match descriptor.field_index(field) {
+                    Some(index) => descriptor
+                        .read_field(&self.values[parent], field)?
+                        .map(|value| (index, value)),
+                    None => None,
+                }
+            }
+            _ => None,
         };
-        fields
-            .iter()
-            .enumerate()
-            .find_map(|(index, (name, value))| (name == field).then_some((index, value)))
-    }
-
-    fn resolved_record_field(&self, parent: usize, field: &str) -> Option<TypedVariable> {
-        let (index, value) = self.record_field(parent, field)?;
-        let schema = self.record_schemas.get(&parent);
-        Some(TypedVariable {
-            value: value.clone(),
-            ty: schema.and_then(|schema| schema.column_type(index)).cloned(),
-            collation_oid: schema.and_then(|schema| schema.column_collation(index)),
-        })
+        let Some((index, value)) = selected else {
+            return Ok(None);
+        };
+        Ok(Some(TypedVariable {
+            value,
+            ty: descriptor
+                .and_then(|descriptor| descriptor.schema.column_type(index))
+                .cloned(),
+            collation_oid: descriptor
+                .and_then(|descriptor| descriptor.schema.column_collation(index)),
+        }))
     }
 
     fn resolved_datum(&self, index: usize) -> Result<TypedVariable, SQLError> {
         if let PLpgSQLDatum::RecField { parent, field } = &self.datums[index] {
             return Ok(self
-                .resolved_record_field(*parent, field)
+                .resolved_record_field(*parent, field)?
                 .unwrap_or(TypedVariable {
                     value: Value::Null,
                     ty: None,
@@ -137,13 +160,15 @@ impl DatumResolver<'_> {
         };
         match &self.datums[idx] {
             PLpgSQLDatum::Rec { name } => match &self.values[idx] {
-                Value::Record(_) => match self.resolved_record_field(idx, column) {
-                    Some(value) => Ok(Some(value)),
-                    None => Err(SQLError::Routine {
-                        sqlstate: "42703".into(),
-                        message: format!("record \"{name}\" has no field \"{column}\""),
-                    }),
-                },
+                Value::Record(_) | Value::Datum(_) => {
+                    match self.resolved_record_field(idx, column)? {
+                        Some(value) => Ok(Some(value)),
+                        None => Err(SQLError::Routine {
+                            sqlstate: "42703".into(),
+                            message: format!("record \"{name}\" has no field \"{column}\""),
+                        }),
+                    }
+                }
                 Value::Null => Err(super::diagnostics::unassigned_record(name)),
                 _ => Ok(None),
             },

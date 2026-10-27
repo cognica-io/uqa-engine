@@ -207,3 +207,60 @@ fn doc_id_filters_compare_the_identity_of_each_row() {
     check(&native, "native");
     check_retrieval(&native, "native");
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_kv(2)]
+#[case::redb(3)]
+fn streamed_subqueries_preserve_metadata_and_local_aliases(#[case] provider: usize) {
+    use std::sync::Arc;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("streamed-metadata.db");
+    let engine = match provider {
+        0 => Engine::new(),
+        1 => Engine::open(&path).unwrap(),
+        2 => Engine::from_persistent_provider(Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(Arc::new(
+            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    };
+    run(
+        &engine,
+        "CREATE TABLE source(id integer PRIMARY KEY, _doc_id integer, _score integer);
+         INSERT INTO source VALUES (1,100,77),(2,200,88);
+         CREATE TABLE alias_source(doc_id integer, score integer);
+         INSERT INTO alias_source VALUES (9,42)",
+    );
+    for inner in [
+        "SELECT id, _doc_id, _score, _meta.doc_id AS actual_id, _meta.score AS actual_score FROM source",
+        "SELECT id, _doc_id, _score, (SELECT _meta.doc_id) AS actual_id, (SELECT _meta.score) AS actual_score FROM source",
+        "SELECT id, tableoid::regclass::text AS relation, xmin::text AS version FROM source",
+        "SELECT id, (SELECT tableoid::regclass::text) AS relation, (SELECT xmin::text) AS version FROM source",
+        "SELECT id FROM source WHERE EXISTS (SELECT 1 WHERE _meta.doc_id=source.id AND _meta.score=0)",
+        "SELECT id FROM source JOIN (VALUES (1)) marker(n) ON marker.n=(SELECT _meta.doc_id) ORDER BY id",
+        "SELECT _meta.doc_id, _meta.score FROM alias_source AS _meta",
+    ] {
+        let expected = engine
+            .sql(inner, &[])
+            .unwrap_or_else(|error| panic!("{provider}: {inner}: {error}"));
+        run(&engine, &format!("CREATE VIEW preserved_metadata AS {inner}"));
+        for query in [
+            "SELECT * FROM preserved_metadata".to_owned(),
+            format!("SELECT * FROM ({inner}) AS derived"),
+            format!("SELECT * FROM (SELECT * FROM ({inner}) AS inner_query) AS derived"),
+        ] {
+            let actual = engine
+                .sql(&query, &[])
+                .unwrap_or_else(|error| panic!("{provider}: {query}: {error}"));
+            assert_eq!(actual.column_types, expected.column_types, "{query}");
+            assert_eq!(actual.rows, expected.rows, "{query}");
+        }
+        run(&engine, "DROP VIEW preserved_metadata");
+    }
+}

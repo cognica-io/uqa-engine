@@ -29,7 +29,7 @@ impl Interpreter<'_> {
         for index in &block.initvarnos {
             // Re-entry resets values but does not discard prepared expressions.
             self.values[*index] = super::Value::Null;
-            self.record_schemas.remove(index);
+            self.record_descriptors.remove(index);
             if let super::PLpgSQLDatum::Var(variable) = &self.datums[*index] {
                 let (value, source) = match &variable.default {
                     Some(expression) => self.eval_expr_with_type(expression)?,

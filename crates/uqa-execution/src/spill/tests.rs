@@ -86,7 +86,7 @@ fn low_budget_creates_file_and_round_trips_in_order() {
         .as_file_mut()
         .read_exact(&mut header)
         .unwrap();
-    assert_eq!(&header, b"UQA-SPILL\x01\n");
+    assert_eq!(&header, b"UQA-SPILL\x02\n");
 
     buffer.push(dummy_batch(2, 1)).unwrap();
     let restored = buffer.drain_all().unwrap();

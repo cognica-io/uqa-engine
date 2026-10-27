@@ -50,7 +50,7 @@ fn fixture() -> (Arc<SQLUserFunction>, FunctionBinding, PLpgSQLFunction) {
             return_type: Some("pg_catalog.int2".into()),
             variadic_mode: RoutineVariadicMode::None,
         })),
-        composite_field: None,
+        value_binding: None,
         resolution_error: None,
         input_collation: None,
     };
@@ -108,7 +108,7 @@ fn native_procedural_parameters_reuse_declarations_but_read_current_values() {
             types: &types,
             datums: &parsed.datums,
             values: &values,
-            record_schemas: &schemas,
+            record_descriptors: &schemas,
             bindings: &bindings,
             error: None,
             param_count: 0,

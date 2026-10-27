@@ -21,18 +21,18 @@ pub enum ArrayTraversalError {
 }
 
 enum Stack<'a> {
-    Native(Vec<std::slice::Iter<'a, Value>>),
-    Budgeted(BudgetedVec<std::slice::Iter<'a, Value>>),
+    Native(Vec<(std::slice::Iter<'a, Value>, usize)>),
+    Budgeted(BudgetedVec<(std::slice::Iter<'a, Value>, usize)>),
 }
 
 impl<'a> Stack<'a> {
-    fn push(&mut self, values: &'a [Value]) -> Result<(), MemoryError> {
+    fn push(&mut self, values: &'a [Value], rank: usize) -> Result<(), MemoryError> {
         if values.is_empty() {
             return Ok(());
         }
         match self {
-            Self::Native(stack) => stack.push(values.iter()),
-            Self::Budgeted(stack) => stack.push(values.iter())?,
+            Self::Native(stack) => stack.push((values.iter(), rank)),
+            Self::Budgeted(stack) => stack.push((values.iter(), rank))?,
         }
         Ok(())
     }
@@ -47,12 +47,12 @@ impl<'a> Stack<'a> {
                 Self::Native(stack) => stack.last_mut(),
                 Self::Budgeted(stack) => stack.last_mut(),
             };
-            let Some(current) = current else {
+            let Some((current, rank)) = current else {
                 return Ok(None);
             };
+            let child_rank = rank.saturating_sub(1);
             match current.next() {
-                Some(Value::List(values)) => self.push(values)?,
-                Some(Value::Array(array)) => self.push(array.elements())?,
+                Some(Value::List(values)) if child_rank != 0 => self.push(values, child_rank)?,
                 Some(value) => return Ok(Some(value)),
                 None => match self {
                     Self::Native(stack) => {
@@ -96,6 +96,42 @@ impl<'v> ControlledArrayElements<'v, '_> {
 }
 
 impl ArrayValue {
+    /// Borrow one scalar element by zero-based row-major position without flattening the array or reading a retained element's payload. The traversal uses no allocation and checks the original and invoking cancellation scopes.
+    pub fn element_at_row_major_with_control(
+        &self,
+        mut index: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&Value>, ValueRetentionError> {
+        control.check()?;
+        let mut remaining = usize::from(!self.dimensions().is_empty());
+        for length in self.dimensions() {
+            control.check()?;
+            remaining = remaining
+                .checked_mul(*length)
+                .ok_or(MemoryError::SizeOverflow)?;
+        }
+        if index >= remaining {
+            return Ok(None);
+        }
+        let mut level = self.elements();
+        for (dimension, length) in self.dimensions().iter().enumerate() {
+            control.check()?;
+            remaining /= length;
+            let Some(value) = level.get(index / remaining) else {
+                return Ok(None);
+            };
+            index %= remaining;
+            if dimension + 1 == self.dimensions().len() {
+                return Ok(Some(value));
+            }
+            let Value::List(children) = value else {
+                return Ok(None);
+            };
+            level = children;
+        }
+        Ok(None)
+    }
+
     pub fn elements_with_control<'v, 'c>(
         &'v self,
         control: &ProductionControl<'c>,
@@ -105,7 +141,7 @@ impl ArrayValue {
             || Stack::Native(Vec::new()),
             |memory| Stack::Budgeted(BudgetedVec::new(memory)),
         );
-        stack.push(self.elements())?;
+        stack.push(self.elements(), self.dimensions().len())?;
         Ok(ControlledArrayElements {
             stack,
             control: *control,
@@ -119,7 +155,7 @@ impl ArrayValue {
     ) -> Result<BudgetedArrayElements<'a>, ArrayTraversalError> {
         cancellation.check()?;
         let mut stack = Stack::Budgeted(BudgetedVec::new(memory));
-        stack.push(self.elements())?;
+        stack.push(self.elements(), self.dimensions().len())?;
         Ok(BudgetedArrayElements {
             stack,
             cancellation,
@@ -127,7 +163,7 @@ impl ArrayValue {
     }
 
     pub(crate) fn flattened_elements(&self) -> impl Iterator<Item = &Value> {
-        let mut stack = Stack::Native(vec![self.elements().iter()]);
+        let mut stack = Stack::Native(vec![(self.elements().iter(), self.dimensions().len())]);
         std::iter::from_fn(move || {
             stack
                 .next(&mut || Ok(()))
@@ -167,5 +203,68 @@ mod tests {
         ));
         drop(reader);
         assert_eq!(budget.used(), 0);
+    }
+}
+
+#[cfg(test)]
+mod positional_tests {
+    use super::*;
+
+    #[test]
+    fn row_major_borrows_match_subscripts_with_no_allocation_and_both_cancellations() {
+        let array = ArrayValue::with_lower_bounds(
+            vec![
+                Value::List(vec![Value::Int(11), Value::Null, Value::Int(13)]),
+                Value::List(vec![Value::Int(21), Value::Int(22), Value::Int(23)]),
+            ],
+            vec![-3, 7],
+        )
+        .unwrap();
+        let budget = MemoryBudget::new(0);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        for (index, subscripts) in [[-3, 7], [-3, 8], [-3, 9], [-2, 7], [-2, 8], [-2, 9]]
+            .iter()
+            .enumerate()
+        {
+            let actual = array
+                .element_at_row_major_with_control(index, &control)
+                .unwrap()
+                .unwrap();
+            assert!(std::ptr::eq(actual, array.element_at(subscripts).unwrap()));
+        }
+        assert_eq!(
+            array
+                .element_at_row_major_with_control(6, &control)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            array
+                .element_at_row_major_with_control(usize::MAX, &control)
+                .unwrap(),
+            None
+        );
+        assert_eq!(budget.used(), 0);
+        let empty = ArrayValue::with_lower_bounds(vec![], vec![0]).unwrap();
+        assert_eq!(
+            empty
+                .element_at_row_major_with_control(0, &control)
+                .unwrap(),
+            None
+        );
+        for token in [&original, &invoking] {
+            token.cancel();
+            assert!(matches!(
+                array.element_at_row_major_with_control(0, &control),
+                Err(ValueRetentionError::Cancelled(_))
+            ));
+            assert!(matches!(
+                empty.element_at_row_major_with_control(0, &control),
+                Err(ValueRetentionError::Cancelled(_))
+            ));
+            token.reset();
+        }
     }
 }

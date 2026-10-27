@@ -15,13 +15,21 @@ use super::{
 
 mod backend;
 mod characteristics;
+mod close;
+pub(crate) use close::SessionClosure;
+mod completion;
+pub(crate) use completion::CompletionCounters;
+pub use completion::{ExecutionCompletion, ExecutionOutcome};
 mod control;
 mod coordinator;
+mod error;
+pub(crate) use error::TransactionError;
 mod failure;
 mod fixed_identities;
 use failure::{failed_transaction_error, panic_description};
 mod frame_finish;
 mod implicit;
+pub(crate) mod prepared;
 mod publication;
 mod savepoints;
 mod scope;

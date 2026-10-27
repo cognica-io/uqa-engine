@@ -15,6 +15,7 @@ struct Transactions {
     depth: usize,
     read_only: bool,
     rollback_fails: bool,
+    rollback_state: Option<&'static str>,
     commit_pending: bool,
     events: RefCell<Vec<&'static str>>,
 }
@@ -24,6 +25,7 @@ impl Transactions {
             depth,
             read_only: false,
             rollback_fails: false,
+            rollback_state: None,
             commit_pending: false,
             events: RefCell::new(Vec::new()),
         }
@@ -50,7 +52,12 @@ impl StatementTransactions for Transactions {
     }
     fn rollback(&self) -> Result<(), SQLError> {
         self.events.borrow_mut().push("rollback");
-        if self.rollback_fails {
+        if let Some(sqlstate) = self.rollback_state {
+            Err(SQLError::Routine {
+                sqlstate: sqlstate.into(),
+                message: "rollback failure".into(),
+            })
+        } else if self.rollback_fails {
             Err(SQLError::Internal("rollback failure".into()))
         } else {
             Ok(())
@@ -98,12 +105,15 @@ fn statement_rollback_keeps_both_failures_and_does_not_rollback_a_closed_transac
         ..Transactions::new(1)
     };
     let error = rollback_after_statement_error::<()>(&broken, failure()).unwrap_err();
-    assert!(
-        matches!(error, SQLError::Internal(message) if message.contains("statement failure") && message.contains("rollback failure"))
-    );
+    assert_eq!(error.sqlstate(), Some("22012"));
+    assert_eq!(error.to_string(), "statement failure");
+    assert!(error.detail().unwrap().contains("rollback failure"));
     let error = rollback_implicit_statement(&broken, "restart reader").unwrap_err();
-    assert!(
-        matches!(error, SQLError::Internal(message) if message.starts_with("restart reader: autocommit rollback failed:") && message.contains("rollback failure"))
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert_eq!(error.to_string(), "internal error: rollback failure");
+    assert_eq!(
+        error.context(),
+        Some("restart reader: autocommit rollback failed")
     );
 }
 
@@ -212,4 +222,42 @@ fn read_only_validation_and_catalog_errors_precede_transaction_snapshot_marking(
     let show = UnifiedPlan::lower(uqa_sql::compile("SHOW work_mem").unwrap().remove(0));
     validate_transaction_plan(&reader, &effects, &show).unwrap();
     assert_eq!(*reader.events.borrow(), ["read-only"]);
+}
+
+#[test]
+fn rollback_diagnostics_keep_primary_metadata_and_unresolved_completion_precedence() {
+    for state in ["53200", "08007"] {
+        let transactions = Transactions {
+            rollback_state: Some(state),
+            ..Transactions::new(1)
+        };
+        let original = SQLError::Diagnostic {
+            sqlstate: "22012".into(),
+            message: "original division failure".into(),
+            detail: Some("original detail".into()),
+            hint: Some("original hint".into()),
+        }
+        .at_position(Some(19));
+        let error = rollback_after_statement_error::<()>(&transactions, original).unwrap_err();
+        if state == "08007" {
+            assert_eq!(error.sqlstate(), Some("08007"));
+            assert_eq!(error.to_string(), "rollback failure");
+            assert!(error
+                .context()
+                .unwrap()
+                .contains("original division failure"));
+        } else {
+            assert_eq!(error.sqlstate(), Some("22012"));
+            assert_eq!(error.position(), Some(19));
+            assert_eq!(error.hint(), Some("original hint"));
+            assert!(error.detail().unwrap().starts_with("original detail"));
+            assert_eq!(error.cleanup().unwrap().1.sqlstate(), Some(state));
+        }
+        let error = rollback_implicit_statement(&transactions, "promote reader").unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state));
+        assert_eq!(
+            error.context(),
+            Some("promote reader: autocommit rollback failed")
+        );
+    }
 }

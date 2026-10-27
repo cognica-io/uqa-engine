@@ -268,7 +268,7 @@ static PARAMETERS: &[ParameterDefinition] = &[
         "Query Tuning / Planner Method Configuration",
         "Enables the planner's use of index-only-scan plans.",
         None,
-        ParameterFlags::NONE,
+        ParameterFlags::EXPLAIN,
     ),
     define(
         "escape_string_warning",
@@ -336,7 +336,7 @@ static PARAMETERS: &[ParameterDefinition] = &[
         "Query Tuning / Other Planner Options",
         "Controls the planner's selection of custom or generic plan.",
         Some("Prepared statements can have custom and generic plans, and the planner will attempt to choose which is better.  This can be set to override the default behavior."),
-        ParameterFlags::NONE,
+        ParameterFlags::EXPLAIN,
     ),
     ParameterDefinition {
         library: Some("plpgsql"),
@@ -389,7 +389,8 @@ static PARAMETERS: &[ParameterDefinition] = &[
         None,
         ParameterFlags::LIST_INPUT
             .union(ParameterFlags::LIST_QUOTE)
-            .union(ParameterFlags::REPORT),
+            .union(ParameterFlags::REPORT)
+            .union(ParameterFlags::EXPLAIN),
     ),
     define(
         "server_encoding",
@@ -465,6 +466,15 @@ static PARAMETERS: &[ParameterDefinition] = &[
         ParameterFlags::REPORT,
     ),
     define(
+        "track_io_timing",
+        boolean(false),
+        ParameterContext::Superuser,
+        "Statistics / Cumulative Query and Index Statistics",
+        "Collects timing statistics for database I/O activity.",
+        None,
+        ParameterFlags::NONE,
+    ),
+    define(
         "transaction_deferrable",
         boolean(false),
         ParameterContext::User,
@@ -507,7 +517,7 @@ static PARAMETERS: &[ParameterDefinition] = &[
         category: "Resource Usage / Memory",
         short_desc: "Sets the maximum memory to be used for query workspaces.",
         extra_desc: Some("This much memory can be used by each internal sort operation and hash table before switching to temporary disk files."),
-        flags: ParameterFlags::NONE,
+        flags: ParameterFlags::EXPLAIN,
         library: None,
     },
     define(

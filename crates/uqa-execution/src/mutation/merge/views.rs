@@ -580,7 +580,7 @@ fn execute_view_merge_pairs<S: Clone + 'static>(
         let result = execute_selected_action(context, &pair, action)?;
         affected += u64::from(result.affected);
         if let Some(row) = result.returning {
-            returning.push(row)?;
+            returning.push_to(row, context.returning.destination)?;
         }
     }
     Ok((affected, returning))
@@ -602,7 +602,7 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         events,
         statement_snapshot,
     } = prepare_view_merge(
-        context.mutation.rules.views.rewrite,
+        context.mutation.rules.views,
         mutation.scopes,
         triggers,
         context.snapshots,
@@ -616,15 +616,21 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
     let mut statement_scope = None;
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
-            let ctes = statement_scope.insert(view_merge_scope(
+            let ctes = statement_scope.insert(
+                read_context
+                    .mutation
+                    .scopes
+                    .command_scope(plan.statement_privilege_subject.as_ref(), false)?,
+            );
+            initialize_view_merge_scope(
                 context,
-                read_context,
                 plan,
                 params,
+                ctes,
                 inherited_ctes,
                 &statement_commands,
                 statement_snapshot.clone(),
-            )?);
+            )?;
             let ViewMergeRows {
                 source_rows,
                 pairings,
@@ -677,9 +683,14 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
     let result = match statement_snapshot.as_deref() {
         Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
-    }?;
-    statement_end::finish_statement(context, params, &plan.ctes, statement_scope.as_mut())?;
-    Ok(result)
+    };
+    statement_end::finish_statement(
+        context,
+        params,
+        &plan.ctes,
+        statement_scope.as_mut(),
+        result,
+    )
 }
 
 /// The rows a view MERGE acts on.
@@ -763,20 +774,16 @@ fn begin_view_merge_statement<S: Clone>(
     Ok((statement_commands, running_statement))
 }
 
-/// The scope of a view MERGE's command, with the WITH items that run before the MERGE materialized.
-fn view_merge_scope<S: Clone + Send + Sync + 'static>(
+/// Initialize the statement-owned scope; partial CTE construction remains owned by the caller's completion boundary.
+fn initialize_view_merge_scope<S: Clone>(
     context: &MutationStatementContext<'_, S>,
-    read_context: &MutationStatementContext<'_, S>,
     plan: &MergePlan,
     params: &[SQLParam],
+    ctes: &mut CteScope<S>,
     inherited_ctes: Option<&CteScope<S>>,
     statement_commands: &std::sync::Arc<StatementCommands>,
     statement_snapshot: Option<std::sync::Arc<S>>,
-) -> Result<CteScope<S>, SQLError> {
-    let mut ctes = read_context
-        .mutation
-        .scopes
-        .command_scope(plan.statement_privilege_subject.as_ref(), false)?;
+) -> Result<(), SQLError> {
     if let Some(parent) = inherited_ctes {
         ctes.inherit_cte_bindings(parent);
     }
@@ -785,18 +792,19 @@ fn view_merge_scope<S: Clone + Send + Sync + 'static>(
     crate::query::cte::materialize_command_ctes(
         context.query.source.ctes,
         &plan.ctes,
-        || {
-            uqa_sql::semantics::primary_command_cte_references(
+        |control| {
+            uqa_sql::semantics::primary_command_cte_references_with_control(
                 &plan.ctes,
-                &plan.query_inputs(),
+                plan.query_inputs(),
                 plan.source_input(),
+                control,
             )
         },
         params,
-        &mut ctes,
+        ctes,
     )?;
     ctes.scalar_subqueries = plan.subqueries.as_slice().into();
-    Ok(ctes)
+    Ok(())
 }
 
 struct PreparedViewMerge<S> {

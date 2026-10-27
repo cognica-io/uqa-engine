@@ -682,15 +682,8 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
             options: options.clone(),
             body: Box::new(bind_select(body, r)?),
         },
-        Statement::Explain {
-            analyze,
-            verbose,
-            format,
-            body,
-        } => Statement::Explain {
-            analyze: *analyze,
-            verbose: *verbose,
-            format: format.clone(),
+        Statement::Explain { options, body } => Statement::Explain {
+            options: options.clone(),
             body: Box::new(bind_statement(body, r)?),
         },
         Statement::DeclareCursor(cursor) => {

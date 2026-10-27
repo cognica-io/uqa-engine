@@ -9,7 +9,7 @@ use crate::{
     assignment::AssignmentContext,
     catalog::domain::{DomainCatalog, StoredDomain},
     expr::EngineHook,
-    ResultRow, RowSchema,
+    RowSchema,
 };
 use std::cell::Cell;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
@@ -46,7 +46,7 @@ impl AssignmentContext for Context {
     fn evaluate_domain_check(
         &self,
         _: &crate::ast::Expr,
-        _: &ResultRow,
+        _: &dyn crate::expr::RowLookup,
         _: &RowSchema,
     ) -> Result<Value, SQLError> {
         self.checks.set(self.checks.get() + 1);

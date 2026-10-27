@@ -30,13 +30,18 @@ pub fn convert_value_to_column_type_from_with_control(
     control.check()?;
     let (value, memory) = value.into_parts();
     let value = control.finish(value, memory)?;
-    if source.is_some_and(|source| super::same_catalog_value_type(source, ty)) {
+    if super::physical_identity(&value, source, ty)
+        || source.is_some_and(|source| super::same_catalog_value_type(source, ty))
+    {
         return super::normalize_legacy_vector_carrier_with_control(&value, ty, control)
             .map(|normalized| normalized.unwrap_or(value));
     }
-    if let (ColumnType::InternalChar, Some(source)) = (ty, source) {
+    if let (ColumnType::InternalChar | ColumnType::Oid | ColumnType::Xid, Some(source)) =
+        (ty, source)
+    {
         let name = source.catalog_name_with_control(control)?;
-        return cast_value_from_with_control(&value, "\"char\"", Some(&name), control);
+        let target = ty.catalog_name_with_control(control)?;
+        return cast_value_from_with_control(&value, &target, Some(&name), control);
     }
     convert_value_to_column_type_with_control(value, ty, control)
 }
@@ -55,6 +60,18 @@ pub fn convert_value_to_column_type_with_control(
     if matches!(&*value, Value::Null) {
         return Ok(value);
     }
+    let decoded = if let Value::Datum(datum) = &*value {
+        if crate::catalog::type_metadata::builtin_scalar_type(datum.type_oid()).is_some()
+            || crate::catalog::type_metadata::builtin_array_element(datum.type_oid()).is_some()
+        {
+            Some(crate::expr::datums::read_with_control(datum, control)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let value = decoded.unwrap_or(value);
     match ty {
         ColumnType::Named(name) => Err(SQLError::Routine {
             sqlstate: "42704".into(),
@@ -133,6 +150,7 @@ pub fn convert_value_to_column_type_with_control(
             numeric_value(value, *precision, *scale, control)
         }
         ColumnType::Json => cast_value_from_with_control(&value, "json", None, control),
+        ColumnType::Xml => cast_value_from_with_control(&value, "xml", None, control),
         ColumnType::JsonB => cast_value_from_with_control(&value, "jsonb", None, control),
         ColumnType::Bit(length) | ColumnType::VarBit(length) => {
             use crate::expr::bit_string::{input_with_control, BitStringKind};
@@ -253,29 +271,42 @@ pub fn convert_value_to_column_type_with_control(
         ColumnType::Multirange(subtype) => {
             cast_value_from_with_control(&value, subtype.multirange_name(), None, control)
         }
-        ColumnType::Vector(dimensions) => {
-            let vector = value_to_vector_with_control(&value, control)?;
-            validate_vector_dimensions(*dimensions, vector.len())?;
-            vector_value(&vector, control)
-        }
-        ColumnType::Tensor(dimensions) => {
-            let tensor = value_to_tensor_with_control(&value, control)?;
-            for vector in &*tensor {
-                control.check()?;
-                validate_vector_dimensions(*dimensions, vector.len())?;
-            }
-            let mut output = ProductionVec::new(*control);
-            output.reserve(tensor.len())?;
-            for vector in &*tensor {
-                output.push_produced(vector_value(vector, control)?)?;
-            }
-            let (values, memory) = output.finish()?.into_parts();
-            Ok(control.finish(Value::List(values), memory)?)
-        }
+        ColumnType::Vector(dimensions) => convert_vector_with_control(&value, *dimensions, control),
+        ColumnType::Tensor(dimensions) => convert_tensor_with_control(&value, *dimensions, control),
         ColumnType::Domain { base, .. } => {
             convert_value_to_column_type_with_control(value, base, control)
         }
     }
+}
+
+/// Assignment and explicit casts share the finite float32 conversion and declared dimension check.
+pub(crate) fn convert_vector_with_control(
+    value: &Value,
+    dimensions: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let vector = value_to_vector_with_control(value, control)?;
+    validate_vector_dimensions(dimensions, vector.len())?;
+    vector_value(&vector, control)
+}
+
+pub(crate) fn convert_tensor_with_control(
+    value: &Value,
+    dimensions: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let tensor = value_to_tensor_with_control(value, control)?;
+    for vector in &*tensor {
+        control.check()?;
+        validate_vector_dimensions(dimensions, vector.len())?;
+    }
+    let mut output = ProductionVec::new(*control);
+    output.reserve(tensor.len())?;
+    for vector in &*tensor {
+        output.push_produced(vector_value(vector, control)?)?;
+    }
+    let (values, memory) = output.finish()?.into_parts();
+    Ok(control.finish(Value::List(values), memory)?)
 }
 
 fn numeric_value(

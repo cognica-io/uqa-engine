@@ -34,7 +34,8 @@ pub fn rows(session: &dyn CatalogSession) -> Result<Vec<ResultRow>, SQLError> {
                 (
                     "prepare_time",
                     Value::Temporal(TemporalValue::TimestampTz {
-                        micros: entry.prepared_at_micros,
+                        postgres_micros: (entry.prepared_at_micros)
+                            - uqa_core::POSTGRES_EPOCH_MICROS,
                     }),
                 ),
                 ("parameter_types", parameters),

@@ -399,6 +399,11 @@ fn execute_window_pass(
         }
         Ok(())
     })();
+    let mut close_states = Ok(());
+    for slot in &mut slots {
+        close_states = crate::aggregation::state::with_cleanup(close_states, slot.state.close());
+    }
+    let execution = crate::aggregation::state::with_cleanup(execution, close_states);
     let close = sorted.close().map_err(exec_to_sql_error);
     combine_execution_and_close(execution, close, "window sort")?;
     Ok(output)
@@ -513,12 +518,12 @@ fn window_function(
     };
     let required = |position: usize| {
         argument(position).ok_or_else(|| SQLError::BadArity {
-            name: name.clone(),
+            name: name.to_string(),
             expected: format!(">={}", position + 1),
             actual: slot.args.len(),
         })
     };
-    Ok(match name.as_str() {
+    Ok(match name.as_ref() {
         "row_number" => WindowFunction::RowNumber,
         "rank" => WindowFunction::Rank,
         "dense_rank" => WindowFunction::DenseRank,
@@ -664,7 +669,7 @@ fn emit_partition(
         *offsets_evaluated = true;
     }
     for slot in slots.iter_mut() {
-        slot.state.begin_partition();
+        slot.state.begin_partition()?;
     }
     let mut current = CurrentRow::new();
     let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
@@ -736,9 +741,10 @@ fn combine_execution_and_close(
     match (execution, close) {
         (Ok(()), Ok(())) => Ok(()),
         (Ok(()), Err(error)) | (Err(error), Ok(())) => Err(error),
-        (Err(execution_error), Err(close_error)) => Err(SQLError::Internal(format!(
-            "{execution_error}; closing {operator} after failure also failed: {close_error}"
-        ))),
+        (Err(execution_error), Err(close_error)) => {
+            Err(execution_error
+                .with_cleanup(close_error, format!("close {operator} after failure")))
+        }
     }
 }
 

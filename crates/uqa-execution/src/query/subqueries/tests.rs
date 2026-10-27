@@ -452,6 +452,39 @@ fn range_membership_preserves_selected_equality_in_cached_and_streamed_rows() {
     }
 }
 
+fn epoch_membership_cases() -> [(Option<uqa_sql::ColumnType>, uqa_core::TemporalValue, bool); 4] {
+    use uqa_core::TemporalValue;
+    use uqa_sql::ColumnType;
+    [
+        (
+            Some(ColumnType::Date),
+            TemporalValue::Date { days: 0 },
+            true,
+        ),
+        (
+            Some(ColumnType::Timestamp),
+            TemporalValue::Timestamp {
+                postgres_micros: -uqa_core::POSTGRES_EPOCH_MICROS,
+            },
+            false,
+        ),
+        (
+            Some(ColumnType::TimestampTz),
+            TemporalValue::TimestampTz {
+                postgres_micros: -uqa_core::POSTGRES_EPOCH_MICROS,
+            },
+            false,
+        ),
+        (
+            None,
+            TemporalValue::Timestamp {
+                postgres_micros: -uqa_core::POSTGRES_EPOCH_MICROS,
+            },
+            false,
+        ),
+    ]
+}
+
 #[test]
 fn selected_datetime_membership_keeps_one_representation_and_resolves_types_once() {
     use crate::query::scope::subqueries::CachedScalarSubquery;
@@ -461,24 +494,7 @@ fn selected_datetime_membership_keeps_one_representation_and_resolves_types_once
     use uqa_sql::ColumnType;
 
     for budget in [1, 64 * 1024] {
-        for (output_type, stored, hashable) in [
-            (
-                Some(ColumnType::Date),
-                TemporalValue::Date { days: 0 },
-                true,
-            ),
-            (
-                Some(ColumnType::Timestamp),
-                TemporalValue::Timestamp { micros: 0 },
-                false,
-            ),
-            (
-                Some(ColumnType::TimestampTz),
-                TemporalValue::TimestampTz { micros: 0 },
-                false,
-            ),
-            (None, TemporalValue::Timestamp { micros: 0 }, false),
-        ] {
+        for (output_type, stored, hashable) in epoch_membership_cases() {
             let services = Services::default();
             let scope = CteScope::new();
             let schema = RowSchema::with_types(vec!["v".into()], vec![output_type]);

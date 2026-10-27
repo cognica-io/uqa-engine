@@ -17,13 +17,21 @@ use uqa_sql::{
     SQLError, SQLParam,
 };
 
+mod inspection;
+
 pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     query: &'a QueryPlan,
     params: &[SQLParam],
     scope: &CteScope<S>,
 ) -> Result<Cow<'a, QueryPlan>, SQLError> {
-    if !needs_preparation(context, query, scope)? {
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    if !inspection::needed(query, scope, control)? {
         return Ok(Cow::Borrowed(query));
     }
     let mut query = query.clone();
@@ -37,94 +45,6 @@ pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
     Ok(Cow::Owned(query))
 }
 
-fn needs_preparation<S: Clone + Send + Sync + 'static>(
-    context: &SourceContext<'_, S>,
-    query: &QueryPlan,
-    scope: &CteScope<S>,
-) -> Result<bool, SQLError> {
-    fn source<S: Clone + Send + Sync + 'static>(
-        context: &SourceContext<'_, S>,
-        from: &SourcePlan,
-        scope: &CteScope<S>,
-    ) -> Result<bool, SQLError> {
-        Ok(match from {
-            SourcePlan::Table {
-                name,
-                executable_query: None,
-                ..
-            } => {
-                if scope.is_visible_cte(name) {
-                    scope.deferred_reference(name).is_some()
-                } else {
-                    scope
-                        .catalog_read_view()?
-                        .view_resolved(&scope.relation_name_resolution()?, name)?
-                        .is_some_and(|view| {
-                            view.kind == uqa_sql::catalog::view::StoredViewKind::View
-                        })
-                }
-            }
-            SourcePlan::Join { left, right, .. } => {
-                source(context, left, scope)? || source(context, right, scope)?
-            }
-            SourcePlan::Subquery { body, .. } => needs_preparation(context, body, scope)?,
-            _ => false,
-        })
-    }
-    let mut scope = scope.clone();
-    for cte in &query.ctes {
-        scope.insert_deferred(cte.clone());
-    }
-    let mut lookup = scope.enter_relation_lookup_mode(query.relations_bound)?;
-    let scope = lookup.enter_visible_ctes(query.ctes.iter().map(|cte| cte.name.as_str()));
-    let scope = &*scope;
-    for cte in &query.ctes {
-        if let Some(query) = cte.body.query() {
-            if needs_preparation(context, query, scope)? {
-                return Ok(true);
-            }
-        }
-    }
-    match &query.root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(from) = &block.from {
-                if source(context, from, scope)? {
-                    return Ok(true);
-                }
-            }
-            for query in &block.subqueries {
-                if needs_preparation(context, query, scope)? {
-                    return Ok(true);
-                }
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            if needs_preparation(context, left, scope)? || needs_preparation(context, right, scope)?
-            {
-                return Ok(true);
-            }
-            for query in subqueries {
-                if needs_preparation(context, query, scope)? {
-                    return Ok(true);
-                }
-            }
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for query in subqueries {
-                if needs_preparation(context, query, scope)? {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-    Ok(false)
-}
-
 fn declare_ctes<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     query: &mut QueryPlan,
@@ -134,9 +54,16 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut restored_outputs = BTreeMap::new();
-    for cte in uqa_sql::semantics::ordered_plan_ctes(query)? {
-        let mut definition = cte.clone();
-        if !uqa_sql::semantics::cte_references_own_name(cte) {
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    let ordered = uqa_sql::semantics::order_cte_plans_with_control(&query.ctes, control)?;
+    for cte in ordered.iter().copied() {
+        let (mut definition, definition_memory) = cte.clone_with_control(&control)?.into_parts();
+        if !uqa_sql::semantics::cte_references_own_name_with_control(cte, control)? {
             if let Some(body) = definition
                 .body
                 .query_mut()
@@ -154,8 +81,15 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
                 restored_outputs.insert(cte.name.clone(), schema);
             }
         }
-        scope.insert_preparation_cte(definition, folded.contains(&cte.name));
+        scope.insert_preparation_cte(
+            uqa_sql::plan::RetainedCtePlan::from_produced(
+                control.finish(definition, definition_memory)?,
+                &control,
+            )?,
+            folded.contains(&cte.name),
+        );
     }
+    drop(ordered);
     for cte in &mut query.ctes {
         if let Some(schema) = restored_outputs.remove(&cte.name) {
             cte.body
@@ -175,7 +109,9 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut scope = parent.clone();
-    let scheduled = crate::query::cte::strategy::schedule_plan_ctes(context.volatility, query)?;
+    let mut lookup = scope.enter_query_plan_scope(query)?;
+    let scheduled =
+        crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, query)?;
     let folded = scheduled
         .iter()
         .filter(|cte| cte.deferred)
@@ -186,8 +122,8 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
         .filter(|cte| !cte.deferred)
         .map(|cte| cte.plan.name.clone())
         .collect::<BTreeSet<_>>();
-    declare_ctes(context, query, params, &mut scope, &folded, outer)?;
-    let mut lookup = scope.enter_relation_lookup_mode(query.relations_bound)?;
+    drop(scheduled);
+    declare_ctes(context, query, params, &mut lookup, &folded, outer)?;
     let names = query
         .ctes
         .iter()

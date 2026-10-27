@@ -57,6 +57,17 @@ impl<S: Clone> CteScope<S> {
         self.row_lock_state()?.outer_row.as_deref()
     }
 
+    pub(super) fn outer_row_binding(&self) -> Option<Arc<crate::OwnedPhysicalRow>> {
+        self.row_lock_state()
+            .and_then(|state| state.outer_row.clone())
+    }
+
+    pub(super) fn restore_outer_row_binding(&mut self, row: Option<Arc<crate::OwnedPhysicalRow>>) {
+        if row.is_some() || self.row_lock.is_some() {
+            self.row_lock_state_mut().outer_row = row;
+        }
+    }
+
     pub fn clear_row_lock_outer_row(&mut self) {
         if let Some(state) = self.row_lock.as_mut() {
             state.outer_row = None;

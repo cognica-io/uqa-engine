@@ -31,11 +31,12 @@
 //! the token before the cancellation.
 
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 mod cancelled;
 mod deadlines;
+mod deferral;
 
 pub use cancelled::{CancellationReason, QueryCancelled};
 pub use deadlines::{schedule, CancellationDeadline, ScheduledAction};
@@ -52,8 +53,11 @@ struct TokenState {
     terminated: AtomicU8,
     /// The session's `lock_timeout` in milliseconds; 0 lets a lock wait last until the lock is granted.
     lock_timeout_ms: AtomicU64,
+    deferrals: deferral::CancellationDeferrals,
     sleepers: Mutex<()>,
     wake: Condvar,
+    /// Reuse the shared timer across this token's successive statements.
+    deadlines: OnceLock<Arc<deadlines::DeadlineService>>,
 }
 
 impl TokenState {
@@ -94,8 +98,7 @@ impl TokenState {
 ///
 /// Cloning is `O(1)` and every clone observes the same signal. Once
 /// the token has been canceled, every subsequent [`Self::check`] returns
-/// [`QueryCancelled`] with the reason until [`Self::reset`] is called or
-/// a deadline of that reason is dropped after it passed.
+/// [`QueryCancelled`] with the reason until [`Self::reset`] is called or a deadline of that reason is dropped after it passed. Explicit [`Self::with_deferred_cancellation`] scopes postpone checks during finalization without clearing the signal.
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken {
     state: Arc<TokenState>,
@@ -138,7 +141,7 @@ impl CancellationToken {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.state.check().is_err()
+        self.check().is_err()
     }
 
     /// The reason the token was canceled for, if it was.
@@ -154,15 +157,29 @@ impl CancellationToken {
     /// Return [`QueryCancelled`] if cancellation was signalled.
     /// `Ok(())` otherwise.
     ///
-    /// Designed for the inner loop of every operator: a single
-    /// atomic load on the happy path.
+    /// The ordinary successful path reads only atomic signals; a cancelled path also checks whether this thread is finalizing resources under an explicit deferral.
     pub fn check(&self) -> Result<(), QueryCancelled> {
-        self.state.check()
+        match self.state.check() {
+            Err(_) if self.state.deferrals.active() => Ok(()),
+            result => result,
+        }
     }
 
     /// Cancel the token with `reason` once `after` has passed, unless the returned deadline is dropped first.
     pub fn deadline(&self, after: Duration, reason: CancellationReason) -> CancellationDeadline {
         CancellationDeadline::arm(&self.state, after, reason)
+    }
+
+    /// Run an action after a delay unless its handle is dropped first. Retain the shared timer for this token's lifetime, so successive session timeouts reuse it. The action runs on the timer thread and must return promptly.
+    pub fn schedule(
+        &self,
+        after: Duration,
+        action: impl FnOnce() + Send + 'static,
+    ) -> ScheduledAction {
+        self.state
+            .deadlines
+            .get_or_init(deadlines::service)
+            .schedule(after, action)
     }
 
     /// Set the `lock_timeout` that lock waits under this token honor; `None` lets a wait last until the lock is granted.
@@ -189,6 +206,7 @@ impl CancellationToken {
         if self
             .lock_timeout()
             .is_some_and(|timeout| started.elapsed() >= timeout)
+            && !self.state.deferrals.active()
         {
             return Err(QueryCancelled::new(CancellationReason::LockTimeout));
         }
@@ -198,7 +216,12 @@ impl CancellationToken {
     /// How long a lock wait that began at `started` may sleep before it checks the lock again: at most `slice`, and no longer than the rest of `lock_timeout`.
     pub fn lock_wait_slice(&self, started: Instant, slice: Duration) -> Duration {
         self.lock_timeout().map_or(slice, |timeout| {
-            slice.min(timeout.saturating_sub(started.elapsed()))
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining < slice && self.state.deferrals.active() {
+                slice
+            } else {
+                slice.min(remaining)
+            }
         })
     }
 

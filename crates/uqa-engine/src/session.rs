@@ -8,8 +8,8 @@
 
 use super::{
     Arc, BTreeMap, CatalogFacade, CatalogIndexRow, ColumnStatsInput, DocId, DocumentStore, Engine,
-    Ordering, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, StoredView,
-    StoredViewKind, TableState, Value,
+    Ordering, SQLError, StorageBackendError, StorageBackendResult, StoredView, StoredViewKind,
+    TableState, Value,
 };
 #[cfg(test)]
 use uqa_planner::QueryPlan;

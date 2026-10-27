@@ -20,9 +20,8 @@ mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, DeepModel, RegisteredSQLFunction, RelationIdentity,
-    SQLAggregateFunction, SQLScalarFunction, SQLStatementCache, SQLTableFunction, SequenceState,
-    TableFieldAnalyzerRegistry, TableState, TransactionFrame,
+    BayesianBM25Params, CommandMutationOverlay, DeepModel, RelationIdentity, SQLStatementCache,
+    SequenceState, TableFieldAnalyzerRegistry, TableState, TransactionFrame,
 };
 
 pub(super) struct StorageContext {
@@ -315,11 +314,12 @@ pub(super) struct SessionContext {
     pub(super) parameters: Mutex<crate::session::SessionParameterRegistry>,
     /// The bytes a query workspace may hold before it spills when the host bounds it below `work_mem`; 0 leaves `work_mem` in effect.
     pub(super) query_memory_limit: std::sync::atomic::AtomicUsize,
-    /// Whether a terminated session has rolled back its transaction and dropped what it held.
-    pub(super) termination_finished: AtomicBool,
+    /// Explicit close, owner Drop and automatic termination share one cleanup owner and its retained completion responsibility.
+    pub(super) closure: crate::transactions::SessionClosure,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
     pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
+    pub(super) next_prepared_handle: std::sync::atomic::AtomicU64,
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
@@ -335,6 +335,7 @@ pub(super) struct SessionContext {
     /// transaction or savepoint rollback leave every consumed draw in place.
     pub(super) random_state: Mutex<super::SessionRandomState>,
     pub(super) transactions: Mutex<Vec<TransactionFrame>>,
+    pub(super) completion_counters: Mutex<crate::transactions::CompletionCounters>,
     /// Memory and serialized providers retain query selections under one session allowance, shared by nested workers and surviving views.
     pub(super) query_retention: uqa_core::memory::MemoryBudget,
     pub(super) regex_cache: Mutex<Option<Arc<uqa_sql::expr::RegexCache>>>,
@@ -393,8 +394,9 @@ impl SessionContext {
             state: SessionStateLock::new(state),
             parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
             query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
-            termination_finished: AtomicBool::new(false),
+            closure: crate::transactions::SessionClosure::default(),
             prepared: RwLock::new(BTreeMap::new()),
+            next_prepared_handle: std::sync::atomic::AtomicU64::new(0),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),
             enum_type_comparison_states: uqa_sql::expr::enums::EnumTypeComparisonStates::default(),
@@ -404,6 +406,7 @@ impl SessionContext {
             sequence_snapshot_reads: std::sync::atomic::AtomicU64::new(0),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
+            completion_counters: Mutex::new(crate::transactions::CompletionCounters::default()),
             regex_cache: Mutex::new(None),
             query_retention: uqa_core::memory::MemoryBudget::new(
                 uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
@@ -449,32 +452,26 @@ impl Drop for SessionContext {
 }
 
 pub(super) struct RuntimeExtensions {
+    pub(super) parallel: uqa_execution::parallel::ParallelExecutor,
     pub(super) foreign_memory_tables:
         Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>>>,
-    pub(super) scalar_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLScalarFunction>>>>,
-    pub(super) table_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>>,
-    pub(super) aggregate_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>>,
+    pub(super) functions: Arc<crate::sql_registry::Registry>,
 }
 
 impl RuntimeExtensions {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(session: &Arc<SessionContext>, gate: &Arc<StatementGate>) -> Self {
         Self {
+            parallel: uqa_execution::parallel::ParallelExecutor::default(),
             foreign_memory_tables: Arc::new(RwLock::new(BTreeMap::new())),
-            scalar_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            table_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            aggregate_functions: Arc::new(RwLock::new(BTreeMap::new())),
+            functions: Arc::new(crate::sql_registry::Registry::new(session, gate)),
         }
     }
 
     pub(super) fn shared_from(source: &Self) -> Self {
         Self {
+            parallel: source.parallel.clone(),
             foreign_memory_tables: source.foreign_memory_tables.clone(),
-            scalar_functions: source.scalar_functions.clone(),
-            table_functions: source.table_functions.clone(),
-            aggregate_functions: source.aggregate_functions.clone(),
+            functions: Arc::clone(&source.functions),
         }
     }
 }
@@ -504,6 +501,15 @@ impl StatementGate {
     /// Hold the gate only if no other thread holds it.
     pub(super) fn try_lock(&self) -> Option<parking_lot::ReentrantMutexGuard<'_, ()>> {
         self.mutex.try_lock()
+    }
+
+    /// Registry changes require an idle session, including on the calling thread.
+    pub(super) fn try_lock_idle(&self) -> Option<parking_lot::ReentrantMutexGuard<'_, ()>> {
+        if self.mutex.is_owned_by_current_thread() {
+            None
+        } else {
+            self.mutex.try_lock()
+        }
     }
 
     pub(super) fn lock_with_cancellation(
@@ -555,6 +561,8 @@ impl Drop for DelegatedStatementGate<'_> {
 }
 
 pub(super) struct QueryRuntime {
+    /// Installation and reads share one cell with internal readers and portal workers.
+    pub(super) function_context: Arc<std::sync::OnceLock<super::SQLFunctionContext>>,
     pub(super) diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics,
     pub(super) statement_gate: Arc<StatementGate>,
     pub(super) sql_execution_depth: AtomicUsize,
@@ -581,11 +589,13 @@ impl QueryRuntime {
     pub(super) fn new(
         function_depth_limit: usize,
         client_level: Arc<std::sync::atomic::AtomicU8>,
+        io_timing: Arc<AtomicBool>,
     ) -> Self {
         Self::with_cancellation(
             function_depth_limit,
             uqa_core::CancellationToken::new(),
             client_level,
+            io_timing,
         )
     }
 
@@ -593,9 +603,11 @@ impl QueryRuntime {
         function_depth_limit: usize,
         cancellation: uqa_core::CancellationToken,
         client_level: Arc<std::sync::atomic::AtomicU8>,
+        io_timing: Arc<AtomicBool>,
     ) -> Self {
         Self {
-            diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics::default(),
+            function_context: Arc::new(std::sync::OnceLock::new()),
+            diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics::new(io_timing),
             statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),
             cancellation,

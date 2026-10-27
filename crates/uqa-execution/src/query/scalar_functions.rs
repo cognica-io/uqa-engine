@@ -75,7 +75,7 @@ pub fn intercept_function(
         return catalog_scalar_value(require_scalar_context(context, &lower)?, &lower, &values)
             .transpose();
     }
-    match lower.as_str() {
+    match lower.as_ref() {
         "uqa_highlight" => Ok(Some(run_uqa_highlight_with_runtime(
             row,
             args,
@@ -200,7 +200,7 @@ pub fn catalog_scalar_value(
     arguments: &[Value],
 ) -> Option<Result<Value, SQLError>> {
     let lower = uqa_sql::semantics::builtin_function_dispatch_name(name);
-    Some(match lower.as_str() {
+    Some(match lower.as_ref() {
         "pg_backend_pid" => no_scalar_arguments(&lower, arguments)
             .map(|()| Value::Int(i64::from(context.session.backend_process_id()))),
         "pg_my_temp_schema" => no_scalar_arguments(&lower, arguments).map(|()| {

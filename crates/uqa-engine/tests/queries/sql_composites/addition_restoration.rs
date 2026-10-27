@@ -44,7 +44,7 @@ fn exec(engine: &Engine, sql: &str) -> uqa_sql::SQLResult {
         .unwrap_or_else(|error| panic!("{sql}: {error}"))
 }
 
-fn setup(engine: &Engine) {
+fn setup(engine: &Engine) -> Value {
     exec(engine, "CREATE TYPE saved_pair AS (a integer, b text);
         CREATE TABLE saved_rows (id integer, p saved_pair DEFAULT ROW(6,'default')::saved_pair,
             g integer GENERATED ALWAYS AS ((ROW(id,'generated')::saved_pair).a) STORED,
@@ -66,23 +66,23 @@ fn setup(engine: &Engine) {
         CREATE TABLE saved_partitioned (id integer) PARTITION BY RANGE (((ROW(id,'key')::saved_pair).a));
         CREATE TABLE saved_partition PARTITION OF saved_partitioned FOR VALUES FROM (0) TO (10);
         INSERT INTO saved_partitioned VALUES (4)");
+    exec(engine, "SELECT p FROM saved_input").rows[0]["p"].clone()
 }
 
 /// The predecessor AST represented the typed constructor as a cast of an anonymous ROW. Keep all other durable identities and catalog formats intact.
-fn downgrade(value: &mut Json) -> usize {
+fn downgrade(value: &mut Json, input: &Value) -> usize {
     match value {
-        Json::Array(values) => values.iter_mut().map(downgrade).sum(),
+        Json::Array(values) => values.iter_mut().map(|value| downgrade(value, input)).sum(),
         Json::Object(object) => {
-            let mut count = object.values_mut().map(downgrade).sum();
+            let mut count = object
+                .values_mut()
+                .map(|value| downgrade(value, input))
+                .sum();
             if let Some(literal) = object.get("TypedLiteral") {
-                if serde_json::from_value::<Value>(literal["value"].clone()).ok()
-                    == Some(Value::Record(
-                        vec![
-                            ("a".into(), Value::Int(9)),
-                            ("b".into(), Value::Str("legacy".into())),
-                        ]
-                        .into(),
-                    ))
+                if serde_json::from_value::<Value>(literal["value"].clone())
+                    .ok()
+                    .as_ref()
+                    .is_some_and(|value| value.has_same_representation(input))
                 {
                     *value = json!({"Cast": {"expr": {"Literal": "(9,legacy)"}, "ty": literal["ty"], "implicit": false}});
                     return count + 1;
@@ -98,41 +98,41 @@ fn downgrade(value: &mut Json) -> usize {
     }
 }
 
-fn downgrade_json(source: &str, count: &mut usize) -> String {
+fn downgrade_json(source: &str, count: &mut usize, input: &Value) -> String {
     let mut value: Json = serde_json::from_str(source).unwrap();
-    *count += downgrade(&mut value);
+    *count += downgrade(&mut value, input);
     serde_json::to_string(&value).unwrap()
 }
 
-fn downgrade_catalog(catalog: &dyn CatalogFacade) {
+fn downgrade_catalog(catalog: &dyn CatalogFacade, input: &Value) {
     let mut count = 0;
     for mut table in catalog.load_tables().unwrap() {
-        table.columns_json = downgrade_json(&table.columns_json, &mut count);
-        table.constraints_json = downgrade_json(&table.constraints_json, &mut count);
+        table.columns_json = downgrade_json(&table.columns_json, &mut count, input);
+        table.constraints_json = downgrade_json(&table.constraints_json, &mut count, input);
         catalog.save_table(&table).unwrap();
     }
     for mut view in catalog.load_views().unwrap() {
-        view.definition_json = downgrade_json(&view.definition_json, &mut count);
+        view.definition_json = downgrade_json(&view.definition_json, &mut count, input);
         catalog.save_view(&view).unwrap();
     }
     for mut index in catalog.load_catalog_indexes().unwrap() {
-        index.columns_json = downgrade_json(&index.columns_json, &mut count);
+        index.columns_json = downgrade_json(&index.columns_json, &mut count, input);
         index.definition_json = index
             .definition_json
             .as_deref()
-            .map(|json| downgrade_json(json, &mut count));
+            .map(|json| downgrade_json(json, &mut count, input));
         catalog.save_catalog_index_row(&index).unwrap();
     }
     for key in ["sql_functions_json", "sql_rules_json", "sql_triggers_json"] {
         if let Some(json) = catalog.get_metadata(key).unwrap() {
             catalog
-                .set_metadata(key, &downgrade_json(&json, &mut count))
+                .set_metadata(key, &downgrade_json(&json, &mut count, input))
                 .unwrap();
         }
     }
     for (key, json) in catalog.metadata_with_prefix("uqa.sql.domain.v1:").unwrap() {
         catalog
-            .set_metadata(&key, &downgrade_json(&json, &mut count))
+            .set_metadata(&key, &downgrade_json(&json, &mut count, input))
             .unwrap();
     }
     assert!(
@@ -156,17 +156,13 @@ fn verify(engine: &Engine) {
         ("SELECT p FROM saved_domains", 3, "domain"),
         ("SELECT p FROM saved_log WHERE (p).a = 4 LIMIT 1", 4, "rule"),
     ] {
-        let result = exec(engine, query);
+        let result = exec(
+            engine,
+            &format!("SELECT p::text AS p FROM ({query}) AS observed"),
+        );
         assert_eq!(
             result.rows[0]["p"],
-            Value::Record(
-                vec![
-                    ("a".into(), Value::Int(a)),
-                    ("b".into(), Value::Str(b.into())),
-                    ("c".into(), Value::Null)
-                ]
-                .into()
-            ),
+            Value::Str(format!("({a},{b},)")),
             "{query}"
         );
     }
@@ -180,9 +176,11 @@ fn predecessor_constructors_are_migrated_before_attribute_addition(#[case] provi
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("constructor-migration.db");
     let engine = super::open(provider, &path);
-    setup(&engine);
+    let input = setup(&engine);
     drop(engine);
-    catalog(provider, &path, downgrade_catalog);
+    catalog(provider, &path, |catalog| {
+        downgrade_catalog(catalog, &input);
+    });
     let engine = super::open(provider, &path);
     exec(
         &engine,
@@ -237,10 +235,10 @@ fn failed_constructor_migration_preserves_the_predecessor_catalog(#[case] provid
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("constructor-rollback.db");
     let engine = super::open(provider, &path);
-    setup(&engine);
+    let input = setup(&engine);
     drop(engine);
     let (rules, before) = catalog(provider, &path, |catalog| {
-        downgrade_catalog(catalog);
+        downgrade_catalog(catalog, &input);
         let rules = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut invalid: Json = serde_json::from_str(&rules).unwrap();
         invalid["format_version"] = json!(u32::MAX);
@@ -283,9 +281,9 @@ fn secondary_session_rejects_constructor_migration_without_changing_durable_reco
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("load-only-constructors.db");
     let engine = super::open(1, &path);
-    setup(&engine);
+    let input = setup(&engine);
     let before = catalog(1, &path, |catalog| {
-        downgrade_catalog(catalog);
+        downgrade_catalog(catalog, &input);
         catalog_snapshot(catalog)
     });
     let Err(error) = engine.new_session() else {

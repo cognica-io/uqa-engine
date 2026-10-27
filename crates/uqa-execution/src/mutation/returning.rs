@@ -27,12 +27,23 @@ use uqa_sql::{
     SQLError, SQLParam,
 };
 
+mod destination;
+pub use destination::ReturningDestination;
 mod rows;
 pub(crate) use rows::ReturningBatchReader;
 pub use rows::ReturningRows;
 
+/// Borrow the same selected RETURNING metadata for portals and direct statement consumers.
+pub trait ReturningInputs<S: Clone + 'static> {
+    fn returning_execution_context(&self) -> ReturningExecutionContext<'_, S>;
+    fn returning_analysis_context(
+        &self,
+    ) -> uqa_sql::semantics::returning::ReturningAnalysisContext<'_>;
+}
+
 #[derive(Clone)]
 pub struct ReturningExecutionContext<'a, S: Clone + 'static> {
+    pub destination: Option<ReturningDestination<'a>>,
     pub rows: MutationRowContext<'a>,
     pub catalog: &'a dyn ReturningCatalog,
     pub routines: &'a dyn RoutineResolution,

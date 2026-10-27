@@ -35,7 +35,8 @@ fn recursive_rules_and_rule_incompatible_dml_fail_atomically() {
             &[],
         )
         .expect_err("ON CONFLICT with an active INSERT rule must fail");
-    assert_eq!(conflict.sqlstate(), Some("0A000"));
+    // PostgreSQL expands the recursive rule before checking ON CONFLICT compatibility.
+    assert_eq!(conflict.sqlstate(), Some("42P17"));
     let merge = engine
         .sql(
             "MERGE INTO recursive_items AS target USING (VALUES (1)) AS source(id)
