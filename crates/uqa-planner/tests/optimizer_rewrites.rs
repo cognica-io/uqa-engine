@@ -63,7 +63,7 @@ fn select_with_where(filter: Expr) -> SelectStmt {
 }
 
 fn optimize_select(stmt: SelectStmt) -> UnifiedPlan {
-    let cfg = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let cfg = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
         .expect("optimizer succeeds")
 }
@@ -117,7 +117,7 @@ proptest! {
         let or_with_false = Expr::Or(vec![lit_false(), col("name")]);
         let filter = Expr::And(vec![Expr::And(and_parts), or_with_false]);
 
-        let cfg = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let cfg = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         let stmt = select_with_where(filter);
         let once = optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
             .expect("first optimizer pass succeeds");
@@ -208,7 +208,7 @@ fn unused_window_constants_keep_postgresql_planning_errors() {
         let statement = uqa_sql::compile(sql).unwrap().remove(0);
         let error = optimize(
             UnifiedPlan::lower(statement),
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         )
         .unwrap_err();
         // Independently captured in named_window_viewdef_oracle.expected.json.
@@ -286,7 +286,7 @@ fn window_definitions_follow_subquery_remapping_and_source_constants() {
     assert!(id < block.subqueries.len());
     let repeated = optimize(
         plan.clone(),
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
     )
     .unwrap();
     assert_eq!(

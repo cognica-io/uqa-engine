@@ -5,6 +5,7 @@
 //
 
 use std::io::{IoSlice, Read, Seek, SeekFrom, Write};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_storage::temporary_file::BlockTemporaryFile;
 
 use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
@@ -15,8 +16,8 @@ use crate::batch::{PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 
 use super::format::{
-    decode_physical_row_record, encode_physical_row_record, encoded_physical_row_record_size,
-    spill_error, RECORD_PREFIX_BYTES,
+    decode_constant_record, decode_physical_row_record, encode_physical_row_record,
+    encoded_physical_row_record_size, spill_error, RECORD_PREFIX_BYTES,
 };
 
 #[cfg(test)]
@@ -156,6 +157,25 @@ impl IndexedSpill {
 
     /// Decode the row at `index` without loading any other row or index entry.
     pub fn get(&mut self, index: u64) -> ExecResult<PhysicalRow> {
+        let payload = self.read_record(index, &ProductionControl::uncontrolled())?;
+        decode_physical_row_record(&payload, self.schema.physical_width())
+    }
+
+    pub(crate) fn get_constant_with_control(
+        &mut self,
+        index: u64,
+        control: &ProductionControl<'_>,
+    ) -> ExecResult<Produced<uqa_core::Value>> {
+        let payload = self.read_record(index, control)?;
+        decode_constant_record(&payload, control)
+    }
+
+    fn read_record(
+        &mut self,
+        index: u64,
+        control: &ProductionControl<'_>,
+    ) -> ExecResult<Produced<Vec<u8>>> {
+        control.check()?;
         if index >= self.rows {
             return Err(spill_error(format!(
                 "indexed spill row {index} is outside 0..{}",
@@ -231,18 +251,19 @@ impl IndexedSpill {
         }
         let length = usize::try_from(declared_length)
             .map_err(|_| spill_error("indexed spill row length is outside address space"))?;
-        let mut payload = Vec::new();
-        payload.try_reserve_exact(length).map_err(|error| {
-            spill_error(format!(
-                "unable to allocate indexed spill row payload of {length} bytes: {error}"
-            ))
-        })?;
-        payload.resize(length, 0);
+        let mut payload = ProductionVec::new(*control);
+        payload.reserve(length)?;
+        let zeros = [0_u8; 4096];
+        while payload.len() < length {
+            payload.extend_from_slice(&zeros[..zeros.len().min(length - payload.len())])?;
+        }
+        let mut payload = payload.finish()?;
         self.data
             .as_file_mut()
-            .read_exact(&mut payload)
+            .read_exact(payload.as_mut_slice())
             .map_err(|error| spill_error(format!("failed to read indexed spill row: {error}")))?;
-        decode_physical_row_record(&payload, self.schema.physical_width())
+        control.check()?;
+        Ok(payload)
     }
 }
 

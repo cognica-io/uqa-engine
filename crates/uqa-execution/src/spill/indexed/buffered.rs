@@ -6,7 +6,7 @@
 
 //! Bounded positional rows switch atomically to the existing encrypted spill owner.
 
-use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
+use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation, Produced, ProductionControl};
 
 use super::{
     decode_physical_row_record, encode_physical_row_record, encoded_physical_row_record_size,
@@ -125,6 +125,27 @@ impl BufferedIndexedSpill {
         self.payload = memory.empty_reservation();
         self.disk = Some(disk);
         Ok(())
+    }
+
+    pub(crate) fn get_constant_with_control(
+        &mut self,
+        index: u64,
+        control: &ProductionControl<'_>,
+    ) -> ExecResult<Produced<uqa_core::Value>> {
+        control.check()?;
+        if let Some(disk) = &mut self.disk {
+            return disk.get_constant_with_control(index, control);
+        }
+        let record = usize::try_from(index)
+            .ok()
+            .and_then(|index| self.rows.get(index))
+            .ok_or_else(|| {
+                spill_error(format!(
+                    "indexed spill row {index} is outside 0..{}",
+                    self.rows.len()
+                ))
+            })?;
+        super::decode_constant_record(record, control)
     }
 
     pub(crate) fn get(&mut self, index: u64) -> ExecResult<PhysicalRow> {

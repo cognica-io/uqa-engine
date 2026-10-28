@@ -208,6 +208,19 @@ impl<T> Produced<T> {
         self.memory.as_ref().map_or(0, MemoryReservation::bytes)
     }
 
+    /// Share an immutable result and its existing lease. The shared payload is admitted before allocation; reference-count bookkeeping is outside the payload allowance.
+    pub fn into_shared(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<std::sync::Arc<Self>, ValueRetentionError> {
+        control.assert_owner(self.memory.as_ref());
+        let header = control.reserve(size_of::<Self>())?;
+        let (value, memory) = self.into_parts();
+        Ok(std::sync::Arc::new(
+            control.finish(value, control.combine(memory, header))?,
+        ))
+    }
+
     /// Transfer the explicit value/lease pair to its next allocation owner. The caller must retain the lease until those allocations are freed or handed off under a documented legacy API boundary.
     pub fn into_parts(self) -> (T, Option<MemoryReservation>) {
         (self.value, self.memory)
@@ -251,6 +264,12 @@ impl<T> std::ops::Deref for Produced<T> {
     type Target = T;
     fn deref(&self) -> &T {
         &self.value
+    }
+}
+
+impl<T: PartialEq> PartialEq for Produced<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
     }
 }
 

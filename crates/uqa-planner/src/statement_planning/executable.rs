@@ -58,7 +58,7 @@ impl PlanningResources {
         }
     }
 
-    fn control(&self) -> ProductionControl<'_> {
+    pub(super) fn control(&self) -> ProductionControl<'_> {
         ProductionControl::new(&self.memory, &self.cancellation, &self.cancellation)
     }
 }

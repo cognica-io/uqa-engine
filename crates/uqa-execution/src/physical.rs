@@ -34,6 +34,12 @@ pub enum ExecError {
     SQL(#[from] uqa_sql::SQLError),
 }
 
+impl From<uqa_core::ValueRetentionError> for ExecError {
+    fn from(error: uqa_core::ValueRetentionError) -> Self {
+        Self::SQL(error.into())
+    }
+}
+
 impl From<uqa_sql::schema::SchemaLayoutError> for ExecError {
     fn from(error: uqa_sql::schema::SchemaLayoutError) -> Self {
         Self::Other(error.to_string())

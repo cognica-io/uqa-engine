@@ -22,7 +22,7 @@ fn optimizer_routes_nested_join_search_through_request_admission() {
         let input = UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0));
         let expected = crate::optimize(
             input.clone(),
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         ).unwrap();
         for failure in 0..4 {
             let budget = MemoryBudget::new(if failure == 0 { 0 } else { 128 * 1024 });
@@ -33,7 +33,7 @@ fn optimizer_routes_nested_join_search_through_request_admission() {
             } else if failure == 2 {
                 invoking.cancel();
             }
-            let mut config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+            let mut config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
             config.production = ProductionControl::new(&budget, &original, &invoking);
             let result = crate::optimize(input.clone(), &config);
             if failure == 3 {

@@ -27,16 +27,16 @@ fn retained_literals_keep_the_original_sql_rendering() {
     };
     let storage = crate::scalar::RetainedConstants::new(64);
     for declaration in [None, Some("\"pg_catalog\".\"text\"".to_owned())] {
-        let retained = RetainedScalarLiteral {
-            value: storage
+        let retained = RetainedScalarLiteral::new(
+            storage
                 .retain(Value::Str("O'Reilly λ".repeat(128)))
                 .unwrap(),
-            ty: ColumnType::Text,
+            Some(ColumnType::Text),
             declaration,
-            collation_oid: None,
-        };
+            None,
+        );
         let original = retained.materialize().unwrap();
-        let expression = ScalarExpr::RetainedLiteral(Box::new(retained));
+        let expression = ScalarExpr::RetainedLiteral(retained);
         for pretty in [false, true] {
             let deparser = Deparser {
                 output: None,

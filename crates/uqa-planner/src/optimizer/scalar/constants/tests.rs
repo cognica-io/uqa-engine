@@ -8,6 +8,7 @@ use super::*;
 
 mod catalog_types;
 mod collations;
+mod production;
 mod retained;
 mod similar_substring;
 mod strict_arithmetic;
@@ -15,8 +16,9 @@ mod strict_arithmetic;
 #[test]
 fn constant_folding_retains_selected_collation_metadata() {
     for coerced_conditionals in [false, true] {
-        let mut config =
-            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut config = crate::optimizer::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
         config.coerced_conditionals = coerced_conditionals;
         for source in [
             "'x' COLLATE \"C\"",
@@ -128,8 +130,9 @@ fn session_dependent_temporal_operators_remain_executable_after_parameter_bindin
 #[test]
 fn constant_folding_retains_row_and_record_comparison_selection() {
     for coerced_conditionals in [false, true] {
-        let mut config =
-            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut config = crate::optimizer::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
         config.coerced_conditionals = coerced_conditionals;
         for (source, expected) in [
             ("SELECT ROW(NULL::integer)=ROW(NULL::integer)", Value::Null),
@@ -324,7 +327,7 @@ fn named_arguments_keep_their_call_context_during_constant_planning() {
     let before = uqa_execution::scalar::eval_constant_scalar(&expression).unwrap();
     crate::optimizer::optimize_scalar_expression(
         &mut expression,
-        &crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
     )
     .unwrap();
     assert_eq!(
@@ -441,7 +444,8 @@ fn eliminated_conditional_calls_do_not_require_execute_permission() {
         )],
         else_branch: Some(Box::new(ScalarExpr::Literal(Value::Str("ok".into())))),
     };
-    let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let mut config =
+        crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     config.builtin_permissions = Some(std::sync::Arc::new(DeniedBuiltin));
     crate::optimizer::optimize_scalar_expression(&mut expression, &config).unwrap();
     assert_eq!(
@@ -560,7 +564,7 @@ fn unreachable_scalar_subqueries_keep_types_without_constant_evaluation() {
                 }
             }
         });
-        let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         config.builtin_permissions = Some(std::sync::Arc::new(DeniedBuiltin));
         let result = crate::optimizer::optimize(plan, &config);
         assert_eq!(result.is_err(), denied, "{sql}: {result:?}");
@@ -629,7 +633,8 @@ fn typed_inline_results_keep_catalog_and_session_dependent_output_at_runtime() {
 
 #[test]
 fn analyzed_conditionals_discard_unreachable_mutable_calls() {
-    let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let mut config =
+        crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     config.coerced_conditionals = true;
     for sql in [
         "SELECT CASE WHEN true THEN v ELSE random() END",

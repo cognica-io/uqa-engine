@@ -46,11 +46,21 @@ pub fn fold_type_transform_assignment(
         return Ok(());
     }
     let value = match &transform.plan.scalar {
-        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => value,
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            std::borrow::Cow::Borrowed(value)
+        }
+        ScalarExpr::RetainedLiteral(literal) => match literal.value.resident_value() {
+            Some(value) => std::borrow::Cow::Borrowed(value),
+            None => std::borrow::Cow::Owned(literal.value.read()?),
+        },
         _ => return Ok(()),
     };
-    let value =
-        assign_type_transform_value(context, value.clone(), base, transform.source_type.as_ref())?;
+    let value = assign_type_transform_value(
+        context,
+        value.into_owned(),
+        base,
+        transform.source_type.as_ref(),
+    )?;
     transform.plan.scalar = ScalarExpr::TypedLiteral {
         collation_oid: None,
         composite_source: None,

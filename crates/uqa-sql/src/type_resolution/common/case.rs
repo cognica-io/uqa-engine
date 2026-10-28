@@ -165,9 +165,7 @@ fn constant_value(
     control.check()?;
     match expression {
         ScalarExpr::Collated { expr, .. } => constant_value(expr, control),
-        ScalarExpr::RetainedLiteral(literal) => {
-            Ok(Some(control.copy_value(&literal.value.read()?)?))
-        }
+        ScalarExpr::RetainedLiteral(literal) => Ok(Some(literal.value.read_with_control(control)?)),
         // Binding reads an `unknown` literal into the typed constant it compares, which stays a constant.
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
             Ok(Some(control.copy_value(value)?))

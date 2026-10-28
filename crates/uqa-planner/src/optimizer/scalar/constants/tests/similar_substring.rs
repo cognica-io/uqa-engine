@@ -7,8 +7,9 @@
 use super::*;
 
 fn optimize(source: &str) -> Result<ScalarExpr, SQLError> {
-    let config =
-        crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let config = crate::optimizer::OptimizerConfig::new(
+        uqa_execution::scalar::eval_constant_scalar_with_control,
+    );
     let mut expression = expression(source);
     crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config)?;
     Ok(expression)
@@ -50,8 +51,9 @@ fn similar_translation_planning_rejects_before_copying_large_operands() {
                 invoking.cancel();
             }
         }
-        let mut config =
-            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut config = crate::optimizer::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
         config.production = ProductionControl::new(&memory, &original, &invoking);
         let mut result = None;
         let allocated = allocation_counter::measure(|| {
@@ -82,8 +84,9 @@ fn similar_translation_planning_keeps_lazy_errors_and_releases_workspace() {
 
     let memory = MemoryBudget::new(4096);
     let token = CancellationToken::new();
-    let mut config =
-        crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let mut config = crate::optimizer::OptimizerConfig::new(
+        uqa_execution::scalar::eval_constant_scalar_with_control,
+    );
     config.production = ProductionControl::new(&memory, &token, &token);
     config.coerced_conditionals = true;
     for (source, state) in [
@@ -106,6 +109,7 @@ fn similar_translation_planning_keeps_lazy_errors_and_releases_workspace() {
             state,
             "{source}"
         );
+        drop(input);
         assert_eq!(memory.used(), 0, "{source}");
     }
     assert!(memory.peak() > 0);

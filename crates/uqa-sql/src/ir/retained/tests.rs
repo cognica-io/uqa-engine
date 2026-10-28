@@ -29,31 +29,52 @@ impl ConstantValueSource for Source {
 }
 
 #[test]
+fn resident_constant_comparison_and_plan_copy_do_not_allocate_or_release_the_owner() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let memory = MemoryBudget::new(16 * 1024 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let input = Value::Str("x".repeat(4 * 1024 * 1024));
+    let make = || {
+        RetainedScalarLiteral::with_control(
+            RetainedConstantValue::from_produced(control.copy_value(&input).unwrap(), &control)
+                .unwrap(),
+            Some(ColumnType::Text.clone_with_control(&control).unwrap()),
+            Some(control.copy_text("text").unwrap()),
+            None,
+            &control,
+        )
+        .unwrap()
+    };
+    let left = crate::ScalarExpr::RetainedLiteral(make());
+    let right = crate::ScalarExpr::RetainedLiteral(make());
+    let held = memory.used();
+    let empty = MemoryBudget::new(0);
+    let copying = ProductionControl::new(&empty, &token, &token);
+    let mut copy = None;
+    let allocations = allocation_counter::measure(|| {
+        assert_eq!(left, right);
+        copy = Some(left.clone_with_control(&copying).unwrap());
+    });
+    assert_eq!(allocations.bytes_total, 0, "{allocations:?}");
+    assert_eq!(empty.used(), 0);
+    assert_eq!(memory.used(), held);
+    drop((left, right));
+    assert!(memory.used() > 4 * 1024 * 1024);
+    drop(copy);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn planning_memory_observes_shared_constants_without_reading_their_values() {
     use uqa_core::memory::{AllocationUsage, ProductionControl};
     let (expression, source) = literal(Value::Str("x".repeat(1 << 20)), ColumnType::Text);
     let one = AllocationUsage::measure(&expression, &ProductionControl::uncontrolled()).unwrap();
     let copies = vec![expression.clone(); 128];
     let observed = AllocationUsage::measure(&copies, &ProductionControl::uncontrolled()).unwrap();
-    let crate::ScalarExpr::RetainedLiteral(literal) = &expression else {
-        panic!("retained literal")
-    };
-    let metadata =
-        size_of::<RetainedScalarLiteral>() + literal.declaration.as_ref().unwrap().capacity();
-    let copied_metadata: usize = copies
-        .iter()
-        .map(|copy| {
-            let crate::ScalarExpr::RetainedLiteral(literal) = copy else {
-                panic!("retained literal")
-            };
-            size_of::<RetainedScalarLiteral>() + literal.declaration.as_ref().unwrap().capacity()
-        })
-        .sum();
     assert_eq!(
         observed.allocated_bytes,
-        one.allocated_bytes - metadata
-            + copied_metadata
-            + copies.capacity() * size_of::<crate::ScalarExpr>()
+        one.allocated_bytes + copies.capacity() * size_of::<crate::ScalarExpr>()
     );
     assert_eq!(source.reads.load(Ordering::Relaxed), 0);
 }
@@ -64,12 +85,12 @@ fn literal(value: Value, ty: ColumnType) -> (crate::ScalarExpr, Arc<Source>) {
         reads: AtomicUsize::new(0),
     });
     (
-        crate::ScalarExpr::RetainedLiteral(Box::new(RetainedScalarLiteral {
-            value: RetainedConstantValue::new(source.clone(), 0),
-            declaration: Some(ty.catalog_name()),
-            ty,
-            collation_oid: None,
-        })),
+        crate::ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
+            RetainedConstantValue::new(source.clone(), 0),
+            Some(ty.clone()),
+            Some(ty.catalog_name()),
+            None,
+        )),
         source,
     )
 }
@@ -102,7 +123,12 @@ fn retained_literal_serialization_and_grouping_preserve_value_representation() {
     let crate::ScalarExpr::RetainedLiteral(stored) = &mut original else {
         unreachable!()
     };
-    stored.collation_oid = Some(950);
+    *stored = RetainedScalarLiteral::new(
+        stored.value.clone(),
+        stored.ty.clone(),
+        stored.declaration.clone(),
+        Some(950),
+    );
     let ordinary = stored.materialize().unwrap();
     let bytes = serde_json::to_vec(&original).unwrap();
     let decoded: crate::ScalarExpr = serde_json::from_slice(&bytes).unwrap();

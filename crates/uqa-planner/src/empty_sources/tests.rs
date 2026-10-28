@@ -9,7 +9,7 @@ use super::*;
 fn query(sql: &str) -> Box<QueryPlan> {
     let plan = crate::optimize(
         crate::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0)),
-        &crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
     )
     .unwrap();
     let crate::UnifiedPlan::Query(query) = plan else {

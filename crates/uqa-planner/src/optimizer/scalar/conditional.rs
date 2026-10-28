@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::eval_value_comparison_truth_with_engine;
 
-use super::constants::literal_value;
+use super::constants::literal_value_with_control;
 use super::{optimize_optional, optimize_scalar, OptimizerConfig, SQLError, ScalarExpr, Value};
 
 pub(super) fn optimize_boolean(
@@ -39,7 +39,7 @@ pub(super) fn optimize_boolean(
             _ => {}
         }
         let item = optimize_scalar(item, config)?;
-        match literal_value(&item)?.as_deref() {
+        match literal_value_with_control(&item, &config.production)?.as_deref() {
             Some(Value::Bool(value)) if *value != and => {
                 if config.enable_boolean_simplify {
                     return Ok(ScalarExpr::Literal(Value::Bool(*value)));
@@ -88,17 +88,20 @@ pub(super) fn optimize_case(
     let mut remaining = when.into_iter();
     while let Some((condition, result)) = remaining.next() {
         let condition = optimize_scalar(condition, config)?;
-        let matched = match (base.as_deref(), literal_value(&condition)?.as_deref()) {
+        let matched = match (
+            base.as_deref(),
+            literal_value_with_control(&condition, &config.production)?.as_deref(),
+        ) {
             (None, Some(Value::Bool(value))) => Some(*value),
             (None, Some(Value::Null)) => Some(false),
-            (Some(base), Some(condition)) => literal_value(base)?
+            (Some(base), Some(condition)) => literal_value_with_control(base, &config.production)?
                 .as_deref()
                 .map(|base| {
                     eval_value_comparison_truth_with_engine(
                         BinaryOp::Equal,
                         base,
                         condition,
-                        &uqa_core::memory::ProductionControl::uncontrolled(),
+                        &config.production,
                         None,
                         None,
                     )
@@ -162,7 +165,7 @@ pub(super) fn optimize_coalesce(
     let mut remaining = args.into_iter();
     while let Some(argument) = remaining.next() {
         let argument = optimize_scalar(argument, config)?;
-        let stops = literal_value(&argument)?
+        let stops = literal_value_with_control(&argument, &config.production)?
             .as_deref()
             .is_some_and(|value| !matches!(value, Value::Null));
         kept.push(argument);

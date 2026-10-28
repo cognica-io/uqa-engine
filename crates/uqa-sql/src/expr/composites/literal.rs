@@ -60,6 +60,20 @@ pub fn evaluate_with_control(
     }
 }
 
+/// Preserve a decoded constant's admitted payload when descriptor adaptation is unnecessary.
+pub fn evaluate_owned_with_control(
+    value: Produced<Value>,
+    ty: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
+    if engine.is_none() || !inspect_records(&value, &mut || control.check().map_err(Into::into))? {
+        return Ok(value);
+    }
+    evaluate_with_control(&value, ty, engine, control)
+}
+
 fn materialize(
     value: &Value,
     ty: &ColumnType,

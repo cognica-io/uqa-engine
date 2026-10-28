@@ -67,7 +67,10 @@ pub(in crate::optimizer::scalar) fn fold_composite_constructor(
         return Ok(expression);
     };
     if !items.iter().try_fold(true, |all, item| {
-        Ok::<_, SQLError>(all && super::literal_value(item)?.is_some())
+        Ok::<_, SQLError>(
+            all && super::literal_value_with_control(item, &ProductionControl::uncontrolled())?
+                .is_some(),
+        )
     })? {
         return Ok(expression);
     }
@@ -88,7 +91,7 @@ pub(in crate::optimizer::scalar) fn fold_composite_constructor(
         |index| {
             control
                 .copy_value(
-                    super::literal_value(&items[index])?
+                    super::literal_value_with_control(&items[index], &control)?
                         .as_deref()
                         .expect("constant argument"),
                 )

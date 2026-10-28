@@ -27,7 +27,7 @@ fn unused_command_ctes_are_not_constant_evaluated() {
         "WITH used AS (VALUES(1/0)) INSERT INTO target SELECT * FROM used",
         "WITH used AS (VALUES(1/0)),effect AS (INSERT INTO target SELECT * FROM used) DELETE FROM target",
     ] {
-        let result = optimize(UnifiedPlan::lower(compile(sql).unwrap().remove(0)), &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar));
+        let result = optimize(UnifiedPlan::lower(compile(sql).unwrap().remove(0)), &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control));
         assert!(matches!(&result, Err(OptimizerError::Expression(error)) if error.sqlstate() == Some("22012")), "{sql}: {result:?}");
     }
 }
@@ -36,7 +36,7 @@ fn optimized(sql: &str) -> UnifiedPlan {
     let mut statements = compile(sql).expect("SQL compiles");
     optimize(
         UnifiedPlan::lower(statements.remove(0)),
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
     )
     .expect("optimizer succeeds")
 }
@@ -46,7 +46,7 @@ fn optimized_with_rows(sql: &str, rows: &[(&str, u64)]) -> UnifiedPlan {
     let rows = rows.iter().copied().collect::<BTreeMap<_, _>>();
     optimize_with_statistics(
         UnifiedPlan::lower(statements.remove(0)),
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         &|table: &str| {
             rows.get(table).copied().map(|row_count| {
                 let column = || crate::ColumnStats {
@@ -88,7 +88,8 @@ fn computed_integer_order_keys_keep_values_instead_of_output_positions() {
         ("SELECT v FROM t ORDER BY coalesce(NULL::integer, 0), v", 0),
         ("SELECT v FROM (VALUES (0)) AS input(v) ORDER BY v", 0),
     ] {
-        let mut config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut config =
+            OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         config.coerced_conditionals = true;
         let plan = optimize(UnifiedPlan::lower(compile(sql).unwrap().remove(0)), &config).unwrap();
         let key = uqa_execution::query::ordering::resolve_order_expression(
@@ -237,7 +238,7 @@ fn analyzed_membership_retains_posting_access() {
         assert!(matches!(block.r#where, Some(ScalarExpr::Func { .. })));
         let plan = optimize(
             plan,
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         )
         .unwrap();
         assert!(
@@ -695,7 +696,7 @@ fn dpccp_resolves_unique_unqualified_where_join_columns() {
     let plan = UnifiedPlan::lower(statements.remove(0));
     let plan = optimize_with_statistics(
         plan,
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         &|table: &str| {
             let (rows, columns): (u64, &[&str]) = match table {
                 "a" => (1_000_000, &["a_id"]),
@@ -797,7 +798,7 @@ fn join_reordering_preserves_lateral_boundary() {
     let rows = BTreeMap::from([("a", 1_000_000), ("b", 10_000), ("c", 1)]);
     let plan = optimize_with_statistics(
         plan,
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         &|table: &str| {
             rows.get(table).copied().map(|row_count| {
                 let column = || crate::ColumnStats {

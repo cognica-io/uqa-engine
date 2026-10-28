@@ -67,7 +67,7 @@ fn failed_sql_analysis_precedes_optimizer_inputs_and_constant_evaluation() {
         },
         aggregates: &aggregates,
         optimization: &inputs,
-        constant_evaluator: uqa_execution::scalar::eval_constant_scalar,
+        constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
     };
     let plan = UnifiedPlan::lower(uqa_sql::compile("SELECT 1 / 0").unwrap().remove(0));
     let error = plan_for_execution(&context, plan, &[]).unwrap_err();
@@ -90,7 +90,7 @@ fn analyzed_rule_conditions_discard_dead_inputs_but_retain_reachable_planning_er
         },
         aggregates: &|_: &str| false,
         optimization: &inputs,
-        constant_evaluator: uqa_execution::scalar::eval_constant_scalar,
+        constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
     };
     for (sql, fails) in [
         ("SELECT CASE WHEN true THEN false ELSE 1/0>0 END", false),

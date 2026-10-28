@@ -50,7 +50,9 @@ impl<'a> PreparedCheck<'a> {
             &[],
             hook.as_ref(),
         );
-        (inputs.plan_check)(&mut expression.scalar)?;
+        inputs
+            .expressions
+            .optimize_catalog_scalar(&mut expression.scalar)?;
         Ok(Self {
             expression,
             schema,

@@ -127,7 +127,7 @@ fn coerce(
 ) -> Result<ScalarExpr, SQLError> {
     let target = context.types.resolve_catalog_column_type_name(target)?;
     let actual = match &expression {
-        ScalarExpr::RetainedLiteral(literal) => Some(&literal.ty),
+        ScalarExpr::RetainedLiteral(literal) => literal.ty.as_ref(),
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
             ..

@@ -88,10 +88,8 @@ impl Lowering<'_> {
             Node::InternalColumn(column) => ScalarExpr::InternalColumn(column),
             Node::Literal(value) => ScalarExpr::Literal(self.value(value)?),
             Node::RetainedLiteral(value) => match value {
-                Source::Owned(value) => ScalarExpr::RetainedLiteral(Box::new(value.0)),
-                Source::Borrowed(value) => {
-                    ScalarExpr::RetainedLiteral(self.copy_retained_literal(&value.0)?)
-                }
+                Source::Owned(value) => ScalarExpr::RetainedLiteral(value.0),
+                Source::Borrowed(value) => ScalarExpr::RetainedLiteral(value.0.clone()),
             },
             Node::TypedLiteral {
                 value,

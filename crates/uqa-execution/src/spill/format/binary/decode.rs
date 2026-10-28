@@ -6,9 +6,12 @@
 
 //! Bounded binary spill decoding.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
-use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
+use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::{TemporalValue, Value};
+
+mod value;
 use uqa_sql::ast::ColumnType;
 
 use crate::batch::{Batch, ColumnIdentity, PhysicalLayout, PhysicalRow, RowSchema};
@@ -176,6 +179,29 @@ pub(crate) fn decode_physical_row_record(
     }
     reader.finish("indexed spill row")?;
     Ok(row)
+}
+
+/// Read the sole value of a frozen constant record, admitting its decoded payload before allocation.
+pub(crate) fn decode_constant_record(
+    record: &[u8],
+    control: &ProductionControl<'_>,
+) -> ExecResult<Produced<Value>> {
+    control.check()?;
+    let mut reader = BinaryReader::new(record);
+    if reader.read_count("row value count", 1)? != 1 {
+        return Err(spill_error(
+            "retained constant storage has invalid row width",
+        ));
+    }
+    let value = reader.read_value_with_control(0, control)?;
+    if reader.remaining() != 0 && reader.read_count("lock origin count", 32)? != 0 {
+        return Err(spill_error(
+            "retained constant storage has unexpected row origins",
+        ));
+    }
+    reader.finish("indexed spill row")?;
+    control.check()?;
+    Ok(value)
 }
 
 /// The document `encode_document` wrote at the start of `bytes`, and the bytes after it.
@@ -354,235 +380,11 @@ impl<'a> BinaryReader<'a> {
         Ok(origins)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "binary decoding validates tags, widths, and bounds before allocation"
-    )]
     fn read_value(&mut self, depth: usize) -> ExecResult<Value> {
-        if depth > MAX_VALUE_DEPTH {
-            return Err(spill_error("spill value nesting exceeds 128 levels"));
-        }
-        match self.read_u8("value tag")? {
-            0 => Ok(Value::Null),
-            1 => match self.read_u8("boolean value")? {
-                0 => Ok(Value::Bool(false)),
-                1 => Ok(Value::Bool(true)),
-                value => Err(spill_error(format!("invalid boolean value {value}"))),
-            },
-            2 => self.read_i64("integer value").map(Value::Int),
-            3 => self
-                .read_u64("float value")
-                .map(|bits| Value::Float(f64::from_bits(bits))),
-            4 => self.read_string("string value").map(Value::Str),
-            5 => self
-                .read_bytes("byte value")
-                .map(|value| Value::Bytes(value.to_vec())),
-            6 => self.read_temporal().map(Value::Temporal),
-            7 => {
-                let value = self.read_string("decimal value")?;
-                DecimalValue::parse(&value)
-                    .map(Value::Decimal)
-                    .ok_or_else(|| spill_error(format!("invalid decimal in spill file: {value}")))
-            }
-            8 => {
-                let count = self.read_count("list length", 1)?;
-                let mut values = Vec::new();
-                values
-                    .try_reserve_exact(count)
-                    .map_err(|error| spill_error(format!("cannot allocate spill list: {error}")))?;
-                for _ in 0..count {
-                    values.push(self.read_value(depth + 1)?);
-                }
-                Ok(Value::List(values))
-            }
-            9 => {
-                let count = self.read_count("map length", 9)?;
-                let mut values = BTreeMap::new();
-                for _ in 0..count {
-                    let key = self.read_string("map key")?;
-                    let value = self.read_value(depth + 1)?;
-                    if values.insert(key.clone(), value).is_some() {
-                        return Err(spill_error(format!("duplicate key `{key}` in spill map")));
-                    }
-                }
-                Ok(Value::Map(values))
-            }
-            10 => self
-                .read_string("fixed character value")
-                .map(Value::FixedChar),
-            11 => self.read_string("JSON value").map(Value::Json),
-            12 => self.read_string("JSONB value").map(Value::JsonB),
-            tag @ (13 | 19 | 25) => {
-                let fields = if tag == 13 {
-                    None
-                } else {
-                    let count =
-                        self.read_count("row descriptor length", if tag == 25 { 9 } else { 8 })?;
-                    let mut fields = Vec::new();
-                    fields.try_reserve_exact(count).map_err(|error| {
-                        spill_error(format!("cannot allocate row descriptor: {error}"))
-                    })?;
-                    for _ in 0..count {
-                        fields.push(uqa_core::RecordFieldType {
-                            oid: u32::from_le_bytes(
-                                self.read_i32("row field type OID")?.to_le_bytes(),
-                            ),
-                            type_modifier: self.read_i32("row field type modifier")?,
-                            collation_oid: if tag == 25 {
-                                match self.read_u8("row field collation presence")? {
-                                    0 => None,
-                                    1 => Some(u32::from_le_bytes(
-                                        self.read_i32("row field collation OID")?.to_le_bytes(),
-                                    )),
-                                    _ => {
-                                        return Err(spill_error(
-                                            "invalid row field collation presence",
-                                        ))
-                                    }
-                                }
-                            } else {
-                                None
-                            },
-                        });
-                    }
-                    Some(fields)
-                };
-                let count = self.read_count("row length", 1)?;
-                let mut values = Vec::new();
-                values
-                    .try_reserve_exact(count)
-                    .map_err(|error| spill_error(format!("cannot allocate spill row: {error}")))?;
-                for _ in 0..count {
-                    values.push(self.read_value(depth + 1)?);
-                }
-                let row = match fields {
-                    Some(fields) => uqa_core::RowValue::typed(values, fields)
-                        .map_err(|error| spill_error(format!("invalid row descriptor: {error}")))?,
-                    None => uqa_core::RowValue::new(values),
-                };
-                Ok(Value::Row(row))
-            }
-            tag @ (14 | 23) => {
-                let type_oid = if tag == 23 {
-                    Some(u32::from_le_bytes(
-                        self.read_i32("record type OID")?.to_le_bytes(),
-                    ))
-                } else {
-                    None
-                };
-                let count = self.read_count("record length", 9)?;
-                let mut fields = Vec::new();
-                fields.try_reserve_exact(count).map_err(|error| {
-                    spill_error(format!("cannot allocate spill record: {error}"))
-                })?;
-                for _ in 0..count {
-                    let name = self.read_string("record field name")?;
-                    let value = self.read_value(depth + 1)?;
-                    fields.push((name, value));
-                }
-                Ok(Value::Record(uqa_core::RecordValue::from_parts(
-                    fields, type_oid,
-                )))
-            }
-            tag @ (15 | 21) => {
-                let element_type_oid = if tag == 21 {
-                    Some(u32::from_le_bytes(
-                        self.read_i32("array element type OID")?.to_le_bytes(),
-                    ))
-                } else {
-                    None
-                };
-                let bound_count = self.read_count("array lower-bound count", 4)?;
-                let mut lower_bounds = Vec::new();
-                lower_bounds
-                    .try_reserve_exact(bound_count)
-                    .map_err(|error| {
-                        spill_error(format!("cannot allocate spill array bounds: {error}"))
-                    })?;
-                for _ in 0..bound_count {
-                    lower_bounds.push(self.read_i32("array lower bound")?);
-                }
-                let element_count = self.read_count("array element count", 1)?;
-                let mut elements = Vec::new();
-                elements.try_reserve_exact(element_count).map_err(|error| {
-                    spill_error(format!("cannot allocate spill array: {error}"))
-                })?;
-                for _ in 0..element_count {
-                    elements.push(self.read_value(depth + 1)?);
-                }
-                ArrayValue::with_lower_bounds(elements, lower_bounds)
-                    .map(|array| array.with_element_type_oid(element_type_oid))
-                    .map(Value::Array)
-                    .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
-            }
-            20 => {
-                let type_oid = u32::from_le_bytes(self.read_i32("datum type OID")?.to_le_bytes());
-                let offset = u32::from_le_bytes(self.read_i32("datum offset")?.to_le_bytes());
-                let bytes = self.read_bytes("datum bytes")?.to_vec();
-                Ok(Value::Datum(uqa_core::DatumValue::new(
-                    type_oid, offset, bytes,
-                )))
-            }
-            16 => Ok(Value::Void),
-            24 => {
-                let length = u32::from_le_bytes(self.read_i32("bit length")?.to_le_bytes());
-                let bytes = self.read_bytes("packed bit data")?;
-                if bytes.len() != length.div_ceil(8) as usize {
-                    return Err(spill_error("invalid packed bit length in spill file"));
-                }
-                uqa_core::BitStringValue::try_from_packed(bytes.to_vec(), length)
-                    .map(Value::BitString)
-                    .ok_or_else(|| spill_error("invalid packed bit padding in spill file"))
-            }
-            tag @ (18 | 22) => {
-                let type_oid = u32::from_le_bytes(self.read_i32("enum type OID")?.to_le_bytes());
-                let label_oid = if tag == 22 {
-                    Some(u32::from_le_bytes(
-                        self.read_i32("enum label OID")?.to_le_bytes(),
-                    ))
-                } else {
-                    None
-                };
-                let key = self.read_bytes("enum label key")?.to_vec();
-                uqa_core::EnumLabelKey::from_bytes(key)
-                    .map(|key| {
-                        Value::Enum(
-                            uqa_core::EnumValue::new(type_oid, key).with_label_oid(label_oid),
-                        )
-                    })
-                    .map_err(|error| {
-                        spill_error(format!("invalid enum label key in spill file: {error}"))
-                    })
-            }
-            17 => {
-                let kind = match self.read_u8("legacy vector kind")? {
-                    0 => uqa_core::LegacyVectorKind::SmallInteger,
-                    1 => uqa_core::LegacyVectorKind::Oid,
-                    _ => return Err(spill_error("invalid legacy vector kind")),
-                };
-                let bound_count = self.read_count("legacy vector dimensions", 4)?;
-                if bound_count > 1 {
-                    return Err(spill_error("invalid legacy vector dimensions"));
-                }
-                let mut bounds = Vec::with_capacity(bound_count);
-                for _ in 0..bound_count {
-                    bounds.push(self.read_i32("legacy vector lower bound")?);
-                }
-                let count = self.read_count("legacy vector length", 1)?;
-                let mut values = Vec::new();
-                values.try_reserve_exact(count).map_err(|error| {
-                    spill_error(format!("cannot allocate legacy vector: {error}"))
-                })?;
-                for _ in 0..count {
-                    values.push(self.read_value(depth + 1)?);
-                }
-                ArrayValue::with_lower_bounds(values, bounds)
-                    .and_then(|array| uqa_core::LegacyVectorValue::try_from_array(kind, array))
-                    .map(Value::LegacyVector)
-                    .ok_or_else(|| spill_error("invalid legacy vector elements"))
-            }
-            tag => Err(spill_error(format!("invalid spill value tag {tag}"))),
-        }
+        Ok(self
+            .read_value_with_control(depth, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary spill value"))
     }
 
     fn read_temporal(&mut self) -> ExecResult<TemporalValue> {

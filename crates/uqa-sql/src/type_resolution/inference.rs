@@ -61,7 +61,7 @@ pub(super) fn scalar_type_inner_with_control(
             qualified_column::resolve_with_control(schema, qualifier, column, control)
         }
         ScalarExpr::Literal(value) => common::value_type_with_control(value, control),
-        ScalarExpr::RetainedLiteral(literal) => copy_type(Some(&literal.ty), control),
+        ScalarExpr::RetainedLiteral(literal) => copy_type(literal.ty.as_ref(), control),
         ScalarExpr::Collated { .. } => {
             nodes::collated_type_with_control(expression, schema, params, resolver, control)
         }

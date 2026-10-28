@@ -57,12 +57,13 @@ fn retained_input_cloning_and_lowering_share_payloads_with_admitted_metadata() {
         value: Value::Str("x".repeat(1_048_576)),
         reads: AtomicUsize::new(0),
     });
-    let expression = Expr::RetainedLiteral(Box::new(RetainedInputLiteral(RetainedScalarLiteral {
-        value: RetainedConstantValue::new(source.clone(), 0),
-        ty: ColumnType::Text,
-        declaration: Some(ColumnType::Text.catalog_name()),
-        collation_oid: Some(950),
-    })));
+    let expression =
+        Expr::RetainedLiteral(Box::new(RetainedInputLiteral(RetainedScalarLiteral::new(
+            RetainedConstantValue::new(source.clone(), 0),
+            Some(ColumnType::Text),
+            Some(ColumnType::Text.catalog_name()),
+            Some(950),
+        ))));
     let token = CancellationToken::new();
     let budget = MemoryBudget::new(262_144);
     let measured = allocation_counter::measure(|| {
@@ -72,7 +73,7 @@ fn retained_input_cloning_and_lowering_share_payloads_with_admitted_metadata() {
         assert_eq!(copies.len(), 256);
         let borrowed =
             ExpressionPlan::lower_column_budgeted(&expression, &budget, &token, &token).unwrap();
-        assert!(borrowed.reserved_bytes() > 0);
+        assert_eq!(borrowed.reserved_bytes(), 0);
         assert!(matches!(&*borrowed, crate::ScalarExpr::RetainedLiteral(_)));
     });
     assert_eq!(source.reads.load(Ordering::Relaxed), 0);
@@ -83,7 +84,7 @@ fn retained_input_cloning_and_lowering_share_payloads_with_admitted_metadata() {
         &token,
         &token
     )
-    .is_err());
+    .is_ok());
     assert_eq!(source.reads.load(Ordering::Relaxed), 0);
     token.cancel();
     let _scope = crate::expr::StatementCancellationScope::enter(token);

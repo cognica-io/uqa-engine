@@ -25713,6 +25713,147 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "shared_production_retains_payload_and_header_until_the_last_owner_drops",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/tests.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "Shared produced strings, last-owner retirement and exhausted shared-header admission.",
+      "invariant": "Keep payload and header leases live through every shared reference; release both after final drop or failed sharing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resident_constant_comparison_and_plan_copy_do_not_allocate_or_release_the_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/retained/tests.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "Two independent four MiB constants and an executable copy with zero additional allowance.",
+      "invariant": "Compare resident representations without payload reads or allocation; copy immutable metadata handles without releasing their original leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "constant_production_rejects_before_allocating_large_output",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "A four MiB repeat under zero/small allowance and cancellation from either owner.",
+      "invariant": "Reject with 53200 or 57014 before output allocation, keep transient allocations below 16 KiB and release all failed production leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "produced_constant_clones_share_payload_metadata_and_live_allowance",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "A four MiB computed text constant, 64 plan clones and sibling allowance exhaustion.",
+      "invariant": "Share payload and type metadata without additional allocation; retain the exact live allowance until the last plan drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "nested_constant_folding_releases_intermediate_values_and_preserves_lazy_errors",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "Nested one MiB repeat/length, selected CASE branches and division by zero.",
+      "invariant": "Preserve values and lazy error ordering while releasing consumed intermediate constants.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_constant_decoding_admits_before_allocating_and_releases_scratch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/retained/tests.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "Resident and encrypted spilled four MiB constants with insufficient allowance and both cancellation scopes.",
+      "invariant": "Admit encoded read buffers and decoded payload before allocation; preserve typed failures and release read scratch independently of the returned value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_constant_decoding_preserves_nested_physical_representations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/retained/tests.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "Nested float bits, strings, decimal, array bounds and OIDs, packed bits, enum identity, unread datum offsets, row descriptors, records and maps through both storage modes.",
+      "invariant": "Reuse ordinary binary decoding semantics under control and retain exact representations without reading lazy datum bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_constant_production_recovers_without_repeating_effects",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "Four MiB constant folding in direct, forced custom/generic prepared and EXPLAIN ANALYZE mutations on all four providers.",
+      "invariant": "Preserve 53200, savepoint recovery, exactly-once sequence/row effects, final owner release and persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "constant_planning_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_prepared/planning.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "The independently captured PostgreSQL 18 constant-planning transcript on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Preserve values, result types, lazy errors, validation order and effects under native constant ownership.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "prepared_plan_error_order_matches_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/sql_prepared/planning.rs",
+      "capability": "Native planning constant ownership",
+      "workload": "The independently captured PostgreSQL 18 prepared planning-error transcript on all four providers.",
+      "invariant": "Preserve parameter and planning error order while selecting prepared constant evaluation under the original request allowance.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

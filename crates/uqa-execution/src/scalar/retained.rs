@@ -67,6 +67,17 @@ impl ConstantValueStorage for RetainedConstants {
 }
 
 impl ConstantValueSource for ConstantRows {
+    fn read_with_control(
+        &self,
+        index: u64,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>, SQLError> {
+        self.0
+            .lock()
+            .get_constant_with_control(index, control)
+            .map_err(crate::physical::physical_exec_error)
+    }
+
     fn observe_allocations<'a>(
         &'a self,
         observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
@@ -96,12 +107,12 @@ pub(super) fn evaluate(
     context: &super::ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let value = literal.value.read()?;
+    let value = literal.value.read_with_control(control)?;
     let Some(declaration) = &literal.declaration else {
-        return control.copy_value(&value).map_err(Into::into);
+        return Ok(value);
     };
-    uqa_sql::expr::composites::literal::evaluate_with_control(
-        &value,
+    uqa_sql::expr::composites::literal::evaluate_owned_with_control(
+        value,
         declaration,
         context.function_hook(),
         control,

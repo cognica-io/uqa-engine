@@ -36,8 +36,9 @@ fn repeated() -> ScalarExpr {
 }
 
 fn config() -> crate::optimizer::OptimizerConfig<'static> {
-    let mut config =
-        crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let mut config = crate::optimizer::OptimizerConfig::new(
+        uqa_execution::scalar::eval_constant_scalar_with_control,
+    );
     config.constant_storage = Some(Arc::new(uqa_execution::scalar::RetainedConstants::new(
         4096,
     )));
@@ -143,8 +144,9 @@ fn retained_constant_storage_follows_values_inputs_in_commands_and_queries() {
         calls.set(calls.get() + 1);
         Ok(None)
     };
-    let mut settings =
-        crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let mut settings = crate::optimizer::OptimizerConfig::new(
+        uqa_execution::scalar::eval_constant_scalar_with_control,
+    );
     settings.constant_storage_factory = Some(crate::optimizer::ConstantStorageFactory(&factory));
     for (sql, expected) in [
         ("SELECT 1", 0),
@@ -185,8 +187,9 @@ fn values_queries_bound_folded_payloads_before_cloning_their_native_plans() {
                 storage.clone() as Arc<dyn uqa_sql::ir::ConstantValueStorage>
             ))
         };
-        let mut settings =
-            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut settings = crate::optimizer::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
         settings.constant_storage_factory =
             Some(crate::optimizer::ConstantStorageFactory(&factory));
         let mut input =

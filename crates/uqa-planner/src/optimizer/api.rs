@@ -32,8 +32,13 @@ impl From<crate::JoinOrderError> for OptimizerError {
     }
 }
 
-/// Evaluate a planner-proven constant using the runtime selected by the caller.
-pub type ConstantEvaluator = fn(&ScalarExpr) -> Result<uqa_core::Value, uqa_sql::SQLError>;
+/// Evaluate a planner-proven constant under the optimizer's production allowance, retaining the result's constructor lease.
+pub type ConstantEvaluator =
+    fn(
+        &ScalarExpr,
+        &[uqa_sql::SQLParam],
+        &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_core::Value>, uqa_sql::SQLError>;
 
 /// Plan an already analyzed scalar at its owning command's preparation boundary. This uses the same lazy conditional simplification and constant-error propagation as query planning.
 pub fn optimize_scalar_expression(

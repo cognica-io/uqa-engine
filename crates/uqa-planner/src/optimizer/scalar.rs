@@ -251,7 +251,7 @@ fn finish_scalar(
     )?;
     let optimized = fold_selected_literal(
         optimized,
-        config.constant_evaluator,
+        |expression, control| (config.constant_evaluator)(expression, &[], control),
         config.builtin_permissions.as_deref(),
         config
             .routine_inlining
@@ -262,6 +262,7 @@ fn finish_scalar(
             .as_ref()
             .map(|context| context.routines as &dyn uqa_sql::FunctionTypeResolver),
         result_type,
+        config,
     )?;
     let optimized = if integer_syntax {
         optimized
@@ -351,7 +352,7 @@ mod tests {
             let mut expression = expected.clone();
             optimize_scalar_slot(
                 &mut expression,
-                &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+                &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
             )
             .unwrap();
             assert_eq!(expression, expected);
@@ -368,7 +369,7 @@ mod tests {
 
         optimize_scalar_slot(
             &mut expression,
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         )
         .unwrap();
 
@@ -392,7 +393,7 @@ mod tests {
 
         optimize_scalar_slot(
             &mut expression,
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         )
         .unwrap();
 
@@ -415,7 +416,7 @@ mod tests {
         };
         let error = optimize_scalar_slot(
             &mut expression,
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         )
         .unwrap_err();
         assert_eq!(error.sqlstate(), Some("22P02"));

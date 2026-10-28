@@ -66,12 +66,12 @@ impl RetainedInputLiteral {
             _ => unreachable!("selected evaluated input"),
         };
         Ok(Expr::RetainedLiteral(Box::new(Self(
-            RetainedScalarLiteral {
-                value: storage.retain(value)?,
-                ty,
+            RetainedScalarLiteral::new(
+                storage.retain(value)?,
+                Some(ty),
                 declaration,
                 collation_oid,
-            },
+            ),
         ))))
     }
 

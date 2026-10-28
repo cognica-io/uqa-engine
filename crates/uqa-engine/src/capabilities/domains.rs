@@ -33,14 +33,6 @@ impl Engine {
                 composites: self,
                 expressions: self,
                 cancellation: self.cancellation_token(),
-                plan_check: |expression| {
-                    uqa_planner::optimizer::optimize_scalar_expression(
-                        expression,
-                        &uqa_planner::OptimizerConfig::new(
-                            uqa_execution::scalar::eval_constant_scalar,
-                        ),
-                    )
-                },
             },
         }
     }

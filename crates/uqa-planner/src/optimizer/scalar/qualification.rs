@@ -7,7 +7,8 @@
 //! Simplify the top-level AND/OR tree where only TRUE admits a row.
 
 use super::{
-    constants::literal_value, optimize_scalar_slot, OptimizerConfig, SQLError, ScalarExpr, Value,
+    constants::literal_value_with_control, optimize_scalar_slot, OptimizerConfig, SQLError,
+    ScalarExpr, Value,
 };
 
 pub(crate) fn optimize_qualification(
@@ -17,20 +18,23 @@ pub(crate) fn optimize_qualification(
     // Fold every reachable constant first, retaining planning-error order before the qualification can discard a nullable branch.
     optimize_scalar_slot(expression, config)?;
     if config.enable_boolean_simplify {
-        simplify(expression)?;
+        simplify(expression, &config.production)?;
     }
     Ok(())
 }
 
-fn simplify(expression: &mut ScalarExpr) -> Result<(), SQLError> {
+fn simplify(
+    expression: &mut ScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
     let and = matches!(expression, ScalarExpr::And(_));
     let (ScalarExpr::And(items) | ScalarExpr::Or(items)) = expression else {
         // A projection, NOT, Boolean test or function argument observes three-valued truth. Do not move the qualification boundary through it.
         return Ok(());
     };
     for item in items.iter_mut() {
-        simplify(item)?;
-        let constant = match literal_value(item)?.as_deref() {
+        simplify(item, control)?;
+        let constant = match literal_value_with_control(item, control)?.as_deref() {
             Some(Value::Bool(value)) => Some(*value),
             Some(Value::Null) => Some(false),
             _ => None,
@@ -54,6 +58,7 @@ fn simplify(expression: &mut ScalarExpr) -> Result<(), SQLError> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::constants::literal_value;
     use super::*;
 
     fn expression(sql: &str) -> ScalarExpr {
@@ -65,7 +70,7 @@ mod tests {
 
     #[test]
     fn strict_null_qualifications_discard_volatile_comparisons() {
-        let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         for sql in [
             "SELECT nextval('ticks') BETWEEN SYMMETRIC NULL::bigint AND 100",
             "SELECT nextval('ticks') > 0 AND NULL::boolean",
@@ -79,7 +84,7 @@ mod tests {
 
     #[test]
     fn nullable_scalar_and_boolean_tests_keep_their_observations() {
-        let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         let mut scalar = expression("SELECT nextval('ticks') > 0 AND NULL::boolean");
         optimize_scalar_slot(&mut scalar, &config).unwrap();
         assert!(matches!(scalar, ScalarExpr::And(_)));
@@ -96,7 +101,7 @@ mod tests {
 
     #[test]
     fn null_qualifications_preserve_constant_error_order() {
-        let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         let mut value = expression("SELECT NULL::boolean AND (1 / 0 > 0)");
         assert_eq!(
             optimize_qualification(&mut value, &config)

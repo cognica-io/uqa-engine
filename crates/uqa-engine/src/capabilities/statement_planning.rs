@@ -186,7 +186,7 @@ impl Engine {
             },
             aggregates: self,
             optimization: self,
-            constant_evaluator: uqa_execution::scalar::eval_constant_scalar,
+            constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
         }
     }
 }

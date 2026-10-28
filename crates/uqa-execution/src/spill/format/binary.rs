@@ -11,7 +11,9 @@ mod decode;
 mod encode;
 mod presence;
 
-pub(crate) use decode::{decode_batch, decode_document, decode_physical_row_record};
+pub(crate) use decode::{
+    decode_batch, decode_constant_record, decode_document, decode_physical_row_record,
+};
 pub(crate) use encode::{
     append_batches, encode_document, encode_physical_row_record, encoded_batch_overhead_size,
     encoded_batch_size, encoded_borrowed_row_record_size, encoded_document_size,

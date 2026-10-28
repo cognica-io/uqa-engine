@@ -220,14 +220,18 @@ mod tests {
         }));
         let crate::UnifiedPlan::Query(query) = super::super::optimize(
             plan,
-            &super::super::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &super::super::OptimizerConfig::new(
+                uqa_execution::scalar::eval_constant_scalar_with_control,
+            ),
         )
         .unwrap() else {
             panic!("query");
         };
         let crate::UnifiedPlan::Query(query) = super::super::optimize(
             crate::UnifiedPlan::Query(query),
-            &super::super::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &super::super::OptimizerConfig::new(
+                uqa_execution::scalar::eval_constant_scalar_with_control,
+            ),
         )
         .unwrap() else {
             panic!("reoptimized query");

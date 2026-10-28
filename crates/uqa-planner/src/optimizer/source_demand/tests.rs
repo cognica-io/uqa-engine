@@ -25,7 +25,7 @@ fn hidden_captured_outputs_follow_physical_demand() {
     assert_eq!(schema.len(), 0);
     assert_eq!(schema.physical_width(), 2);
     let mut plan = query("SELECT 7, 1/0");
-    let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     let context = Context {
         config: &config,
         aggregates: &|_: &str| false,
@@ -111,7 +111,7 @@ fn join_lateral_scope_preserves_captured_input_used_only_by_its_right_child() {
     let mut plan = UnifiedPlan::Query(plan);
     prune(
         &mut plan,
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         &|_: &str| false,
     )
     .unwrap();

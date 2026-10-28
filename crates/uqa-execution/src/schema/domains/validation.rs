@@ -29,7 +29,7 @@ use uqa_sql::{
         dependencies::{column_domain_dependency, DomainColumnDependency},
         removal::TypeObjectCatalog,
     },
-    SQLError, ScalarExpr,
+    SQLError,
 };
 
 /// Retain the latest locked relation independently of an ordinary query's fixed isolation snapshot. Writes performed by a CHECK function must not change the rows in this validation scan.
@@ -48,7 +48,6 @@ pub struct DomainValidationInputs<'a, S: Clone + 'static> {
     pub composites: &'a dyn CompositeTypeCatalog,
     pub expressions: &'a dyn QueryExpressionFactory<S>,
     pub cancellation: CancellationToken,
-    pub plan_check: fn(&mut ScalarExpr) -> Result<(), SQLError>,
 }
 
 pub(super) struct DomainValueValidationContext<'a, 'b, S: Clone + 'static> {

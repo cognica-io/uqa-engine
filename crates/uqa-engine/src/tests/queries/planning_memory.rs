@@ -10,6 +10,103 @@ use uqa_planner::UnifiedPlan;
 
 const JOIN: &str = "SELECT a.id FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id";
 
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_constant_production_recovers_without_repeating_effects(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("constant-production.db");
+    let engine = provider.open(&path);
+    engine.sql("CREATE TABLE constant_effects (n integer, tick bigint); CREATE SEQUENCE constant_ticks", &[]).unwrap();
+    let retention = engine.query_retention_control().unwrap();
+    let memory = retention.memory();
+    let mut effects = 0_i64;
+    for mode in ["force_custom_plan", "force_generic_plan"] {
+        engine
+            .sql(&format!("SET plan_cache_mode = {mode}"), &[])
+            .unwrap();
+        for path in 0..3 {
+            let query = "INSERT INTO constant_effects SELECT length(repeat('x', 4194304)), nextval('constant_ticks') RETURNING n";
+            let prepared = engine.prepare_statement(query, &[]).unwrap();
+            engine.sql("BEGIN; SAVEPOINT retry_constant", &[]).unwrap();
+            let occupied = memory.reserve(memory.available() - 32768).unwrap();
+            let error = match path {
+                0 => engine.sql(query, &[]),
+                1 => engine.execute_prepared_statement(&prepared, &[]),
+                _ => engine.sql(
+                    &format!("EXPLAIN (MEMORY, ANALYZE, FORMAT JSON) {query}"),
+                    &[],
+                ),
+            }
+            .unwrap_err();
+            assert_eq!(
+                error.sqlstate(),
+                Some("53200"),
+                "{provider:?}, {mode}, path={path}: {error}"
+            );
+            drop(occupied);
+            assert!(engine.transaction_failed());
+            engine.sql("ROLLBACK TO retry_constant", &[]).unwrap();
+            assert_eq!(
+                engine
+                    .sql("SELECT count(*) FROM constant_effects", &[])
+                    .unwrap()
+                    .value_at(0, 0),
+                Some(&Value::Int(effects))
+            );
+            let result = match path {
+                0 => engine.sql(query, &[]),
+                1 => engine.execute_prepared_statement(&prepared, &[]),
+                _ => engine.sql(
+                    &format!("EXPLAIN (MEMORY, ANALYZE, FORMAT JSON) {query}"),
+                    &[],
+                ),
+            }
+            .unwrap();
+            if path != 2 {
+                assert_eq!(result.value_at(0, 0), Some(&Value::Int(4_194_304)));
+            }
+            drop(result);
+            effects += 1;
+            assert_eq!(
+                engine
+                    .sql("SELECT currval('constant_ticks')", &[])
+                    .unwrap()
+                    .value_at(0, 0),
+                Some(&Value::Int(effects))
+            );
+            engine.sql("COMMIT", &[]).unwrap();
+            engine.finalize_prepared_statement(&prepared);
+        }
+    }
+    assert_eq!(
+        engine
+            .sql("SELECT count(*) FROM constant_effects", &[])
+            .unwrap()
+            .value_at(0, 0),
+        Some(&Value::Int(6))
+    );
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(memory.used(), 0);
+    if !matches!(provider, Provider::Memory) {
+        let engine = provider.open(&path);
+        assert_eq!(
+            engine
+                .sql(
+                    "SELECT count(*), min(n), max(tick) FROM constant_effects",
+                    &[]
+                )
+                .unwrap()
+                .value_at(0, 2),
+            Some(&Value::Int(6))
+        );
+        engine.close().unwrap();
+    }
+}
+
 fn populate(engine: &Engine) {
     engine.sql(
         "CREATE TABLE a (id INTEGER); CREATE TABLE b (id INTEGER); CREATE TABLE c (id INTEGER); \

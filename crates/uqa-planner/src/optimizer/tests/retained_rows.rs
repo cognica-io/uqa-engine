@@ -35,7 +35,7 @@ fn retained_row_plans_preserve_cardinality_identity_and_internal_predicates() {
         });
         let plan = optimize(
             UnifiedPlan::Query(query),
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         )
         .unwrap();
         assert_eq!(
@@ -62,7 +62,7 @@ fn retained_row_plans_preserve_cardinality_identity_and_internal_predicates() {
         });
         let plan = optimize(
             UnifiedPlan::Query(query),
-            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         )
         .unwrap();
         assert!(

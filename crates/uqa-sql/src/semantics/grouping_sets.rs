@@ -159,7 +159,7 @@ fn normalize_expression(
     params: &[SQLParam],
 ) -> Result<ScalarExpr, SQLError> {
     Ok(match expression {
-        ScalarExpr::RetainedLiteral(mut literal) => {
+        ScalarExpr::RetainedLiteral(literal) => {
             let normalized = normalize_expression(engine, literal.materialize()?, schema, params)?;
             match normalized {
                 ScalarExpr::TypedLiteral {
@@ -167,16 +167,19 @@ fn normalize_expression(
                     ty: declaration,
                     collation_oid,
                     ..
-                } => {
-                    literal.ty = ty;
-                    literal.collation_oid = collation_oid;
-                    literal.declaration = Some(declaration);
-                    ScalarExpr::RetainedLiteral(literal)
-                }
+                } => ScalarExpr::RetainedLiteral(crate::ir::RetainedScalarLiteral::new(
+                    literal.value.clone(),
+                    Some(ty),
+                    Some(declaration),
+                    collation_oid,
+                )),
                 ScalarExpr::Literal(_) => {
-                    literal.collation_oid = None;
-                    literal.declaration = None;
-                    ScalarExpr::RetainedLiteral(literal)
+                    ScalarExpr::RetainedLiteral(crate::ir::RetainedScalarLiteral::new(
+                        literal.value.clone(),
+                        literal.ty.clone(),
+                        None,
+                        None,
+                    ))
                 }
                 other => other,
             }

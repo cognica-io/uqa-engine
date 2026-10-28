@@ -7,10 +7,7 @@
 use uqa_core::memory::{AllocationObserver, ObserveAllocations};
 use uqa_core::ValueRetentionError;
 
-use crate::ir::{
-    RetainedScalarLiteral, ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame,
-    ScalarWindowSpec,
-};
+use crate::ir::{ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec};
 
 impl ObserveAllocations for ScalarExpr {
     #[expect(
@@ -239,24 +236,6 @@ impl ObserveAllocations for ScalarFrameBound {
                 observer.child(value0)?;
             }
         }
-        Ok(())
-    }
-}
-
-impl ObserveAllocations for RetainedScalarLiteral {
-    fn observe_allocations<'a>(
-        &'a self,
-        observer: &mut AllocationObserver<'a, '_>,
-    ) -> Result<(), ValueRetentionError> {
-        let Self {
-            value,
-            ty,
-            declaration,
-            collation_oid: _,
-        } = self;
-        observer.child(value)?;
-        observer.child(ty)?;
-        observer.child(declaration)?;
         Ok(())
     }
 }
