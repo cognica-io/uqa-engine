@@ -15,6 +15,7 @@ use uqa_sql::{
 
 struct Inputs {
     captured: Cell<bool>,
+    analyzed: bool,
 }
 impl StatementAnalysisScopes for Inputs {
     fn with_scope(&self, _: StatementAnalysisOperation<'_>) -> Result<(), SQLError> {
@@ -24,7 +25,11 @@ impl StatementAnalysisScopes for Inputs {
 }
 impl StatementOptimizationContexts for Inputs {
     fn production_resources(&self) -> Result<Option<PlanningResources>, SQLError> {
-        panic!("analysis failed before optimizer resource capture")
+        assert!(
+            self.analyzed,
+            "analysis failed before optimizer resource capture"
+        );
+        Ok(None)
     }
     fn statistics(&self) -> StatementStatisticsContext<'_> {
         panic!("analysis failed before optimizer input capture")
@@ -57,6 +62,7 @@ impl uqa_sql::schema::dependencies::oid_alias::OidAliasInput for NoRoutines {
 fn failed_sql_analysis_precedes_optimizer_inputs_and_constant_evaluation() {
     let inputs = Inputs {
         captured: Cell::new(false),
+        analyzed: false,
     };
     let aggregates = |_: &str| false;
     let context = StatementPlanningContext {
@@ -81,6 +87,7 @@ fn failed_sql_analysis_precedes_optimizer_inputs_and_constant_evaluation() {
 fn analyzed_rule_conditions_discard_dead_inputs_but_retain_reachable_planning_errors() {
     let inputs = Inputs {
         captured: Cell::new(false),
+        analyzed: true,
     };
     let context = StatementPlanningContext {
         analysis: StatementAnalysisContext {

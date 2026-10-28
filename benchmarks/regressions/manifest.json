@@ -25915,6 +25915,87 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "controlled_plan_costing_admits_constant_casts_before_materialization",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/plan_cost/tests.rs",
+      "capability": "Native costing constant ownership",
+      "workload": "Four MiB cast destinations in table, source-free, aggregate and join cost predicates under zero and partial allowances.",
+      "invariant": "Reject before the large destination allocation and release every partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "scalar_costing_retains_cast_storage_through_nested_and_sibling_production",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/tests/memory.rs",
+      "capability": "Native costing constant ownership",
+      "workload": "Equality and inequality over one or two nested four MiB casts, exact allowance and a sibling-held ancestor.",
+      "invariant": "Retain simultaneous input/output leases, compute inequality once, preserve estimates and recover without releasing sibling memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "scalar_costing_releases_each_membership_cast_and_checks_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/tests/memory.rs",
+      "capability": "Native costing constant ownership",
+      "workload": "Two four MiB membership casts within one-result workspace, either cancellation scope and an unused LHS cast.",
+      "invariant": "Release each member before the next, preserve RHS-first demand and reject cancellation without materializing the payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_borrows_resident_arrays_without_reading_or_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/membership/tests.rs",
+      "capability": "Native costing constant ownership",
+      "workload": "IN/NOT IN over four MiB resident, empty, opaque and multidimensional arrays.",
+      "invariant": "Borrow the original elements without allocation or a retained read, preserving dimension and empty-ALL restrictions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_preserves_retrieval_sets_and_null_rejection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/retrieval/tests.rs",
+      "capability": "Native costing constant ownership",
+      "workload": "Resident folded arrays with duplicate integers and NULL under positive and negated membership.",
+      "invariant": "Preserve exact equality sets and three-valued negation without evaluating the stored array.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_prepared_costing_shares_request_allowance_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory.rs",
+      "capability": "Native costing constant ownership",
+      "workload": "Parameterized native costing with a four MiB constant cast on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Propagate request exhaustion and cancellation, allocate less than 256 KiB on rejection, recover identical cost bits and release the owner at close.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

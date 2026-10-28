@@ -36,7 +36,7 @@ pub fn estimate_plan_with_control(
     plan: &UnifiedPlan,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<crate::plan_cost::PlanCost, SQLError> {
-    let estimate = with_statistics(context, |statistics| {
+    let estimate = with_statistics(context, *control, |statistics| {
         crate::plan_cost::PlanCostEstimator::new(statistics).estimate_with_control(plan, control)
     })?;
     validate_cost(estimate)?;
@@ -48,7 +48,7 @@ pub fn estimate_plan_nodes_with_control<'p>(
     plan: &'p UnifiedPlan,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<crate::plan_cost::nodes::PlanCostTree<'p>, SQLError> {
-    let tree = with_statistics(context, |statistics| {
+    let tree = with_statistics(context, *control, |statistics| {
         crate::plan_cost::PlanCostEstimator::new(statistics)
             .estimate_nodes_with_control(plan, control)
     })?;
@@ -61,12 +61,14 @@ pub fn estimate_plan_nodes_with_control<'p>(
 
 fn with_statistics<T>(
     context: StatementStatisticsContext<'_>,
-    estimate: impl FnOnce(&CatalogSourceStatistics<'_>) -> Result<T, SQLError>,
+    production: uqa_core::memory::ProductionControl<'_>,
+    estimate: impl FnOnce(&CatalogSourceStatistics<'_, '_>) -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
     let error = std::cell::RefCell::new(None);
     let statistics = CatalogSourceStatistics {
         context,
         error: &error,
+        production,
     };
     let estimate = estimate(&statistics);
     if let Some(error) = error.into_inner() {
@@ -119,6 +121,7 @@ pub(super) fn optimize_plan_authorized(
     let statistics = CatalogSourceStatistics {
         context,
         error: &callback_error,
+        production: optimizer_config.production,
     };
     let optimized = optimize_plan_with_statistics(
         context.volatility,

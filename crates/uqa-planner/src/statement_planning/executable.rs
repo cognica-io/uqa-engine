@@ -153,6 +153,19 @@ pub fn optimize_query(
         )),
     }
 }
+
+/// Cost a selected native executable with the same request resources used by its optimizer.
+pub fn estimate_plan(
+    context: &StatementPlanningContext<'_>,
+    plan: &UnifiedPlan,
+) -> Result<crate::plan_cost::PlanCost, SQLError> {
+    let resources = context.optimization.production_resources()?;
+    let control = resources
+        .as_ref()
+        .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
+    super::estimate_plan_with_control(context.optimization.statistics(), plan, &control)
+}
+
 pub fn optimize_plan(
     context: &StatementPlanningContext<'_>,
     plan: UnifiedPlan,

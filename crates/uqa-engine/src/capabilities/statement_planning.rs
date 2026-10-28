@@ -243,7 +243,10 @@ pub(crate) fn estimate_engine_plan(
     engine: &Engine,
     plan: &uqa_planner::UnifiedPlan,
 ) -> Result<uqa_planner::plan_cost::PlanCost, SQLError> {
-    uqa_planner::statement_planning::estimate_plan(engine.statement_statistics_context(), plan)
+    uqa_planner::statement_planning::executable::estimate_plan(
+        &engine.statement_planning_context(),
+        plan,
+    )
 }
 
 pub(crate) fn optimize_engine_query(

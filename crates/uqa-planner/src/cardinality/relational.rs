@@ -10,9 +10,11 @@ use super::{
     column_of, histogram_range_selectivity, literal_of, BinaryOp, CardinalityEstimator, Expr,
     GraphStoreSampler, RelationStats, RelationStatsRef, Selectivity,
 };
-use std::borrow::Cow;
-use uqa_core::Value;
-use uqa_sql::ScalarExpr;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
+use uqa_sql::{SQLError, ScalarExpr};
 
 impl CardinalityEstimator {
     /// Estimate the selectivity of `predicate` against `stats`. Best
@@ -109,12 +111,24 @@ impl CardinalityEstimator {
     /// keeps join ordering sensitive to local WHERE filters without converting
     /// the optimized plan back into parser AST nodes.
     pub fn scalar_selectivity(&self, predicate: &ScalarExpr, stats: &RelationStats) -> Selectivity {
+        self.scalar_selectivity_with_control(predicate, stats, &ProductionControl::uncontrolled())
+            .expect("ordinary scalar costing retains best-effort constant conversion")
+    }
+
+    /// Estimate under the caller's allowance. Constant casts retain their produced storage through comparison; resource failures propagate instead of becoming heuristic estimates.
+    pub fn scalar_selectivity_with_control(
+        &self,
+        predicate: &ScalarExpr,
+        stats: &RelationStats,
+        control: &ProductionControl<'_>,
+    ) -> Result<Selectivity, SQLError> {
         self.scalar_selectivity_with_statistics(
             predicate,
             RelationStatsRef {
                 row_count: stats.row_count,
                 columns: &stats.columns,
             },
+            control,
         )
     }
 
@@ -122,59 +136,38 @@ impl CardinalityEstimator {
         &self,
         predicate: &ScalarExpr,
         stats: RelationStatsRef<'_>,
-    ) -> Selectivity {
+        control: &ProductionControl<'_>,
+    ) -> Result<Selectivity, SQLError> {
+        control.check()?;
         if let Some(membership) = uqa_sql::semantics::membership_operands(predicate) {
-            let selectivity = scalar_column(membership.value)
-                .and_then(|column| stats.column(column))
-                .map_or(
-                    self.default_selectivity * membership.items.len() as f64,
-                    |column| {
-                        membership
-                            .items
-                            .iter()
-                            .map(|item| {
-                                match item {
-                                    uqa_sql::semantics::MembershipItem::Expression(expression) => {
-                                        scalar_literal(expression)
-                                    }
-                                    uqa_sql::semantics::MembershipItem::Constant(value) => {
-                                        Some(Cow::Borrowed(value))
-                                    }
-                                }
-                                .map_or_else(
-                                    || column.equality_selectivity(),
-                                    |value| column.equality_selectivity_for(&value),
-                                )
-                            })
-                            .sum()
-                    },
-                )
-                .min(1.0);
-            return Selectivity(if membership.negated {
-                1.0 - selectivity
-            } else {
-                selectivity
-            })
-            .clamp();
+            return self.scalar_membership_selectivity(membership, stats, control);
         }
-        match predicate {
-            ScalarExpr::And(parts) => Selectivity(
-                parts
-                    .iter()
-                    .map(|part| self.scalar_selectivity_with_statistics(part, stats).raw())
-                    .product(),
-            )
-            .clamp(),
+        Ok(match predicate {
+            ScalarExpr::And(parts) => {
+                let mut selectivity = 1.0;
+                for part in parts {
+                    selectivity *= self
+                        .scalar_selectivity_with_statistics(part, stats, control)?
+                        .raw();
+                }
+                Selectivity(selectivity).clamp()
+            }
             ScalarExpr::Or(parts) => {
-                let anti = parts.iter().fold(1.0, |anti, part| {
-                    anti * (1.0 - self.scalar_selectivity_with_statistics(part, stats).raw())
-                });
+                let mut anti = 1.0;
+                for part in parts {
+                    anti *= 1.0
+                        - self
+                            .scalar_selectivity_with_statistics(part, stats, control)?
+                            .raw();
+                }
                 Selectivity(1.0 - anti).clamp()
             }
-            ScalarExpr::Not(inner) => {
-                Selectivity(1.0 - self.scalar_selectivity_with_statistics(inner, stats).raw())
-                    .clamp()
-            }
+            ScalarExpr::Not(inner) => Selectivity(
+                1.0 - self
+                    .scalar_selectivity_with_statistics(inner, stats, control)?
+                    .raw(),
+            )
+            .clamp(),
             ScalarExpr::IsNull { expr, negated } => {
                 let null_fraction = scalar_column(expr)
                     .and_then(|column| stats.column(column))
@@ -193,7 +186,7 @@ impl CardinalityEstimator {
                 .clamp()
             }
             ScalarExpr::Binary { op, lhs, rhs } => {
-                self.scalar_binary_selectivity(*op, lhs, rhs, stats)
+                self.scalar_binary_selectivity(*op, lhs, rhs, stats, control)?
             }
             ScalarExpr::Literal(Value::Bool(value))
             | ScalarExpr::TypedLiteral {
@@ -204,15 +197,59 @@ impl CardinalityEstimator {
             | ScalarExpr::TypedLiteral {
                 value: Value::Null, ..
             } => Selectivity(0.0),
+            ScalarExpr::RetainedLiteral(literal) => match literal.value.resident_value() {
+                Some(Value::Bool(value)) => Selectivity(f64::from(*value)),
+                Some(Value::Null) => Selectivity(0.0),
+                _ => Selectivity(self.default_selectivity).clamp(),
+            },
             ScalarExpr::Between { .. } => Selectivity(self.range_selectivity).clamp(),
             ScalarExpr::Func {
                 name,
                 binding,
                 args,
                 ..
-            } => self.scalar_function_selectivity(name, binding.as_ref(), args, stats),
+            } => self.scalar_function_selectivity(name, binding.as_ref(), args, stats, control)?,
             _ => Selectivity(self.default_selectivity).clamp(),
+        })
+    }
+
+    fn scalar_membership_selectivity(
+        &self,
+        membership: uqa_sql::semantics::MembershipOperands<'_>,
+        stats: RelationStatsRef<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Selectivity, SQLError> {
+        let selectivity = if let Some(column) =
+            scalar_column(membership.value).and_then(|column| stats.column(column))
+        {
+            // Preserve Iterator::sum's floating-point identity, including an empty set.
+            let mut selectivity = -0.0;
+            for item in membership.items.iter() {
+                control.check()?;
+                let value = match item {
+                    uqa_sql::semantics::MembershipItem::Expression(expression) => {
+                        scalar_literal(expression, control)?
+                    }
+                    uqa_sql::semantics::MembershipItem::Constant(value) => {
+                        Some(Literal::Borrowed(value))
+                    }
+                };
+                selectivity += value.as_deref().map_or_else(
+                    || column.equality_selectivity(),
+                    |value| column.equality_selectivity_for(value),
+                );
+            }
+            selectivity
+        } else {
+            self.default_selectivity * membership.items.len() as f64
         }
+        .min(1.0);
+        Ok(Selectivity(if membership.negated {
+            1.0 - selectivity
+        } else {
+            selectivity
+        })
+        .clamp())
     }
 
     fn scalar_function_selectivity(
@@ -221,44 +258,51 @@ impl CardinalityEstimator {
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         args: &[ScalarExpr],
         stats: RelationStatsRef<'_>,
-    ) -> Selectivity {
+        control: &ProductionControl<'_>,
+    ) -> Result<Selectivity, SQLError> {
         if let Some(uqa_sql::ast::FunctionDispatch::Pattern { operator, .. }) =
             binding.and_then(|binding| binding.dispatch)
         {
             if operator.is_like() {
-                return Selectivity(if operator.negated() {
+                return Ok(Selectivity(if operator.negated() {
                     1.0 - self.like_selectivity
                 } else {
                     self.like_selectivity
                 })
-                .clamp();
+                .clamp());
             }
         }
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
-            "knn_match" | "calibrated_vector_match" => {
-                args.get(2).and_then(scalar_positive_usize).map_or_else(
-                    || Selectivity(self.default_selectivity).clamp(),
-                    |k| top_k_selectivity(k, stats.row_count),
-                )
-            }
-            "fuse_bayesian_evidence"
-            | "fuse_log_odds"
-            | "pool_positive_evidence"
-            | "attention"
-            | "fuse_attention"
-            | "fuse_multihead"
-            | "learned_fusion"
-            | "fuse_learned" => {
-                let support = args
-                    .iter()
-                    .filter(|signal| !scalar_named_argument(signal))
-                    .map(|signal| self.scalar_selectivity_with_statistics(signal, stats).raw())
-                    .sum::<f64>();
-                Selectivity(support.min(1.0)).clamp()
-            }
-            _ => Selectivity(self.default_selectivity).clamp(),
+        if ["knn_match", "calibrated_vector_match"]
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        {
+            return Ok(args.get(2).and_then(scalar_positive_usize).map_or_else(
+                || Selectivity(self.default_selectivity).clamp(),
+                |k| top_k_selectivity(k, stats.row_count),
+            ));
         }
+        if [
+            "fuse_bayesian_evidence",
+            "fuse_log_odds",
+            "pool_positive_evidence",
+            "attention",
+            "fuse_attention",
+            "fuse_multihead",
+            "learned_fusion",
+            "fuse_learned",
+        ]
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        {
+            let mut support = -0.0;
+            for signal in args.iter().filter(|signal| !scalar_named_argument(signal)) {
+                support += self
+                    .scalar_selectivity_with_statistics(signal, stats, control)?
+                    .raw();
+            }
+            return Ok(Selectivity(support.min(1.0)).clamp());
+        }
+        Ok(Selectivity(self.default_selectivity).clamp())
     }
 
     fn scalar_binary_selectivity(
@@ -267,35 +311,37 @@ impl CardinalityEstimator {
         lhs: &ScalarExpr,
         rhs: &ScalarExpr,
         stats: RelationStatsRef<'_>,
-    ) -> Selectivity {
+        control: &ProductionControl<'_>,
+    ) -> Result<Selectivity, SQLError> {
         let column = scalar_column(lhs).or_else(|| scalar_column(rhs));
-        let value = scalar_literal(rhs).or_else(|| scalar_literal(lhs));
+        let value = match scalar_literal(rhs, control)? {
+            Some(value) => Some(value),
+            None => scalar_literal(lhs, control)?,
+        };
         let column_stats = column.and_then(|column| stats.column(column));
         if matches!(value.as_deref(), Some(Value::Null)) {
-            return Selectivity(0.0);
+            return Ok(Selectivity(0.0));
         }
-        match op {
-            BinaryOp::Equal => {
-                if let Some(column) = column_stats {
-                    return Selectivity(value.as_deref().map_or_else(
+        Ok(match op {
+            BinaryOp::Equal | BinaryOp::NotEqual => {
+                let equal = column_stats.map_or(self.default_selectivity, |column| {
+                    value.as_deref().map_or_else(
                         || column.equality_selectivity(),
                         |value| column.equality_selectivity_for(value),
-                    ))
-                    .clamp();
-                }
-                Selectivity(self.default_selectivity).clamp()
-            }
-            BinaryOp::NotEqual => {
-                let equal = self
-                    .scalar_binary_selectivity(BinaryOp::Equal, lhs, rhs, stats)
-                    .raw();
-                Selectivity(column_stats.map_or(1.0, super::ColumnStats::non_null_fraction) - equal)
-                    .clamp()
+                    )
+                });
+                let equal = Selectivity(equal).clamp().raw();
+                Selectivity(if op == BinaryOp::NotEqual {
+                    column_stats.map_or(1.0, super::ColumnStats::non_null_fraction) - equal
+                } else {
+                    equal
+                })
+                .clamp()
             }
             BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
                 if let (Some(column), Some(value)) = (column_stats, value.as_deref()) {
                     if let Some(selectivity) = histogram_range_selectivity(column, op, value) {
-                        return Selectivity(selectivity).clamp();
+                        return Ok(Selectivity(selectivity).clamp());
                     }
                 }
                 Selectivity(self.range_selectivity).clamp()
@@ -303,7 +349,7 @@ impl CardinalityEstimator {
             BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
                 Selectivity(self.default_selectivity).clamp()
             }
-        }
+        })
     }
 }
 
@@ -334,16 +380,49 @@ fn scalar_column(expression: &ScalarExpr) -> Option<&str> {
     }
 }
 
-fn scalar_literal(expression: &ScalarExpr) -> Option<Cow<'_, Value>> {
-    match expression {
-        ScalarExpr::Collated { expr, .. } => scalar_literal(expr),
+enum Literal<'a> {
+    Borrowed(&'a Value),
+    Produced(Produced<Value>),
+}
+
+impl std::ops::Deref for Literal<'_> {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Produced(value) => value,
+        }
+    }
+}
+
+fn scalar_literal<'a>(
+    expression: &'a ScalarExpr,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Literal<'a>>, SQLError> {
+    control.check()?;
+    Ok(match expression {
+        ScalarExpr::Collated { expr, .. } => scalar_literal(expr, control)?,
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
-            Some(Cow::Borrowed(value))
+            Some(Literal::Borrowed(value))
+        }
+        ScalarExpr::RetainedLiteral(literal) => {
+            literal.value.resident_value().map(Literal::Borrowed)
         }
         ScalarExpr::Cast { expr, ty, .. } => {
-            let value = scalar_literal(expr)?;
-            uqa_sql::expr::cast_value(&value, ty).ok().map(Cow::Owned)
+            let Some(value) = scalar_literal(expr, control)? else {
+                return Ok(None);
+            };
+            match uqa_sql::expr::cast_value_from_with_control(&value, ty, None, control) {
+                Ok(value) => Some(Literal::Produced(value)),
+                Err(error)
+                    if control.budget().is_some()
+                        && matches!(error.sqlstate(), Some("53200" | "57014")) =>
+                {
+                    return Err(error)
+                }
+                Err(_) => None,
+            }
         }
         _ => None,
-    }
+    })
 }

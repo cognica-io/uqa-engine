@@ -578,7 +578,7 @@ fn apply_local_filter_estimates(
             continue;
         }
         let selectivity = estimator
-            .scalar_selectivity_with_statistics(predicate, statistics)
+            .scalar_selectivity_with_statistics(predicate, statistics, control)?
             .raw();
         relation.cardinality = (relation.cardinality * selectivity).max(0.0);
         relation.access_cost += crate::CostEstimator::default()

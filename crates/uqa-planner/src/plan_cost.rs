@@ -255,7 +255,7 @@ impl PlanCostEstimator<'_, '_> {
                     rows: 1.0,
                     ..PlanCost::default()
                 };
-                self.filter(&mut cost, block.r#where.as_ref(), &RelationStats::default());
+                self.filter(&mut cost, block.r#where.as_ref(), &RelationStats::default())?;
                 cost
             }
         };
@@ -269,7 +269,7 @@ impl PlanCostEstimator<'_, '_> {
                 } else {
                     cost.rows.min(200.0) * block.grouping_sets.len().max(1) as f64
                 };
-                self.filter(&mut cost, block.having.as_ref(), &RelationStats::default());
+                self.filter(&mut cost, block.having.as_ref(), &RelationStats::default())?;
             }
             ComputePlan::Window => {
                 cost.execution += self.unary(OperatorKind::Window, cost.rows);
@@ -316,7 +316,7 @@ impl PlanCostEstimator<'_, '_> {
                 cost.execution = access.cost;
                 cost.startup = access.cost;
             } else {
-                self.filter(&mut cost, Some(predicate), &stats);
+                self.filter(&mut cost, Some(predicate), &stats)?;
             }
         }
         self.control.check()?;
@@ -397,20 +397,19 @@ impl PlanCostEstimator<'_, '_> {
                 } else {
                     OperatorKind::NestedLoopJoin
                 };
-                let selectivity = on.as_ref().map_or_else(
-                    || {
-                        if using.is_some() || *natural {
-                            self.cardinality.default_selectivity
-                        } else {
-                            1.0
-                        }
-                    },
-                    |predicate| {
-                        self.cardinality
-                            .scalar_selectivity(predicate, &RelationStats::default())
-                            .raw()
-                    },
-                );
+                let selectivity = if let Some(predicate) = on {
+                    self.cardinality
+                        .scalar_selectivity_with_control(
+                            predicate,
+                            &RelationStats::default(),
+                            &self.control,
+                        )?
+                        .raw()
+                } else if using.is_some() || *natural {
+                    self.cardinality.default_selectivity
+                } else {
+                    1.0
+                };
                 self.join_cost(*kind, operator, *lateral, left, right, selectivity)
             }
             SourcePlan::Function { .. } => {
@@ -436,7 +435,7 @@ impl PlanCostEstimator<'_, '_> {
                 startup: 0.0,
             },
         };
-        self.filter(&mut cost, predicate, &RelationStats::default());
+        self.filter(&mut cost, predicate, &RelationStats::default())?;
         self.control.check()?;
         Ok(cost)
     }
@@ -496,11 +495,20 @@ impl PlanCostEstimator<'_, '_> {
         }
     }
 
-    fn filter(&self, cost: &mut PlanCost, predicate: Option<&ScalarExpr>, stats: &RelationStats) {
+    fn filter(
+        &self,
+        cost: &mut PlanCost,
+        predicate: Option<&ScalarExpr>,
+        stats: &RelationStats,
+    ) -> Result<(), SQLError> {
         if let Some(predicate) = predicate {
             cost.execution += self.unary(OperatorKind::Filter, cost.rows);
-            cost.rows *= self.cardinality.scalar_selectivity(predicate, stats).raw();
+            cost.rows *= self
+                .cardinality
+                .scalar_selectivity_with_control(predicate, stats, &self.control)?
+                .raw();
         }
+        Ok(())
     }
 
     fn subqueries<'p>(

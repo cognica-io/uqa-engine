@@ -12,7 +12,7 @@ use crate::{
 };
 use uqa_sql::{ast::BinaryOp, SQLError, ScalarExpr};
 pub(super) fn parameterized_access(
-    statistics: &CatalogSourceStatistics<'_>,
+    statistics: &CatalogSourceStatistics<'_, '_>,
     table: &str,
     predicate: &ScalarExpr,
 ) -> Result<Option<LocalAccessEstimate>, SQLError> {
@@ -50,7 +50,7 @@ pub(super) fn parameterized_access(
     let rows = stats.row_count as f64;
     let mut cost = costs.estimate_unary(OperatorKind::TableScan, rows).total()
         + costs.estimate_unary(OperatorKind::Filter, rows).total();
-    if let Some(candidate_rows) = index_rows(predicate, &stats, &fields) {
+    if let Some(candidate_rows) = index_rows(predicate, &stats, &fields, &statistics.production)? {
         let index_cost = costs
             .estimate_unary(OperatorKind::IndexScan, candidate_rows)
             .total()
@@ -62,7 +62,7 @@ pub(super) fn parameterized_access(
     Ok(Some(LocalAccessEstimate {
         output_rows: rows
             * CardinalityEstimator::new()
-                .scalar_selectivity(predicate, &stats)
+                .scalar_selectivity_with_control(predicate, &stats, &statistics.production)?
                 .raw(),
         cost,
         paradigm: AccessParadigm::Relational,
@@ -73,15 +73,20 @@ fn index_rows(
     expression: &ScalarExpr,
     stats: &RelationStats,
     fields: &std::collections::BTreeSet<String>,
-) -> Option<f64> {
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<f64>, SQLError> {
+    control.check()?;
     if let ScalarExpr::And(items) = expression {
-        return items
-            .iter()
-            .filter_map(|item| index_rows(item, stats, fields))
-            .reduce(f64::min);
+        let mut minimum: Option<f64> = None;
+        for item in items {
+            if let Some(rows) = index_rows(item, stats, fields, control)? {
+                minimum = Some(minimum.map_or(rows, |previous| previous.min(rows)));
+            }
+        }
+        return Ok(minimum);
     }
     let ScalarExpr::Binary { op, lhs, rhs } = expression else {
-        return None;
+        return Ok(None);
     };
     if !matches!(
         op,
@@ -91,26 +96,29 @@ fn index_rows(
             | BinaryOp::Greater
             | BinaryOp::GreaterEqual
     ) {
-        return None;
+        return Ok(None);
     }
     let ((ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. }, parameter)
     | (parameter, ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. })) =
         (lhs.as_ref(), rhs.as_ref())
     else {
-        return None;
+        return Ok(None);
     };
     if !fields.contains(column.as_str())
         || !matches!(
             parameter,
-            ScalarExpr::Param(_) | ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
+            ScalarExpr::Param(_)
+                | ScalarExpr::Literal(_)
+                | ScalarExpr::TypedLiteral { .. }
+                | ScalarExpr::RetainedLiteral(_)
         )
     {
-        return None;
+        return Ok(None);
     }
-    Some(
+    Ok(Some(
         stats.row_count as f64
             * CardinalityEstimator::new()
-                .scalar_selectivity(expression, stats)
+                .scalar_selectivity_with_control(expression, stats, control)?
                 .raw(),
-    )
+    ))
 }

@@ -49,12 +49,13 @@ pub struct StatementStatisticsContext<'a> {
     pub volatility: &'a dyn VolatilityCatalog,
     pub retrieval: &'a dyn RetrievalSourceCosting,
 }
-pub(super) struct CatalogSourceStatistics<'a> {
+pub(super) struct CatalogSourceStatistics<'a, 'c> {
     pub(super) context: StatementStatisticsContext<'a>,
     pub(super) error: &'a std::cell::RefCell<Option<SQLError>>,
+    pub(super) production: uqa_core::memory::ProductionControl<'c>,
 }
 
-impl CatalogSourceStatistics<'_> {
+impl CatalogSourceStatistics<'_, '_> {
     fn record_error(&self, error: SQLError) {
         if self.error.borrow().is_none() {
             *self.error.borrow_mut() = Some(error);
@@ -62,7 +63,7 @@ impl CatalogSourceStatistics<'_> {
     }
 }
 
-impl crate::SourceStatistics for CatalogSourceStatistics<'_> {
+impl crate::SourceStatistics for CatalogSourceStatistics<'_, '_> {
     fn relation_statistics(&self, table: &str) -> Option<crate::RelationStats> {
         match self.context.catalog.storage_table(table) {
             Ok(None) => None,

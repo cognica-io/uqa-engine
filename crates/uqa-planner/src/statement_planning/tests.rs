@@ -123,6 +123,7 @@ fn relation_statistics_retain_table_generation_and_first_failure() {
             retrieval: &catalog,
         },
         error: &error,
+        production: uqa_core::memory::ProductionControl::uncontrolled(),
     };
 
     assert!(statistics.relation_statistics("items").is_none());

@@ -121,6 +121,83 @@ fn temporal_membership_retains_sql_operators_instead_of_physical_set_keys() {
                 uqa_core::ArrayValue::try_new(vec![Value::Temporal(value.clone())]).unwrap(),
             ));
             assert!(lower_where(&folded, &constants).is_none());
+            let ScalarExpr::Func { args, .. } = &mut folded else {
+                unreachable!()
+            };
+            let ScalarExpr::Literal(value) = &args[1] else {
+                unreachable!()
+            };
+            args[1] = resident(value);
+            assert!(lower_where(&folded, &constants).is_none());
+        }
+    }
+}
+
+fn resident(value: &Value) -> ScalarExpr {
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    ScalarExpr::RetainedLiteral(crate::ir::RetainedScalarLiteral::new(
+        crate::ir::RetainedConstantValue::from_produced(
+            control.copy_value(value).unwrap(),
+            &control,
+        )
+        .unwrap(),
+        None,
+        None,
+        None,
+    ))
+}
+
+#[test]
+fn retained_membership_preserves_retrieval_sets_and_null_rejection() {
+    let constants = RetrievalConstants {
+        params: &[],
+        evaluate: &|_, _| panic!("membership borrows the resident array"),
+        stores: &|_| true,
+    };
+    for (negated, has_null) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut expression = bound(if negated {
+            "c NOT IN (1, 2)"
+        } else {
+            "c IN (1, 2)"
+        });
+        let ScalarExpr::Func { args, .. } = &mut expression else {
+            panic!("membership")
+        };
+        let mut values = vec![Value::Int(2), Value::Int(1), Value::Int(2)];
+        if has_null {
+            values.push(Value::Null);
+        }
+        args[1] = resident(&Value::Array(
+            uqa_core::ArrayValue::try_new(values).unwrap(),
+        ));
+        let lowered = lower_where(&expression, &constants).unwrap();
+        if !negated {
+            let RetrievalExpr::Filter {
+                field,
+                predicate: Predicate::InSet(values),
+                ..
+            } = lowered
+            else {
+                panic!("set filter")
+            };
+            assert_eq!(field, "c");
+            assert_eq!(values, BTreeSet::from([Value::Int(1), Value::Int(2)]));
+        } else if has_null {
+            assert!(matches!(lowered, RetrievalExpr::Empty));
+        } else {
+            let RetrievalExpr::Intersect(parts) = lowered else {
+                panic!("negated set")
+            };
+            assert!(matches!(
+                parts.as_slice(),
+                [
+                    RetrievalExpr::Complement(_),
+                    RetrievalExpr::Filter {
+                        predicate: Predicate::IsNotNull,
+                        ..
+                    }
+                ]
+            ));
         }
     }
 }

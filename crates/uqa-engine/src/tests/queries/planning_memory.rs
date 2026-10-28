@@ -15,6 +15,72 @@ const JOIN: &str = "SELECT a.id FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
+fn native_prepared_costing_shares_request_allowance_and_recovers(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("costing-owner.db"));
+    engine.sql("CREATE TABLE items (id integer PRIMARY KEY, payload text); INSERT INTO items VALUES (1, 'x')", &[]).unwrap();
+    let mut plan = UnifiedPlan::lower(
+        uqa_sql::compile("SELECT id FROM items WHERE id = $1 AND payload = 'x'::text")
+            .unwrap()
+            .remove(0),
+    );
+    let UnifiedPlan::Query(query) = &mut plan else {
+        panic!("query")
+    };
+    let uqa_planner::RelationalPlan::QueryBlock(block) = &mut query.root else {
+        panic!("block")
+    };
+    let uqa_sql::ScalarExpr::And(predicates) = block.r#where.as_mut().unwrap() else {
+        panic!("conjunction")
+    };
+    let uqa_sql::ScalarExpr::Binary { rhs, .. } = &mut predicates[1] else {
+        panic!("comparison")
+    };
+    let uqa_sql::ScalarExpr::Cast { expr, .. } = rhs.as_mut() else {
+        panic!("cast")
+    };
+    **expr = uqa_sql::ScalarExpr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
+    let retention = engine.query_retention_control().unwrap();
+    let memory = retention.memory();
+    let estimate = || crate::capabilities::statement_planning::estimate_engine_plan(&engine, &plan);
+    let expected = estimate().unwrap();
+    let before = memory.used();
+    let occupied = memory.reserve(memory.available() - 16384).unwrap();
+    let mut result = None;
+    let allocation = allocation_counter::measure(|| result = Some(estimate()));
+    assert_eq!(
+        result.unwrap().unwrap_err().sqlstate(),
+        Some("53200"),
+        "{provider:?}"
+    );
+    assert!(
+        allocation.bytes_total < 256 * 1024,
+        "{provider:?}: {allocation:?}"
+    );
+    drop(occupied);
+    assert_eq!(memory.used(), before);
+    engine.cancel();
+    assert_eq!(
+        estimate().unwrap_err().sqlstate(),
+        Some("57014"),
+        "{provider:?}"
+    );
+    engine.reset_cancellation();
+    let actual = estimate().unwrap();
+    assert_eq!(actual.rows.to_bits(), expected.rows.to_bits());
+    assert_eq!(actual.execution.to_bits(), expected.execution.to_bits());
+    assert_eq!(actual.startup.to_bits(), expected.startup.to_bits());
+    assert_eq!(memory.used(), before);
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(memory.used(), 0);
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
 fn native_constant_production_recovers_without_repeating_effects(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("constant-production.db");
