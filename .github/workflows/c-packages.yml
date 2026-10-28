@@ -5,17 +5,12 @@ on:
     types: [ready_for_review]
   push:
     branches: [main]
-    paths:
-      - Cargo.toml
-      - Cargo.lock
-      - "crates/**"
-      - "examples/c/**"
-      - "scripts/*c-bindings*"
-      - scripts/c_bindings_licenses.py
-      - "scripts/c-bindings/**"
-      - scripts/verify-c-package.py
-      - .github/workflows/c-packages.yml
   workflow_call:
+    inputs:
+      force_all:
+        description: Validate every configuration for explicit full or release callers.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -31,7 +26,30 @@ env:
   MACOSX_DEPLOYMENT_TARGET: "11.0"
 
 jobs:
+  scope:
+    name: Select C validation inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      required: ${{ steps.select.outputs.required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Verify C validation selection
+        run: python3 -m unittest discover -s scripts/tests -p test_c_validation.py
+      - name: Inspect C validation inputs
+        id: select
+        env:
+          C_VALIDATION_FORCE_ALL: ${{ inputs.force_all }}
+        run: python3 scripts/c_validation.py --kind packages
+
   package:
+    needs: scope
+    if: needs.scope.outputs.required == 'true'
     name: C package (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90

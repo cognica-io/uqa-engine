@@ -1510,3 +1510,8 @@ cleanup:
 
 `uqa_engine_execute_params` and prepared bindings accept explicit vector parameters for KNN/hybrid retrieval and SQL graph functions for graph/Cypher workflows. Those examples must use the existing manual contracts and fixture intent rather than adding separate C query semantics.
 
+### Validation input selection
+
+Ordinary engine implementation changes keep the workspace's Rust FFI tests and the owning engine, analysis and storage checks. The dedicated C/C++ and native-sanitizer matrices are selected for the C adapter, headers, examples, shared C value and Arrow conversion contracts, C test-support fixtures, dependency manifests, lockfile, toolchain and C validation tools. Distribution builds are selected for the C adapter, headers, examples, dependency/build inputs, package tooling and shipped legal inputs. Generic engine runtime changes do not by themselves select either complete C matrix.
+
+Both workflows run the lightweight ownership selector and its Git-history regression tests on completed review candidates and main pushes. Missing or unreliable comparison history retains complete validation; rename detection is disabled so removed C inputs cannot disappear behind a new unrelated path. A workflow change that preserves every existing build command, matrix, environment and tool while changing only event/selection wiring runs policy checks without recompiling C. Actual execution-definition changes select the affected complete matrix. Explicit reusable-workflow callers, including full and release validation, default to every configuration. Skipped C matrices are recorded as unaffected, never as passing C executions.
