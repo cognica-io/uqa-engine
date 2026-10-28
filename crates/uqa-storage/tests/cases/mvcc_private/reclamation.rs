@@ -65,68 +65,80 @@ fn retained_views_pin_only_their_own_values_through_replacements_and_owner_drop(
 
 #[test]
 fn releasing_the_last_savepoint_reclaims_its_obsolete_values_immediately() {
-    let control = StorageReadControl::with_limit(1 << 20);
-    let changes = PrivateRecordChanges::new(control.memory());
-    let mut payload = vec![1; 256 << 10];
-    changes.apply(&[write(b"row", &payload)], &control).unwrap();
-    let checkpoint = StorageSavepointId::allocate();
-    changes.savepoint(checkpoint).unwrap();
-    payload.fill(2);
-    changes.apply(&[write(b"row", &payload)], &control).unwrap();
-    let before_release = control.memory().used();
-    changes.release_savepoint(checkpoint).unwrap();
-    assert!(control.memory().used() <= before_release - payload.len());
-    for revision in 3..=12 {
-        payload.fill(revision);
+    for (bytes, resident) in [(32 << 10, true), (256 << 10, false)] {
+        let control = StorageReadControl::with_limit(1 << 20);
+        let changes = PrivateRecordChanges::new(control.memory());
+        let mut payload = vec![1; bytes];
         changes.apply(&[write(b"row", &payload)], &control).unwrap();
+        let checkpoint = StorageSavepointId::allocate();
+        changes.savepoint(checkpoint).unwrap();
+        if !resident {
+            // Large roots have already released their payload buffers before capture.
+            assert!(control.memory().used() < payload.len());
+        }
+        payload.fill(2);
+        changes.apply(&[write(b"row", &payload)], &control).unwrap();
+        let before_release = control.memory().used();
+        changes.release_savepoint(checkpoint).unwrap();
+        let required_release = if resident { payload.len() } else { 0 };
+        assert!(control.memory().used() <= before_release - required_release);
+        for revision in 3..=12 {
+            payload.fill(revision);
+            changes.apply(&[write(b"row", &payload)], &control).unwrap();
+        }
+        let final_records = changes.prepare(&control).unwrap();
+        changes.rollback().unwrap();
+        let mut writes = final_records.writes();
+        let write = writes.next(&control).unwrap().unwrap();
+        assert_eq!(write.value(), Some(payload.as_slice()));
+        drop(write);
+        drop(writes);
+        drop(final_records);
+        assert_eq!(control.memory().used(), 0);
     }
-    let final_records = changes.prepare(&control).unwrap();
-    changes.rollback().unwrap();
-    let mut writes = final_records.writes();
-    let write = writes.next(&control).unwrap().unwrap();
-    assert_eq!(write.value(), Some(payload.as_slice()));
-    drop(write);
-    drop(writes);
-    drop(final_records);
-    assert_eq!(control.memory().used(), 0);
 }
 
 #[test]
 fn exhausted_allowance_rollback_frees_nested_savepoint_and_current_roots() {
-    let control = StorageReadControl::with_limit(1 << 20);
-    let changes = PrivateRecordChanges::new(control.memory());
-    let mut payload = vec![1; 256 << 10];
-    changes.apply(&[write(b"row", &payload)], &control).unwrap();
-    let outer = StorageSavepointId::allocate();
-    changes.savepoint(outer).unwrap();
-    payload.fill(2);
-    changes.apply(&[write(b"row", &payload)], &control).unwrap();
-    let inner = StorageSavepointId::allocate();
-    changes.savepoint(inner).unwrap();
-    payload.fill(3);
-    changes.apply(&[write(b"row", &payload)], &control).unwrap();
-    let held = control
-        .memory()
-        .reserve(control.memory().limit() - control.memory().used())
-        .unwrap();
-    changes.rollback_to_savepoint(outer).unwrap();
-    assert!(control.memory().used() <= control.memory().limit() - 2 * payload.len());
-    assert!(matches!(
-        changes.release_savepoint(inner),
-        Err(VersionError::SavepointMissing(_))
-    ));
-    let restored = changes.snapshot().unwrap();
-    assert!(restored
-        .get(b"row", &control)
-        .unwrap()
-        .unwrap()
-        .value()
-        .unwrap()
-        .iter()
-        .all(|byte| *byte == 1));
-    drop(restored);
-    changes.rollback().unwrap();
-    drop(held);
-    assert_eq!(control.memory().used(), 0);
-    assert!(!changes.has_written());
+    for bytes in [32 << 10, 256 << 10] {
+        let control = StorageReadControl::with_limit(1 << 20);
+        let changes = PrivateRecordChanges::new(control.memory());
+        let mut payload = vec![1; bytes];
+        changes.apply(&[write(b"row", &payload)], &control).unwrap();
+        let outer = StorageSavepointId::allocate();
+        changes.savepoint(outer).unwrap();
+        payload.fill(2);
+        changes.apply(&[write(b"row", &payload)], &control).unwrap();
+        let inner = StorageSavepointId::allocate();
+        changes.savepoint(inner).unwrap();
+        let before_current = control.memory().used();
+        payload.fill(3);
+        changes.apply(&[write(b"row", &payload)], &control).unwrap();
+        let current_bytes = control.memory().used() - before_current;
+        assert!(current_bytes >= payload.len());
+        let held = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used())
+            .unwrap();
+        changes.rollback_to_savepoint(outer).unwrap();
+        assert!(control.memory().available() >= current_bytes);
+        assert!(matches!(
+            changes.release_savepoint(inner),
+            Err(VersionError::SavepointMissing(_))
+        ));
+        let restored = changes.snapshot().unwrap();
+        assert!(restored
+            .get(b"row", &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .unwrap()
+            .iter()
+            .all(|byte| *byte == 1));
+        drop(restored);
+        changes.rollback().unwrap();
+        drop(held);
+        assert_eq!(control.memory().used(), 0);
+        assert!(!changes.has_written());
+    }
 }

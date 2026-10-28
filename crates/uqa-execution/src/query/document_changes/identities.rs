@@ -101,7 +101,7 @@ impl ChangedIdentities {
     ) -> StorageBackendResult<()> {
         let key = key(generation, id);
         let previous = self
-            .snapshot()?
+            .records
             .get(&key, control)
             .map_err(VersionError::into_storage_error)?
             .map(|write| decode_entry(write.value()))

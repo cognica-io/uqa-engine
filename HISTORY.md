@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Count standard, whitespace and letter-tokenizer emissions before reserving their output arrays, avoiding simultaneous old and replacement arrays under a tight shared allowance. Token terms, source spans, positions, cancellation and analyzer identities are unchanged.
+- Spill large transaction-private writable tiers before command snapshots or savepoints retain them, leaving workspace for later producers under the same session allowance. Frozen views preserve their revisions and values; rollback and failed capture preserve logical state. Immediate record reads use the current owner without sealing a retained root, preserving bounded mutation membership and node lookups.
+- Bound native SQLite text mutation staging with encrypted spill records instead of retaining every changed posting row in memory. Consecutive projections coalesce before encoding; complete row encodings reserve once and release consumed projection buffers before capture. Each mutation shares decoded private blocks within its fixed read view and releases them before publication. Indexed replacements preserve prefix deletion, cancellation, atomic publication and the existing session memory limit.
+
 ## [0.6.2] - 2026-10-27
 
 ### Added

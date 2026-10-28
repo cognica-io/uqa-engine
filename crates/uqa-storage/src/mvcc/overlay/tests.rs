@@ -12,6 +12,7 @@ use crate::mvcc::CommitSequence;
 type Model = BTreeMap<Vec<u8>, (Option<CommitSequence>, Option<Vec<u8>>)>;
 
 mod cursors;
+mod retained_roots;
 mod revisions;
 mod selection;
 

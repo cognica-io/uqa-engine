@@ -286,15 +286,15 @@ impl SpillWriter<'_> {
     pub(super) fn write(&self, batch: &mut WriteBatch) -> Result<(), SQLError> {
         if !batch.counts.is_empty() {
             // The counts so far include the batches this transaction already wrote.
-            let view = self
-                .records
-                .snapshot()
-                .map_err(|error| super::storage_error(version_error(error)))?;
             for (key, change) in std::mem::take(&mut batch.counts) {
                 if change == 0 {
                     continue;
                 }
-                let count = entry_count(&view, &key, self.control)
+                let write = self
+                    .records
+                    .get(&key, self.control)
+                    .map_err(|error| super::storage_error(version_error(error)))?;
+                let count = decode_entry_count(write.as_ref().and_then(|write| write.value()))
                     .map_err(super::storage_error)?
                     .checked_add_signed(change)
                     .ok_or_else(|| {
@@ -332,10 +332,12 @@ fn entry_count(
     key: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
-    let Some(write) = view.get(key, control).map_err(version_error)? else {
-        return Ok(0);
-    };
-    let Some(value) = write.value() else {
+    let write = view.get(key, control).map_err(version_error)?;
+    decode_entry_count(write.as_ref().and_then(|write| write.value()))
+}
+
+fn decode_entry_count(value: Option<&[u8]>) -> StorageBackendResult<u64> {
+    let Some(value) = value else {
         return Ok(0);
     };
     value

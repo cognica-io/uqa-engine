@@ -37,6 +37,10 @@ pub(super) fn tokenize_budgeted(
     input.prepare_coordinates(budget, poll)?;
     let text = input.as_str();
     let mut tokens = TokenBuffer::new(budget);
+    if let Some(count) = word_token_count(tokenizer, text, poll)? {
+        // The final token array fits without also retaining an earlier growing array. Counting shares the emission predicates and keeps only a scalar, so both passes have bounded workspace and linear source traversal.
+        tokens.reserve_tokens(count)?;
+    }
     match tokenizer {
         #[cfg(feature = "kuromoji")]
         PreparedTokenizer::Kuromoji(tokenizer) => {
@@ -116,6 +120,41 @@ pub(super) fn tokenize_budgeted(
         }
     }
     tokens.finish(input, 0, poll)
+}
+
+fn word_token_count(
+    tokenizer: &PreparedTokenizer,
+    text: &str,
+    poll: &mut dyn FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Option<usize>> {
+    let mut count = 0_usize;
+    let mut count_word = |_: Range<usize>, _: &mut dyn FnMut() -> AnalysisResult<()>| {
+        count = count
+            .checked_add(1)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        Ok(())
+    };
+    match tokenizer {
+        PreparedTokenizer::Whitespace => for_each_word(text, poll, &mut count_word)?,
+        PreparedTokenizer::Standard => {
+            let class = standard_word_class()?;
+            for_each_matching_word(
+                text,
+                poll,
+                |character| contains(class, character),
+                &mut count_word,
+            )?;
+        }
+        PreparedTokenizer::Letter => for_each_matching_word(
+            text,
+            poll,
+            |character| character.is_ascii_alphabetic(),
+            &mut count_word,
+        )?,
+        PreparedTokenizer::Keyword => return Ok(Some(usize::from(!text.is_empty()))),
+        _ => return Ok(None),
+    }
+    Ok(Some(count))
 }
 
 fn tokenize_pattern(

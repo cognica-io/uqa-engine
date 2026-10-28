@@ -108,9 +108,7 @@ impl RetainedValueIndex {
 
     pub fn contains(&self, id: DocId, control: &StorageReadControl) -> StorageBackendResult<bool> {
         let records = Records::new(&self.records, &self.memory, control);
-        records
-            .node_at(&records.snapshot()?, id)
-            .map(|node| node.is_some())
+        records.current_node(id).map(|node| node.is_some())
     }
 
     /// Read the original representation, without SQL interpretation or reevaluation.

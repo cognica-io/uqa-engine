@@ -90,18 +90,40 @@ pub(in crate::mvcc) struct SpilledRunWriter {
 }
 
 impl SpilledRunWriter {
+    /// The bounded I/O buffers needed while the resident input is still retained. Capturing a smaller root would spend more workspace than the buffers it releases.
+    pub(in crate::mvcc) fn buffered_bytes(
+        entries: u64,
+        key_bytes: u64,
+        memory: &MemoryBudget,
+    ) -> usize {
+        let encoded = Self::encoded_entry_bytes(entries, key_bytes);
+        let (entries, values) = Self::buffer_sizes(encoded, memory);
+        entries + values
+    }
+
+    fn encoded_entry_bytes(entries: u64, key_bytes: u64) -> u64 {
+        key_bytes.saturating_add(entries.saturating_mul(entry::encoded_len(0, true, true) as u64))
+    }
+
+    fn buffer_sizes(encoded: u64, memory: &MemoryBudget) -> (usize, usize) {
+        // Keep the resident input intact until publication and leave half the available workspace for the run index and merge readers.
+        let values = (memory.available() / 4).clamp(1, FLUSH_BYTES);
+        let entries = usize::try_from(encoded)
+            .unwrap_or(usize::MAX)
+            .clamp(1, values);
+        (entries, values)
+    }
+
     /// A writer for about `entries` changes whose keys hold about `key_bytes` bytes in all; the estimates size the block index and optional key/prefix filters. The index and filters are charged to `memory`, and unavailable filter admission preserves ordinary reads.
     pub(in crate::mvcc) fn new(
         entries: u64,
         key_bytes: u64,
         memory: &MemoryBudget,
     ) -> VersionResult<Self> {
-        let encoded = key_bytes
-            .saturating_add(entries.saturating_mul(entry::encoded_len(0, true, true) as u64));
-        // Keep the resident input intact until publication and leave half the available workspace for the run index and merge readers.
-        let flush_bytes = (memory.available() / 4).clamp(1, FLUSH_BYTES);
+        let encoded = Self::encoded_entry_bytes(entries, key_bytes);
+        let (entry_flush_bytes, flush_bytes) = Self::buffer_sizes(encoded, memory);
         Ok(Self {
-            entries: BufferedFile::new(memory, flush_bytes)?,
+            entries: BufferedFile::new(memory, entry_flush_bytes)?,
             values: BufferedFile::new(memory, flush_bytes)?,
             encoded: Vec::new(),
             blocks: BudgetedVec::new(memory),
