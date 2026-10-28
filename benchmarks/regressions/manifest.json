@@ -25107,6 +25107,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "memory_fields_match_postgresql_option_visibility_in_every_format",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/explain/planning/tests/memory.rs",
+      "capability": "Typed EXPLAIN planning memory",
+      "workload": "Ninety-six independently captured PostgreSQL 18 MEMORY/ANALYZE/SUMMARY/BUFFERS/TIMING format combinations.",
+      "invariant": "Render the captured typed memory observation in all formats exactly when MEMORY is enabled, separately from buffer fields and timing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "absent_planning_memory_is_omitted_and_byte_rounding_does_not_overflow",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/explain/planning/tests/memory.rs",
+      "capability": "Typed EXPLAIN planning memory",
+      "workload": "An absent owner observation and maximum-size byte counts.",
+      "invariant": "Do not invent zero measurements; round actual counts up to integer kilobytes without overflow.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "planning_memory_properties_release_admission_on_failure_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/explain/planning/tests/memory.rs",
+      "capability": "Typed EXPLAIN planning memory",
+      "workload": "All four renderers with zero/small/adequate budgets and cancelled invocations.",
+      "invariant": "Admit field and text buffers before construction and release reservations on success, error and cancellation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -218,6 +218,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             uqa_sql::result::explain::ExplainPlanningMetrics {
                 io: captured.io,
                 io_timing: captured.io_timing,
+                memory: None,
             }
         });
         let physical = control.finish(

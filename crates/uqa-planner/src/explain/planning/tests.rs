@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod memory;
 use std::time::Duration;
 use uqa_core::{
     io_usage::{BlockUsage, IOUsage},
@@ -37,6 +39,7 @@ fn planning_and_serialization_formats_keep_separate_totals_and_final_clock_visib
             planning: Some(ExplainPlanningMetrics {
                 io: usage(3),
                 io_timing: !io_timing,
+                memory: None,
             }),
             planning_elapsed: Some(Duration::from_millis(7)),
             ..ExplainPhysicalPlan::default()
@@ -143,6 +146,7 @@ fn unexecuted_planning_uses_its_own_clock_and_text_omits_empty_groups() {
             planning: Some(ExplainPlanningMetrics {
                 io: IOUsage::default(),
                 io_timing,
+                memory: None,
             }),
             ..ExplainPhysicalPlan::default()
         };
