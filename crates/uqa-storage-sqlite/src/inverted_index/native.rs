@@ -39,6 +39,7 @@ impl OccurrenceStorage for NativeOccurrenceStorage {
     fn mutate(&self, operation: &mut KeyValueMutation<'_>) -> StorageBackendResult<()> {
         self.connection
             .with_native_write(|snapshot, batch| {
+                let _readers = snapshot.view.read_scope(&snapshot.control)?;
                 let read = NativeRead::new(snapshot, &self.table)?;
                 let mut projected = ProjectionBatch::new(&read, batch);
                 operation(&read, &mut projected)?;

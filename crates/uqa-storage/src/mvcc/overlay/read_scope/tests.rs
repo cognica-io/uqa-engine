@@ -123,3 +123,54 @@ fn private_snapshot_read_scopes_preserve_frozen_visibility_and_failed_admission(
     assert_eq!(control.memory().used(), 0);
     assert!(control.memory().peak() <= control.memory().limit());
 }
+
+#[test]
+fn merged_snapshot_point_reads_share_private_blocks_only_within_their_scope() {
+    use crate::mvcc::{MemoryVersionStore, MergedRecordSnapshot};
+
+    let control = StorageReadControl::with_limit(128 * 1024);
+    let changes = spilled_changes(&control);
+    let committed = MemoryVersionStore::new(control.memory())
+        .snapshot()
+        .unwrap();
+    let view =
+        MergedRecordSnapshot::new(std::sync::Arc::new(committed), changes.snapshot().unwrap());
+    let key = 1_u64.to_be_bytes();
+    let read = || {
+        view.visit_value(&key, &control, &mut |record| {
+            assert_eq!(record.unwrap().value, Some(&[23; 1024][..]));
+            Ok(())
+        })
+        .unwrap();
+    };
+    let baseline = control.memory().used();
+    let scope = view.read_scope(&control).unwrap();
+    read();
+    read_counts::take();
+    for _ in 0..32 {
+        read();
+    }
+    assert_eq!(read_counts::take().blocks, 0);
+    assert!(view.read_scope(&StorageReadControl::with_limit(0)).is_err());
+    changes
+        .apply(
+            &[RecordWrite {
+                key: &key,
+                expected: None,
+                value: Some(b"later"),
+            }],
+            &control,
+        )
+        .unwrap();
+    read();
+    drop(changes);
+    drop(scope);
+    assert_eq!(control.memory().used(), baseline);
+    read_counts::take();
+    read();
+    assert_eq!(read_counts::take().blocks, 1);
+    control.cancellation().cancel();
+    assert!(view.read_scope(&control).is_err());
+    drop(view);
+    assert_eq!(control.memory().used(), 0);
+}

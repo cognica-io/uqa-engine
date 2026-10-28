@@ -459,6 +459,14 @@ pub struct MergedRecordSnapshot {
 }
 
 impl MergedRecordSnapshot {
+    /// Share decoded private-run blocks across related point reads of this fixed view. The last active scope releases its cached bytes without retaining the view or changing committed/private visibility.
+    pub fn read_scope(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<super::PrivateRecordReadScope> {
+        self.private.read_scope(control)
+    }
+
     pub(in crate::mvcc) fn retained_source(
         &self,
         key: &[u8],
