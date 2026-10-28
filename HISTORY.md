@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Bound native SQLite text mutation staging with encrypted spill records instead of retaining every changed posting row in memory. Consecutive projections coalesce before encoding, and indexed replacements preserve prefix deletion, cancellation, atomic publication and the existing session memory limit.
+- Bound native SQLite text mutation staging with encrypted spill records instead of retaining every changed posting row in memory. Consecutive projections coalesce before encoding; complete row encodings reserve once and release consumed projection buffers before capture. Indexed replacements preserve prefix deletion, cancellation, atomic publication and the existing session memory limit.
 
 ## [0.6.2] - 2026-10-27
 

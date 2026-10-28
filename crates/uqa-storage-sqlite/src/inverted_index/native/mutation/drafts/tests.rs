@@ -89,6 +89,79 @@ fn staged_projection_reads_preserve_cancellation() {
 }
 
 #[test]
+fn projection_staging_shares_the_allowance_with_other_retained_owners() {
+    let control = StorageReadControl::with_limit(256 << 10);
+    let peer = control.memory().reserve(208 << 10).unwrap();
+    let mut rows = Drafts::new(&control);
+    let value = vec![7; 4096];
+    for cluster in 0..64_u64 {
+        let draft = Draft {
+            address: address(cluster).encode(&control).unwrap(),
+            values: [
+                super::super::owned_value(Some(&value), &control).unwrap(),
+                super::super::owned_value(Some(b"positions"), &control).unwrap(),
+            ],
+            _key: control.memory().empty_reservation(),
+            _entry: control.memory().empty_reservation(),
+            merge: true,
+        };
+        rows.put(&cluster.to_be_bytes(), draft).unwrap();
+    }
+    let prefix = Address {
+        cluster: None,
+        ..address(0)
+    }
+    .encode(&control)
+    .unwrap();
+    rows.remove_prefix(&prefix).unwrap();
+    let mut count = 0;
+    rows.visit(|_, draft| {
+        assert!(draft.values[0].is_none());
+        assert_eq!(draft.values[1].as_deref(), Some(&b"positions"[..]));
+        count += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(count, 64);
+    drop((prefix, rows, peer));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn large_projection_row_releases_its_source_before_retaining_the_encoding() {
+    let control = StorageReadControl::with_limit(256 << 10);
+    let peer = control.memory().reserve(128 << 10).unwrap();
+    let mut rows = Drafts::new(&control);
+    let value = vec![7; 48 << 10];
+    rows.put(
+        b"row",
+        Draft {
+            address: address(1).encode(&control).unwrap(),
+            values: [
+                super::super::owned_value(Some(&value), &control).unwrap(),
+                None,
+            ],
+            _key: control.memory().empty_reservation(),
+            _entry: control.memory().empty_reservation(),
+            merge: true,
+        },
+    )
+    .unwrap();
+    let mut count = 0;
+    rows.visit(|key, draft| {
+        assert_eq!(key, b"row");
+        assert_eq!(draft.values[0].as_deref(), Some(&value[..]));
+        assert!(draft.values[1].is_none());
+        count += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(count, 1);
+    drop((rows, peer));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn adjacent_projections_transfer_the_pending_row_without_serializing_it_twice() {
     let control = StorageReadControl::with_limit(256 << 10);
     let mut rows = Drafts::new(&control);

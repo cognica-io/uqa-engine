@@ -6,11 +6,11 @@
 
 //! Coalesced native rows retain a bounded prefix and spill through the common encrypted record owner.
 
-use super::{invalid, Draft};
+use super::{Draft, invalid};
 use uqa_core::memory::BudgetedVec;
+use uqa_storage::StorageBackendResult;
 use uqa_storage::mvcc::{PrivateRecordChanges, PrivateRecordSnapshot, RecordWrite, VersionError};
 use uqa_storage::read_control::StorageReadControl;
-use uqa_storage::StorageBackendResult;
 
 pub(super) struct Drafts {
     records: PrivateRecordChanges,
@@ -92,12 +92,22 @@ impl Drafts {
         let Some((key, draft)) = self.pending.take() else {
             return Ok(());
         };
+        let bytes = std::iter::once(&draft.address[..])
+            .chain(draft.values.iter().filter_map(|value| value.as_deref()))
+            .try_fold(1 + 3 * size_of::<u64>(), |bytes, value| {
+                bytes
+                    .checked_add(value.len())
+                    .ok_or(uqa_core::memory::MemoryError::SizeOverflow)
+            })?;
         let mut encoded = BudgetedVec::new(self.control.memory());
+        encoded.reserve(bytes)?;
         encoded.push(u8::from(draft.merge))?;
         append(&mut encoded, Some(&draft.address))?;
         for value in &draft.values {
             append(&mut encoded, value.as_deref())?;
         }
+        // The encoded row replaces its projection buffers before the record owner captures it.
+        drop(draft);
         self.records
             .apply(
                 &[RecordWrite {

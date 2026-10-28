@@ -15661,6 +15661,32 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "large_projection_row_releases_its_source_before_retaining_the_encoding",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/inverted_index/native/mutation/drafts/tests.rs",
+      "capability": "Native row encoding peak retention",
+      "workload": "Encode and visit one 48 KiB projected row under a 256 KiB allowance while another owner retains 128 KiB.",
+      "invariant": "The complete encoded row and its retained capture fit without keeping an unnecessary source copy or a growing encoder buffer; exact values survive and every reservation is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "projection_staging_shares_the_allowance_with_other_retained_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/inverted_index/native/mutation/drafts/tests.rs",
+      "capability": "Native staging shared allowance",
+      "workload": "Stage and delete 64 projected 4 KiB values under a 256 KiB allowance while a peer retains 208 KiB.",
+      "invariant": "Spill, prefix deletion, unchanged projections and final visitation preserve exact results and release their complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "adjacent_projections_transfer_the_pending_row_without_serializing_it_twice",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/inverted_index/native/mutation/drafts/tests.rs",
