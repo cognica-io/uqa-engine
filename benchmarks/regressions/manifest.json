@@ -25321,6 +25321,45 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "rejected_compound_join_costing_does_not_copy_large_literals",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/costing.rs",
+      "capability": "Admitted local join costing",
+      "workload": "A two-predicate local filter with a four MiB literal under zero allowance and either cancelled token.",
+      "invariant": "Reject with the typed memory/cancellation error before copying the large literal; additional planner allocations stay below 16 KiB and no planning storage survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "compound_join_predicates_retain_exact_storage_and_release_partial_copies",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/costing.rs",
+      "capability": "Admitted local join costing",
+      "workload": "Two ordered predicate copies, including a four MiB literal, under exact, insufficient and sibling-held ancestor allowances.",
+      "invariant": "The produced conjunction retains exactly its observed allocation bytes, preserves order and values, and releases every partial copy without consuming sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "compound_join_costing_keeps_leases_through_estimates_errors_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/costing.rs",
+      "capability": "Admitted local join costing",
+      "workload": "Provider and fallback estimates over a compound local predicate, invalid provider estimates and provider unwind.",
+      "invariant": "Keep the conjunction lease through the single provider call and fallback; preserve estimate formulas and release storage on every return or unwind.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

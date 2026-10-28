@@ -12,7 +12,9 @@ use super::{
     RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan, SourceStatistics, UnifiedPlan,
 };
 
-use uqa_core::memory::ProductionControl;
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+
+use super::OptimizerResult;
 
 const DEFAULT_JOIN_CARDINALITY: u64 = 1_000;
 
@@ -23,7 +25,7 @@ pub(super) fn reorder_unified_plan_joins(
     plan: &mut UnifiedPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<(), crate::JoinOrderError> {
+) -> OptimizerResult<()> {
     match plan {
         UnifiedPlan::Query(query) => reorder_query_joins(query, statistics, control),
         UnifiedPlan::Command(command) => reorder_command_joins(command, statistics, control),
@@ -34,7 +36,7 @@ fn reorder_query_joins(
     query: &mut QueryPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<(), crate::JoinOrderError> {
+) -> OptimizerResult<()> {
     for cte in &mut query.ctes {
         match &mut cte.body {
             crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control)?,
@@ -78,7 +80,7 @@ fn reorder_cte_joins(
     cte: &mut crate::CtePlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<(), crate::JoinOrderError> {
+) -> OptimizerResult<()> {
     match &mut cte.body {
         crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control),
         crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics, control),
@@ -93,7 +95,7 @@ fn reorder_command_joins(
     command: &mut CommandPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<(), crate::JoinOrderError> {
+) -> OptimizerResult<()> {
     match command {
         CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics, control)?,
         CommandPlan::Update(plan) => {
@@ -213,7 +215,7 @@ fn reorder_insert_joins(
     plan: &mut crate::unified_plan::InsertPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<(), crate::JoinOrderError> {
+) -> OptimizerResult<()> {
     for cte in &mut plan.ctes {
         match &mut cte.body {
             crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control)?,
@@ -235,7 +237,7 @@ fn reorder_expression_subquery_joins(
     expressions: &mut [ExpressionPlan],
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<(), crate::JoinOrderError> {
+) -> OptimizerResult<()> {
     for expression in expressions {
         for subquery in &mut expression.subqueries {
             reorder_query_joins(subquery, statistics, control)?;
@@ -249,7 +251,7 @@ fn reorder_source_joins(
     external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<(), crate::JoinOrderError> {
+) -> OptimizerResult<()> {
     match source {
         SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
@@ -287,7 +289,7 @@ fn reordered_inner_join_source(
     external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> Result<Option<SourcePlan>, crate::JoinOrderError> {
+) -> OptimizerResult<Option<SourcePlan>> {
     let mut atoms = Vec::new();
     let mut expressions = Vec::new();
     if !flatten_reorderable_inner_join(source, &mut atoms, &mut expressions)
@@ -369,6 +371,7 @@ fn reordered_inner_join_source(
         &column_owners,
         &relation_tables,
         statistics,
+        control,
     )?;
 
     // SQL's comma-separated FROM form lowers to a tree of cross joins while
@@ -487,6 +490,19 @@ fn unique_column_owners(relations: &[JoinRelation]) -> ColumnOwners {
     owners
 }
 
+fn copy_local_conjunction(
+    predicates: &[&ScalarExpr],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ScalarExpr>, uqa_sql::SQLError> {
+    let mut expressions = ProductionVec::new(*control);
+    expressions.reserve(predicates.len())?;
+    for predicate in predicates {
+        expressions.push_produced(predicate.clone_with_control(control)?)?;
+    }
+    let (expressions, memory) = expressions.finish()?.into_parts();
+    Ok(control.finish(ScalarExpr::And(expressions), memory)?)
+}
+
 fn apply_local_filter_estimates(
     relations: &mut [JoinRelation],
     predicates: &[&ScalarExpr],
@@ -494,7 +510,8 @@ fn apply_local_filter_estimates(
     column_owners: &ColumnOwners,
     relation_tables: &BTreeMap<String, String>,
     source_statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> OptimizerResult<()> {
     let estimator = crate::CardinalityEstimator::new();
     let mut predicates_by_alias = BTreeMap::<String, Vec<&ScalarExpr>>::new();
     for predicate in predicates {
@@ -517,11 +534,12 @@ fn apply_local_filter_estimates(
         let Some(predicates) = predicates_by_alias.remove(&relation.alias) else {
             continue;
         };
-        let predicate = match predicates.as_slice() {
-            [predicate] => std::borrow::Cow::Borrowed(*predicate),
-            _ => {
-                std::borrow::Cow::Owned(ScalarExpr::And(predicates.into_iter().cloned().collect()))
-            }
+        let conjunction;
+        let predicate = if let [predicate] = predicates.as_slice() {
+            *predicate
+        } else {
+            conjunction = copy_local_conjunction(&predicates, control)?;
+            &conjunction
         };
         let statistics = crate::cardinality::RelationStatsRef {
             row_count: relation.cardinality.round() as u64,
@@ -529,19 +547,21 @@ fn apply_local_filter_estimates(
         };
         let local_estimate = relation_tables
             .get(&relation.alias)
-            .and_then(|table| source_statistics.local_access_estimate(table.as_str(), &predicate));
+            .and_then(|table| source_statistics.local_access_estimate(table.as_str(), predicate));
         if let Some(estimate) = local_estimate {
             if !estimate.output_rows.is_finite() || estimate.output_rows < 0.0 {
                 return Err(JoinGraphError::InvalidCardinality {
                     name: relation.alias.clone(),
                     rows: estimate.output_rows,
-                });
+                }
+                .into());
             }
             if !estimate.cost.is_finite() || estimate.cost < 0.0 {
                 return Err(JoinGraphError::InvalidAccessCost {
                     name: relation.alias.clone(),
                     cost: estimate.cost,
-                });
+                }
+                .into());
             }
             relation.cardinality = estimate.output_rows.min(relation.cardinality).max(0.0);
             relation.access_cost = estimate.cost;
@@ -549,7 +569,7 @@ fn apply_local_filter_estimates(
             continue;
         }
         let selectivity = estimator
-            .scalar_selectivity_with_statistics(&predicate, statistics)
+            .scalar_selectivity_with_statistics(predicate, statistics)
             .raw();
         relation.cardinality = (relation.cardinality * selectivity).max(0.0);
         relation.access_cost += crate::CostEstimator::default()

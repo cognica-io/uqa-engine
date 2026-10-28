@@ -7,6 +7,7 @@
 use super::*;
 
 mod admission;
+mod costing;
 
 #[test]
 fn unavailable_function_cost_does_not_copy_join_source_payloads() {
@@ -161,6 +162,7 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
                 &owners,
                 &tables,
                 &estimates,
+                &ProductionControl::uncontrolled(),
             )
             .unwrap();
         });

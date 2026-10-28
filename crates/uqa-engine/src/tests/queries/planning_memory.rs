@@ -69,7 +69,7 @@ fn native_join_requests_recover_after_admission_failure(#[case] provider: Provid
     populate(&engine);
     let retained = engine.query_retention_control().unwrap();
     let memory = retained.memory();
-    let query = format!("{JOIN} WHERE a.id = $1");
+    let query = format!("{JOIN} WHERE a.id = $1 AND a.id >= 0");
     let params = [uqa_sql::SQLParam::Scalar(Value::Int(7))];
     for mode in ["force_custom_plan", "force_generic_plan"] {
         engine
