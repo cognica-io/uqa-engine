@@ -42,7 +42,7 @@ pub enum JoinGraphError {
 
 pub type JoinGraphResult<T> = Result<T, JoinGraphError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct JoinEdge {
     /// Bitmask of relations on the left side of the equijoin.
     pub left: u64,

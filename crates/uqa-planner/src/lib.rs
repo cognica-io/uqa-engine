@@ -66,7 +66,9 @@ pub use cardinality::{
     JACCARD_JOIN_SELECTIVITY,
 };
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
-pub use join_enumerator::{enumerate_dpccp, enumerate_dpccp_with_cost_estimator, JoinPlan};
+pub use join_enumerator::{
+    enumerate_dpccp, enumerate_dpccp_with_control, enumerate_dpccp_with_cost_estimator, JoinPlan,
+};
 pub use join_graph::{JoinEdge, JoinGraph, JoinGraphError, JoinGraphResult};
 pub use join_order::{
     JoinAlgorithm, JoinCondition, JoinOrderOptimizer, JoinOrderResult, JoinOrderTree,

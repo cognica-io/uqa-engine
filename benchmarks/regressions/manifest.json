@@ -25003,6 +25003,110 @@
       "capability": "Bounded native parallel worker ownership",
       "workload": "Worker startup fails after the first native worker has initialized its destructor probe.",
       "invariant": "Construction returns an error only after the started worker and its thread-local resources finish cleanup."
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "dense_candidates_do_not_copy_partial_trees",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests.rs",
+      "capability": "Admitted native join planning",
+      "workload": "An eight-relation complete join graph.",
+      "invariant": "At most 128 KiB and 1,024 allocations for subset decisions, connectivity, layers and the selected tree; no per-candidate subtree allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "controlled_search_admits_scratch_and_retains_only_selected_output",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests/memory.rs",
+      "capability": "Admitted native join planning",
+      "workload": "Exact, threshold star, dense, disconnected and 18/64-relation greedy searches with allowance boundaries.",
+      "invariant": "Reject below the measured necessary peak, preserve the selected tree, retain exactly its boxed nodes and release all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "rejected_and_cancelled_search_allocates_no_candidate_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests/memory.rs",
+      "capability": "Admitted native join planning",
+      "workload": "Dense search with zero allowance and either cancelled token.",
+      "invariant": "Reject before any candidate allocation and retain no reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_and_single_relation_search_need_no_heap_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests/memory.rs",
+      "capability": "Admitted native join planning",
+      "workload": "Empty and singleton graphs with a zero-byte allowance.",
+      "invariant": "Return the original empty/leaf result without allocating or retaining memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "search_respects_sibling_reservations_and_releases_on_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests/memory.rs",
+      "capability": "Admitted native join planning",
+      "workload": "A full parent allowance held by a sibling, then a consumer unwind and recovery.",
+      "invariant": "Respect ancestor admission, release all tree/scratch leases on unwind and allow the next operation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "exact_decisions_match_exhaustive_connected_trees",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests/reference.rs",
+      "capability": "Admitted native join planning",
+      "workload": "Three through six relations in cycle and complete graphs.",
+      "invariant": "Match the minimum cost of independently enumerated ordered connected trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "disconnected_equal_cardinality_components_keep_discovery_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests/reference.rs",
+      "capability": "Admitted native join planning",
+      "workload": "Four interleaved two-relation components with equal cardinality.",
+      "invariant": "Keep stable component discovery order independently of numeric subset-mask ordering.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "greedy_equal_cost_candidates_keep_relation_mask_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests/reference.rs",
+      "capability": "Admitted native join planning",
+      "workload": "An eighteen-relation zero-row chain with equal candidate costs.",
+      "invariant": "Preserve ordered candidate selection and strict cost ties above the exact enumeration threshold.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
