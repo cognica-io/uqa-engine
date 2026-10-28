@@ -6,17 +6,34 @@
 
 //! Borrow join inputs and retain admitted predicate-reference buffers during selection.
 
-use super::{BTreeSet, JoinRelation, ScalarExpr, SourcePlan};
+use super::{RelationMetadata, ScalarExpr, SourcePlan};
 use uqa_core::memory::{ProductionControl, ProductionSmallVec, ProductionVec};
 
 /// Resolve only demanded column names in the eligible join's at most 64 existing column maps. Unknown and ambiguous names both remain unresolved.
 pub(super) struct ColumnOwners<'a> {
-    relations: &'a [JoinRelation],
+    relations: &'a [RelationMetadata<'a>],
+    aliases: [(&'a str, usize); 64],
 }
 
 impl<'a> ColumnOwners<'a> {
-    pub(super) fn new(relations: &'a [JoinRelation]) -> Self {
-        Self { relations }
+    pub(super) fn new(relations: &'a [RelationMetadata<'a>]) -> Self {
+        let mut aliases = [("", 0); 64];
+        for (index, relation) in relations.iter().enumerate() {
+            aliases[index] = (relation.alias.as_ref(), index);
+        }
+        aliases[..relations.len()].sort_unstable_by_key(|(name, _)| *name);
+        Self { relations, aliases }
+    }
+
+    pub(super) fn contains_alias(&self, alias: &str) -> bool {
+        self.alias_index(alias).is_some()
+    }
+
+    fn alias_index(&self, alias: &str) -> Option<usize> {
+        self.aliases[..self.relations.len()]
+            .binary_search_by_key(&alias, |(name, _)| *name)
+            .ok()
+            .map(|index| self.aliases[index].1)
     }
 
     pub(super) fn resolve(&self, column: &str) -> Option<(&'a str, &'a str)> {
@@ -26,7 +43,7 @@ impl<'a> ColumnOwners<'a> {
                 if owner.is_some() {
                     return None;
                 }
-                owner = Some((relation.alias.as_str(), name.as_str()));
+                owner = Some((relation.alias.as_ref(), name.as_str()));
             }
         }
         owner
@@ -99,34 +116,29 @@ type PredicateGroups<'p, 'c> = [Option<ProductionVec<'c, &'p ScalarExpr>>; 64];
 
 /// The eligible join's existing 64-relation domain bounds the alias index and bucket headers; only predicate references require growing storage.
 pub(super) fn local_predicate_groups<'p, 'c>(
-    relations: &[JoinRelation],
+    relations: &[RelationMetadata<'_>],
     predicates: &[&'p ScalarExpr],
-    aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners<'_>,
     control: &ProductionControl<'c>,
 ) -> Result<PredicateGroups<'p, 'c>, uqa_sql::SQLError> {
     control.check()?;
     let mut groups = std::array::from_fn(|_| None);
-    let mut index = [("", 0_usize); 64];
-    let index = &mut index[..relations.len()];
-    for (position, relation) in relations.iter().enumerate() {
-        index[position] = (relation.alias.as_str(), position);
+    for (position, _) in relations.iter().enumerate() {
         groups[position] = Some(ProductionVec::new(*control));
     }
-    index.sort_unstable_by_key(|(alias, _)| *alias);
     for predicate in predicates {
         control.check()?;
         let mut alias = None;
-        if !collect_local_alias(predicate, aliases, column_owners, &mut alias) {
+        if !collect_local_alias(predicate, column_owners, &mut alias) {
             continue;
         }
         let Some(alias) = alias else {
             continue;
         };
-        let Ok(position) = index.binary_search_by_key(&alias, |(name, _)| *name) else {
+        let Some(position) = column_owners.alias_index(alias) else {
             continue;
         };
-        groups[index[position].1]
+        groups[position]
             .as_mut()
             .expect("indexed relation bucket")
             .push_copy(*predicate)?;
@@ -136,13 +148,11 @@ pub(super) fn local_predicate_groups<'p, 'c>(
 
 fn collect_local_alias<'a>(
     expression: &'a ScalarExpr,
-    aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners<'a>,
     output: &mut Option<&'a str>,
 ) -> bool {
-    let mut recur = |expression: &'a ScalarExpr| {
-        collect_local_alias(expression, aliases, column_owners, output)
-    };
+    let mut recur =
+        |expression: &'a ScalarExpr| collect_local_alias(expression, column_owners, output);
     match expression {
         ScalarExpr::Column(column) => {
             let Some((alias, _)) = column_owners.resolve(column.as_str()) else {
@@ -157,7 +167,7 @@ fn collect_local_alias<'a>(
             }
         }
         ScalarExpr::QualifiedColumn { qualifier, .. } => {
-            if !aliases.contains(qualifier) {
+            if !column_owners.contains_alias(qualifier) {
                 return false;
             }
             match output {

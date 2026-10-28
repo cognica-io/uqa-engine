@@ -26281,6 +26281,32 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "rejected_join_search_borrows_relation_names_before_admission",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/metadata.rs",
+      "capability": "Borrowed native relation metadata",
+      "workload": "Select a join with a four MiB alias, qualifier or table name under a zero request allowance.",
+      "invariant": "Reject with 53200 below 16 KiB additional allocation while retaining the original name address and both ordered statistics callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "declined_join_metadata_borrows_names_and_releases_captured_statistics",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/metadata.rs",
+      "capability": "Borrowed native relation metadata",
+      "workload": "Capture a table with a four MiB alias and retained statistics before a function whose access cost is unavailable.",
+      "invariant": "Allocate no heap storage, stop at the same callback and release the captured statistics handle without changing the source.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

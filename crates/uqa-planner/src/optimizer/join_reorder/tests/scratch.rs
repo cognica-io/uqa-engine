@@ -7,14 +7,13 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
-fn relation(alias: String, source_id: u64) -> JoinRelation {
-    JoinRelation {
-        alias,
-        source_id,
+fn relation(alias: String) -> RelationMetadata<'static> {
+    RelationMetadata {
+        paradigm: crate::AccessParadigm::Relational,
+        alias: alias.into(),
         cardinality: 100.0,
         access_cost: 100.0,
         column_stats: crate::ColumnStatistics::default(),
-        paradigm: crate::AccessParadigm::Relational,
     }
 }
 
@@ -88,13 +87,7 @@ fn join_source_discovery_keeps_the_relation_bound_without_heap_scratch() {
 #[test]
 fn local_predicate_groups_retain_exact_buffers_and_conjunct_order() {
     for count in [2, 8, 64] {
-        let relations: Vec<_> = (0..count)
-            .map(|i| relation(format!("a{i}"), i as u64))
-            .collect();
-        let aliases = relations
-            .iter()
-            .map(|relation| relation.alias.clone())
-            .collect();
+        let relations: Vec<_> = (0..count).map(|i| relation(format!("a{i}"))).collect();
         let owners = ColumnOwners::new(&relations);
         let predicates: Vec<_> = (0..17 * count)
             .map(|i| ScalarExpr::QualifiedColumn {
@@ -109,9 +102,7 @@ fn local_predicate_groups_retain_exact_buffers_and_conjunct_order() {
         let control = ProductionControl::new(&budget, &original, &invoking);
         let mut groups = None;
         let allocation = allocation_counter::measure(|| {
-            groups = Some(
-                local_predicate_groups(&relations, &inputs, &aliases, &owners, &control).unwrap(),
-            );
+            groups = Some(local_predicate_groups(&relations, &inputs, &owners, &control).unwrap());
         });
         assert_eq!(allocation.bytes_current as usize, budget.used());
         assert!(budget.used() > 0);
@@ -135,18 +126,18 @@ fn local_predicate_groups_retain_exact_buffers_and_conjunct_order() {
         let sibling = parent.reserve(sibling_bytes).unwrap();
         let budget = parent.child(required);
         let control = ProductionControl::new(&budget, &original, &invoking);
-        let error = local_predicate_groups(&relations, &inputs, &aliases, &owners, &control)
+        let error = local_predicate_groups(&relations, &inputs, &owners, &control)
             .err()
             .unwrap();
         assert_eq!(error.sqlstate(), Some("53200"));
         assert_eq!(budget.used(), 0);
         assert_eq!(parent.used(), sibling_bytes);
         drop(sibling);
-        drop(local_predicate_groups(&relations, &inputs, &aliases, &owners, &control).unwrap());
+        drop(local_predicate_groups(&relations, &inputs, &owners, &control).unwrap());
         assert_eq!(parent.used(), 0);
         for token in [&original, &invoking] {
             token.cancel();
-            let error = local_predicate_groups(&relations, &inputs, &aliases, &owners, &control)
+            let error = local_predicate_groups(&relations, &inputs, &owners, &control)
                 .err()
                 .unwrap();
             assert_eq!(error.sqlstate(), Some("57014"));
@@ -159,11 +150,10 @@ fn local_predicate_groups_retain_exact_buffers_and_conjunct_order() {
 #[test]
 fn local_predicate_groups_preserve_resolution_and_expression_restrictions() {
     let mut relations = [
-        relation("b".into(), 0),
-        relation("a".into(), 1),
-        relation("c".into(), 2),
+        relation("b".into()),
+        relation("a".into()),
+        relation("c".into()),
     ];
-    let aliases = BTreeSet::from(["a".into(), "b".into(), "c".into()]);
     relations[0].column_stats =
         BTreeMap::from([("ambiguous".into(), crate::ColumnStats::default())]).into();
     relations[1].column_stats = BTreeMap::from([
@@ -195,7 +185,6 @@ fn local_predicate_groups_preserve_resolution_and_expression_restrictions() {
     let groups = local_predicate_groups(
         &relations,
         &inputs,
-        &aliases,
         &owners,
         &ProductionControl::uncontrolled(),
     )
@@ -349,17 +338,15 @@ fn local_predicate_grouping_borrows_aliases_and_admits_reference_buffers() {
         }),
         rhs: Box::new(ScalarExpr::Literal(Value::Int(1))),
     };
-    let relations = [JoinRelation {
-        alias: alias.clone(),
+    let relations = [RelationMetadata {
+        paradigm: crate::AccessParadigm::Relational,
+        alias: alias.clone().into(),
         cardinality: 100.0,
         access_cost: 100.0,
         column_stats: crate::ColumnStatistics::default(),
-        paradigm: crate::AccessParadigm::Relational,
-        source_id: 0,
     }];
-    let aliases = BTreeSet::from([alias]);
     let owners = ColumnOwners::new(&relations);
-    let tables = BTreeMap::new();
+    let tables = [None];
     let budget = MemoryBudget::new(0);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
@@ -368,7 +355,6 @@ fn local_predicate_grouping_borrows_aliases_and_admits_reference_buffers() {
         result = Some(estimate_local_filters(
             &relations,
             &[&predicate],
-            &aliases,
             &owners,
             &tables,
             &|_: &str| None,

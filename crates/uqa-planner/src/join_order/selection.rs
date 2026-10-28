@@ -6,7 +6,7 @@
 
 use super::{
     JoinGraph, JoinGraphError, JoinGraphResult, JoinOrderError, JoinOrderOptimizer, JoinPlan,
-    JoinPredicate, JoinRelation, Produced, ProductionControl,
+    JoinPredicate, JoinRelationRef, Produced, ProductionControl,
 };
 use crate::join_enumerator::enumerate_dpccp_with_control;
 use uqa_core::memory::ProductionVec;
@@ -58,12 +58,12 @@ impl<'a> Aliases<'a> {
 impl JoinOrderOptimizer {
     pub(super) fn select<'a>(
         &self,
-        relations: &'a [JoinRelation],
+        relations: impl ExactSizeIterator<Item = JoinRelationRef<'a>> + Clone,
         predicates: &[JoinPredicate],
         control: &ProductionControl<'_>,
     ) -> Result<Selection<'a>, JoinOrderError> {
         control.check()?;
-        if relations.is_empty() {
+        if relations.len() == 0 {
             return Err(JoinGraphError::EmptyGraph.into());
         }
 
@@ -72,8 +72,8 @@ impl JoinOrderOptimizer {
         let mut access_costs = ProductionVec::new(*control);
         let mut edges = ProductionVec::new(*control);
         let mut aliases = Aliases::new();
-        for (index, relation) in relations.iter().enumerate() {
-            let (name, memory) = control.copy_text(&relation.alias)?.into_parts();
+        for (index, relation) in relations.clone().enumerate() {
+            let (name, memory) = control.copy_text(relation.alias)?.into_parts();
             let name = JoinGraph::validate_relation(
                 index,
                 name,
@@ -83,7 +83,7 @@ impl JoinOrderOptimizer {
             names.push_produced(control.finish(name, memory)?)?;
             cardinalities.push_copy(relation.cardinality)?;
             access_costs.push_copy(relation.access_cost)?;
-            aliases.insert(&relation.alias, index)?;
+            aliases.insert(relation.alias, index)?;
         }
 
         // The established singleton interface validates the relation but does
@@ -94,7 +94,7 @@ impl JoinOrderOptimizer {
                 let left = aliases.index(&predicate.left_alias)?;
                 let right = aliases.index(&predicate.right_alias)?;
                 let selectivity = Self::estimate_predicate_selectivity(
-                    relations,
+                    relations.clone(),
                     left,
                     right,
                     &predicate.left_field,

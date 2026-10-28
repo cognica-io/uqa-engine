@@ -7,13 +7,12 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
-fn relation(alias: &str, columns: impl IntoIterator<Item = String>) -> JoinRelation {
-    JoinRelation {
-        alias: alias.into(),
+fn relation(alias: &str, columns: impl IntoIterator<Item = String>) -> RelationMetadata<'static> {
+    RelationMetadata {
+        paradigm: crate::AccessParadigm::Relational,
+        alias: alias.to_owned().into(),
         cardinality: 100.0,
         access_cost: 100.0,
-        paradigm: crate::AccessParadigm::Relational,
-        source_id: 0,
         column_stats: columns
             .into_iter()
             .map(|column| (column, crate::ColumnStats::default()))
@@ -58,6 +57,7 @@ fn column_resolution_preserves_unique_ambiguous_and_unknown_names() {
                     for (index, column) in unique.iter().enumerate() {
                         let relation = &relations[if reversed { count - index - 1 } else { index }];
                         let (alias, name) = owners.resolve(column).unwrap();
+                        assert!(owners.contains_alias(relation.alias.as_ref()));
                         let key = relation.column_stats.get_key_value(column).unwrap().0;
                         assert_eq!(alias, relation.alias);
                         assert_eq!(name, column);
@@ -70,6 +70,8 @@ fn column_resolution_preserves_unique_ambiguous_and_unknown_names() {
                     );
                     assert!(owners.resolve("unknown").is_none());
                     assert!(owners.resolve("UNIQUE_0").is_none());
+                    assert!(!owners.contains_alias("unknown"));
+                    assert!(!owners.contains_alias("R0"));
                 });
                 assert_eq!(allocation.bytes_total, 0, "{count}/{width}: {allocation:?}");
             }
@@ -150,12 +152,7 @@ fn local_filter_costs_keep_relation_order_and_stop_on_original_error() {
         }
     }
     let relations = [relation("b", []), relation("a", []), relation("c", [])];
-    let aliases = BTreeSet::from(["a".into(), "b".into(), "c".into()]);
-    let tables = BTreeMap::from([
-        ("a".into(), "source_a".into()),
-        ("b".into(), "source_b".into()),
-        ("c".into(), "source_c".into()),
-    ]);
+    let tables = [Some("source_b"), Some("source_a"), Some("source_c")];
     let predicates = ["a", "b", "c"].map(|alias| ScalarExpr::QualifiedColumn {
         qualifier: alias.into(),
         column: "id".into(),
@@ -172,7 +169,6 @@ fn local_filter_costs_keep_relation_order_and_stop_on_original_error() {
         let outcome = estimate_local_filters(
             &relations,
             &inputs,
-            &aliases,
             &ColumnOwners::new(&relations),
             &tables,
             &estimates,

@@ -56,6 +56,26 @@ pub struct JoinRelation {
     pub source_id: u64,
 }
 
+/// Selection observes existing relation metadata without requiring an owned alias or column map.
+#[derive(Clone, Copy)]
+pub(crate) struct JoinRelationRef<'a> {
+    pub alias: &'a str,
+    pub cardinality: f64,
+    pub column_stats: &'a ColumnStatistics,
+    pub access_cost: f64,
+}
+
+impl JoinRelation {
+    fn as_join_relation(&self) -> JoinRelationRef<'_> {
+        JoinRelationRef {
+            alias: &self.alias,
+            cardinality: self.cardinality,
+            column_stats: &self.column_stats,
+            access_cost: self.access_cost,
+        }
+    }
+}
+
 /// Equijoin predicate between two named relations.
 #[derive(Debug, Clone)]
 pub struct JoinPredicate {
@@ -129,14 +149,17 @@ impl JoinOrderOptimizer {
         relations: Vec<JoinRelation>,
         predicates: Vec<JoinPredicate>,
     ) -> JoinGraphResult<JoinOrderResult> {
-        let selection::Selection { plan, aliases } =
-            match self.select(&relations, &predicates, &ProductionControl::uncontrolled()) {
-                Ok(selection) => selection,
-                Err(JoinOrderError::Graph(error)) => return Err(error),
-                Err(JoinOrderError::Production(error)) => {
-                    panic!("uncontrolled join-order allocation failed: {error}");
-                }
-            };
+        let selection::Selection { plan, aliases } = match self.select(
+            relations.iter().map(JoinRelation::as_join_relation),
+            &predicates,
+            &ProductionControl::uncontrolled(),
+        ) {
+            Ok(selection) => selection,
+            Err(JoinOrderError::Graph(error)) => return Err(error),
+            Err(JoinOrderError::Production(error)) => {
+                panic!("uncontrolled join-order allocation failed: {error}");
+            }
+        };
         let primary_alias = relations.first().map(|relation| relation.alias.clone());
         let mut predicate_lookup = BTreeMap::new();
         if relations.len() > 1 {
@@ -167,23 +190,38 @@ impl JoinOrderOptimizer {
         predicates: &[JoinPredicate],
         control: &ProductionControl<'_>,
     ) -> Result<Produced<JoinPlan>, JoinOrderError> {
+        self.select_relations_with_control(
+            relations.iter().map(JoinRelation::as_join_relation),
+            predicates,
+            control,
+        )
+    }
+
+    pub(crate) fn select_relations_with_control<'a>(
+        &self,
+        relations: impl ExactSizeIterator<Item = JoinRelationRef<'a>> + Clone,
+        predicates: &[JoinPredicate],
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<JoinPlan>, JoinOrderError> {
         self.select(relations, predicates, control)
             .map(|selection| selection.plan)
     }
 
-    fn estimate_predicate_selectivity(
-        relations: &[JoinRelation],
+    fn estimate_predicate_selectivity<'a>(
+        relations: impl ExactSizeIterator<Item = JoinRelationRef<'a>> + Clone,
         left_idx: usize,
         right_idx: usize,
         left_field: &str,
         right_field: &str,
     ) -> f64 {
         let l_distinct = relations
-            .get(left_idx)
+            .clone()
+            .nth(left_idx)
             .and_then(|r| r.column_stats.get(left_field))
             .map(|s| s.distinct_count.max(1));
         let r_distinct = relations
-            .get(right_idx)
+            .clone()
+            .nth(right_idx)
             .and_then(|r| r.column_stats.get(right_field))
             .map(|s| s.distinct_count.max(1));
         match (l_distinct, r_distinct) {
@@ -410,20 +448,31 @@ mod tests {
 
     #[test]
     fn predicate_selectivity_uses_max_distinct() {
-        let relations = vec![
+        let relations = [
             rel_with_stats("a", 1000.0, 1, "x", 100),
             rel_with_stats("b", 1000.0, 2, "y", 50),
         ];
-        let s = JoinOrderOptimizer::estimate_predicate_selectivity(&relations, 0, 1, "x", "y");
+        let s = JoinOrderOptimizer::estimate_predicate_selectivity(
+            relations.iter().map(JoinRelation::as_join_relation),
+            0,
+            1,
+            "x",
+            "y",
+        );
         assert!((s - 0.01).abs() < 1e-9);
         let _ = Value::Int(0);
     }
 
     #[test]
     fn predicate_selectivity_uses_the_configured_fallback_without_statistics() {
-        let relations = vec![rel("a", 1000.0, 1), rel("b", 1000.0, 2)];
-        let selectivity =
-            JoinOrderOptimizer::estimate_predicate_selectivity(&relations, 0, 1, "x", "y");
+        let relations = [rel("a", 1000.0, 1), rel("b", 1000.0, 2)];
+        let selectivity = JoinOrderOptimizer::estimate_predicate_selectivity(
+            relations.iter().map(JoinRelation::as_join_relation),
+            0,
+            1,
+            "x",
+            "y",
+        );
         assert_eq!(
             selectivity,
             crate::CardinalityEstimator::new().default_selectivity

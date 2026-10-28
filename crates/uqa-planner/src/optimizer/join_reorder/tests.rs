@@ -10,6 +10,7 @@ mod admission;
 mod columns;
 mod costing;
 mod materialization;
+mod metadata;
 mod scratch;
 
 #[test]
@@ -131,12 +132,11 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
             }),
             rhs: Box::new(ScalarExpr::Literal(large.clone())),
         };
-        let relations = [JoinRelation {
+        let relations = [RelationMetadata {
+            paradigm: crate::AccessParadigm::Relational,
             alias: "a".into(),
             cardinality: 100.0,
             access_cost: 100.0,
-            paradigm: crate::AccessParadigm::Relational,
-            source_id: 0,
             column_stats: BTreeMap::from([(
                 "id".into(),
                 crate::ColumnStats {
@@ -149,9 +149,8 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
             )])
             .into(),
         }];
-        let aliases = BTreeSet::from(["a".into()]);
         let owners = ColumnOwners::new(&relations);
-        let tables = BTreeMap::from([("a".into(), "source_table".into())]);
+        let tables = [Some("source_table")];
         let estimates = Estimates {
             predicate: &predicate,
             output,
@@ -164,7 +163,6 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
                 estimate_local_filters(
                     &relations,
                     &[&predicate],
-                    &aliases,
                     &owners,
                     &tables,
                     &estimates,
@@ -180,12 +178,12 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
         assert_eq!(estimates.calls.get(), 1);
         assert!(estimates.borrowed.get());
         let expected = output.unwrap_or_else(|| crate::LocalAccessEstimate {
+            paradigm: crate::AccessParadigm::Relational,
             output_rows: 25.0,
             cost: 100.0
                 + crate::CostEstimator::default()
                     .estimate_unary(crate::OperatorKind::Filter, 100.0)
                     .total(),
-            paradigm: crate::AccessParadigm::Relational,
         });
         assert_eq!(result, expected);
     }

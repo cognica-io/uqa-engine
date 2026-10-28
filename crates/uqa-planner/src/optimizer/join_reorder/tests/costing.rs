@@ -167,12 +167,11 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
             mode,
             calls: Cell::new(0),
         };
-        let relations = [JoinRelation {
+        let relations = [RelationMetadata {
+            paradigm: crate::AccessParadigm::Relational,
             alias: "a".into(),
             cardinality: 100.0,
             access_cost: 100.0,
-            paradigm: crate::AccessParadigm::Relational,
-            source_id: 0,
             column_stats: BTreeMap::from([
                 (
                     "payload".into(),
@@ -195,14 +194,12 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
             ])
             .into(),
         }];
-        let aliases = BTreeSet::from(["a".into()]);
         let owners = ColumnOwners::new(&relations);
-        let tables = BTreeMap::from([("a".into(), "source_table".into())]);
+        let tables = [Some("source_table")];
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             estimate_local_filters(
                 &relations,
                 &[&predicates[0], &predicates[1]],
-                &aliases,
                 &owners,
                 &tables,
                 &estimates,

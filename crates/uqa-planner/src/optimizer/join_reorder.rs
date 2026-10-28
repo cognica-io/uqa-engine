@@ -8,8 +8,8 @@
 
 use super::{
     BTreeMap, BTreeSet, BinaryOp, CommandPlan, ExpressionPlan, JoinExecutionStrategy,
-    JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinPredicate, JoinRelation, QueryPlan,
-    RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan, SourceStatistics, UnifiedPlan,
+    JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinPredicate, QueryPlan, RelationalPlan,
+    ScalarExpr, ScalarFrameBound, SourcePlan, SourceStatistics, UnifiedPlan,
 };
 
 use uqa_core::memory::{Produced, ProductionControl, ProductionSmallVec, ProductionVec};
@@ -23,9 +23,11 @@ mod tests;
 
 mod inputs;
 mod materialization;
+mod relations;
 use inputs::{
     collect_conjuncts, flatten_reorderable_inner_join, local_predicate_groups, ColumnOwners,
 };
+use relations::RelationMetadata;
 
 pub(super) fn reorder_unified_plan_joins(
     plan: &mut UnifiedPlan,
@@ -301,9 +303,10 @@ fn reordered_inner_join_source(
         return Ok(None);
     }
 
-    let mut aliases = BTreeSet::new();
-    let mut relations = Vec::with_capacity(atoms.len());
-    let mut relation_tables = BTreeMap::new();
+    let mut relation_storage: [RelationMetadata<'_>; 64] =
+        std::array::from_fn(|_| RelationMetadata::default());
+    let relations = &mut relation_storage[..atoms.len()];
+    let mut relation_tables = [None; 64];
     for (source_id, atom) in atoms.iter().enumerate() {
         let (qualifier, cardinality, column_stats, access_cost, paradigm) = match atom {
             SourcePlan::RetainedRows(_) => return Ok(None),
@@ -313,8 +316,8 @@ fn reordered_inner_join_source(
                 alias,
                 ..
             } => {
-                let qualifier = alias.clone().unwrap_or_else(|| qualifier.clone());
-                relation_tables.insert(qualifier.clone(), name.clone());
+                let qualifier = alias.as_deref().unwrap_or(qualifier);
+                relation_tables[source_id] = Some(name.as_str());
                 let relation_stats = statistics.relation_statistics(name);
                 let cardinality = relation_stats
                     .as_ref()
@@ -339,8 +342,7 @@ fn reordered_inner_join_source(
                 };
                 (
                     atom.visible_qualifier()
-                        .expect("a function source always has a visible qualifier")
-                        .to_string(),
+                        .expect("a function source always has a visible qualifier"),
                     estimate.output_rows,
                     crate::ColumnStatistics::default(),
                     estimate.cost,
@@ -352,26 +354,25 @@ fn reordered_inner_join_source(
             | SourcePlan::FunctionGroup { .. }
             | SourcePlan::Subquery { .. } => return Ok(None),
         };
-        if qualifier.is_empty() || !aliases.insert(qualifier.clone()) {
+        if qualifier.is_empty()
+            || relations[..source_id]
+                .iter()
+                .any(|relation| relation.alias == qualifier)
+        {
             return Ok(None);
         }
-        let source_id = u64::try_from(source_id).map_err(|_| JoinGraphError::InvalidPlan {
-            detail: format!("source index {source_id} exceeds the join plan identifier range"),
-        })?;
-        relations.push(JoinRelation {
-            alias: qualifier,
+        relations[source_id] = RelationMetadata {
+            alias: qualifier.into(),
             cardinality,
             column_stats,
             access_cost,
             paradigm,
-            source_id,
-        });
+        };
     }
-    let column_owners = ColumnOwners::new(&relations);
+    let column_owners = ColumnOwners::new(relations);
     let local_estimates = estimate_local_filters(
-        &relations,
+        relations,
         external_predicates,
-        &aliases,
         &column_owners,
         &relation_tables,
         statistics,
@@ -385,7 +386,7 @@ fn reordered_inner_join_source(
     // the same equality to the hash join changes evaluation shape, not rows.
     let mut inferred = Vec::new();
     for expression in external_predicates {
-        for (implied, _) in implied_join_predicates(expression, &aliases, &column_owners) {
+        for (implied, _) in implied_join_predicates(expression, &column_owners) {
             inferred.push(implied);
         }
     }
@@ -400,7 +401,7 @@ fn reordered_inner_join_source(
     {
         let mut qualifiers = BTreeSet::new();
         collect_scalar_qualifiers(&expression, &mut qualifiers);
-        let graph_predicate = join_predicate(&expression, &aliases, &column_owners);
+        let graph_predicate = join_predicate(&expression, &column_owners);
         if let Some(predicate) = &graph_predicate {
             qualifiers.insert(predicate.left_alias.clone());
             qualifiers.insert(predicate.right_alias.clone());
@@ -426,8 +427,12 @@ fn reordered_inner_join_source(
             relation.paradigm = estimate.paradigm;
         }
     }
-    let selected =
-        JoinOrderOptimizer::new().select_with_control(&relations, &graph_predicates, control)?;
+    let selected = JoinOrderOptimizer::new().select_relations_with_control(
+        relations.iter().map(RelationMetadata::as_join_relation),
+        &graph_predicates,
+        control,
+    )?;
+    drop(relation_storage);
     let mut reordered = materialization::reorder(source, &selected, &mut predicates)?;
     attach_join_predicates(&mut reordered, &mut predicates, true);
     if !predicates.is_empty() {
@@ -456,21 +461,21 @@ fn copy_local_conjunction(
 }
 
 fn estimate_local_filters(
-    relations: &[JoinRelation],
+    relations: &[RelationMetadata<'_>],
     predicates: &[&ScalarExpr],
-    aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners<'_>,
-    relation_tables: &BTreeMap<String, String>,
+    relation_tables: &[Option<&str>],
     source_statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
 ) -> OptimizerResult<[Option<crate::LocalAccessEstimate>; 64]> {
     let estimator = crate::CardinalityEstimator::new();
     let mut estimates = [None; 64];
     let predicates_by_alias =
-        local_predicate_groups(relations, predicates, aliases, column_owners, control)?;
-    for ((relation, predicates), output) in relations
+        local_predicate_groups(relations, predicates, column_owners, control)?;
+    for (((relation, predicates), table), output) in relations
         .iter()
         .zip(predicates_by_alias)
+        .zip(relation_tables)
         .zip(&mut estimates)
     {
         let predicates = predicates.expect("one predicate bucket per relation");
@@ -488,20 +493,19 @@ fn estimate_local_filters(
             row_count: relation.cardinality.round() as u64,
             columns: &relation.column_stats,
         };
-        let local_estimate = relation_tables
-            .get(&relation.alias)
-            .and_then(|table| source_statistics.local_access_estimate(table.as_str(), predicate));
+        let local_estimate =
+            table.and_then(|table| source_statistics.local_access_estimate(table, predicate));
         if let Some(estimate) = local_estimate {
             if !estimate.output_rows.is_finite() || estimate.output_rows < 0.0 {
                 return Err(JoinGraphError::InvalidCardinality {
-                    name: relation.alias.clone(),
+                    name: relation.alias.to_string(),
                     rows: estimate.output_rows,
                 }
                 .into());
             }
             if !estimate.cost.is_finite() || estimate.cost < 0.0 {
                 return Err(JoinGraphError::InvalidAccessCost {
-                    name: relation.alias.clone(),
+                    name: relation.alias.to_string(),
                     cost: estimate.cost,
                 }
                 .into());
@@ -529,7 +533,6 @@ fn estimate_local_filters(
 
 fn join_predicate(
     expression: &ScalarExpr,
-    aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners<'_>,
 ) -> Option<JoinPredicate> {
     let ScalarExpr::Binary {
@@ -540,8 +543,8 @@ fn join_predicate(
     else {
         return None;
     };
-    let (left_alias, left_field) = resolve_join_column(lhs, aliases, column_owners)?;
-    let (right_alias, right_field) = resolve_join_column(rhs, aliases, column_owners)?;
+    let (left_alias, left_field) = resolve_join_column(lhs, column_owners)?;
+    let (right_alias, right_field) = resolve_join_column(rhs, column_owners)?;
     if left_alias == right_alias {
         return None;
     }
@@ -555,13 +558,14 @@ fn join_predicate(
 
 fn resolve_join_column(
     expression: &ScalarExpr,
-    aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners<'_>,
 ) -> Option<(String, String)> {
     match expression {
         ScalarExpr::QualifiedColumn {
             qualifier, column, ..
-        } if aliases.contains(qualifier) => Some((qualifier.clone(), column.to_string())),
+        } if column_owners.contains_alias(qualifier) => {
+            Some((qualifier.clone(), column.to_string()))
+        }
         ScalarExpr::Column(column) => column_owners
             .resolve(column.as_str())
             .map(|(alias, column)| (alias.to_owned(), column.to_owned())),
@@ -587,18 +591,16 @@ fn join_predicate_key(predicate: &JoinPredicate) -> JoinPredicateKey {
 /// repeated part/lineitem equality without applying an unsafe OR pushdown.
 fn implied_join_predicates(
     expression: &ScalarExpr,
-    aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners<'_>,
 ) -> Vec<(ScalarExpr, JoinPredicate)> {
-    if let Some(predicate) = join_predicate(expression, aliases, column_owners) {
+    if let Some(predicate) = join_predicate(expression, column_owners) {
         return vec![(expression.clone(), predicate)];
     }
     match expression {
         ScalarExpr::And(items) => {
             let mut implied = BTreeMap::new();
             for item in items {
-                for (expression, predicate) in implied_join_predicates(item, aliases, column_owners)
-                {
+                for (expression, predicate) in implied_join_predicates(item, column_owners) {
                     implied
                         .entry(join_predicate_key(&predicate))
                         .or_insert((expression, predicate));
@@ -610,14 +612,14 @@ fn implied_join_predicates(
             let Some((first, rest)) = items.split_first() else {
                 return Vec::new();
             };
-            let mut common = implied_join_predicates(first, aliases, column_owners)
+            let mut common = implied_join_predicates(first, column_owners)
                 .into_iter()
                 .map(|(expression, predicate)| {
                     (join_predicate_key(&predicate), (expression, predicate))
                 })
                 .collect::<BTreeMap<_, _>>();
             for item in rest {
-                let branch = implied_join_predicates(item, aliases, column_owners)
+                let branch = implied_join_predicates(item, column_owners)
                     .into_iter()
                     .map(|(_, predicate)| join_predicate_key(&predicate))
                     .collect::<BTreeSet<_>>();
