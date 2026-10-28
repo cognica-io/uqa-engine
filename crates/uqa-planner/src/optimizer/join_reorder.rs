@@ -23,7 +23,9 @@ mod tests;
 
 mod inputs;
 mod materialization;
-use inputs::{collect_conjuncts, flatten_reorderable_inner_join, local_predicate_groups};
+use inputs::{
+    collect_conjuncts, flatten_reorderable_inner_join, local_predicate_groups, ColumnOwners,
+};
 
 pub(super) fn reorder_unified_plan_joins(
     plan: &mut UnifiedPlan,
@@ -364,9 +366,9 @@ fn reordered_inner_join_source(
             source_id,
         });
     }
-    let column_owners = unique_column_owners(&relations);
-    apply_local_filter_estimates(
-        &mut relations,
+    let column_owners = ColumnOwners::new(&relations);
+    let local_estimates = estimate_local_filters(
+        &relations,
         external_predicates,
         &aliases,
         &column_owners,
@@ -416,6 +418,13 @@ fn reordered_inner_join_source(
 
     drop(expressions);
     drop(atoms);
+    for (relation, estimate) in relations.iter_mut().zip(local_estimates) {
+        if let Some(estimate) = estimate {
+            relation.cardinality = estimate.output_rows;
+            relation.access_cost = estimate.cost;
+            relation.paradigm = estimate.paradigm;
+        }
+    }
     let selected =
         JoinOrderOptimizer::new().select_with_control(&relations, &graph_predicates, control)?;
     let mut reordered = materialization::reorder(source, &selected, &mut predicates)?;
@@ -432,21 +441,6 @@ fn reordered_inner_join_source(
     Ok(Some(reordered))
 }
 
-type ColumnOwners = BTreeMap<String, Option<(String, String)>>;
-
-fn unique_column_owners(relations: &[JoinRelation]) -> ColumnOwners {
-    let mut owners = ColumnOwners::new();
-    for relation in relations {
-        for column in relation.column_stats.keys() {
-            owners
-                .entry(column.clone())
-                .and_modify(|owner| *owner = None)
-                .or_insert_with(|| Some((relation.alias.clone(), column.clone())));
-        }
-    }
-    owners
-}
-
 fn copy_local_conjunction(
     predicates: &[&ScalarExpr],
     control: &ProductionControl<'_>,
@@ -460,19 +454,24 @@ fn copy_local_conjunction(
     Ok(control.finish(ScalarExpr::And(expressions), memory)?)
 }
 
-fn apply_local_filter_estimates(
-    relations: &mut [JoinRelation],
+fn estimate_local_filters(
+    relations: &[JoinRelation],
     predicates: &[&ScalarExpr],
     aliases: &BTreeSet<String>,
-    column_owners: &ColumnOwners,
+    column_owners: &ColumnOwners<'_>,
     relation_tables: &BTreeMap<String, String>,
     source_statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> OptimizerResult<()> {
+) -> OptimizerResult<[Option<crate::LocalAccessEstimate>; 64]> {
     let estimator = crate::CardinalityEstimator::new();
+    let mut estimates = [None; 64];
     let predicates_by_alias =
         local_predicate_groups(relations, predicates, aliases, column_owners, control)?;
-    for (relation, predicates) in relations.iter_mut().zip(predicates_by_alias) {
+    for ((relation, predicates), output) in relations
+        .iter()
+        .zip(predicates_by_alias)
+        .zip(&mut estimates)
+    {
         let predicates = predicates.expect("one predicate bucket per relation");
         if predicates.is_empty() {
             continue;
@@ -506,26 +505,31 @@ fn apply_local_filter_estimates(
                 }
                 .into());
             }
-            relation.cardinality = estimate.output_rows.min(relation.cardinality).max(0.0);
-            relation.access_cost = estimate.cost;
-            relation.paradigm = estimate.paradigm;
+            *output = Some(crate::LocalAccessEstimate {
+                output_rows: estimate.output_rows.min(relation.cardinality).max(0.0),
+                ..estimate
+            });
             continue;
         }
         let selectivity = estimator
             .scalar_selectivity_with_statistics(predicate, statistics, control)?
             .raw();
-        relation.cardinality = (relation.cardinality * selectivity).max(0.0);
-        relation.access_cost += crate::CostEstimator::default()
-            .estimate_unary(crate::OperatorKind::Filter, statistics.row_count as f64)
-            .total();
+        *output = Some(crate::LocalAccessEstimate {
+            output_rows: (relation.cardinality * selectivity).max(0.0),
+            cost: relation.access_cost
+                + crate::CostEstimator::default()
+                    .estimate_unary(crate::OperatorKind::Filter, statistics.row_count as f64)
+                    .total(),
+            paradigm: relation.paradigm,
+        });
     }
-    Ok(())
+    Ok(estimates)
 }
 
 fn join_predicate(
     expression: &ScalarExpr,
     aliases: &BTreeSet<String>,
-    column_owners: &ColumnOwners,
+    column_owners: &ColumnOwners<'_>,
 ) -> Option<JoinPredicate> {
     let ScalarExpr::Binary {
         op: BinaryOp::Equal,
@@ -551,13 +555,15 @@ fn join_predicate(
 fn resolve_join_column(
     expression: &ScalarExpr,
     aliases: &BTreeSet<String>,
-    column_owners: &ColumnOwners,
+    column_owners: &ColumnOwners<'_>,
 ) -> Option<(String, String)> {
     match expression {
         ScalarExpr::QualifiedColumn {
             qualifier, column, ..
         } if aliases.contains(qualifier) => Some((qualifier.clone(), column.to_string())),
-        ScalarExpr::Column(column) => column_owners.get(column.as_str())?.clone(),
+        ScalarExpr::Column(column) => column_owners
+            .resolve(column.as_str())
+            .map(|(alias, column)| (alias.to_owned(), column.to_owned())),
         _ => None,
     }
 }
@@ -581,7 +587,7 @@ fn join_predicate_key(predicate: &JoinPredicate) -> JoinPredicateKey {
 fn implied_join_predicates(
     expression: &ScalarExpr,
     aliases: &BTreeSet<String>,
-    column_owners: &ColumnOwners,
+    column_owners: &ColumnOwners<'_>,
 ) -> Vec<(ScalarExpr, JoinPredicate)> {
     if let Some(predicate) = join_predicate(expression, aliases, column_owners) {
         return vec![(expression.clone(), predicate)];

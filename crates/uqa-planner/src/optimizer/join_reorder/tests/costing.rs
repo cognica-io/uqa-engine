@@ -167,7 +167,7 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
             mode,
             calls: Cell::new(0),
         };
-        let mut relations = [JoinRelation {
+        let relations = [JoinRelation {
             alias: "a".into(),
             cardinality: 100.0,
             access_cost: 100.0,
@@ -195,11 +195,11 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
             ]),
         }];
         let aliases = BTreeSet::from(["a".into()]);
-        let owners = unique_column_owners(&relations);
+        let owners = ColumnOwners::new(&relations);
         let tables = BTreeMap::from([("a".into(), "source_table".into())]);
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            apply_local_filter_estimates(
-                &mut relations,
+            estimate_local_filters(
+                &relations,
                 &[&predicates[0], &predicates[1]],
                 &aliases,
                 &owners,
@@ -212,10 +212,10 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
         assert_eq!(budget.used(), 0, "mode={mode}");
         match mode {
             0 => {
-                outcome.unwrap().unwrap();
-                assert_eq!(relations[0].cardinality, 100.0 * (0.4 * 0.1));
+                let result = outcome.unwrap().unwrap()[0].unwrap();
+                assert_eq!(result.output_rows, 100.0 * (0.4 * 0.1));
                 assert_eq!(
-                    relations[0].access_cost,
+                    result.cost,
                     100.0
                         + crate::CostEstimator::default()
                             .estimate_unary(crate::OperatorKind::Filter, 100.0)
@@ -223,10 +223,10 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
                 );
             }
             1 => {
-                outcome.unwrap().unwrap();
-                assert_eq!(relations[0].cardinality, 7.0);
-                assert_eq!(relations[0].access_cost, 3.0);
-                assert_eq!(relations[0].paradigm, crate::AccessParadigm::Text);
+                let result = outcome.unwrap().unwrap()[0].unwrap();
+                assert_eq!(result.output_rows, 7.0);
+                assert_eq!(result.cost, 3.0);
+                assert_eq!(result.paradigm, crate::AccessParadigm::Text);
             }
             2 | 3 => {
                 assert!(matches!(

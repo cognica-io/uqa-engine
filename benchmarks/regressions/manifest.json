@@ -26087,6 +26087,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "column_resolution_borrows_existing_names_without_index_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/columns.rs",
+      "capability": "Borrowed join column ownership",
+      "workload": "Resolve a four MiB column name directly from its existing relation statistics.",
+      "invariant": "Resolve the original alias and column allocations with zero new heap bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "column_resolution_preserves_unique_ambiguous_and_unknown_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/columns.rs",
+      "capability": "Borrowed join column ownership",
+      "workload": "Resolve unique, shared, unknown and case-distinct names across 1/2/8/64 relations and 1/64/1024 shared columns in forward and reverse order.",
+      "invariant": "Preserve exact owner identities and ambiguity without copying names or constructing another column index.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "rejected_join_search_does_not_copy_unused_column_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/columns.rs",
+      "capability": "Borrowed join column ownership",
+      "workload": "Move statistics containing an unused four MiB column into a two-source native optimizer request with zero allowance.",
+      "invariant": "Reject graph admission with 53200 below 16 KiB new allocation, preserving both original statistics calls and releasing the request allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "local_filter_costs_keep_relation_order_and_stop_on_original_error",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/columns.rs",
+      "capability": "Borrowed join column ownership",
+      "workload": "Estimate three relations in non-lexical order, then reject the second provider cardinality.",
+      "invariant": "Preserve callback order, exact result slots, first-error identity and buffer cleanup while keeping source metadata immutable.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

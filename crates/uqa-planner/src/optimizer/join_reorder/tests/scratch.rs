@@ -95,7 +95,7 @@ fn local_predicate_groups_retain_exact_buffers_and_conjunct_order() {
             .iter()
             .map(|relation| relation.alias.clone())
             .collect();
-        let owners = BTreeMap::new();
+        let owners = ColumnOwners::new(&relations);
         let predicates: Vec<_> = (0..17 * count)
             .map(|i| ScalarExpr::QualifiedColumn {
                 qualifier: format!("a{}", i % count),
@@ -158,16 +158,21 @@ fn local_predicate_groups_retain_exact_buffers_and_conjunct_order() {
 
 #[test]
 fn local_predicate_groups_preserve_resolution_and_expression_restrictions() {
-    let relations = [
+    let mut relations = [
         relation("b".into(), 0),
         relation("a".into(), 1),
         relation("c".into(), 2),
     ];
     let aliases = BTreeSet::from(["a".into(), "b".into(), "c".into()]);
-    let owners = BTreeMap::from([
-        ("local_a".into(), Some(("a".into(), "local_a".into()))),
-        ("ambiguous".into(), None),
-    ]);
+    relations[1]
+        .column_stats
+        .insert("local_a".into(), crate::ColumnStats::default());
+    for relation in &mut relations[..2] {
+        relation
+            .column_stats
+            .insert("ambiguous".into(), crate::ColumnStats::default());
+    }
+    let owners = ColumnOwners::new(&relations);
     let predicates: Vec<_> = [
         "a.id = 1",
         "b.id = 2",
@@ -345,7 +350,7 @@ fn local_predicate_grouping_borrows_aliases_and_admits_reference_buffers() {
         }),
         rhs: Box::new(ScalarExpr::Literal(Value::Int(1))),
     };
-    let mut relations = [JoinRelation {
+    let relations = [JoinRelation {
         alias: alias.clone(),
         cardinality: 100.0,
         access_cost: 100.0,
@@ -354,15 +359,15 @@ fn local_predicate_grouping_borrows_aliases_and_admits_reference_buffers() {
         source_id: 0,
     }];
     let aliases = BTreeSet::from([alias]);
-    let owners = BTreeMap::new();
+    let owners = ColumnOwners::new(&relations);
     let tables = BTreeMap::new();
     let budget = MemoryBudget::new(0);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     let mut result = None;
     let allocation = allocation_counter::measure(|| {
-        result = Some(apply_local_filter_estimates(
-            &mut relations,
+        result = Some(estimate_local_filters(
+            &relations,
             &[&predicate],
             &aliases,
             &owners,

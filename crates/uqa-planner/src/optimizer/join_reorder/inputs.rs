@@ -6,8 +6,32 @@
 
 //! Borrow join inputs and retain admitted predicate-reference buffers during selection.
 
-use super::{BTreeSet, ColumnOwners, JoinRelation, ScalarExpr, SourcePlan};
+use super::{BTreeSet, JoinRelation, ScalarExpr, SourcePlan};
 use uqa_core::memory::{ProductionControl, ProductionSmallVec, ProductionVec};
+
+/// Resolve only demanded column names in the eligible join's at most 64 existing column maps. Unknown and ambiguous names both remain unresolved.
+pub(super) struct ColumnOwners<'a> {
+    relations: &'a [JoinRelation],
+}
+
+impl<'a> ColumnOwners<'a> {
+    pub(super) fn new(relations: &'a [JoinRelation]) -> Self {
+        Self { relations }
+    }
+
+    pub(super) fn resolve(&self, column: &str) -> Option<(&'a str, &'a str)> {
+        let mut owner = None;
+        for relation in self.relations {
+            if let Some((name, _)) = relation.column_stats.get_key_value(column) {
+                if owner.is_some() {
+                    return None;
+                }
+                owner = Some((relation.alias.as_str(), name.as_str()));
+            }
+        }
+        owner
+    }
+}
 
 pub(super) fn flatten_reorderable_inner_join<'p>(
     source: &'p SourcePlan,
@@ -78,7 +102,7 @@ pub(super) fn local_predicate_groups<'p, 'c>(
     relations: &[JoinRelation],
     predicates: &[&'p ScalarExpr],
     aliases: &BTreeSet<String>,
-    column_owners: &ColumnOwners,
+    column_owners: &ColumnOwners<'_>,
     control: &ProductionControl<'c>,
 ) -> Result<PredicateGroups<'p, 'c>, uqa_sql::SQLError> {
     control.check()?;
@@ -113,7 +137,7 @@ pub(super) fn local_predicate_groups<'p, 'c>(
 fn collect_local_alias<'a>(
     expression: &'a ScalarExpr,
     aliases: &BTreeSet<String>,
-    column_owners: &'a ColumnOwners,
+    column_owners: &ColumnOwners<'a>,
     output: &mut Option<&'a str>,
 ) -> bool {
     let mut recur = |expression: &'a ScalarExpr| {
@@ -121,7 +145,7 @@ fn collect_local_alias<'a>(
     };
     match expression {
         ScalarExpr::Column(column) => {
-            let Some(Some((alias, _))) = column_owners.get(column.as_str()) else {
+            let Some((alias, _)) = column_owners.resolve(column.as_str()) else {
                 return false;
             };
             match output {

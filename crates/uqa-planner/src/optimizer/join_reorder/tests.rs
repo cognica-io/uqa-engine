@@ -7,6 +7,7 @@
 use super::*;
 
 mod admission;
+mod columns;
 mod costing;
 mod materialization;
 mod scratch;
@@ -130,7 +131,7 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
             }),
             rhs: Box::new(ScalarExpr::Literal(large.clone())),
         };
-        let mut relations = [JoinRelation {
+        let relations = [JoinRelation {
             alias: "a".into(),
             cardinality: 100.0,
             access_cost: 100.0,
@@ -148,7 +149,7 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
             )]),
         }];
         let aliases = BTreeSet::from(["a".into()]);
-        let owners = unique_column_owners(&relations);
+        let owners = ColumnOwners::new(&relations);
         let tables = BTreeMap::from([("a".into(), "source_table".into())]);
         let estimates = Estimates {
             predicate: &predicate,
@@ -156,35 +157,35 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
             calls: Cell::new(0),
             borrowed: Cell::new(false),
         };
+        let mut result = None;
         let allocation = allocation_counter::measure(|| {
-            apply_local_filter_estimates(
-                &mut relations,
-                &[&predicate],
-                &aliases,
-                &owners,
-                &tables,
-                &estimates,
-                &ProductionControl::uncontrolled(),
-            )
-            .unwrap();
+            result = Some(
+                estimate_local_filters(
+                    &relations,
+                    &[&predicate],
+                    &aliases,
+                    &owners,
+                    &tables,
+                    &estimates,
+                    &ProductionControl::uncontrolled(),
+                )
+                .unwrap()[0]
+                    .unwrap(),
+            );
         });
+        let result = result.unwrap();
         assert!(allocation.bytes_total < 4096, "{allocation:?}");
         assert_eq!(allocation.bytes_current, 0);
         assert_eq!(estimates.calls.get(), 1);
         assert!(estimates.borrowed.get());
-        if let Some(output) = output {
-            assert_eq!(relations[0].cardinality, output.output_rows);
-            assert_eq!(relations[0].access_cost, output.cost);
-            assert_eq!(relations[0].paradigm, output.paradigm);
-        } else {
-            assert_eq!(relations[0].cardinality, 25.0);
-            assert_eq!(
-                relations[0].access_cost,
-                100.0
-                    + crate::CostEstimator::default()
-                        .estimate_unary(crate::OperatorKind::Filter, 100.0)
-                        .total()
-            );
-        }
+        let expected = output.unwrap_or_else(|| crate::LocalAccessEstimate {
+            output_rows: 25.0,
+            cost: 100.0
+                + crate::CostEstimator::default()
+                    .estimate_unary(crate::OperatorKind::Filter, 100.0)
+                    .total(),
+            paradigm: crate::AccessParadigm::Relational,
+        });
+        assert_eq!(result, expected);
     }
 }
