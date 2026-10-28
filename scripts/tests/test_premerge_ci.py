@@ -45,6 +45,8 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             '      - "!tests/wasm/test_uqa_wasm.mjs"\n'
             '      - "!scripts/fdw_ci.py"\n'
             '      - "!scripts/tests/test_fdw_ci.py"\n'
+            '      - "!scripts/c_validation.py"\n'
+            '      - "!scripts/tests/test_c_validation.py"\n'
             '      - "!scripts/tests/test_premerge_ci.py"\n'
             '      - "!scripts/tests/test_registry_workflows.py"\n'
             '      - "!scripts/usql-release.py"\n'
