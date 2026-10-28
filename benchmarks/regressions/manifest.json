@@ -15635,6 +15635,45 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "large_text_replacements_remain_bounded_across_one_transaction",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests/occurrences.rs",
+      "capability": "Bounded native text replacement",
+      "workload": "Replace two persistent documents containing 4096 distinct terms within one transaction under a 2 MiB retained allowance, then commit and reopen.",
+      "invariant": "Both replacements and publication fit the original allowance; reopened document lengths and old and added term frequencies remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "spilled_projection_rows_preserve_replacements_and_prefix_deletion",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/inverted_index/native/mutation/drafts/tests.rs",
+      "capability": "Bounded native projection staging",
+      "workload": "Stage 192 rows containing 4 KiB scores under a 256 KiB allowance, delete one projection by prefix, replace a spilled row and clear the owner.",
+      "invariant": "Staging exceeds the resident allowance through spill while preserving order, merge flags, untouched projections and empty values; clearing releases every retained byte.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "adjacent_projections_transfer_the_pending_row_without_serializing_it_twice",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/inverted_index/native/mutation/drafts/tests.rs",
+      "capability": "Native projection coalescing work",
+      "workload": "Update both projections of one pending native row under a 256 KiB allowance and flush its final value.",
+      "invariant": "The second projection reuses the score allocation, neither partial row enters private records, and flush emits one complete row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "native_occurrence_commit_batches_unchanged_snapshot_reads",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests/occurrences.rs",
