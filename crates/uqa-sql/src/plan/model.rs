@@ -24,6 +24,32 @@ pub enum UnifiedPlan {
     Command(Box<CommandPlan>),
 }
 
+/// A statement root borrowed from either a complete plan or a utility's relational child. Borrowing does not copy the child or assert that its analysis or optimization has run.
+#[derive(Debug, Clone, Copy)]
+pub enum PlanRef<'a> {
+    Query(&'a QueryPlan),
+    Command(&'a CommandPlan),
+}
+
+impl PlanRef<'_> {
+    /// Create an ordinary mutable destination with one copy of the borrowed tree. Resource-controlled immutable copies use `clone_executable_with_control`.
+    pub fn to_owned(self) -> UnifiedPlan {
+        match self {
+            Self::Query(query) => UnifiedPlan::Query(Box::new(query.clone())),
+            Self::Command(command) => UnifiedPlan::Command(Box::new(command.clone())),
+        }
+    }
+}
+
+impl<'a> From<&'a UnifiedPlan> for PlanRef<'a> {
+    fn from(plan: &'a UnifiedPlan) -> Self {
+        match plan {
+            UnifiedPlan::Query(query) => Self::Query(query),
+            UnifiedPlan::Command(command) => Self::Command(command),
+        }
+    }
+}
+
 /// A relational query with its CTE scope and one relational root.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryPlan {

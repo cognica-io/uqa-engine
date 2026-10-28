@@ -45,6 +45,31 @@ pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
     Ok(Cow::Owned(query))
 }
 
+/// The caller owns this executable exclusively. Attach its named sources to the existing tree instead of copying a tree that no other invocation can observe.
+pub(crate) fn prepare_in_place<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    query: &mut QueryPlan,
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+) -> Result<(), SQLError> {
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    if inspection::needed(query, scope, control)? {
+        prepare_query(
+            context,
+            query,
+            params,
+            scope,
+            scope.row_lock_outer_row().map(|row| &row.schema),
+        )?;
+    }
+    Ok(())
+}
+
 fn declare_ctes<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     query: &mut QueryPlan,

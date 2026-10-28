@@ -25854,6 +25854,67 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "borrowed_query_copy_admits_one_executable_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests.rs",
+      "capability": "Native EXPLAIN executable ownership",
+      "workload": "Four MiB relational child copied directly into an executable with its exact destination allowance.",
+      "invariant": "Admit exactly one tree and enclosing box, preserve shared analysis identities and release partial construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "named_explain_borrows_the_selected_generic_executable",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/prepared/explain_named.rs",
+      "capability": "Native EXPLAIN executable ownership",
+      "workload": "EXPLAIN MEMORY of a cached 8,192-row VALUES executable on all four providers.",
+      "invariant": "Retain the selected plan identity and one selection count, use less than 256 KiB additional allocation with 64 KiB request workspace, and release diagnostics.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "utility_explain_borrows_its_query_until_optimization",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/prepared/explain_named.rs",
+      "capability": "Native EXPLAIN executable ownership",
+      "workload": "Direct, DECLARE, CREATE TABLE AS and CREATE MATERIALIZED VIEW explanations of the same 8,192-row query.",
+      "invariant": "Utility extraction adds less than 128 KiB to direct optimization and preserves non-executing destination behavior.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "named_explain_prepares_private_sources_and_preserves_cache_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/prepared/explain_named.rs",
+      "capability": "Native EXPLAIN executable ownership",
+      "workload": "Prepared query and INSERT with CTE/view inputs, exhausted admission, savepoint recovery and view replacement on all four providers.",
+      "invariant": "Preserve immutable retained plans, typed failure, exactly-once sequence/write effects, dependency invalidation, final owner release and persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

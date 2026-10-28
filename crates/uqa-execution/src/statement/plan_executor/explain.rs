@@ -51,12 +51,11 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         settings: &ExplainSettings,
         planning: Planning,
     ) -> Result<SQLResult, SQLError> {
-        let source;
         let destination;
         let query = match body {
             UnifiedPlan::Query(_) => {
                 destination = None;
-                body
+                body.into()
             }
             UnifiedPlan::Command(command) => match command.as_ref() {
                 CommandPlan::Insert(_)
@@ -64,12 +63,11 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 | CommandPlan::Delete(_)
                 | CommandPlan::Merge(_) => {
                     destination = None;
-                    body
+                    body.into()
                 }
                 CommandPlan::DeclareCursor { query, .. } => {
                     destination = None;
-                    source = UnifiedPlan::Query(query.clone());
-                    &source
+                    uqa_sql::plan::PlanRef::Query(query)
                 }
                 CommandPlan::CreateTableAs {
                     name,
@@ -86,8 +84,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                         return self.explain_utility(body, settings, planning);
                     }
                     destination = Some(command.as_ref());
-                    source = UnifiedPlan::Query(query.clone());
-                    &source
+                    uqa_sql::plan::PlanRef::Query(query)
                 }
                 CommandPlan::CreateMaterializedView {
                     name,
@@ -104,8 +101,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                         return self.explain_utility(body, settings, planning);
                     }
                     destination = Some(command.as_ref());
-                    source = UnifiedPlan::Query(query.clone());
-                    &source
+                    uqa_sql::plan::PlanRef::Query(query)
                 }
                 CommandPlan::Execute { name, params } => {
                     let bound = crate::query::prepared::bind_execute_parameters(
@@ -127,7 +123,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                     executor
                         .privilege_subject
                         .clone_from(&self.privilege_subject);
-                    return executor.explain_statement(&plan, settings, planning);
+                    return executor.explain_selected_statement(&plan, settings, planning);
                 }
                 _ => return self.explain_utility(body, settings, planning),
             },
@@ -137,7 +133,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
 
     fn explain_query(
         &self,
-        query: &UnifiedPlan,
+        query: uqa_sql::plan::PlanRef<'_>,
         destination: Option<&CommandPlan>,
         settings: &ExplainSettings,
         planning: Planning,
@@ -146,26 +142,91 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             .context
             .physical_explain
             .plan_explained_statement(query)?;
-        if self.context.validation.transactions.transaction_depth() != 0 {
-            crate::query::locking::lock_explained_relations(
-                self.context.queries.row_lock_context(),
-                &planned,
-            )?;
-        }
+        self.lock_explained_relations(&planned)?;
         if let UnifiedPlan::Query(query) = &mut planned {
             let ctes = self
                 .context
                 .queries
                 .statement_scope(self.privilege_subject.as_ref());
-            let prepared = crate::query::sources::prepared_queries::prepare(
+            crate::query::sources::prepared_queries::prepare_in_place(
                 &self.context.queries.query_context().source,
                 query,
                 self.params,
                 &ctes,
             )?;
-            if let std::borrow::Cow::Owned(prepared) = prepared {
-                **query = prepared;
+        }
+        self.explain_prepared_query(&planned, destination, settings, planning)
+    }
+
+    /// A prepared selector has already analyzed, optimized and costed its chosen executable. Borrow that immutable result; utility bodies still belong to their deferred preparation boundary.
+    fn explain_selected_statement(
+        &self,
+        planned: &UnifiedPlan,
+        settings: &ExplainSettings,
+        planning: Planning,
+    ) -> Result<SQLResult, SQLError> {
+        if let UnifiedPlan::Command(command) = planned {
+            if !matches!(
+                command.as_ref(),
+                CommandPlan::Insert(_)
+                    | CommandPlan::Update(_)
+                    | CommandPlan::Delete(_)
+                    | CommandPlan::Merge(_)
+            ) {
+                return self.explain_statement(planned, settings, planning);
             }
+        }
+        self.lock_explained_relations(planned)?;
+        if let UnifiedPlan::Query(query) = planned {
+            let ctes = self
+                .context
+                .queries
+                .statement_scope(self.privilege_subject.as_ref());
+            if let std::borrow::Cow::Owned(prepared) =
+                crate::query::sources::prepared_queries::prepare(
+                    &self.context.queries.query_context().source,
+                    query,
+                    self.params,
+                    &ctes,
+                )?
+            {
+                let retained = self.context.diagnostics.diagnostics_control()?;
+                let control = uqa_core::memory::ProductionControl::new(
+                    retained.memory(),
+                    retained.cancellation(),
+                    self.context.runtime.cancellation,
+                );
+                // The source preparer owns the returned query's payloads. This lease admits only the new enclosing box, and outlives that box on every return path.
+                let _query_box_memory = control.reserve(size_of::<uqa_sql::plan::QueryPlan>())?;
+                let prepared = UnifiedPlan::Query(Box::new(prepared));
+                return self.explain_prepared_query(&prepared, None, settings, planning);
+            }
+        }
+        self.explain_prepared_query(planned, None, settings, planning)
+    }
+
+    fn lock_explained_relations(&self, planned: &UnifiedPlan) -> Result<(), SQLError> {
+        if self.context.validation.transactions.transaction_depth() != 0 {
+            crate::query::locking::lock_explained_relations(
+                self.context.queries.row_lock_context(),
+                planned,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn explain_prepared_query(
+        &self,
+        body: &UnifiedPlan,
+        destination: Option<&CommandPlan>,
+        settings: &ExplainSettings,
+        planning: Planning,
+    ) -> Result<SQLResult, SQLError> {
+        if let UnifiedPlan::Query(query) = body {
+            let ctes = self
+                .context
+                .queries
+                .statement_scope(self.privilege_subject.as_ref());
             crate::query::privileges::routine_calls::query(
                 &self.context.queries.query_context().source,
                 query,
@@ -173,7 +234,6 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 &ctes,
             )?;
         }
-        let body = &planned;
         if let UnifiedPlan::Command(command) = body {
             crate::mutation::routine_calls::explain(
                 &self.context.mutations.mutation_initialization_context(),

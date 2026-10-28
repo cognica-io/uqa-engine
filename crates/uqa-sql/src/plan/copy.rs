@@ -6,7 +6,7 @@
 
 //! Destination admission for executable query and mutation plan copies.
 
-use super::{CommandPlan, ExpressionPlan, QueryPlan, UnifiedPlan};
+use super::{CommandPlan, ExpressionPlan, PlanRef, QueryPlan, UnifiedPlan};
 use crate::{catalog::roles::RoleReference, SQLError, ScalarExpr};
 use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, ProductionControl};
 
@@ -60,17 +60,29 @@ impl UnifiedPlan {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>> {
+        PlanRef::from(self).clone_executable_with_control(control)
+    }
+}
+
+impl PlanRef<'_> {
+    /// Copy a borrowed query or mutation directly into its admitted executable owner, without first constructing a temporary statement wrapper.
+    pub fn clone_executable_with_control(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<UnifiedPlan>> {
         control.check()?;
         let Some(mut copying) = Copying::new(*control) else {
             if let Self::Command(command) = self {
                 require_mutation(command)?;
             }
-            return Ok(control.finish(self.clone(), None)?);
+            return Ok(control.finish(self.to_owned(), None)?);
         };
         let plan = match self {
-            Self::Query(query) => Self::Query(copying.boxed(|copying| copying.query(query))?),
+            Self::Query(query) => {
+                UnifiedPlan::Query(copying.boxed(|copying| copying.query(query))?)
+            }
             Self::Command(command) => {
-                Self::Command(copying.boxed(|copying| copying.command(command))?)
+                UnifiedPlan::Command(copying.boxed(|copying| copying.command(command))?)
             }
         };
         copying.finish(plan)

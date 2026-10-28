@@ -69,6 +69,56 @@ fn payload_query(size: usize) -> QueryPlan {
 }
 
 #[test]
+fn borrowed_query_copy_admits_one_executable_destination() {
+    let query = payload_query(4 * 1024 * 1024);
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(8 * 1024 * 1024);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let query_copy = query.clone_with_control(&control).unwrap();
+    let required = query_copy.reserved_bytes() + size_of::<QueryPlan>();
+    drop(query_copy);
+    let reference = crate::plan::PlanRef::Query(&query);
+    let exact = budget.child(required);
+    let mut copied = None;
+    let allocation = allocation_counter::measure(|| {
+        copied = Some(
+            reference
+                .clone_executable_with_control(&ProductionControl::new(&exact, &token, &token))
+                .unwrap(),
+        );
+    });
+    let copied = copied.unwrap();
+    assert_eq!(copied.reserved_bytes(), required);
+    assert_eq!(allocation.bytes_current, required as i64);
+    assert!(
+        allocation.bytes_total < 4 * 1024 * 1024 + 16 * 1024,
+        "{allocation:?}"
+    );
+    let UnifiedPlan::Query(destination) = &*copied else {
+        panic!("query destination");
+    };
+    assert_eq!(
+        serde_json::to_value(destination.as_ref()).unwrap(),
+        serde_json::to_value(&query).unwrap()
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        destination.analyzed_source.as_ref().unwrap(),
+        query.analyzed_source.as_ref().unwrap()
+    ));
+    drop(copied);
+    assert_eq!(budget.used(), 0);
+    let insufficient = budget.child(required - 1);
+    assert_eq!(
+        reference
+            .clone_executable_with_control(&ProductionControl::new(&insufficient, &token, &token))
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn executable_payload_copies_admit_actual_destinations_and_release_every_failure() {
     for size in [1, 4 * 1024 * 1024] {
         let source = payload_query(size);
