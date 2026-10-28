@@ -13,7 +13,7 @@ use std::{
     cell::RefCell,
     sync::{Arc, Weak},
 };
-use uqa_core::catalog_index::CatalogIndexRow;
+use uqa_core::catalog_index::CatalogIndexSnapshot;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility, OperatorJoinRelations},
     plan::QueryPlan,
@@ -63,7 +63,7 @@ impl PlannerStatisticsCatalog for FailingCatalog {
         unreachable!("relation statistics do not resolve index targets")
     }
 
-    fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError> {
+    fn catalog_indexes(&self) -> Result<CatalogIndexSnapshot, SQLError> {
         unreachable!("relation statistics do not read indexes")
     }
 }

@@ -7,7 +7,7 @@
 //! Supply current catalog metadata and the configured retrieval planner to statement planning.
 use crate::Engine;
 use std::sync::Arc;
-use uqa_core::catalog_index::CatalogIndexRow;
+use uqa_core::catalog_index::CatalogIndexSnapshot;
 use uqa_execution::storage_errors::storage_error;
 use uqa_planner::{
     statement_planning::{
@@ -133,8 +133,8 @@ impl PlannerStatisticsCatalog for Engine {
         self.resolve_table_name(table)
             .map_err(|error| storage_error("resolve optimizer index target", &error))
     }
-    fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError> {
-        self.catalog_indexes_in_execution()
+    fn catalog_indexes(&self) -> Result<CatalogIndexSnapshot, SQLError> {
+        self.catalog_index_snapshot_in_execution()
             .map_err(|error| storage_error("read optimizer catalog indexes", &error))
     }
 }

@@ -29,10 +29,10 @@ pub(super) fn index_candidates(
         .map_err(|error| operator_execution_error("resolve index candidate table", error))?
         .unwrap_or_else(|| table.to_string());
     let mut indexes_by_field = BTreeMap::new();
-    for index in catalog
+    let indexes = catalog
         .list_catalog_indexes()
-        .map_err(|error| operator_execution_error("list index candidates", error))?
-    {
+        .map_err(|error| operator_execution_error("list index candidates", error))?;
+    for index in indexes.iter() {
         if index.table_name != resolved_table || !index.index_type.eq_ignore_ascii_case("btree") {
             continue;
         }
@@ -49,6 +49,7 @@ pub(super) fn index_candidates(
                 .or_insert_with(|| index.relation.qualified_name());
         }
     }
+    drop(indexes);
 
     let mut predicates = Vec::new();
     tree.visit(&mut |node| {

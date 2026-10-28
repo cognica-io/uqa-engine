@@ -7,7 +7,10 @@
 use super::*;
 use crate::ColumnStatistics;
 use std::{cell::RefCell, rc::Rc};
-use uqa_core::{catalog_index::CatalogIndexRow, Predicate};
+use uqa_core::{
+    catalog_index::{CatalogIndexRow, CatalogIndexSnapshot},
+    Predicate,
+};
 
 #[derive(Clone, Default)]
 struct Catalog {
@@ -23,8 +26,8 @@ impl RetrievalPlanningCatalog for Catalog {
     fn resolve_table_name(&self, table: &str) -> Result<Option<String>, String> {
         Ok(Some(table.into()))
     }
-    fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String> {
-        Ok(Vec::new())
+    fn list_catalog_indexes(&self) -> Result<CatalogIndexSnapshot, String> {
+        Ok(CatalogIndexSnapshot::default())
     }
     fn value_index_cardinality(
         &self,
@@ -123,11 +126,12 @@ fn first_frequency_error_releases_readers_before_stopping_catalog_work() {
     );
 }
 
-struct BrokenIndexCatalog {
+struct IndexCatalog {
     events: RefCell<Vec<&'static str>>,
+    rows: CatalogIndexSnapshot,
 }
 
-impl RetrievalPlanningCatalog for BrokenIndexCatalog {
+impl RetrievalPlanningCatalog for IndexCatalog {
     fn has_table(&self, table: &str) -> Result<bool, String> {
         assert_eq!(table, "docs");
         self.events.borrow_mut().push("has table");
@@ -138,24 +142,21 @@ impl RetrievalPlanningCatalog for BrokenIndexCatalog {
         self.events.borrow_mut().push("resolve table");
         Ok(Some("public.docs".into()))
     }
-    fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String> {
+    fn list_catalog_indexes(&self) -> Result<CatalogIndexSnapshot, String> {
         self.events.borrow_mut().push("list indexes");
-        Ok(vec![CatalogIndexRow {
-            relation: uqa_core::RelationIdentity::new("public", "broken_index"),
-            index_type: "btree".into(),
-            table_name: "public.docs".into(),
-            columns_json: "[".into(),
-            parameters_json: "{}".into(),
-            definition_json: None,
-        }])
+        Ok(self.rows.clone())
     }
     fn value_index_cardinality(
         &self,
-        _: &str,
-        _: &str,
-        _: &Predicate,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
     ) -> Result<Option<usize>, SQLError> {
-        panic!("invalid catalog metadata must precede index access")
+        assert_eq!(table, "docs");
+        assert_eq!(field, "id");
+        assert_eq!(predicate, &Predicate::Equals(uqa_core::Value::Int(1)));
+        self.events.borrow_mut().push("cardinality");
+        Ok(Some(7))
     }
     fn value_index_supports(&self, _: &str, _: &str, _: &Predicate) -> Result<bool, String> {
         panic!("this failure must precede access selection")
@@ -187,8 +188,17 @@ impl RetrievalPlanningCatalog for BrokenIndexCatalog {
 
 #[test]
 fn invalid_index_metadata_stops_planning_before_reading_runtime_statistics() {
-    let catalog = BrokenIndexCatalog {
+    let catalog = IndexCatalog {
         events: RefCell::new(Vec::new()),
+        rows: vec![CatalogIndexRow {
+            relation: uqa_core::RelationIdentity::new("public", "broken_index"),
+            index_type: "btree".into(),
+            table_name: "public.docs".into(),
+            columns_json: "[".into(),
+            parameters_json: "{}".into(),
+            definition_json: None,
+        }]
+        .into(),
     };
     let tree = OperatorTree::Term {
         query: "rust".into(),
@@ -203,5 +213,54 @@ fn invalid_index_metadata_stops_planning_before_reading_runtime_statistics() {
     assert_eq!(
         *catalog.events.borrow(),
         ["has table", "resolve table", "list indexes"]
+    );
+}
+
+#[test]
+fn shared_index_rows_preserve_candidate_order_without_copying_unrelated_payloads() {
+    let row = |name: &str| CatalogIndexRow {
+        relation: uqa_core::RelationIdentity::new("public", name),
+        index_type: "BTREE".into(),
+        table_name: "public.docs".into(),
+        columns_json: "[\"id\"]".into(),
+        parameters_json: "{}".into(),
+        definition_json: None,
+    };
+    let mut unrelated = row("ignored");
+    unrelated.table_name = "public.other".into();
+    unrelated.columns_json = "x".repeat(4 * 1024 * 1024);
+    let catalog = IndexCatalog {
+        events: RefCell::new(Vec::with_capacity(4)),
+        rows: vec![unrelated, row("z_first"), row("a_second")].into(),
+    };
+    let tree = OperatorTree::Filter {
+        field: "id".into(),
+        predicate: Predicate::Equals(uqa_core::Value::Int(1)),
+        source: None,
+    };
+    let mut output = None;
+    let allocation = allocation_counter::measure(|| {
+        output = Some(index_candidates(&catalog, "docs", &tree).unwrap());
+    });
+    assert!(allocation.bytes_total < 4096, "{allocation:?}");
+    let output = output.unwrap();
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].index_name, "public.z_first");
+    assert_eq!(output[0].table_name, "docs");
+    assert_eq!(output[0].field, "id");
+    assert_eq!(
+        output[0].predicate,
+        Predicate::Equals(uqa_core::Value::Int(1))
+    );
+    assert_eq!(
+        output[0].scan_cost.to_bits(),
+        crate::CostEstimator::default()
+            .estimate_unary(crate::OperatorKind::IndexScan, 7.0)
+            .total()
+            .to_bits()
+    );
+    assert_eq!(
+        *catalog.events.borrow(),
+        ["has table", "resolve table", "list indexes", "cardinality"]
     );
 }

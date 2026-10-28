@@ -9,7 +9,7 @@
 use crate::{Engine, TableState};
 use parking_lot::RwLockReadGuard;
 use std::sync::Arc;
-use uqa_core::{catalog_index::CatalogIndexRow, Predicate};
+use uqa_core::{catalog_index::CatalogIndexSnapshot, Predicate};
 use uqa_planner::{
     retrieval_planning::{
         GraphStatisticsSnapshot, RetrievalPlanningCatalog, RetrievalStatisticsTable,
@@ -132,8 +132,8 @@ impl RetrievalPlanningCatalog for Engine {
         self.resolve_table_name(table)
             .map_err(|error| error.to_string())
     }
-    fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String> {
-        self.catalog_indexes_in_execution()
+    fn list_catalog_indexes(&self) -> Result<CatalogIndexSnapshot, String> {
+        self.catalog_index_snapshot_in_execution()
             .map_err(|error| error.to_string())
     }
     fn value_index_cardinality(

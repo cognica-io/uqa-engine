@@ -8,7 +8,7 @@
 
 use crate::{ColumnStatistics, LocalAccessEstimate};
 use std::sync::Arc;
-use uqa_core::catalog_index::CatalogIndexRow;
+use uqa_core::catalog_index::CatalogIndexSnapshot;
 use uqa_sql::{
     ast::OperatorJoinRelations,
     semantics::volatility::{self, VolatilityCatalog},
@@ -26,7 +26,7 @@ pub trait PlannerStatisticsCatalog {
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError>;
     fn column_statistics(&self, table: &str) -> Result<ColumnStatistics, SQLError>;
     fn resolved_table_name(&self, table: &str) -> Result<Option<String>, SQLError>;
-    fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError>;
+    fn catalog_indexes(&self) -> Result<CatalogIndexSnapshot, SQLError>;
 }
 /// Access estimates supplied by the retrieval planner selected by the composition boundary.
 pub trait RetrievalSourceCosting {

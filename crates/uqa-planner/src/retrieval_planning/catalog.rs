@@ -8,7 +8,7 @@
 
 use crate::ColumnStatistics;
 use std::collections::BTreeMap;
-use uqa_core::{catalog_index::CatalogIndexRow, Edge, Predicate, Vertex};
+use uqa_core::{catalog_index::CatalogIndexSnapshot, Edge, Predicate, Vertex};
 use uqa_sql::SQLError;
 
 /// The implementation retains the actual text-index read guard through all analyzer and frequency reads.
@@ -81,7 +81,7 @@ pub struct GraphStatisticsSnapshot {
 pub trait RetrievalPlanningCatalog {
     fn has_table(&self, table: &str) -> Result<bool, String>;
     fn resolve_table_name(&self, table: &str) -> Result<Option<String>, String>;
-    fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String>;
+    fn list_catalog_indexes(&self) -> Result<CatalogIndexSnapshot, String>;
     fn value_index_cardinality(
         &self,
         table: &str,

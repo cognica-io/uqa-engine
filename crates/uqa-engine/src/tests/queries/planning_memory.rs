@@ -10,6 +10,7 @@ use uqa_planner::UnifiedPlan;
 
 const JOIN: &str = "SELECT a.id FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id";
 
+mod indexes;
 mod inference;
 mod sources;
 mod statistics;

@@ -23,7 +23,7 @@ pub(super) fn parameterized_access(
     let resolved = catalog.resolved_table_name(table)?;
     let indexes = catalog.catalog_indexes()?;
     let mut fields = std::collections::BTreeSet::new();
-    for index in indexes {
+    for index in indexes.iter() {
         if Some(&index.table_name) != resolved.as_ref()
             || !index.index_type.eq_ignore_ascii_case("btree")
         {
@@ -46,6 +46,7 @@ pub(super) fn parameterized_access(
             fields.insert(column.to_string());
         }
     }
+    drop(indexes);
     let costs = CostEstimator::default();
     let rows = stats.row_count as f64;
     let mut cost = costs.estimate_unary(OperatorKind::TableScan, rows).total()

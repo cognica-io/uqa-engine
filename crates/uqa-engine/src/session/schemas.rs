@@ -18,25 +18,23 @@ impl Engine {
     pub(crate) fn catalog_indexes_in_execution(
         &self,
     ) -> StorageBackendResult<Vec<CatalogIndexRow>> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            let mut out = snapshot
-                .catalog_indexes
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
-            out.sort_by(|a, b| a.relation.cmp(&b.relation));
-            return Ok(out);
-        }
-        self.synchronize_catalog_registries()?;
-        let mut out: Vec<CatalogIndexRow> = self
-            .durable
-            .catalog_indexes
-            .read()
-            .values()
+        let mut out = self
+            .catalog_index_snapshot_in_execution()?
+            .iter()
             .cloned()
-            .collect();
+            .collect::<Vec<_>>();
         out.sort_by(|a, b| a.relation.cmp(&b.relation));
         Ok(out)
+    }
+
+    pub(crate) fn catalog_index_snapshot_in_execution(
+        &self,
+    ) -> StorageBackendResult<uqa_core::catalog_index::CatalogIndexSnapshot> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(snapshot.catalog_indexes.clone().into());
+        }
+        self.synchronize_catalog_registries()?;
+        Ok(self.durable.catalog_indexes.snapshot().into())
     }
 
     /// Create a durable schema catalog object. Returns `true` when a new

@@ -9,7 +9,7 @@ use super::{
 };
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use uqa_core::{catalog_index::CatalogIndexRow, Predicate};
+use uqa_core::{catalog_index::CatalogIndexSnapshot, Predicate};
 
 pub(super) struct Inputs {
     pub(super) support: Result<bool, &'static str>,
@@ -34,7 +34,7 @@ impl RetrievalPlanningCatalog for Inputs {
     fn resolve_table_name(&self, _: &str) -> Result<Option<String>, String> {
         panic!("access selection follows optimizer catalog binding")
     }
-    fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String> {
+    fn list_catalog_indexes(&self) -> Result<CatalogIndexSnapshot, String> {
         panic!("access selection follows optimizer catalog binding")
     }
     fn value_index_cardinality(

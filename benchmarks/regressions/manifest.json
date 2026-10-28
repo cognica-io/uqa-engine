@@ -26544,6 +26544,116 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "registry_snapshots_share_payloads_and_release_with_the_last_reader",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_index/snapshot/tests.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Retain a four MiB index payload through 64 immutable registry readers.",
+      "invariant": "Sharing and iteration allocate no storage, retain the original payload address, and free the registry at the last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "catalog_writes_preserve_the_observed_generation_and_structural_order",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_index/snapshot/tests.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Capture an ordered registry before a writer removes and changes its rows.",
+      "invariant": "Copy-on-write publication leaves the captured generation immutable and preserves structural-key iteration order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "supplied_sequences_keep_order_duplicates_and_payload_identity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_index/snapshot/tests.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Move an ordinary row sequence with non-sorted repeated identities into a shared snapshot.",
+      "invariant": "Retain original sequence order, duplicate identities and payload addresses; reader and empty-snapshot clones allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "unwinding_a_catalog_reader_releases_its_retained_rows",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_index/snapshot/tests.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Unwind the only observer after the original registry owner has transferred.",
+      "invariant": "Release the retained generation and all row payloads on consumer unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "shared_index_rows_preserve_candidate_order_without_copying_unrelated_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/tests.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Cost one indexed filter after observing an unrelated four MiB index and two candidate indexes supplied in reverse lexical order.",
+      "invariant": "Stay below four KiB additional allocation while selecting the same first index, callback order, predicate and exact scan cost.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_planning_index_capture_reuses_catalog_payloads",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/indexes.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Capture a four MiB catalog row through statement and retrieval planning and cost a parameterized query on all four providers.",
+      "invariant": "Both captures retain original row/payload addresses below 16 KiB allocation; costing stays below 64 KiB with 16 KiB request allowance, unchanged costs and untouched sibling reservation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_planning_index_snapshots_follow_transactional_publication",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/indexes.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Retain index generations across transactional DROP/CREATE, rollback, commit, public enumeration, close and persistent reopen on all four providers.",
+      "invariant": "Publish the current structurally ordered registry while previous readers and mutable public copies remain independent, and preserve committed indexes after reopening.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_planning_index_capture_preserves_the_pinned_catalog",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/indexes.rs",
+      "capability": "Immutable planning index snapshots",
+      "workload": "Observe a pinned statement catalog after the live primary-key index has been removed.",
+      "invariant": "Both native planners retain the pinned row address without allocations or accidental live-catalog substitution.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

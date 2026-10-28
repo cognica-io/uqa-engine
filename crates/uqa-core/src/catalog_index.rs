@@ -8,6 +8,9 @@
 
 use crate::RelationIdentity;
 
+mod snapshot;
+pub use snapshot::CatalogIndexSnapshot;
+
 /// One row from the secondary-index registry.
 #[derive(Debug, Clone)]
 pub struct CatalogIndexRow {
