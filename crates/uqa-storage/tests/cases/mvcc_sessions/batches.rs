@@ -29,7 +29,16 @@ fn evaluated_batch_payloads_fit_one_retained_copy_through_savepoint_undo() {
         })
         .unwrap();
     store.rollback_transaction().unwrap();
-    assert!(control.memory().used() >= payload.len());
+    assert!(control.memory().used() > 0);
+    assert!(control.memory().used() < payload.len());
+    let peer = control.memory().reserve(16 * 1024).unwrap();
+    retained
+        .visit_value(b"payload", &control, &mut |record| {
+            assert_eq!(record.unwrap().value, Some(payload.as_slice()));
+            Ok(())
+        })
+        .unwrap();
+    drop(peer);
     drop(retained);
     assert_eq!(control.memory().used(), 0);
 }

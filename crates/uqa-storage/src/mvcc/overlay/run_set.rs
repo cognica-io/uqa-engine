@@ -116,9 +116,38 @@ impl RunSet {
         memory: &MemoryBudget,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
-        let class = |run: &SpilledRun| (run.bytes() / base.max(1)).max(1).ilog(FAN_IN as u64);
+        self.with_retained_run(run).compacted(base, memory, control)
+    }
+
+    /// Seal a retained root without rewriting any preceding payloads. The writable owner compacts eligible runs before its next mutation; immutable readers keep this exact run set.
+    pub(super) fn with_retained_run(&self, run: SpilledRun) -> Self {
         let mut runs = self.runs().to_vec();
         runs.push(Arc::new(run));
+        Self(Some(StrongArc::new(runs)))
+    }
+
+    /// Complete any compaction deferred by retained-root capture. Already compacted sets share their existing root without allocating or reading payloads.
+    pub(super) fn compacted(
+        &self,
+        base: u64,
+        memory: &MemoryBudget,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
+        let class = |run: &SpilledRun| (run.bytes() / base.max(1)).max(1).ilog(FAN_IN as u64);
+        let Some(newest) = self.runs().last().map(|run| class(run)) else {
+            return Ok(self.clone());
+        };
+        if self
+            .runs()
+            .iter()
+            .rev()
+            .take_while(|run| class(run) <= newest)
+            .count()
+            < FAN_IN
+        {
+            return Ok(self.clone());
+        }
+        let mut runs = self.runs().to_vec();
         loop {
             let count = runs.len();
             let Some(newest) = runs.last().map(|run| class(run)) else {

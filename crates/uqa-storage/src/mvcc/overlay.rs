@@ -143,9 +143,12 @@ impl State {
             .map_or(ordinary, |limit| ordinary.min(limit.max(1)))
     }
 
-    /// Move the memory tier into a new run when the transaction's allowance is under pressure: more than half of it is used and the memory tier holds a share of it worth a run. The allowance measures what this tier actually holds, so changes that share their values with an earlier owner do not spill on their own. Failure leaves both tiers unchanged.
+    /// Move the memory tier into a new run when the transaction's allowance is under pressure: more than half of it is used and the memory tier holds a share of it worth a run. The allowance measures what this tier actually holds, so changes that share their values with an earlier owner do not spill on their own. Deferred run compaction belongs to this writable boundary. Failure preserves every logical change and retained root.
     fn make_room(&mut self, control: &StorageReadControl) -> VersionResult<()> {
         let budget = self.records.budget();
+        self.runs = self
+            .runs
+            .compacted(self.least_spill() as u64, budget, control)?;
         let retain = self.policy.memory_tier_limit().map_or_else(
             || {
                 self.resident < self.least_spill()
@@ -156,6 +159,21 @@ impl State {
         if self.records.is_empty() || retain {
             return Ok(());
         }
+        self.spill(control, true)
+    }
+
+    /// A retained command or undo root must not pin the writable tier's large buffers while the next producer needs its own workspace. Spill before sharing that root; its logical revision and all existing readers remain unchanged.
+    fn retain_root(&mut self) -> VersionResult<()> {
+        if self.records.is_empty() || self.resident < self.least_spill() {
+            return Ok(());
+        }
+        let memory = self.records.budget().clone();
+        // Snapshot and savepoint capture have no cancellation argument. Their representation-only preparation retains the same allowance and leaves both tiers unchanged on failure.
+        let control = StorageReadControl::new(&memory, &uqa_core::CancellationToken::new());
+        self.spill(&control, false)
+    }
+
+    fn spill(&mut self, control: &StorageReadControl, compact: bool) -> VersionResult<()> {
         let memory = self.records.budget().clone();
         let key_bytes = self.records.iter().fold(0_u64, |bytes, (key, _)| {
             bytes.saturating_add(key.bytes().len() as u64)
@@ -175,7 +193,11 @@ impl State {
             .finish()?
             .expect("a nonempty memory tier spills a nonempty run");
         let base = self.least_spill() as u64;
-        self.runs = self.runs.with_run(run, base, &memory, control)?;
+        self.runs = if compact {
+            self.runs.with_run(run, base, &memory, control)?
+        } else {
+            self.runs.with_retained_run(run)
+        };
         self.records = Records::new(&memory);
         self.resident = 0;
         Ok(())
@@ -460,7 +482,8 @@ impl PrivateRecordChanges {
     }
 
     pub fn snapshot(&self) -> VersionResult<PrivateRecordSnapshot> {
-        let state = self.owner.state.lock();
+        let mut state = self.owner.state.lock();
+        state.retain_root()?;
         let memory = state
             .records
             .budget()
@@ -481,6 +504,7 @@ impl PrivateRecordChanges {
 
     pub fn savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
+        state.retain_root()?;
         let records = state.records.clone();
         let resident = state.resident;
         let runs = state.runs.clone();

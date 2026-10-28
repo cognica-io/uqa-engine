@@ -100,8 +100,11 @@ impl SpilledRunWriter {
             .saturating_add(entries.saturating_mul(entry::encoded_len(0, true, true) as u64));
         // Keep the resident input intact until publication and leave half the available workspace for the run index and merge readers.
         let flush_bytes = (memory.available() / 4).clamp(1, FLUSH_BYTES);
+        let entry_flush_bytes = usize::try_from(encoded)
+            .unwrap_or(usize::MAX)
+            .clamp(1, flush_bytes);
         Ok(Self {
-            entries: BufferedFile::new(memory, flush_bytes)?,
+            entries: BufferedFile::new(memory, entry_flush_bytes)?,
             values: BufferedFile::new(memory, flush_bytes)?,
             encoded: Vec::new(),
             blocks: BudgetedVec::new(memory),
