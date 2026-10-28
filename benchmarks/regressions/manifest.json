@@ -25996,6 +25996,97 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "wide_where_predicate_collection_obeys_request_admission",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/scratch.rs",
+      "capability": "Native join input workspace",
+      "workload": "65,536 WHERE conjuncts under zero/partial request allowances and either cancelled token.",
+      "invariant": "Reject before unbounded reference-buffer allocation, retain input identity/order and release partial scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "wide_on_predicate_collection_obeys_request_admission",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/scratch.rs",
+      "capability": "Native join input workspace",
+      "workload": "65,536 ON conjuncts under zero/partial request allowances and either cancelled token.",
+      "invariant": "Admit discovery references before growth and preserve the original source when discovery fails.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "local_predicate_grouping_borrows_aliases_and_admits_reference_buffers",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/scratch.rs",
+      "capability": "Native join input workspace",
+      "workload": "A four MiB relation qualifier classified under a zero allowance.",
+      "invariant": "Borrow names instead of cloning keys, reject reference storage before allocation and leave estimates unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "join_source_discovery_keeps_the_relation_bound_without_heap_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/scratch.rs",
+      "capability": "Native join input workspace",
+      "workload": "2, 8, 64 and 65 sources under zero heap allowance and both cancellation scopes.",
+      "invariant": "Retain ordered source references inline, preserve the existing 64-relation search bound and allocate no heap scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "local_predicate_groups_retain_exact_buffers_and_conjunct_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/scratch.rs",
+      "capability": "Native join input workspace",
+      "workload": "Seventeen interleaved predicates per relation across 2, 8 and 64 relation groups.",
+      "invariant": "Preserve original predicate identities/order, equate live buffer allocations with reservations and release on ancestor rejection/cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "local_predicate_groups_preserve_resolution_and_expression_restrictions",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/scratch.rs",
+      "capability": "Native join input workspace",
+      "workload": "Qualified, unique unqualified, ambiguous, unknown, mixed-alias, conditional, membership and subquery predicates.",
+      "invariant": "Keep exactly the same eligible local predicates, relation order and per-relation conjunct order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "non_join_sources_do_not_collect_unused_where_predicates",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/scratch.rs",
+      "capability": "Native join input workspace",
+      "workload": "65,536 WHERE conjuncts with a single table or no source.",
+      "invariant": "Allocate no unused predicate-reference list and retain the original WHERE expression.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

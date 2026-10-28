@@ -12,7 +12,7 @@ use super::{
     RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan, SourceStatistics, UnifiedPlan,
 };
 
-use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+use uqa_core::memory::{Produced, ProductionControl, ProductionSmallVec, ProductionVec};
 
 use super::OptimizerResult;
 
@@ -21,7 +21,9 @@ const DEFAULT_JOIN_CARDINALITY: u64 = 1_000;
 #[cfg(test)]
 mod tests;
 
+mod inputs;
 mod materialization;
+use inputs::{collect_conjuncts, flatten_reorderable_inner_join, local_predicate_groups};
 
 pub(super) fn reorder_unified_plan_joins(
     plan: &mut UnifiedPlan,
@@ -49,16 +51,13 @@ fn reorder_query_joins(
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
-            let where_predicates = block
-                .r#where
-                .as_ref()
-                .map(|predicate| {
-                    let mut predicates = Vec::new();
-                    collect_conjuncts(predicate, &mut predicates);
-                    predicates
-                })
-                .unwrap_or_default();
             if let Some(source) = &mut block.from {
+                let mut where_predicates = ProductionVec::new(*control);
+                if matches!(source, SourcePlan::Join { .. }) {
+                    if let Some(predicate) = &block.r#where {
+                        collect_conjuncts(predicate, &mut where_predicates, control)?;
+                    }
+                }
                 reorder_source_joins(source, &where_predicates, statistics, control)?;
             }
             for subquery in &mut block.subqueries {
@@ -292,9 +291,9 @@ fn reordered_inner_join_source(
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
 ) -> OptimizerResult<Option<SourcePlan>> {
-    let mut atoms = Vec::new();
-    let mut expressions = Vec::new();
-    if !flatten_reorderable_inner_join(source, &mut atoms, &mut expressions)
+    let mut atoms = ProductionSmallVec::<[&SourcePlan; 64]>::new(*control);
+    let mut expressions = ProductionVec::new(*control);
+    if !flatten_reorderable_inner_join(source, &mut atoms, &mut expressions, control)?
         || !(2..=64).contains(&atoms.len())
     {
         return Ok(None);
@@ -391,7 +390,8 @@ fn reordered_inner_join_source(
     let mut predicates = Vec::new();
     let mut graph_predicates = Vec::new();
     for expression in expressions
-        .into_iter()
+        .iter()
+        .copied()
         .map(std::borrow::Cow::Borrowed)
         .chain(inferred.into_iter().map(std::borrow::Cow::Owned))
     {
@@ -414,6 +414,8 @@ fn reordered_inner_join_source(
         });
     }
 
+    drop(expressions);
+    drop(atoms);
     let selected =
         JoinOrderOptimizer::new().select_with_control(&relations, &graph_predicates, control)?;
     let mut reordered = materialization::reorder(source, &selected, &mut predicates)?;
@@ -428,60 +430,6 @@ fn reordered_inner_join_source(
         .into());
     }
     Ok(Some(reordered))
-}
-
-fn flatten_reorderable_inner_join<'a>(
-    source: &'a SourcePlan,
-    atoms: &mut Vec<&'a SourcePlan>,
-    predicates: &mut Vec<&'a ScalarExpr>,
-) -> bool {
-    match source {
-        SourcePlan::RetainedRows(_) => false,
-        SourcePlan::Join {
-            left,
-            right,
-            kind: uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross,
-            on,
-            using: None,
-            natural: false,
-            alias: None,
-            column_aliases,
-            lateral: false,
-            strategy: _,
-            ..
-        } => {
-            if !column_aliases.is_empty() {
-                return false;
-            }
-            if !flatten_reorderable_inner_join(left, atoms, predicates)
-                || !flatten_reorderable_inner_join(right, atoms, predicates)
-            {
-                return false;
-            }
-            if let Some(on) = on {
-                collect_conjuncts(on, predicates);
-            }
-            true
-        }
-        SourcePlan::Table { .. } | SourcePlan::Function { .. } => {
-            atoms.push(source);
-            true
-        }
-        SourcePlan::Join { .. }
-        | SourcePlan::Values { .. }
-        | SourcePlan::FunctionGroup { .. }
-        | SourcePlan::Subquery { .. } => false,
-    }
-}
-
-fn collect_conjuncts<'a>(expression: &'a ScalarExpr, output: &mut Vec<&'a ScalarExpr>) {
-    if let ScalarExpr::And(items) = expression {
-        for item in items {
-            collect_conjuncts(item, output);
-        }
-    } else {
-        output.push(expression);
-    }
 }
 
 type ColumnOwners = BTreeMap<String, Option<(String, String)>>;
@@ -522,29 +470,15 @@ fn apply_local_filter_estimates(
     control: &ProductionControl<'_>,
 ) -> OptimizerResult<()> {
     let estimator = crate::CardinalityEstimator::new();
-    let mut predicates_by_alias = BTreeMap::<String, Vec<&ScalarExpr>>::new();
-    for predicate in predicates {
-        let mut referenced = BTreeSet::new();
-        if !collect_resolved_aliases(predicate, aliases, column_owners, &mut referenced)
-            || referenced.len() != 1
-        {
+    let predicates_by_alias =
+        local_predicate_groups(relations, predicates, aliases, column_owners, control)?;
+    for (relation, predicates) in relations.iter_mut().zip(predicates_by_alias) {
+        let predicates = predicates.expect("one predicate bucket per relation");
+        if predicates.is_empty() {
             continue;
         }
-        let Some(alias) = referenced.first() else {
-            continue;
-        };
-        predicates_by_alias
-            .entry(alias.clone())
-            .or_default()
-            .push(*predicate);
-    }
-
-    for relation in relations.iter_mut() {
-        let Some(predicates) = predicates_by_alias.remove(&relation.alias) else {
-            continue;
-        };
         let conjunction;
-        let predicate = if let [predicate] = predicates.as_slice() {
+        let predicate = if let [predicate] = &*predicates {
             *predicate
         } else {
             conjunction = copy_local_conjunction(&predicates, control)?;
@@ -586,80 +520,6 @@ fn apply_local_filter_estimates(
             .total();
     }
     Ok(())
-}
-
-fn collect_resolved_aliases(
-    expression: &ScalarExpr,
-    aliases: &BTreeSet<String>,
-    column_owners: &ColumnOwners,
-    output: &mut BTreeSet<String>,
-) -> bool {
-    let mut recur = |expression: &ScalarExpr| {
-        collect_resolved_aliases(expression, aliases, column_owners, output)
-    };
-    match expression {
-        ScalarExpr::Column(column) => {
-            let Some(Some((alias, _))) = column_owners.get(column.as_str()) else {
-                return false;
-            };
-            output.insert(alias.clone());
-            true
-        }
-        ScalarExpr::QualifiedColumn { qualifier, .. } => {
-            if !aliases.contains(qualifier) {
-                return false;
-            }
-            output.insert(qualifier.clone());
-            true
-        }
-        ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_) => true,
-        ScalarExpr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            args.iter().all(&mut recur)
-                && order_by.iter().all(|order| recur(&order.expr))
-                && filter.as_deref().is_none_or(recur)
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items.iter().all(recur),
-        ScalarExpr::Binary { lhs, rhs, .. } => recur(lhs) && recur(rhs),
-        ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Not(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => recur(inner),
-        ScalarExpr::Between { expr, low, high } => recur(expr) && recur(low) && recur(high),
-        ScalarExpr::InList { expr, list, .. } => recur(expr) && list.iter().all(recur),
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_deref().is_none_or(&mut recur)
-                && when
-                    .iter()
-                    .all(|(condition, result)| recur(condition) && recur(result))
-                && else_branch.as_deref().is_none_or(recur)
-        }
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::WindowCall { .. }
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. }
-        | ScalarExpr::InSubquery { .. } => false,
-    }
 }
 
 fn join_predicate(
