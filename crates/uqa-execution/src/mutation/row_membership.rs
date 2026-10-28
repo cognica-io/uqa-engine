@@ -75,8 +75,7 @@ impl PhysicalRowBuffer {
 
     fn contains_key(&self, key: &[u8]) -> Result<bool, SQLError> {
         self.records
-            .snapshot()
-            .and_then(|view| view.get(key, &self.control))
+            .get(key, &self.control)
             .map(|record| record.is_some())
             .map_err(|error| storage_error(self.operation, error))
     }

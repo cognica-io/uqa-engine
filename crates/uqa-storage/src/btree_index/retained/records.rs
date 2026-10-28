@@ -95,8 +95,19 @@ impl<'a> Records<'a> {
         self.changes.snapshot().map_err(failure)
     }
     pub fn node(&self, id: DocId) -> StorageBackendResult<Node> {
-        self.node_at(&self.snapshot()?, id)?
+        self.current_node(id)?
             .ok_or_else(|| invalid("missing ordered node"))
+    }
+    pub fn current_node(&self, id: DocId) -> StorageBackendResult<Option<Node>> {
+        #[cfg(test)]
+        NODE_READS.with(|reads| reads.set(reads.get() + 1));
+        self.changes
+            .get(&key(NODE, id), &self.control)
+            .map_err(failure)?
+            .as_ref()
+            .and_then(|record| record.value())
+            .map(Node::decode)
+            .transpose()
     }
     pub fn node_at(
         &self,
@@ -122,7 +133,7 @@ impl<'a> Records<'a> {
         id.map_or(Ok(0), |id| Ok(self.node(id)?.count))
     }
     pub fn read_scope(&self) -> StorageBackendResult<crate::mvcc::PrivateRecordReadScope> {
-        self.snapshot()?.read_scope(&self.control).map_err(failure)
+        self.changes.read_scope(&self.control).map_err(failure)
     }
     fn write(&self, key: &[u8], value: Option<&[u8]>) -> StorageBackendResult<()> {
         self.changes

@@ -18951,6 +18951,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "current_point_reads_preserve_the_writable_tier_and_selected_payload_lease",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Current private record read ownership",
+      "workload": "Read one of 24 resident 16 KiB values and a missing key 64 times under a 1 MiB owner with an independent zero-byte reader; keep the selected value through writer rollback.",
+      "invariant": "Immediate reads seal no roots and write no spill bytes, preserve the writable tier, and retain only the selected payload lease until its final owner drops."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "current_point_reads_preserve_spilled_conditions_kinds_and_undo_visibility",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Current private record read visibility",
+      "workload": "Force private changes to spill under 64 KiB, retain a command view and undo root, replace a marked value with a tombstone, and attempt reads with cancelled and zero-byte controls.",
+      "invariant": "Current and frozen reads preserve distinct values, original preconditions and write kinds; failed reads do not change undo visibility or retain leaked reservations."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "command_snapshot_releases_large_resident_roots_for_the_next_producer",
       "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
       "cases": 1,

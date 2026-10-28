@@ -289,7 +289,7 @@ impl PrivateRecordChanges {
     /// batch. Releasing the scope releases its cached bytes, even when a
     /// savepoint still owns the runs. Later changes keep their ordinary lookup
     /// precedence; this scope retains no record view.
-    pub(in crate::mvcc) fn read_scope(
+    pub(crate) fn read_scope(
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<PrivateRecordReadScope> {
@@ -485,6 +485,20 @@ impl PrivateRecordChanges {
     pub fn has_written(&self) -> bool {
         let state = self.owner.state.lock();
         !state.records.is_empty() || !state.runs.is_empty()
+    }
+
+    /// Read the current private replacement, including a deletion, without retaining or sealing a command root. The selected write keeps its original condition and kind; spilled values are loaded under the invoking control.
+    pub fn get(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<PreparedRecordWrite>> {
+        control.check()?;
+        let state = self.owner.state.lock();
+        state
+            .change(key, control)?
+            .map(|change| change.write(control))
+            .transpose()
     }
 
     pub fn snapshot(&self) -> VersionResult<PrivateRecordSnapshot> {

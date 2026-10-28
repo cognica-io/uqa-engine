@@ -58,8 +58,6 @@ impl Drafts {
 
     fn get_stored(&self, key: &[u8]) -> StorageBackendResult<Option<Draft>> {
         self.records
-            .snapshot()
-            .map_err(VersionError::into_storage_error)?
             .get(key, &self.control)
             .map_err(VersionError::into_storage_error)?
             .map(|record| {

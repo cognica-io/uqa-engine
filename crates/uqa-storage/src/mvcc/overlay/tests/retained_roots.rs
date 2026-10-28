@@ -85,6 +85,101 @@ fn populated(control: &StorageReadControl) -> PrivateRecordChanges {
     changes
 }
 
+#[test]
+fn current_point_reads_preserve_the_writable_tier_and_selected_payload_lease() {
+    use super::super::run::write_counts;
+
+    let control = StorageReadControl::with_limit(1 << 20);
+    let changes = populated(&control);
+    assert_eq!(spilled_runs(&changes), 0);
+    let resident = changes.owner.state.lock().resident;
+    let reader = StorageReadControl::with_limit(0);
+    write_counts::take();
+    for _ in 0..64 {
+        assert_eq!(
+            changes
+                .get(&0_u64.to_be_bytes(), &reader)
+                .unwrap()
+                .unwrap()
+                .value(),
+            Some(&[0; 16 * 1024][..]),
+        );
+        assert!(changes.get(b"missing", &reader).unwrap().is_none());
+    }
+    assert_eq!(write_counts::take().bytes, 0);
+    assert_eq!(spilled_runs(&changes), 0);
+    assert_eq!(changes.owner.state.lock().resident, resident);
+    let selected = changes.get(&0_u64.to_be_bytes(), &reader).unwrap().unwrap();
+    changes.rollback().unwrap();
+    assert_eq!(selected.value(), Some(&[0; 16 * 1024][..]));
+    assert!(control.memory().used() >= 16 * 1024);
+    assert_eq!(reader.memory().used(), 0);
+    drop((selected, changes));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn current_point_reads_preserve_spilled_conditions_kinds_and_undo_visibility() {
+    use crate::mvcc::commit::RecordWriteKind;
+
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let changes = PrivateRecordChanges::with_memory_tier_limit(control.memory(), 0);
+    let expected = Some(CommitSequence::from_u64(17));
+    let original = PreparedRecordWrite::copy_bytes(b"row", expected, Some(b"original"), &control)
+        .unwrap()
+        .with_kind(RecordWriteKind::Marker);
+    changes.apply_owned(&[original], &control).unwrap();
+    changes
+        .apply(
+            &[RecordWrite {
+                key: b"peer",
+                expected: None,
+                value: Some(b"peer"),
+            }],
+            &control,
+        )
+        .unwrap();
+    assert!(spilled_runs(&changes) > 0);
+    let frozen = changes.snapshot().unwrap();
+    let savepoint = StorageSavepointId::allocate();
+    changes.savepoint(savepoint).unwrap();
+    let deleted = PreparedRecordWrite::copy_bytes(b"row", expected, None, &control)
+        .unwrap()
+        .with_kind(RecordWriteKind::StatisticsMaintenance);
+    changes.apply_owned(&[deleted], &control).unwrap();
+    changes
+        .apply(
+            &[RecordWrite {
+                key: b"later",
+                expected: None,
+                value: Some(b"later"),
+            }],
+            &control,
+        )
+        .unwrap();
+    let current = changes.get(b"row", &control).unwrap().unwrap();
+    assert_eq!(current.key(), b"row");
+    assert_eq!(current.expected(), expected);
+    assert_eq!(current.value(), None);
+    assert!(current.kind() == RecordWriteKind::StatisticsMaintenance);
+    let prior = frozen.get(b"row", &control).unwrap().unwrap();
+    assert_eq!(prior.value(), Some(&b"original"[..]));
+    assert!(prior.kind() == RecordWriteKind::Marker);
+    let too_small = StorageReadControl::with_limit(0);
+    assert!(changes.get(b"row", &too_small).is_err());
+    assert_eq!(too_small.memory().used(), 0);
+    let cancelled = StorageReadControl::with_limit(64 * 1024);
+    cancelled.cancellation().cancel();
+    assert!(changes.get(b"row", &cancelled).is_err());
+    changes.rollback_to_savepoint(savepoint).unwrap();
+    let restored = changes.get(b"row", &control).unwrap().unwrap();
+    assert_eq!(restored.expected(), expected);
+    assert_eq!(restored.value(), Some(&b"original"[..]));
+    assert!(restored.kind() == RecordWriteKind::Marker);
+    drop((current, prior, restored, frozen, changes));
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn assert_original(view: &PrivateRecordSnapshot, control: &StorageReadControl) {
     for index in 0_u64..24 {
         assert_eq!(
