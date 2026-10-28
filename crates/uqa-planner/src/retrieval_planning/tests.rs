@@ -12,6 +12,8 @@ use uqa_core::{
     Predicate,
 };
 
+mod index_candidates;
+
 #[derive(Clone, Default)]
 struct Catalog {
     events: Rc<RefCell<Vec<String>>>,
@@ -126,12 +128,15 @@ fn first_frequency_error_releases_readers_before_stopping_catalog_work() {
     );
 }
 
-struct IndexCatalog {
+type CardinalityProbe<'a> = &'a dyn Fn(&str, &Predicate) -> Result<Option<usize>, SQLError>;
+
+struct IndexCatalog<'a> {
     events: RefCell<Vec<&'static str>>,
     rows: CatalogIndexSnapshot,
+    probe: Option<CardinalityProbe<'a>>,
 }
 
-impl RetrievalPlanningCatalog for IndexCatalog {
+impl RetrievalPlanningCatalog for IndexCatalog<'_> {
     fn has_table(&self, table: &str) -> Result<bool, String> {
         assert_eq!(table, "docs");
         self.events.borrow_mut().push("has table");
@@ -153,6 +158,10 @@ impl RetrievalPlanningCatalog for IndexCatalog {
         predicate: &Predicate,
     ) -> Result<Option<usize>, SQLError> {
         assert_eq!(table, "docs");
+        if let Some(probe) = self.probe {
+            self.events.borrow_mut().push("cardinality");
+            return probe(field, predicate);
+        }
         assert_eq!(field, "id");
         assert_eq!(predicate, &Predicate::Equals(uqa_core::Value::Int(1)));
         self.events.borrow_mut().push("cardinality");
@@ -190,6 +199,7 @@ impl RetrievalPlanningCatalog for IndexCatalog {
 fn invalid_index_metadata_stops_planning_before_reading_runtime_statistics() {
     let catalog = IndexCatalog {
         events: RefCell::new(Vec::new()),
+        probe: None,
         rows: vec![CatalogIndexRow {
             relation: uqa_core::RelationIdentity::new("public", "broken_index"),
             index_type: "btree".into(),
@@ -232,6 +242,7 @@ fn shared_index_rows_preserve_candidate_order_without_copying_unrelated_payloads
     let catalog = IndexCatalog {
         events: RefCell::new(Vec::with_capacity(4)),
         rows: vec![unrelated, row("z_first"), row("a_second")].into(),
+        probe: None,
     };
     let tree = OperatorTree::Filter {
         field: "id".into(),

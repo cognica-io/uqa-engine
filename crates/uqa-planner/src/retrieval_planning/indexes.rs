@@ -51,26 +51,21 @@ pub(super) fn index_candidates(
     }
     drop(indexes);
 
-    let mut predicates = Vec::new();
-    tree.visit(&mut |node| {
+    let mut candidates = Vec::new();
+    tree.try_visit(&mut |node| {
         let OperatorTree::Filter {
             field,
             predicate,
             source: None,
         } = node
         else {
-            return;
+            return Ok(());
         };
-        predicates.push((field.clone(), predicate.clone()));
-    });
-
-    let mut candidates = Vec::new();
-    for (field, predicate) in predicates {
-        let Some(index_name) = indexes_by_field.get(&field) else {
-            continue;
+        let Some(index_name) = indexes_by_field.get(field) else {
+            return Ok(());
         };
-        let Some(cardinality) = catalog.value_index_cardinality(table, &field, &predicate)? else {
-            continue;
+        let Some(cardinality) = catalog.value_index_cardinality(table, field, predicate)? else {
+            return Ok(());
         };
         let cardinality = cardinality as f64;
         let scan_cost = CostEstimator::default()
@@ -79,10 +74,11 @@ pub(super) fn index_candidates(
         candidates.push(IndexScanCandidate {
             index_name: index_name.clone(),
             table_name: table.to_string(),
-            field,
-            predicate,
+            field: field.clone(),
+            predicate: predicate.clone(),
             scan_cost,
         });
-    }
+        Ok::<(), SQLError>(())
+    })?;
     Ok(candidates)
 }

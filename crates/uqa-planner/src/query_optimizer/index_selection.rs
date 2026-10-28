@@ -25,21 +25,20 @@ impl QueryOptimizer {
             field,
             predicate,
             source: None,
-        } = &op
+        } = op
         {
             let best = self
                 .index_candidates
                 .iter()
                 .filter(|candidate| {
                     candidate.table_name == *table
-                        && candidate.field == *field
-                        && candidate.predicate == *predicate
+                        && candidate.field == field
+                        && candidate.predicate == predicate
                         && candidate.scan_cost.is_finite()
                         && candidate.scan_cost >= 0.0
                 })
-                .map(|candidate| (candidate.index_name.clone(), candidate.scan_cost))
-                .min_by(|left, right| left.1.total_cmp(&right.1));
-            if let Some((name, scan_cost)) = best {
+                .min_by(|left, right| left.scan_cost.total_cmp(&right.scan_cost));
+            if let Some(candidate) = best {
                 // Prefer the index only when its `scan_cost(predicate)` beats
                 // a full scan; otherwise keep the filter over the original
                 // operator.
@@ -48,14 +47,19 @@ impl QueryOptimizer {
                     .physical_cost
                     .estimate_unary(OperatorKind::TableScan, self.index_stats.total_docs as f64)
                     .total();
-                if scan_cost < full_scan_cost {
+                if candidate.scan_cost < full_scan_cost {
                     return OperatorTree::IndexScan {
-                        index_name: name,
-                        field: field.clone(),
-                        predicate: predicate.clone(),
+                        index_name: candidate.index_name.clone(),
+                        field,
+                        predicate,
                     };
                 }
             }
+            return OperatorTree::Filter {
+                field,
+                predicate,
+                source: None,
+            };
         }
         if let OperatorTree::Filter {
             field,

@@ -26654,6 +26654,152 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "fallible_tree_visit_preserves_preorder_and_borrowed_nodes_without_workspace",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/tree/tests.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Visit unary, binary, variadic, facet-vector, multi-stage, progressive, deep and opaque child carriers.",
+      "invariant": "Preserve original node addresses and leaf order without heap workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "fallible_tree_visit_stops_at_each_child_boundary_and_returns_the_original_error",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/tree/tests.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Fail at every node position in the complete child-carrier fixture.",
+      "invariant": "Return the original error allocation after exactly the expected prefix, without later visits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unindexed_filter_discovery_does_not_copy_payloads_or_collect_nodes",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/tests/index_candidates.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Inspect 8192 unindexed leaves followed by a four MiB field and four MiB predicate.",
+      "invariant": "Keep discovery allocation below four KiB and perform no cardinality callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "index_cardinality_borrows_the_original_filter_until_selection",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/tests/index_candidates.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Probe an indexed four MiB predicate whose cardinality callback declines the candidate.",
+      "invariant": "Pass the original field and predicate addresses and stay below four KiB allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_candidate_retains_one_independent_payload_after_borrowed_costing",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/tests/index_candidates.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Retain a selected four MiB candidate after borrowing its input for costing.",
+      "invariant": "Copy the selected payload once, preserve its value and keep the candidate independent after the source is dropped.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "index_candidate_failure_preserves_order_and_drops_partial_output_without_later_copies",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/tests/index_candidates.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Produce one candidate, then raise 53200, 57014 or XX001 before an unused four MiB leaf.",
+      "invariant": "Preserve the first typed error and callback prefix, allocate below four KiB and release all partial output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "index_candidate_unwind_drops_partial_output_without_later_copies",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/tests/index_candidates.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Unwind the second cardinality callback after producing one candidate and before an unused four MiB leaf.",
+      "invariant": "Release all partial output without copying later inputs or invoking later callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_index_scan_moves_filter_payloads_and_copies_only_the_winning_name",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/tests/index_ownership.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Select a physical scan over four MiB field/predicate inputs and a seven MiB losing catalog name.",
+      "invariant": "Preserve both input allocation addresses and copy only the winning name below four KiB allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "declined_index_scan_keeps_input_and_does_not_copy_catalog_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/tests/index_ownership.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Decline a high-cost physical scan with a seven MiB catalog name and four MiB predicate.",
+      "invariant": "Return the original input allocations with zero new allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "index_selection_preserves_cost_thresholds_invalid_costs_and_first_ties",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/tests/index_ownership.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Compare zero, finite, table-scan-equal, negative, infinite and NaN candidate costs with equal-cost duplicates.",
+      "invariant": "Preserve invalid-cost rejection, the strict table-scan threshold and first-candidate tie order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_index_candidates_borrow_unselected_filter_payloads",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/indexes.rs",
+      "capability": "Borrowed retrieval index inputs",
+      "workload": "Discover one indexed filter after 8192 unindexed leaves and a four MiB predicate on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Keep native setup below 64 KiB with 32 KiB remaining request allowance, preserve exact candidates and row counts, and leave sibling reservations unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

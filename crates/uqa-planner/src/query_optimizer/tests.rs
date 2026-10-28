@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod index_ownership;
 use uqa_operators::{DeepFusionLayer, ProgressiveFusionEntry};
 
 mod fusion_order;

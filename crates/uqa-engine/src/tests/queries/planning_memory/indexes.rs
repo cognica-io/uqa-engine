@@ -13,6 +13,68 @@ use uqa_planner::statement_planning::PlannerStatisticsCatalog;
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
+fn native_index_candidates_borrow_unselected_filter_payloads(#[case] provider: Provider) {
+    use uqa_core::Predicate;
+    use uqa_operators::OperatorTree;
+    use uqa_planner::retrieval_planning::query_optimizer;
+
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("candidate-inputs.db"));
+    engine.sql("CREATE TABLE candidate_items(id integer PRIMARY KEY, payload text); INSERT INTO candidate_items VALUES (1, 'x')", &[]).unwrap();
+    let indexed = OperatorTree::Filter {
+        field: "id".into(),
+        predicate: Predicate::Equals(Value::Int(1)),
+        source: None,
+    };
+    let expected = query_optimizer(&engine, "candidate_items", &indexed).unwrap();
+    assert_eq!(expected.index_candidates.len(), 1);
+    let mut children: Vec<_> = (0..8192)
+        .map(|_| OperatorTree::Filter {
+            field: "payload".into(),
+            predicate: Predicate::Equals(Value::Null),
+            source: None,
+        })
+        .collect();
+    children.push(OperatorTree::Filter {
+        field: "payload".into(),
+        predicate: Predicate::Equals(Value::Str("x".repeat(4 * 1024 * 1024))),
+        source: None,
+    });
+    children.push(indexed);
+    let tree = OperatorTree::Union(children);
+    let retention = engine.query_retention_control().unwrap();
+    let memory = retention.memory();
+    let before = memory.used();
+    let sibling = memory.reserve(memory.available() - 32 * 1024).unwrap();
+    let mut actual = None;
+    let allocation = allocation_counter::measure(|| {
+        actual = Some(query_optimizer(&engine, "candidate_items", &tree).unwrap());
+    });
+    assert!(
+        allocation.bytes_total < 64 * 1024,
+        "{provider:?}: {allocation:?}"
+    );
+    let actual = actual.unwrap();
+    assert_eq!(
+        actual.index_candidates, expected.index_candidates,
+        "{provider:?}"
+    );
+    assert_eq!(
+        actual.index_stats.total_docs,
+        expected.index_stats.total_docs
+    );
+    assert_eq!(memory.used(), before + sibling.bytes());
+    drop(actual);
+    drop(sibling);
+    assert_eq!(memory.used(), before);
+    engine.close().unwrap();
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
 fn native_planning_index_capture_reuses_catalog_payloads(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("index-capture.db"));
