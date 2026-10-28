@@ -8,6 +8,7 @@
 
 use super::{rule_inputs::RuleInputPlanningContext, StatementStatisticsContext};
 use crate::{AggregateClassifier, ConstantEvaluator, QueryPlan, UnifiedPlan};
+use std::borrow::Cow;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
@@ -142,11 +143,12 @@ pub fn plan_for_execution(
     analyze_executable_plan(&context.analysis, &mut plan, params)?;
     optimize_plan(context, plan)
 }
+/// Move an owned query through optimization; a borrowed catalog or utility query still receives its independent destination.
 pub fn optimize_query(
     context: &StatementPlanningContext<'_>,
-    query: &QueryPlan,
+    query: Cow<'_, QueryPlan>,
 ) -> Result<QueryPlan, SQLError> {
-    match optimize_plan(context, UnifiedPlan::Query(Box::new(query.clone())))? {
+    match optimize_plan(context, UnifiedPlan::Query(Box::new(query.into_owned())))? {
         UnifiedPlan::Query(query) => Ok(*query),
         UnifiedPlan::Command(_) => Err(SQLError::Internal(
             "query optimization produced a command".into(),

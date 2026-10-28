@@ -58,6 +58,98 @@ impl uqa_sql::schema::dependencies::oid_alias::OidAliasInput for NoRoutines {
     }
 }
 
+struct UnavailableResources {
+    unwind: bool,
+}
+impl StatementOptimizationContexts for UnavailableResources {
+    fn production_resources(&self) -> Result<Option<PlanningResources>, SQLError> {
+        assert!(!self.unwind, "request resource unwind");
+        Err(SQLError::Routine {
+            sqlstate: "53200".into(),
+            message: "request resources unavailable".into(),
+        })
+    }
+    fn statistics(&self) -> StatementStatisticsContext<'_> {
+        panic!("resource acquisition failed before statistics capture")
+    }
+    fn rule_inputs(&self) -> RuleInputPlanningContext<'_> {
+        panic!("resource acquisition failed before rule capture")
+    }
+}
+
+#[test]
+fn owned_query_optimization_does_not_copy_input_before_resource_failure() {
+    let inputs = Inputs {
+        captured: Cell::new(false),
+        analyzed: true,
+    };
+    let context = StatementPlanningContext {
+        analysis: StatementAnalysisContext {
+            scopes: &inputs,
+            routines: &NoRoutines,
+            aliases: &NoRoutines,
+        },
+        aggregates: &|_: &str| false,
+        optimization: &UnavailableResources { unwind: false },
+        constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
+    };
+    let UnifiedPlan::Query(mut query) =
+        UnifiedPlan::lower(uqa_sql::compile("VALUES ('x')").unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    let uqa_sql::plan::RelationalPlan::Values { rows, .. } = &mut query.root else {
+        panic!("values")
+    };
+    rows[0][0] = uqa_sql::ScalarExpr::Literal(uqa_core::Value::Str("x".repeat(4 * 1024 * 1024)));
+    let allocation = allocation_counter::measure(|| {
+        let error = optimize_query(&context, std::borrow::Cow::Owned(*query)).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("53200"));
+        assert_eq!(error.to_string(), "request resources unavailable");
+    });
+    assert!(allocation.bytes_total < 4096, "{allocation:?}");
+    assert!(!inputs.captured.get());
+}
+
+#[test]
+fn owned_query_optimization_releases_input_on_resource_unwind() {
+    let inputs = Inputs {
+        captured: Cell::new(false),
+        analyzed: true,
+    };
+    let context = StatementPlanningContext {
+        analysis: StatementAnalysisContext {
+            scopes: &inputs,
+            routines: &NoRoutines,
+            aliases: &NoRoutines,
+        },
+        aggregates: &|_: &str| false,
+        optimization: &UnavailableResources { unwind: true },
+        constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
+    };
+    let UnifiedPlan::Query(mut query) =
+        UnifiedPlan::lower(uqa_sql::compile("VALUES ('x')").unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    let uqa_sql::plan::RelationalPlan::Values { rows, .. } = &mut query.root else {
+        panic!("values")
+    };
+    rows[0][0] = uqa_sql::ScalarExpr::Literal(uqa_core::Value::Str("x".repeat(4 * 1024 * 1024)));
+    let allocation = allocation_counter::measure(|| {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            optimize_query(&context, std::borrow::Cow::Owned(*query))
+        }));
+        assert!(outcome.is_err());
+    });
+    assert!(allocation.bytes_total < 16 * 1024, "{allocation:?}");
+    assert!(
+        allocation.bytes_current <= -(4 * 1024 * 1024),
+        "{allocation:?}"
+    );
+    assert!(!inputs.captured.get());
+}
+
 #[test]
 fn failed_sql_analysis_precedes_optimizer_inputs_and_constant_evaluation() {
     let inputs = Inputs {

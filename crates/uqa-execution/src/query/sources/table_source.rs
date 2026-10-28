@@ -371,7 +371,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     context
                         .ctes
                         .rewrites
-                        .optimize_retained_query(&execution_plan)?
+                        .optimize_retained_query(execution_plan)?
                 };
                 let execution_plan = &optimized;
                 let streamed = match try_build_streaming_subquery_operator(

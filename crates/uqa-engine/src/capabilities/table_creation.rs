@@ -84,7 +84,10 @@ impl TableCreationTransactions for Engine {
 }
 impl TableAsQuerySource for Engine {
     fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError> {
-        crate::capabilities::statement_planning::optimize_engine_query(self, plan)
+        crate::capabilities::statement_planning::optimize_engine_query(
+            self,
+            std::borrow::Cow::Borrowed(plan),
+        )
     }
     fn execute(
         &self,

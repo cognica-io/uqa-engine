@@ -64,8 +64,8 @@ pub trait QueryOutputRewriter: Sync {
         visible_ctes: &dyn Fn(&str) -> bool,
     ) -> Result<(), SQLError>;
 
-    /// Optimize a catalog-retained query before assembling either its streaming or materialized execution path.
-    fn optimize_retained_query(&self, query: &QueryPlan) -> Result<QueryPlan, SQLError>;
+    /// Consume the private catalog-query destination before assembling its streaming or materialized execution path. The caller has already restored layouts and applied its output demand.
+    fn optimize_retained_query(&self, query: QueryPlan) -> Result<QueryPlan, SQLError>;
 
     /// Return a plan that applies the complete output predicate, or `None` when the caller must retain it.
     fn push_output_filter(

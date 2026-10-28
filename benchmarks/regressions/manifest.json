@@ -26139,6 +26139,64 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "owned_query_optimization_does_not_copy_input_before_resource_failure",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/executable/tests.rs",
+      "capability": "Owned source query optimization",
+      "workload": "Pass an already owned query with a four MiB literal to an optimizer whose resource acquisition returns 53200.",
+      "invariant": "Propagate the original diagnostic before metadata capture with less than four KiB additional allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "owned_query_optimization_releases_input_on_resource_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/executable/tests.rs",
+      "capability": "Owned source query optimization",
+      "workload": "Unwind while acquiring resources for an already owned query containing a four MiB literal.",
+      "invariant": "Release the original input during unwind without copying it or acquiring statistics/rule inputs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_owned_source_optimization_preserves_input_allocations",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/sources.rs",
+      "capability": "Owned source query optimization",
+      "workload": "Optimize 8,192 parameter rows through the actual retained-source adapter with 64 KiB request workspace on all four providers.",
+      "invariant": "Keep the original outer and row-vector addresses, allocate less than 16 KiB additional storage and release temporary resources.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_borrowed_source_optimization_preserves_private_destinations",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/sources.rs",
+      "capability": "Owned source query optimization",
+      "workload": "Optimize a borrowed three-row utility query twice through the native CTAS adapter on all four providers.",
+      "invariant": "Retain independent destination row vectors, preserve parameter identities and keep later optimization unaffected by mutations to the first output.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

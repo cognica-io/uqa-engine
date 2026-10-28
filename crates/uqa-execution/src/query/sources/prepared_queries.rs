@@ -356,7 +356,7 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
         )?;
     }
     if optimize {
-        query = context.ctes.rewrites.optimize_retained_query(&query)?;
+        query = context.ctes.rewrites.optimize_retained_query(query)?;
     }
     prepare_query(context, &mut query, params, &scope, outer)?;
     *executable_query = Some(Box::new(query));

@@ -251,7 +251,7 @@ pub(crate) fn estimate_engine_plan(
 
 pub(crate) fn optimize_engine_query(
     engine: &Engine,
-    query: &uqa_planner::QueryPlan,
+    query: std::borrow::Cow<'_, uqa_planner::QueryPlan>,
 ) -> Result<uqa_planner::QueryPlan, SQLError> {
     uqa_planner::statement_planning::executable::optimize_query(
         &engine.statement_planning_context(),
