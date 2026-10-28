@@ -6,6 +6,68 @@
 
 use super::*;
 
+#[test]
+fn small_metadata_roots_keep_their_resident_capture_fast_path() {
+    use super::super::run::write_counts;
+
+    let control = StorageReadControl::with_limit(4096);
+    let changes = PrivateRecordChanges::new(control.memory());
+    changes
+        .apply(
+            &[
+                RecordWrite {
+                    key: b"a",
+                    expected: None,
+                    value: None,
+                },
+                RecordWrite {
+                    key: b"c",
+                    expected: None,
+                    value: Some(b"private"),
+                },
+            ],
+            &control,
+        )
+        .unwrap();
+    write_counts::take();
+    let view = changes.snapshot().unwrap();
+    assert_eq!(write_counts::take().bytes, 0);
+    let reader = StorageReadControl::with_limit(32);
+    assert_eq!(view.get(b"a", &reader).unwrap().unwrap().value(), None);
+    assert_eq!(
+        view.get(b"c", &reader).unwrap().unwrap().value(),
+        Some(&b"private"[..])
+    );
+    assert_eq!(reader.memory().used(), 0);
+    drop((view, changes));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn retained_root_sealing_remains_beneficial_under_small_allowances() {
+    let control = StorageReadControl::with_limit(16 * 1024);
+    let changes = PrivateRecordChanges::new(control.memory());
+    changes
+        .apply(
+            &[RecordWrite {
+                key: b"payload",
+                expected: None,
+                value: Some(&[7; 8 * 1024]),
+            }],
+            &control,
+        )
+        .unwrap();
+    let view = changes.snapshot().unwrap();
+    let peer = control.memory().reserve(12 * 1024).unwrap();
+    drop(peer);
+    assert_eq!(
+        view.get(b"payload", &control).unwrap().unwrap().value(),
+        Some(&[7; 8 * 1024][..])
+    );
+    drop((view, changes));
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn populated(control: &StorageReadControl) -> PrivateRecordChanges {
     let changes = PrivateRecordChanges::new(control.memory());
     for index in 0_u64..24 {

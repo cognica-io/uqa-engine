@@ -178,6 +178,12 @@ impl State {
         let key_bytes = self.records.iter().fold(0_u64, |bytes, (key, _)| {
             bytes.saturating_add(key.bytes().len() as u64)
         });
+        if !compact
+            && self.resident
+                <= SpilledRunWriter::buffered_bytes(self.records.len() as u64, key_bytes, &memory)
+        {
+            return Ok(());
+        }
         let mut writer = SpilledRunWriter::new(self.records.len() as u64, key_bytes, &memory)?;
         for (_, change) in &self.records {
             writer.push(

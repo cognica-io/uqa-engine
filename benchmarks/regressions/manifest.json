@@ -18925,6 +18925,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "test": "small_metadata_roots_keep_their_resident_capture_fast_path",
+      "capability": "Small retained-root workspace preservation",
+      "workload": "Capture a private tombstone and seven-byte value under a 4 KiB session allowance, then read their exact states through an independent 32-byte reader.",
+      "invariant": "Capture writes no spill payloads when its I/O buffers exceed the resident tier; tiny controlled reads retain their existing fast path and all owner reservations are released."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "test": "retained_root_sealing_remains_beneficial_under_small_allowances",
+      "capability": "Small-allowance retained producer admission",
+      "workload": "Freeze an 8 KiB private value under a 16 KiB allowance and admit a following 12 KiB producer before reading the original value.",
+      "invariant": "Sealing uses the actual bounded writer-buffer requirement instead of an absolute spill-size floor; the later producer fits, the frozen value is exact and dropping owners releases every reservation."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "command_snapshot_releases_large_resident_roots_for_the_next_producer",
       "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
       "cases": 1,
