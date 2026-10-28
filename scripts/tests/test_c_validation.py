@@ -59,6 +59,8 @@ class OwnershipTests(unittest.TestCase):
     def test_c_values_arrow_and_sanitizers_are_binding_inputs(self):
         for path in ("crates/uqa-core/src/value.rs", "crates/uqa-api/src/arrow/arrays.rs",
                      "crates/uqa-storage/src/test_support/fixtures.rs",
+                     "crates/uqa-storage/src/test_support/tests.rs",
+                     "crates/uqa-storage/src/test_support/tests/fixtures.rs",
                      "scripts/verify-c-clients.py", ".github/scripts/c-sanitizer-cc.sh"):
             with self.subTest(path=path):
                 self.assertTrue(SCOPE.affected("bindings", path))

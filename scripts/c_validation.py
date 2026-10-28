@@ -44,7 +44,8 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 def affected(kind: str, path: str) -> bool:
     if path.startswith("crates/") and ("/tests/" in path or path.endswith("/tests.rs")):
-        return path.startswith(("crates/uqa-ffi/", "examples/c/"))
+        return path.startswith("crates/uqa-ffi/") or (
+            kind == "bindings" and fnmatch.fnmatchcase(path, "crates/*/src/test_support*"))
     patterns = SHARED + (BINDINGS if kind == "bindings" else PACKAGES)
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
