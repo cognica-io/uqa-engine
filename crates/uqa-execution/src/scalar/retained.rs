@@ -67,6 +67,14 @@ impl ConstantValueStorage for RetainedConstants {
 }
 
 impl ConstantValueSource for ConstantRows {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        observer.allocation(size_of::<Self>(), size_of::<Self>())?;
+        self.0.lock().observe_resident_allocations(observer)
+    }
+
     fn read(&self, index: u64) -> Result<Value, SQLError> {
         let row = self
             .0

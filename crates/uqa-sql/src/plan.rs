@@ -26,6 +26,7 @@ mod command_children;
 mod command_expressions;
 pub(crate) mod copy;
 pub mod input_projection;
+mod memory;
 mod model;
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;

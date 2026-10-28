@@ -21,6 +21,18 @@ pub(crate) struct BufferedIndexedSpill {
 }
 
 impl BufferedIndexedSpill {
+    /// Read resident capacities while the caller holds this store's guard. Serialized disk bytes and decoding workspace are not resident planning storage.
+    pub(crate) fn observe_resident_allocations(
+        &self,
+        observer: &mut uqa_core::memory::AllocationObserver<'_, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        observer.buffer::<Vec<u8>>(self.rows.len(), self.rows.capacity())?;
+        for record in self.rows.iter() {
+            observer.buffer::<u8>(record.len(), record.capacity())?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(schema: RowSchema, budget_bytes: usize) -> Self {
         Self::with_memory(schema, &MemoryBudget::new(budget_bytes))
     }

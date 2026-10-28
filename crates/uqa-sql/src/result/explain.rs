@@ -63,9 +63,7 @@ pub struct ExplainPlanningMetrics {
     pub memory: Option<ExplainPlanningMemory>,
 }
 
-/// Live storage attributed to the native planning owner before execution. Used
-/// bytes exclude unused container capacity; allocated bytes include that
-/// capacity. Neither quantity is a process total, execution peak or estimate.
+/// Live exposed executable and resident constant storage before execution. Used bytes exclude unused container capacity; allocated bytes include it. Separately owned analysis/catalog and spill-file services, opaque dependency allocations and allocator bookkeeping are outside this observation. Neither quantity is a process total, execution peak or estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExplainPlanningMemory {
     pub used_bytes: usize,

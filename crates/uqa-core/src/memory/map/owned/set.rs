@@ -179,3 +179,12 @@ impl<K> IntoIterator for OwnedSet<K> {
         OwnedSetIntoIter(self.0.into_iter())
     }
 }
+
+impl<K: crate::memory::ObserveAllocations> crate::memory::ObserveAllocations for OwnedSet<K> {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        observer.child(&self.0)
+    }
+}

@@ -438,3 +438,20 @@ fn column_references(block: &QueryBlockPlan) -> BTreeSet<ColumnIdentity> {
     }
     references
 }
+
+impl uqa_core::memory::ObserveAllocations for DeferredOuterRewrite {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        let Self {
+            outer_columns: _,
+            replacements: _,
+            shadowed_qualifiers,
+            shadowed_columns,
+        } = self;
+        observer.child(shadowed_qualifiers)?;
+        observer.child(shadowed_columns)?;
+        Ok(())
+    }
+}

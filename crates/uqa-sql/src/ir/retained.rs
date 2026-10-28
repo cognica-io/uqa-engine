@@ -16,6 +16,14 @@ use crate::{ast::ColumnType, SQLError};
 /// Storage for an already evaluated value. Reading must reproduce the original value without invoking SQL or changing it; implementations own their resource until the final shared handle is dropped.
 pub trait ConstantValueSource: fmt::Debug + Send + Sync {
     fn read(&self, index: u64) -> Result<Value, SQLError>;
+
+    /// Observe resident owner storage without decoding a constant or touching its spill files. External providers may have no exposed allocation observation.
+    fn observe_allocations<'a>(
+        &'a self,
+        _observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        Ok(())
+    }
 }
 
 /// An immutable positional value in a shared owner. Copying this handle never reads or copies the payload.
@@ -78,6 +86,14 @@ impl<'de> Deserialize<'de> for RetainedConstantValue {
 struct OwnedConstant(Value);
 
 impl ConstantValueSource for OwnedConstant {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        observer.allocation(size_of::<Self>(), size_of::<Self>())?;
+        observer.child(&self.0)
+    }
+
     fn read(&self, index: u64) -> Result<Value, SQLError> {
         if index != 0 {
             return Err(SQLError::Internal(
@@ -85,6 +101,18 @@ impl ConstantValueSource for OwnedConstant {
             ));
         }
         Ok(self.0.clone())
+    }
+}
+
+impl uqa_core::memory::ObserveAllocations for RetainedConstantValue {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        if observer.shared_owner(self.source.as_ref())? {
+            self.source.observe_allocations(observer)?;
+        }
+        Ok(())
     }
 }
 

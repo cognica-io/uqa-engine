@@ -68,3 +68,15 @@ impl RowDescriptor {
 
 #[cfg(test)]
 mod tests;
+
+impl crate::memory::ObserveAllocations for RowDescriptor {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), ValueRetentionError> {
+        if observer.shared_owner(self.0.as_ref())? {
+            observer.buffer::<RecordFieldType>(self.0.len(), self.0.len())?;
+        }
+        Ok(())
+    }
+}

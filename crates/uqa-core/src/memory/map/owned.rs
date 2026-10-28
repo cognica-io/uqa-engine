@@ -261,3 +261,14 @@ impl<K, V> IntoIterator for OwnedMap<K, V> {
         iter
     }
 }
+
+impl<K: crate::memory::ObserveAllocations, V: crate::memory::ObserveAllocations>
+    crate::memory::ObserveAllocations for OwnedMap<K, V>
+{
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        observer.child(&self.root)
+    }
+}

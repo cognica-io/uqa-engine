@@ -231,3 +231,25 @@ impl<'a, K, V> IntoIterator for &'a BudgetedMap<K, V> {
         self.iter()
     }
 }
+
+impl<K: super::ObserveAllocations, V: super::ObserveAllocations> super::ObserveAllocations
+    for OwnedNode<K, V>
+{
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut super::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        observer.allocation(size_of::<Node<K, V>>(), size_of::<Node<K, V>>())?;
+        let Node {
+            key,
+            value,
+            left,
+            right,
+            height: _,
+        } = self.value.as_ref();
+        observer.child(key)?;
+        observer.child(value)?;
+        observer.child(left)?;
+        observer.child(right)
+    }
+}

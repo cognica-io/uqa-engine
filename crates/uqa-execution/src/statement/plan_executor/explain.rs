@@ -188,6 +188,10 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             retained.cancellation(),
             self.context.runtime.cancellation,
         );
+        let memory = settings
+            .memory
+            .then(|| body.planning_memory(&control))
+            .transpose()?;
         let physical = self.context.physical_explain.physical_explain_plan(
             body,
             self.params,
@@ -218,7 +222,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             uqa_sql::result::explain::ExplainPlanningMetrics {
                 io: captured.io,
                 io_timing: captured.io_timing,
-                memory: None,
+                memory,
             }
         });
         let physical = control.finish(

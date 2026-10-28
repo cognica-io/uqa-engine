@@ -251,3 +251,22 @@ impl<'de> serde::Deserialize<'de> for ArrayValue {
             .ok_or_else(|| serde::de::Error::custom("invalid PostgreSQL array dimensions"))
     }
 }
+
+impl crate::memory::ObserveAllocations for ArrayValue {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        observer.allocation(size_of::<ArrayStorage>(), size_of::<ArrayStorage>())?;
+        let ArrayStorage {
+            elements,
+            dimensions,
+            lower_bounds,
+            element_type_oid: _,
+        } = self.storage.as_ref();
+        observer.child(elements)?;
+        observer.child(dimensions)?;
+        observer.child(lower_bounds)?;
+        Ok(())
+    }
+}

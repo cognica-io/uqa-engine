@@ -13,11 +13,49 @@ struct Source {
     reads: AtomicUsize,
 }
 impl ConstantValueSource for Source {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        observer.allocation(size_of::<Self>(), size_of::<Self>())?;
+        observer.child(&self.value)
+    }
+
     fn read(&self, index: u64) -> Result<Value, SQLError> {
         assert_eq!(index, 0);
         self.reads.fetch_add(1, Ordering::Relaxed);
         Ok(self.value.clone())
     }
+}
+
+#[test]
+fn planning_memory_observes_shared_constants_without_reading_their_values() {
+    use uqa_core::memory::{AllocationUsage, ProductionControl};
+    let (expression, source) = literal(Value::Str("x".repeat(1 << 20)), ColumnType::Text);
+    let one = AllocationUsage::measure(&expression, &ProductionControl::uncontrolled()).unwrap();
+    let copies = vec![expression.clone(); 128];
+    let observed = AllocationUsage::measure(&copies, &ProductionControl::uncontrolled()).unwrap();
+    let crate::ScalarExpr::RetainedLiteral(literal) = &expression else {
+        panic!("retained literal")
+    };
+    let metadata =
+        size_of::<RetainedScalarLiteral>() + literal.declaration.as_ref().unwrap().capacity();
+    let copied_metadata: usize = copies
+        .iter()
+        .map(|copy| {
+            let crate::ScalarExpr::RetainedLiteral(literal) = copy else {
+                panic!("retained literal")
+            };
+            size_of::<RetainedScalarLiteral>() + literal.declaration.as_ref().unwrap().capacity()
+        })
+        .sum();
+    assert_eq!(
+        observed.allocated_bytes,
+        one.allocated_bytes - metadata
+            + copied_metadata
+            + copies.capacity() * size_of::<crate::ScalarExpr>()
+    );
+    assert_eq!(source.reads.load(Ordering::Relaxed), 0);
 }
 
 fn literal(value: Value, ty: ColumnType) -> (crate::ScalarExpr, Arc<Source>) {

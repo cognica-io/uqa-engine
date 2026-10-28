@@ -21,6 +21,7 @@ mod copying;
 mod decoding;
 mod identity;
 mod nonfinite;
+mod observation;
 mod retention;
 pub use decoding::JsonValueDecoder;
 mod tagged;

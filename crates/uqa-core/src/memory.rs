@@ -17,6 +17,7 @@ mod deque;
 mod hash_set;
 mod heap;
 mod map;
+mod observation;
 mod production;
 mod small_vec;
 mod string;
@@ -30,6 +31,7 @@ pub use map::{
     BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter,
     OwnedSetIter, PreparedMapEntry,
 };
+pub use observation::{AllocationObserver, AllocationUsage, ObserveAllocations};
 pub use production::{
     Produced, ProductionControl, ProductionSmallVec, ProductionString, ProductionVec,
 };

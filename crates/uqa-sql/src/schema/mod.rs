@@ -271,3 +271,15 @@ pub mod retention;
 
 mod type_lookup;
 pub use type_lookup::{ColumnTypeSchema, ScalarTypeSchema};
+
+impl uqa_core::memory::ObserveAllocations for ColumnIdentity {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        let Self { qualifier, column } = self;
+        observer.child(qualifier)?;
+        observer.child(column)?;
+        Ok(())
+    }
+}

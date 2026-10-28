@@ -13,6 +13,7 @@ mod explain_execution;
 mod explain_generic;
 mod explain_inputs;
 mod explain_io;
+mod explain_memory;
 mod explain_named;
 mod explain_node_estimates;
 mod explain_node_executions;

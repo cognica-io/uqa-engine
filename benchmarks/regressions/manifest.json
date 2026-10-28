@@ -25577,6 +25577,142 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "observation_reads_live_lengths_and_capacities_without_counting_its_workspace",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/observation/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "Strings and vectors with spare capacity, a sibling reservation and removal of their payload.",
+      "invariant": "Observe exact live lengths and exposed capacities, exclude diagnostic workspace and release every temporary reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "observation_rejects_workspace_and_cancellation_without_retaining_a_lease",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/observation/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "An exhausted allowance and a cancelled invoking token over an immutable source.",
+      "invariant": "Reject observation before unadmitted workspace and preserve cancellation precedence, source contents and final live allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "observation_counts_shared_tuple_storage_once_without_reading_it",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/observation/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "128 retained views of one uninterpreted tuple with one MiB capacity under a four KiB diagnostic allowance.",
+      "invariant": "Count one shared backing allocation with exact length and capacity, without decoding or copying tuple bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "observation_workspace_follows_depth_instead_of_sequence_width",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/observation/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "100,000 string slots and 10,000 document-map keys under a four KiB diagnostic allowance, plus 4,000 nested value lists.",
+      "invariant": "Bound vector and map traversal workspace by depth and observe deep containers without recursive calls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "plan_observation_counts_actual_payload_and_capacity_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/memory/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "A plan with a seven-byte string in four MiB capacity, spare row buffers and an external analysis descriptor.",
+      "invariant": "Match independently calculated live layouts and capacities with less than four KiB additional diagnostic allocation and no retained workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_observation_covers_queries_and_mutations_without_changing_the_ir",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/memory/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "Query, subquery, join, window, recursive CTE, set operation and INSERT/UPDATE/DELETE/MERGE plan storage.",
+      "invariant": "Observe each executable without changing its IR or evaluating its expressions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "planning_memory_observes_shared_constants_without_reading_their_values",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/retained/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "128 scalar handles sharing one MiB constant payload.",
+      "invariant": "Count the shared owner once, include each independent metadata box, and call no constant reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "planning_memory_counts_resident_constants_once_and_excludes_spilled_payload",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/retained/tests.rs",
+      "capability": "Native planning memory observation",
+      "workload": "Resident constant rows, 128 shared handles and a one MiB constant that forces encrypted spill.",
+      "invariant": "Measure actual resident buffer capacities once, exclude disk payload and decoding workspace, and preserve subsequent constant reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_explain_memory_matches_postgresql_visibility_and_effects",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/prepared/explain_memory.rs",
+      "capability": "Native planning memory observation",
+      "workload": "429 independently captured PostgreSQL 18 cases across four formats, option combinations, prepared reuse/replan and utility paths on all four storage providers.",
+      "invariant": "Match memory-field visibility and exact sequence effects; report positive used KiB no greater than allocated KiB without extra execution.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_explain_memory_precedes_execution_and_recovers_after_rejection",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/prepared/explain_memory.rs",
+      "capability": "Native planning memory observation",
+      "workload": "Direct and forced generic/custom prepared EXPLAIN ANALYZE, exhausted request allowance, savepoint recovery, execution output and persistent reopen on all four providers.",
+      "invariant": "Preserve 53200 and lazy diagnostics, execute mutations once after recovery, exclude execution memory and release the request allowance at retirement.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

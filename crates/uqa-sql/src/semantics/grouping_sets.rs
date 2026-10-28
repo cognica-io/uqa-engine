@@ -612,3 +612,17 @@ fn canonical_function_name(name: String) -> String {
         None => lower,
     }
 }
+
+impl uqa_core::memory::ObserveAllocations for AnalyzedGroupingSets {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        let Self {
+            original_count: _,
+            retained,
+        } = self;
+        observer.child(retained)?;
+        Ok(())
+    }
+}

@@ -151,6 +151,31 @@ impl<'de> serde::Deserialize<'de> for DatumValue {
     }
 }
 
+impl crate::memory::ObserveAllocations for DatumValue {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        if observer.shared_owner(self.bytes.as_ref())? {
+            observer.allocation(size_of::<Vec<u8>>(), size_of::<Vec<u8>>())?;
+            observer.buffer::<u8>(self.bytes.len(), self.bytes.capacity())?;
+        }
+        if let Some(fields) = &self.record_fields {
+            if observer.shared_owner(fields.as_ref())? {
+                observer.allocation(
+                    size_of::<Vec<RecordDatumField>>(),
+                    size_of::<Vec<RecordDatumField>>(),
+                )?;
+                observer.buffer::<RecordDatumField>(fields.len(), fields.capacity())?;
+                for field in fields.iter() {
+                    observer.child(&field.name)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
