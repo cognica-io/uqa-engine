@@ -18,8 +18,7 @@ use crate::unified_plan::{
     QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
 };
 use crate::{
-    JoinAlgorithm, JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinOrderTree,
-    JoinPredicate, JoinRelation, RelationStats,
+    JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinPredicate, JoinRelation, RelationStats,
 };
 
 mod access_path;

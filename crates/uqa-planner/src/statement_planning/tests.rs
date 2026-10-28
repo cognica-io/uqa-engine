@@ -33,12 +33,12 @@ struct FailingCatalog {
 }
 
 impl PlannerStatisticsCatalog for FailingCatalog {
-    fn storage_table(&self, _: &str) -> Result<Option<Arc<dyn StatisticsTableState>>, String> {
+    fn storage_table(&self, _: &str) -> Result<Option<Arc<dyn StatisticsTableState>>, SQLError> {
         self.table
             .borrow_mut()
             .take()
             .map(|table| Some(table as Arc<dyn StatisticsTableState>))
-            .ok_or_else(|| "later table lookup failed".into())
+            .ok_or_else(|| SQLError::Internal("later table lookup failed".into()))
     }
 
     fn hierarchy_scan_tables(&self, _: &str) -> Result<Vec<String>, SQLError> {
@@ -54,10 +54,10 @@ impl PlannerStatisticsCatalog for FailingCatalog {
         unreachable!("hierarchy discovery failed")
     }
 
-    fn column_statistics(&self, _: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
+    fn column_statistics(&self, _: &str) -> Result<BTreeMap<String, ColumnStats>, SQLError> {
         assert!(self.retained.upgrade().is_some());
         self.reads.borrow_mut().push("columns");
-        Err("column metadata failed".into())
+        Err(SQLError::Internal("column metadata failed".into()))
     }
 
     fn resolved_table_name(&self, _: &str) -> Result<Option<String>, SQLError> {

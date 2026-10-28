@@ -21,10 +21,11 @@ pub trait StatisticsTableState: Send + Sync {}
 
 /// Loaded metadata needed to estimate relational access without depending on a storage provider.
 pub trait PlannerStatisticsCatalog {
-    fn storage_table(&self, table: &str) -> Result<Option<Arc<dyn StatisticsTableState>>, String>;
+    fn storage_table(&self, table: &str)
+        -> Result<Option<Arc<dyn StatisticsTableState>>, SQLError>;
     fn hierarchy_scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError>;
-    fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String>;
+    fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, SQLError>;
     fn resolved_table_name(&self, table: &str) -> Result<Option<String>, SQLError>;
     fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError>;
 }
@@ -75,16 +76,12 @@ impl crate::SourceStatistics for CatalogSourceStatistics<'_> {
                     None
                 }
                 (_, Err(error)) => {
-                    self.record_error(SQLError::Internal(format!(
-                        "read optimizer statistics for `{table}`: {error}"
-                    )));
+                    self.record_error(error);
                     None
                 }
             },
             Err(error) => {
-                self.record_error(SQLError::Internal(format!(
-                    "resolve optimizer storage table `{table}`: {error}"
-                )));
+                self.record_error(error);
                 None
             }
         }
@@ -148,9 +145,7 @@ impl crate::SourceStatistics for CatalogSourceStatistics<'_> {
             Ok(Some(_)) => {}
             Ok(None) => return None,
             Err(error) => {
-                self.record_error(SQLError::Internal(format!(
-                    "resolve optimizer storage table `{table}`: {error}"
-                )));
+                self.record_error(error);
                 return None;
             }
         }

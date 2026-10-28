@@ -25276,6 +25276,51 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "optimizer_routes_nested_join_search_through_request_admission",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/admission.rs",
+      "capability": "Native join planning admission",
+      "workload": "Joins in direct queries, CTEs, scalar subqueries, INSERT, UPDATE, DELETE, MERGE and cursors with rejected, cancelled and sufficient production scopes.",
+      "invariant": "Preserve successful source trees and propagate both cancellation scopes and memory rejection through nested optimizer entry points without leaked reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_join_planning_shares_request_allowance_and_cancellation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory.rs",
+      "capability": "Native join planning admission",
+      "workload": "Native planning adapters under an exhausted request allowance and cancelled runtime on four providers, followed by recovery.",
+      "invariant": "Share the native request budget and token, preserve typed 53200/57014 diagnostics through statistics reads, and release failed planning resources without changing the recovered tree.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_join_requests_recover_after_admission_failure",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory.rs",
+      "capability": "Native join planning admission",
+      "workload": "Parameterized direct SQL, forced custom/generic prepared queries and JSON EXPLAIN with savepoint rejection/recovery on four providers and persistent reopen.",
+      "invariant": "Keep failed-frame and rollback behavior, return the expected row or explanation after recovery and release retained resources before reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

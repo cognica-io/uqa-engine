@@ -876,6 +876,7 @@ mod cache;
 mod mutation_recheck;
 mod null_qualifications;
 mod operators;
+mod planning_memory;
 mod regex_cache;
 mod retrieval_planning;
 mod scope;

@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod admission;
+
 #[test]
 fn unavailable_function_cost_does_not_copy_join_source_payloads() {
     for size in [4 * 1024 * 1024, 4096] {
@@ -24,7 +26,13 @@ fn unavailable_function_cost_does_not_copy_join_source_payloads() {
         };
         args[0] = ScalarExpr::Literal(uqa_core::Value::Str("x".repeat(size)));
         let allocation = allocation_counter::measure(|| {
-            let result = reordered_inner_join_source(source, &[], &|_: &str| None).unwrap();
+            let result = reordered_inner_join_source(
+                source,
+                &[],
+                &|_: &str| None,
+                &ProductionControl::uncontrolled(),
+            )
+            .unwrap();
             assert!(result.is_none());
         });
         assert!(allocation.bytes_total < 4096, "size={size}: {allocation:?}");
@@ -60,7 +68,12 @@ fn unavailable_function_cost_does_not_copy_join_predicates() {
             *on = Some(predicate);
         }
         let allocation = allocation_counter::measure(|| {
-            reorder_unified_plan_joins(&mut plan, &|_: &str| None).unwrap();
+            reorder_unified_plan_joins(
+                &mut plan,
+                &|_: &str| None,
+                &ProductionControl::uncontrolled(),
+            )
+            .unwrap();
         });
         assert!(
             allocation.bytes_total < 4096,

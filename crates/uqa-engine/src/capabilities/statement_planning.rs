@@ -9,6 +9,7 @@ use crate::Engine;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::catalog_index::CatalogIndexRow;
+use uqa_execution::storage_errors::storage_error;
 use uqa_planner::{
     statement_planning::{
         rule_inputs::{RuleInputColumns, RuleInputPlanningContext},
@@ -103,10 +104,18 @@ impl Engine {
 impl StatisticsTableState for crate::TableState {}
 
 impl PlannerStatisticsCatalog for Engine {
-    fn storage_table(&self, table: &str) -> Result<Option<Arc<dyn StatisticsTableState>>, String> {
+    fn storage_table(
+        &self,
+        table: &str,
+    ) -> Result<Option<Arc<dyn StatisticsTableState>>, SQLError> {
         self.try_table(table)
             .map(|state| state.map(|state| state as Arc<dyn StatisticsTableState>))
-            .map_err(|error| error.to_string())
+            .map_err(|error| {
+                storage_error(
+                    &format!("resolve optimizer storage table `{table}`"),
+                    &error,
+                )
+            })
     }
     fn hierarchy_scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
         self.query_hierarchy_scan_tables(table, true)
@@ -114,17 +123,18 @@ impl PlannerStatisticsCatalog for Engine {
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError> {
         self.table_row_estimate(table)
     }
-    fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
-        self.try_query_column_stats(table)
-            .map_err(|error| error.to_string())
+    fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, SQLError> {
+        self.try_query_column_stats(table).map_err(|error| {
+            storage_error(&format!("read optimizer statistics for `{table}`"), &error)
+        })
     }
     fn resolved_table_name(&self, table: &str) -> Result<Option<String>, SQLError> {
         self.resolve_table_name(table)
-            .map_err(|error| SQLError::Internal(error.to_string()))
+            .map_err(|error| storage_error("resolve optimizer index target", &error))
     }
     fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError> {
         self.catalog_indexes_in_execution()
-            .map_err(|error| SQLError::Internal(error.to_string()))
+            .map_err(|error| storage_error("read optimizer catalog indexes", &error))
     }
 }
 impl RetrievalSourceCosting for Engine {
@@ -181,6 +191,18 @@ impl Engine {
     }
 }
 impl uqa_planner::statement_planning::executable::StatementOptimizationContexts for Engine {
+    fn production_resources(
+        &self,
+    ) -> Result<Option<uqa_planner::statement_planning::executable::PlanningResources>, SQLError>
+    {
+        let control = self.query_retention_control()?;
+        Ok(Some(
+            uqa_planner::statement_planning::executable::PlanningResources::new(
+                control.memory().clone(),
+                control.cancellation().clone(),
+            ),
+        ))
+    }
     fn constant_storage(
         &self,
     ) -> Result<Option<Arc<dyn uqa_sql::ir::ConstantValueStorage>>, SQLError> {

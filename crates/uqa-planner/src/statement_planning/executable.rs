@@ -8,6 +8,10 @@
 
 use super::{rule_inputs::RuleInputPlanningContext, StatementStatisticsContext};
 use crate::{AggregateClassifier, ConstantEvaluator, QueryPlan, UnifiedPlan};
+use uqa_core::{
+    memory::{MemoryBudget, ProductionControl},
+    CancellationToken,
+};
 use uqa_sql::{
     binding::statements::{analyze_executable_plan, AnalyzedResult, StatementAnalysisContext},
     SQLError, SQLParam,
@@ -15,6 +19,11 @@ use uqa_sql::{
 
 /// Borrow planner metadata after SQL analysis succeeds.
 pub trait StatementOptimizationContexts {
+    /// Retain the invoking request's allowance and cancellation signal while
+    /// optimizer producers run. Standalone planning may remain uncontrolled.
+    fn production_resources(&self) -> Result<Option<PlanningResources>, SQLError> {
+        Ok(None)
+    }
     fn constant_storage(
         &self,
     ) -> Result<Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>, SQLError> {
@@ -33,6 +42,27 @@ pub trait StatementOptimizationContexts {
         None
     }
 }
+
+/// Native planning retains the existing request owner without depending on a
+/// storage provider. Its new allocations use the invoking cancellation scope.
+pub struct PlanningResources {
+    memory: MemoryBudget,
+    cancellation: CancellationToken,
+}
+
+impl PlanningResources {
+    pub fn new(memory: MemoryBudget, cancellation: CancellationToken) -> Self {
+        Self {
+            memory,
+            cancellation,
+        }
+    }
+
+    fn control(&self) -> ProductionControl<'_> {
+        ProductionControl::new(&self.memory, &self.cancellation, &self.cancellation)
+    }
+}
+
 pub struct StatementPlanningContext<'a> {
     pub analysis: StatementAnalysisContext<'a>,
     pub aggregates: &'a dyn AggregateClassifier,
@@ -127,7 +157,11 @@ pub fn optimize_plan(
     context: &StatementPlanningContext<'_>,
     plan: UnifiedPlan,
 ) -> Result<UnifiedPlan, SQLError> {
+    let resources = context.optimization.production_resources()?;
     let mut config = crate::optimizer::OptimizerConfig::new(context.constant_evaluator);
+    config.production = resources
+        .as_ref()
+        .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
     config.builtin_permissions = context.optimization.builtin_permissions();
     config.routine_inlining = context.optimization.routine_inlining();
     let storage = || context.optimization.constant_storage();

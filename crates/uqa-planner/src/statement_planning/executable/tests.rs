@@ -23,6 +23,9 @@ impl StatementAnalysisScopes for Inputs {
     }
 }
 impl StatementOptimizationContexts for Inputs {
+    fn production_resources(&self) -> Result<Option<PlanningResources>, SQLError> {
+        panic!("analysis failed before optimizer resource capture")
+    }
     fn statistics(&self) -> StatementStatisticsContext<'_> {
         panic!("analysis failed before optimizer input capture")
     }

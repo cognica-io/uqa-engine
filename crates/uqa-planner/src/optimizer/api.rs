@@ -23,6 +23,15 @@ pub enum OptimizerError {
 
 pub type OptimizerResult<T> = Result<T, OptimizerError>;
 
+impl From<crate::JoinOrderError> for OptimizerError {
+    fn from(error: crate::JoinOrderError) -> Self {
+        match error {
+            crate::JoinOrderError::Graph(error) => Self::JoinGraph(error),
+            crate::JoinOrderError::Production(error) => Self::Expression(error.into()),
+        }
+    }
+}
+
 /// Evaluate a planner-proven constant using the runtime selected by the caller.
 pub type ConstantEvaluator = fn(&ScalarExpr) -> Result<uqa_core::Value, uqa_sql::SQLError>;
 
@@ -50,6 +59,8 @@ impl std::fmt::Debug for ConstantStorageFactory<'_> {
 
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig<'a> {
+    /// Allocation owner and cancellation scopes for optimizer producers.
+    pub production: uqa_core::memory::ProductionControl<'a>,
     /// CASE/COALESCE result types and arm coercions have already been retained by the caller. Unreachable arms can be discarded without changing subsequent type inference.
     pub coerced_conditionals: bool,
     pub enable_filter_pushdown: bool,
@@ -86,6 +97,7 @@ impl OptimizerConfig<'_> {
     #[must_use]
     pub const fn new(constant_evaluator: ConstantEvaluator) -> Self {
         Self {
+            production: uqa_core::memory::ProductionControl::uncontrolled(),
             coerced_conditionals: false,
             enable_filter_pushdown: true,
             enable_boolean_simplify: true,
@@ -189,7 +201,7 @@ pub fn optimize_with_aggregates_and_statistics(
 ) -> OptimizerResult<UnifiedPlan> {
     optimize_unified_plan(&mut plan, config, aggregates)?;
     if config.enable_join_reordering {
-        reorder_unified_plan_joins(&mut plan, statistics)?;
+        reorder_unified_plan_joins(&mut plan, statistics, &config.production)?;
     }
     Ok(plan)
 }

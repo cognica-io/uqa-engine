@@ -7,11 +7,12 @@
 //! Statistics-driven DPccp join reordering and predicate attachment.
 
 use super::{
-    BTreeMap, BTreeSet, BinaryOp, CommandPlan, ExpressionPlan, JoinAlgorithm,
-    JoinExecutionStrategy, JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinOrderTree,
-    JoinPredicate, JoinRelation, QueryPlan, RelationalPlan, ScalarExpr, ScalarFrameBound,
-    SourcePlan, SourceStatistics, UnifiedPlan,
+    BTreeMap, BTreeSet, BinaryOp, CommandPlan, ExpressionPlan, JoinExecutionStrategy,
+    JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinPredicate, JoinRelation, QueryPlan,
+    RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan, SourceStatistics, UnifiedPlan,
 };
+
+use uqa_core::memory::ProductionControl;
 
 const DEFAULT_JOIN_CARDINALITY: u64 = 1_000;
 
@@ -21,21 +22,25 @@ mod tests;
 pub(super) fn reorder_unified_plan_joins(
     plan: &mut UnifiedPlan,
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> Result<(), crate::JoinOrderError> {
     match plan {
-        UnifiedPlan::Query(query) => reorder_query_joins(query, statistics),
-        UnifiedPlan::Command(command) => reorder_command_joins(command, statistics),
+        UnifiedPlan::Query(query) => reorder_query_joins(query, statistics, control),
+        UnifiedPlan::Command(command) => reorder_command_joins(command, statistics, control),
     }
 }
 
 fn reorder_query_joins(
     query: &mut QueryPlan,
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> Result<(), crate::JoinOrderError> {
     for cte in &mut query.ctes {
         match &mut cte.body {
-            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics)?,
-            crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics)?,
+            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control)?,
+            crate::CtePlanBody::Command(command) => {
+                reorder_command_joins(command, statistics, control)?;
+            }
         }
     }
     match &mut query.root {
@@ -50,19 +55,19 @@ fn reorder_query_joins(
                 })
                 .unwrap_or_default();
             if let Some(source) = &mut block.from {
-                reorder_source_joins(source, &where_predicates, statistics)?;
+                reorder_source_joins(source, &where_predicates, statistics, control)?;
             }
             for subquery in &mut block.subqueries {
-                reorder_query_joins(subquery, statistics)?;
+                reorder_query_joins(subquery, statistics, control)?;
             }
         }
         RelationalPlan::SetOp { left, right, .. } => {
-            reorder_query_joins(left, statistics)?;
-            reorder_query_joins(right, statistics)?;
+            reorder_query_joins(left, statistics, control)?;
+            reorder_query_joins(right, statistics, control)?;
         }
         RelationalPlan::Values { subqueries, .. } => {
             for subquery in subqueries {
-                reorder_query_joins(subquery, statistics)?;
+                reorder_query_joins(subquery, statistics, control)?;
             }
         }
     }
@@ -72,10 +77,11 @@ fn reorder_query_joins(
 fn reorder_cte_joins(
     cte: &mut crate::CtePlan,
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> Result<(), crate::JoinOrderError> {
     match &mut cte.body {
-        crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics),
-        crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics),
+        crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control),
+        crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics, control),
     }
 }
 
@@ -86,45 +92,46 @@ fn reorder_cte_joins(
 fn reorder_command_joins(
     command: &mut CommandPlan,
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> Result<(), crate::JoinOrderError> {
     match command {
-        CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics)?,
+        CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics, control)?,
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
-                reorder_cte_joins(cte, statistics)?;
+                reorder_cte_joins(cte, statistics, control)?;
             }
             if let Some(source) = &mut plan.source {
-                reorder_source_joins(source, &[], statistics)?;
+                reorder_source_joins(source, &[], statistics, control)?;
             }
             for subquery in &mut plan.subqueries {
-                reorder_query_joins(subquery, statistics)?;
+                reorder_query_joins(subquery, statistics, control)?;
             }
         }
         CommandPlan::Delete(plan) => {
             for cte in &mut plan.ctes {
-                reorder_cte_joins(cte, statistics)?;
+                reorder_cte_joins(cte, statistics, control)?;
             }
             if let Some(source) = &mut plan.source {
-                reorder_source_joins(source, &[], statistics)?;
+                reorder_source_joins(source, &[], statistics, control)?;
             }
             for subquery in &mut plan.subqueries {
-                reorder_query_joins(subquery, statistics)?;
+                reorder_query_joins(subquery, statistics, control)?;
             }
         }
         CommandPlan::Merge(plan) => {
             for cte in &mut plan.ctes {
-                reorder_cte_joins(cte, statistics)?;
+                reorder_cte_joins(cte, statistics, control)?;
             }
-            reorder_source_joins(&mut plan.source, &[], statistics)?;
+            reorder_source_joins(&mut plan.source, &[], statistics, control)?;
             for subquery in &mut plan.subqueries {
-                reorder_query_joins(subquery, statistics)?;
+                reorder_query_joins(subquery, statistics, control)?;
             }
         }
         CommandPlan::DeclareCursor { query, .. } => {
-            reorder_query_joins(query, statistics)?;
+            reorder_query_joins(query, statistics, control)?;
         }
         CommandPlan::Call { args: params, .. } => {
-            reorder_expression_subquery_joins(params, statistics)?;
+            reorder_expression_subquery_joins(params, statistics, control)?;
         }
         CommandPlan::Explain { .. }
         | CommandPlan::CreateTableAs { .. }
@@ -205,18 +212,21 @@ fn reorder_command_joins(
 fn reorder_insert_joins(
     plan: &mut crate::unified_plan::InsertPlan,
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> Result<(), crate::JoinOrderError> {
     for cte in &mut plan.ctes {
         match &mut cte.body {
-            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics)?,
-            crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics)?,
+            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control)?,
+            crate::CtePlanBody::Command(command) => {
+                reorder_command_joins(command, statistics, control)?;
+            }
         }
     }
     if let Some(source) = &mut plan.source {
-        reorder_query_joins(source, statistics)?;
+        reorder_query_joins(source, statistics, control)?;
     }
     for subquery in &mut plan.subqueries {
-        reorder_query_joins(subquery, statistics)?;
+        reorder_query_joins(subquery, statistics, control)?;
     }
     Ok(())
 }
@@ -224,10 +234,11 @@ fn reorder_insert_joins(
 fn reorder_expression_subquery_joins(
     expressions: &mut [ExpressionPlan],
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> Result<(), crate::JoinOrderError> {
     for expression in expressions {
         for subquery in &mut expression.subqueries {
-            reorder_query_joins(subquery, statistics)?;
+            reorder_query_joins(subquery, statistics, control)?;
         }
     }
     Ok(())
@@ -237,21 +248,24 @@ fn reorder_source_joins(
     source: &mut SourcePlan,
     external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<()> {
+    control: &ProductionControl<'_>,
+) -> Result<(), crate::JoinOrderError> {
     match source {
         SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
-            reorder_source_joins(left, &[], statistics)?;
-            reorder_source_joins(right, &[], statistics)?;
+            reorder_source_joins(left, &[], statistics, control)?;
+            reorder_source_joins(right, &[], statistics, control)?;
         }
-        SourcePlan::Subquery { body, .. } => reorder_query_joins(body, statistics)?,
+        SourcePlan::Subquery { body, .. } => reorder_query_joins(body, statistics, control)?,
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. } => {}
     }
 
-    if let Some(reordered) = reordered_inner_join_source(source, external_predicates, statistics)? {
+    if let Some(reordered) =
+        reordered_inner_join_source(source, external_predicates, statistics, control)?
+    {
         *source = reordered;
     }
     Ok(())
@@ -272,7 +286,8 @@ fn reordered_inner_join_source(
     source: &SourcePlan,
     external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<Option<SourcePlan>> {
+    control: &ProductionControl<'_>,
+) -> Result<Option<SourcePlan>, crate::JoinOrderError> {
     let mut atoms = Vec::new();
     let mut expressions = Vec::new();
     if !flatten_reorderable_inner_join(source, &mut atoms, &mut expressions)
@@ -387,8 +402,9 @@ fn reordered_inner_join_source(
         });
     }
 
-    let result = JoinOrderOptimizer::new().optimize(relations, graph_predicates)?;
-    let mut reordered = materialize_join_order(result.tree, &atoms)?;
+    let selected =
+        JoinOrderOptimizer::new().select_with_control(&relations, &graph_predicates, control)?;
+    let mut reordered = materialize_join_order(&selected, &atoms)?;
     attach_join_predicates(&mut reordered, &mut predicates, true);
     if !predicates.is_empty() {
         return Err(JoinGraphError::InvalidPlan {
@@ -396,7 +412,8 @@ fn reordered_inner_join_source(
                 "join reordering failed to retain {} predicate(s)",
                 predicates.len()
             ),
-        });
+        }
+        .into());
     }
     Ok(Some(reordered))
 }
@@ -720,18 +737,16 @@ fn implied_join_predicates(
 }
 
 fn materialize_join_order(
-    tree: JoinOrderTree,
+    tree: &crate::JoinPlan,
     atoms: &[&SourcePlan],
 ) -> JoinGraphResult<SourcePlan> {
-    match tree {
-        JoinOrderTree::Scan(relation) => {
-            let source_id =
-                usize::try_from(relation.source_id).map_err(|_| JoinGraphError::InvalidPlan {
-                    detail: format!(
-                        "join source id {} exceeds the addressable source range",
-                        relation.source_id
-                    ),
-                })?;
+    match (&tree.left, &tree.right) {
+        (None, None) => {
+            let source_id = usize::try_from(tree.relations.trailing_zeros()).map_err(|_| {
+                JoinGraphError::InvalidPlan {
+                    detail: "join leaf index exceeds the addressable source range".into(),
+                }
+            })?;
             atoms
                 .get(source_id)
                 .map(|source| (*source).clone())
@@ -742,38 +757,37 @@ fn materialize_join_order(
                     ),
                 })
         }
-        JoinOrderTree::Inner {
-            algorithm,
-            left,
-            right,
-            ..
-        } => Ok(SourcePlan::Join {
-            comma: false,
-            left: Box::new(materialize_join_order(*left, atoms)?),
-            right: Box::new(materialize_join_order(*right, atoms)?),
-            kind: uqa_sql::ast::JoinKind::Inner,
-            on: None,
-            using: None,
-            natural: false,
-            alias: None,
-            column_aliases: Vec::new(),
-            lateral: false,
-            strategy: match algorithm {
-                JoinAlgorithm::Hash => JoinExecutionStrategy::Hash,
-            },
-        }),
-        JoinOrderTree::Cross { left, right } => Ok(SourcePlan::Join {
-            comma: false,
-            left: Box::new(materialize_join_order(*left, atoms)?),
-            right: Box::new(materialize_join_order(*right, atoms)?),
-            kind: uqa_sql::ast::JoinKind::Inner,
-            on: None,
-            using: None,
-            natural: false,
-            alias: None,
-            column_aliases: Vec::new(),
-            lateral: false,
-            strategy: JoinExecutionStrategy::Auto,
+        (Some(left), Some(right)) => {
+            let strategy = match (tree.join_edge, tree.kind) {
+                (None, _) => JoinExecutionStrategy::Auto,
+                (Some(_), Some(crate::OperatorKind::HashJoinInner)) => JoinExecutionStrategy::Hash,
+                (Some(_), Some(kind)) => {
+                    return Err(JoinGraphError::InvalidPlan {
+                        detail: format!("DPccp selected non-executable equijoin strategy {kind:?}"),
+                    })
+                }
+                (Some(_), None) => {
+                    return Err(JoinGraphError::InvalidPlan {
+                        detail: "DPccp equijoin node has no physical strategy".into(),
+                    })
+                }
+            };
+            Ok(SourcePlan::Join {
+                comma: false,
+                left: Box::new(materialize_join_order(left, atoms)?),
+                right: Box::new(materialize_join_order(right, atoms)?),
+                kind: uqa_sql::ast::JoinKind::Inner,
+                on: None,
+                using: None,
+                natural: false,
+                alias: None,
+                column_aliases: Vec::new(),
+                lateral: false,
+                strategy,
+            })
+        }
+        _ => Err(JoinGraphError::InvalidPlan {
+            detail: "join node contains exactly one child".into(),
         }),
     }
 }

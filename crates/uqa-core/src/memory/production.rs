@@ -17,7 +17,7 @@ pub use string::ProductionString;
 pub use vec::ProductionVec;
 
 /// Allocation and cancellation inputs borrowed for one production call. An ordinary call has no allowance or cancellation scope; a controlled call preserves both the original retained owner and the invoking reader.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProductionControl<'a> {
     budget: Option<&'a MemoryBudget>,
     original: Option<&'a CancellationToken>,
