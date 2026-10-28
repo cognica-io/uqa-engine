@@ -15,6 +15,9 @@ use super::{
 
 const DEFAULT_JOIN_CARDINALITY: u64 = 1_000;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn reorder_unified_plan_joins(
     plan: &mut UnifiedPlan,
     statistics: &dyn SourceStatistics,
@@ -232,7 +235,7 @@ fn reorder_expression_subquery_joins(
 
 fn reorder_source_joins(
     source: &mut SourcePlan,
-    external_predicates: &[ScalarExpr],
+    external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     match source {
@@ -267,7 +270,7 @@ struct JoinPredicateBinding {
 )]
 fn reordered_inner_join_source(
     source: &SourcePlan,
-    external_predicates: &[ScalarExpr],
+    external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<Option<SourcePlan>> {
     let mut atoms = Vec::new();
@@ -358,15 +361,16 @@ fn reordered_inner_join_source(
     // only top-level conjunctive column equalities as join-graph edges. The
     // WHERE expression stays in place as a post-join semantic guard; adding
     // the same equality to the hash join changes evaluation shape, not rows.
+    let mut inferred = Vec::new();
     for expression in external_predicates {
         for (implied, _) in implied_join_predicates(expression, &aliases, &column_owners) {
-            expressions.push(implied);
+            inferred.push(implied);
         }
     }
 
     let mut predicates = Vec::new();
     let mut graph_predicates = Vec::new();
-    for expression in expressions {
+    for expression in expressions.into_iter().cloned().chain(inferred) {
         let mut qualifiers = BTreeSet::new();
         collect_scalar_qualifiers(&expression, &mut qualifiers);
         let graph_predicate = join_predicate(&expression, &aliases, &column_owners);
@@ -397,10 +401,10 @@ fn reordered_inner_join_source(
     Ok(Some(reordered))
 }
 
-fn flatten_reorderable_inner_join(
-    source: &SourcePlan,
-    atoms: &mut Vec<SourcePlan>,
-    predicates: &mut Vec<ScalarExpr>,
+fn flatten_reorderable_inner_join<'a>(
+    source: &'a SourcePlan,
+    atoms: &mut Vec<&'a SourcePlan>,
+    predicates: &mut Vec<&'a ScalarExpr>,
 ) -> bool {
     match source {
         SourcePlan::RetainedRows(_) => false,
@@ -431,7 +435,7 @@ fn flatten_reorderable_inner_join(
             true
         }
         SourcePlan::Table { .. } | SourcePlan::Function { .. } => {
-            atoms.push(source.clone());
+            atoms.push(source);
             true
         }
         SourcePlan::Join { .. }
@@ -441,13 +445,13 @@ fn flatten_reorderable_inner_join(
     }
 }
 
-fn collect_conjuncts(expression: &ScalarExpr, output: &mut Vec<ScalarExpr>) {
+fn collect_conjuncts<'a>(expression: &'a ScalarExpr, output: &mut Vec<&'a ScalarExpr>) {
     if let ScalarExpr::And(items) = expression {
         for item in items {
             collect_conjuncts(item, output);
         }
     } else {
-        output.push(expression.clone());
+        output.push(expression);
     }
 }
 
@@ -468,7 +472,7 @@ fn unique_column_owners(relations: &[JoinRelation]) -> ColumnOwners {
 
 fn apply_local_filter_estimates(
     relations: &mut [JoinRelation],
-    predicates: &[ScalarExpr],
+    predicates: &[&ScalarExpr],
     aliases: &BTreeSet<String>,
     column_owners: &ColumnOwners,
     relation_tables: &BTreeMap<String, String>,
@@ -489,7 +493,7 @@ fn apply_local_filter_estimates(
         predicates_by_alias
             .entry(alias.clone())
             .or_default()
-            .push(predicate.clone());
+            .push((*predicate).clone());
     }
 
     for relation in relations.iter_mut() {
@@ -713,7 +717,7 @@ fn implied_join_predicates(
 
 fn materialize_join_order(
     tree: JoinOrderTree,
-    atoms: &[SourcePlan],
+    atoms: &[&SourcePlan],
 ) -> JoinGraphResult<SourcePlan> {
     match tree {
         JoinOrderTree::Scan(relation) => {
@@ -726,7 +730,7 @@ fn materialize_join_order(
                 })?;
             atoms
                 .get(source_id)
-                .cloned()
+                .map(|source| (*source).clone())
                 .ok_or_else(|| JoinGraphError::InvalidPlan {
                     detail: format!(
                         "join source id {source_id} is outside {} source atom(s)",

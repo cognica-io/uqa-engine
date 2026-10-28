@@ -25146,6 +25146,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unavailable_function_cost_does_not_copy_join_source_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests.rs",
+      "capability": "Borrowed join-reordering inputs",
+      "workload": "Function-source arguments with 4 KiB and 4 MiB payloads when no native source cost is available.",
+      "invariant": "Keep the original unmodified join and allocate less than 4 KiB without copying source or predicate payloads before eligibility is established.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unavailable_function_cost_does_not_copy_join_predicates",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests.rs",
+      "capability": "Borrowed join-reordering inputs",
+      "workload": "Four MiB predicates in ON and WHERE on a join whose function cost is unavailable.",
+      "invariant": "Keep the original unmodified join and allocate less than 4 KiB without copying source or predicate payloads before eligibility is established.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
