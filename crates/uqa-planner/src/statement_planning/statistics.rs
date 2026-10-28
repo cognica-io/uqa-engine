@@ -6,8 +6,7 @@
 
 //! Catalog statistics and retrieval access estimates with first-error preservation.
 
-use crate::{ColumnStats, LocalAccessEstimate};
-use std::collections::BTreeMap;
+use crate::{ColumnStatistics, LocalAccessEstimate};
 use std::sync::Arc;
 use uqa_core::catalog_index::CatalogIndexRow;
 use uqa_sql::{
@@ -25,7 +24,7 @@ pub trait PlannerStatisticsCatalog {
         -> Result<Option<Arc<dyn StatisticsTableState>>, SQLError>;
     fn hierarchy_scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError>;
-    fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, SQLError>;
+    fn column_statistics(&self, table: &str) -> Result<ColumnStatistics, SQLError>;
     fn resolved_table_name(&self, table: &str) -> Result<Option<String>, SQLError>;
     fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError>;
 }

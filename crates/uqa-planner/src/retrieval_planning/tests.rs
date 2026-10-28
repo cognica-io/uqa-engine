@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::ColumnStats;
+use crate::ColumnStatistics;
 use std::{cell::RefCell, rc::Rc};
 use uqa_core::{catalog_index::CatalogIndexRow, Predicate};
 
@@ -54,7 +54,7 @@ impl RetrievalPlanningCatalog for Catalog {
     ) -> Result<Option<Box<dyn RetrievalStatisticsTable>>, String> {
         Ok(Some(Box::new(Table(self.clone()))))
     }
-    fn try_query_column_stats(&self, _: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
+    fn try_query_column_stats(&self, _: &str) -> Result<ColumnStatistics, String> {
         panic!("must stop at the text index error")
     }
     fn graph_snapshot(&self, _: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {
@@ -177,7 +177,7 @@ impl RetrievalPlanningCatalog for BrokenIndexCatalog {
     ) -> Result<Option<Box<dyn RetrievalStatisticsTable>>, String> {
         panic!("invalid catalog metadata must precede table retention")
     }
-    fn try_query_column_stats(&self, _: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
+    fn try_query_column_stats(&self, _: &str) -> Result<ColumnStatistics, String> {
         panic!("invalid catalog metadata must precede column statistics")
     }
     fn graph_snapshot(&self, _: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {

@@ -6,7 +6,7 @@
 
 //! Read-only catalog and retained index interfaces for retrieval costing.
 
-use crate::ColumnStats;
+use crate::ColumnStatistics;
 use std::collections::BTreeMap;
 use uqa_core::{catalog_index::CatalogIndexRow, Edge, Predicate, Vertex};
 use uqa_sql::SQLError;
@@ -106,7 +106,7 @@ pub trait RetrievalPlanningCatalog {
         &self,
         table: &str,
     ) -> Result<Option<Box<dyn RetrievalStatisticsTable>>, String>;
-    fn try_query_column_stats(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String>;
+    fn try_query_column_stats(&self, table: &str) -> Result<ColumnStatistics, String>;
     /// Read all four graph populations under one snapshot before returning.
     fn graph_snapshot(&self, graph: &str) -> Result<Option<GraphStatisticsSnapshot>, String>;
 }

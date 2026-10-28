@@ -95,7 +95,7 @@ fn rejected_join_search_does_not_copy_unused_column_names() {
         match table {
             "a" => Some(crate::RelationStats {
                 row_count: 100,
-                columns: columns.borrow_mut().take().unwrap(),
+                columns: columns.borrow_mut().take().unwrap().into(),
             }),
             "b" => None,
             _ => panic!("unexpected table"),

@@ -78,10 +78,7 @@ impl RetrievalPlanningCatalog for Inputs {
     ) -> Result<Option<Box<dyn RetrievalStatisticsTable>>, String> {
         panic!("access selection follows optimizer statistics binding")
     }
-    fn try_query_column_stats(
-        &self,
-        _: &str,
-    ) -> Result<BTreeMap<String, crate::ColumnStats>, String> {
+    fn try_query_column_stats(&self, _: &str) -> Result<crate::ColumnStatistics, String> {
         panic!("access selection follows optimizer statistics binding")
     }
     fn graph_snapshot(&self, _: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {

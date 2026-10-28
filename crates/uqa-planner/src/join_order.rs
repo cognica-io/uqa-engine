@@ -25,7 +25,7 @@ use uqa_core::{
     ValueRetentionError,
 };
 
-use crate::cardinality::{AccessParadigm, ColumnStats};
+use crate::cardinality::{AccessParadigm, ColumnStatistics};
 use crate::cost_model::{CostEstimator, OperatorKind};
 use crate::join_enumerator::JoinPlan;
 use crate::join_graph::{JoinGraph, JoinGraphError, JoinGraphResult};
@@ -46,7 +46,7 @@ pub enum JoinOrderError {
 pub struct JoinRelation {
     pub alias: String,
     pub cardinality: f64,
-    pub column_stats: BTreeMap<String, ColumnStats>,
+    pub column_stats: ColumnStatistics,
     /// Cost of producing this relation after local access predicates.
     pub access_cost: f64,
     /// Physical domain used by the relation-local access path.
@@ -301,6 +301,7 @@ impl JoinOrderOptimizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ColumnStats;
     use uqa_core::Value;
 
     mod memory;
@@ -309,7 +310,7 @@ mod tests {
         JoinRelation {
             alias: alias.into(),
             cardinality: card,
-            column_stats: BTreeMap::new(),
+            column_stats: ColumnStatistics::default(),
             access_cost: card,
             paradigm: AccessParadigm::Relational,
             source_id: src,
@@ -329,7 +330,7 @@ mod tests {
         JoinRelation {
             alias: alias.into(),
             cardinality: card,
-            column_stats: cs,
+            column_stats: cs.into(),
             access_cost: card,
             paradigm: AccessParadigm::Relational,
             source_id: src,

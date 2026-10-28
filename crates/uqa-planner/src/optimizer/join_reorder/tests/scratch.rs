@@ -13,7 +13,7 @@ fn relation(alias: String, source_id: u64) -> JoinRelation {
         source_id,
         cardinality: 100.0,
         access_cost: 100.0,
-        column_stats: BTreeMap::new(),
+        column_stats: crate::ColumnStatistics::default(),
         paradigm: crate::AccessParadigm::Relational,
     }
 }
@@ -164,14 +164,13 @@ fn local_predicate_groups_preserve_resolution_and_expression_restrictions() {
         relation("c".into(), 2),
     ];
     let aliases = BTreeSet::from(["a".into(), "b".into(), "c".into()]);
-    relations[1]
-        .column_stats
-        .insert("local_a".into(), crate::ColumnStats::default());
-    for relation in &mut relations[..2] {
-        relation
-            .column_stats
-            .insert("ambiguous".into(), crate::ColumnStats::default());
-    }
+    relations[0].column_stats =
+        BTreeMap::from([("ambiguous".into(), crate::ColumnStats::default())]).into();
+    relations[1].column_stats = BTreeMap::from([
+        ("local_a".into(), crate::ColumnStats::default()),
+        ("ambiguous".into(), crate::ColumnStats::default()),
+    ])
+    .into();
     let owners = ColumnOwners::new(&relations);
     let predicates: Vec<_> = [
         "a.id = 1",
@@ -354,7 +353,7 @@ fn local_predicate_grouping_borrows_aliases_and_admits_reference_buffers() {
         alias: alias.clone(),
         cardinality: 100.0,
         access_cost: 100.0,
-        column_stats: BTreeMap::new(),
+        column_stats: crate::ColumnStatistics::default(),
         paradigm: crate::AccessParadigm::Relational,
         source_id: 0,
     }];

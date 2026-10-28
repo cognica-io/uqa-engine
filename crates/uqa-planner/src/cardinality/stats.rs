@@ -8,6 +8,9 @@
 
 use super::{BTreeMap, Value, VertexConstraint};
 
+mod columns;
+pub use columns::ColumnStatistics;
+
 /// Jaccard-style selectivity assumed for text-similarity joins when no
 /// per-column statistics are available.
 pub const JACCARD_JOIN_SELECTIVITY: f64 = 0.05;
@@ -172,7 +175,7 @@ impl ColumnStats {
 #[derive(Debug, Clone, Default)]
 pub struct RelationStats {
     pub row_count: u64,
-    pub columns: BTreeMap<String, ColumnStats>,
+    pub columns: ColumnStatistics,
 }
 
 /// A costing observation over columns retained by the relation's owner.
@@ -192,7 +195,7 @@ impl RelationStats {
     pub fn new(row_count: u64) -> Self {
         Self {
             row_count,
-            columns: BTreeMap::new(),
+            columns: ColumnStatistics::default(),
         }
     }
 

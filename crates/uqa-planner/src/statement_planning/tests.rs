@@ -8,10 +8,9 @@ use super::{
     statistics::CatalogSourceStatistics, PlannerStatisticsCatalog, RetrievalSourceCosting,
     StatementStatisticsContext, StatisticsTableState,
 };
-use crate::{ColumnStats, LocalAccessEstimate, SourceStatistics};
+use crate::{ColumnStatistics, LocalAccessEstimate, SourceStatistics};
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
     sync::{Arc, Weak},
 };
 use uqa_core::catalog_index::CatalogIndexRow;
@@ -54,7 +53,7 @@ impl PlannerStatisticsCatalog for FailingCatalog {
         unreachable!("hierarchy discovery failed")
     }
 
-    fn column_statistics(&self, _: &str) -> Result<BTreeMap<String, ColumnStats>, SQLError> {
+    fn column_statistics(&self, _: &str) -> Result<ColumnStatistics, SQLError> {
         assert!(self.retained.upgrade().is_some());
         self.reads.borrow_mut().push("columns");
         Err(SQLError::Internal("column metadata failed".into()))

@@ -40,8 +40,9 @@ mod stats;
 pub use entropy::{column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate};
 pub(crate) use stats::RelationStatsRef;
 pub use stats::{
-    AccessParadigm, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler, LocalAccessEstimate,
-    RelationStats, Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY,
+    AccessParadigm, ColumnStatistics, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler,
+    LocalAccessEstimate, RelationStats, Selectivity, GRAPH_AVG_DEGREE_DEFAULT,
+    JACCARD_JOIN_SELECTIVITY,
 };
 
 use ast_helpers::{
@@ -59,7 +60,7 @@ pub struct CardinalityEstimator {
     /// Default selectivity for an inequality predicate with no histogram.
     pub range_selectivity: f64,
     /// Per-column statistics keyed by column name.
-    pub column_stats: BTreeMap<String, ColumnStats>,
+    pub column_stats: ColumnStatistics,
     /// Optional graph statistics used by traversal and pattern heuristics.
     pub graph_stats: Option<GraphStats>,
     /// Optional graph store sampler for random-walk pattern estimates.

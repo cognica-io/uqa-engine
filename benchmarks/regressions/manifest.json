@@ -26197,6 +26197,90 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_statistics_and_handle_clones_do_not_allocate",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests.rs",
+      "capability": "Immutable planner statistics snapshots",
+      "workload": "Create empty default, owned and collected statistics and clone their handles.",
+      "invariant": "Keep all empty observations allocation-free.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "shared_statistics_keep_payloads_until_the_last_reader_releases_them",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests.rs",
+      "capability": "Immutable planner statistics snapshots",
+      "workload": "Retain a four MiB MCV catalog snapshot through 64 independent readers.",
+      "invariant": "Allocate no new storage, retain the original map and payload addresses and release the generation after its last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "relation_builder_detaches_before_changing_shared_statistics",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests.rs",
+      "capability": "Immutable planner statistics snapshots",
+      "workload": "Replace an MCV entry through a standalone relation builder while an earlier reader retains its statistics.",
+      "invariant": "Keep the earlier value and selectivity unchanged and give the changed builder an independent generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "optimizer_statistics_attachment_keeps_one_payload_owner",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/tests.rs",
+      "capability": "Immutable planner statistics snapshots",
+      "workload": "Attach an owned map containing a four MiB MCV value to both optimizer estimators.",
+      "invariant": "Retain the original payload address in both estimators with less than four KiB additional allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_statistics_capture_reuses_catalog_payloads",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/statistics.rs",
+      "capability": "Immutable planner statistics snapshots",
+      "workload": "Capture a four MiB MCV catalog generation through both native statement and retrieval planning adapters on all four providers.",
+      "invariant": "Retain the original payload address with less than 16 KiB additional allocation across both captures.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_statistics_snapshots_follow_transactional_publication",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/statistics.rs",
+      "capability": "Immutable planner statistics snapshots",
+      "workload": "Retain statistics through ANALYZE, transactional publication, rollback, commit, close and persistent reopen on all four providers.",
+      "invariant": "Publish the correct row counts and bounds while earlier captured generations remain immutable and committed rows survive reopening.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

@@ -320,7 +320,8 @@ fn reordered_inner_join_source(
                     .as_ref()
                     .map_or(DEFAULT_JOIN_CARDINALITY, |stats| stats.row_count)
                     as f64;
-                let column_stats = relation_stats.map_or_else(BTreeMap::new, |stats| stats.columns);
+                let column_stats = relation_stats
+                    .map_or_else(crate::ColumnStatistics::default, |stats| stats.columns);
                 let access_cost = crate::CostEstimator::default()
                     .estimate_unary(crate::OperatorKind::TableScan, cardinality)
                     .total();
@@ -341,7 +342,7 @@ fn reordered_inner_join_source(
                         .expect("a function source always has a visible qualifier")
                         .to_string(),
                     estimate.output_rows,
-                    BTreeMap::new(),
+                    crate::ColumnStatistics::default(),
                     estimate.cost,
                     estimate.paradigm,
                 )

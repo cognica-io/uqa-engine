@@ -8,14 +8,14 @@
 
 use crate::{Engine, TableState};
 use parking_lot::RwLockReadGuard;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::{catalog_index::CatalogIndexRow, Predicate};
 use uqa_planner::{
     retrieval_planning::{
         GraphStatisticsSnapshot, RetrievalPlanningCatalog, RetrievalStatisticsTable,
         TextStatisticsRead, VectorStatisticsRead,
     },
-    ColumnStats,
+    ColumnStatistics,
 };
 use uqa_sql::SQLError;
 use uqa_storage::{read_control::StorageReadControl, InvertedIndex};
@@ -201,8 +201,9 @@ impl RetrievalPlanningCatalog for Engine {
             .map_err(|error| error.to_string())?;
         Ok(Some(Box::new(TableStatistics(state, control))))
     }
-    fn try_query_column_stats(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
+    fn try_query_column_stats(&self, table: &str) -> Result<ColumnStatistics, String> {
         self.try_query_column_stats(table)
+            .map(Into::into)
             .map_err(|error| error.to_string())
     }
     fn graph_snapshot(&self, graph: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {

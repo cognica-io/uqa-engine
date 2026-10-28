@@ -15,7 +15,9 @@ fn selected_join_tree_moves_owned_statistics_without_copying_payloads() {
     let mut left = rel_with_stats("a", 100.0, 1, "id", 100);
     let payload = "x".repeat(4 * 1024 * 1024);
     let original = payload.as_ptr();
-    left.column_stats.get_mut("id").unwrap().min_value = Some(Value::Str(payload));
+    let mut columns = (*left.column_stats).clone();
+    columns.get_mut("id").unwrap().min_value = Some(Value::Str(payload));
+    left.column_stats = columns.into();
     let relations = vec![left, rel_with_stats("b", 100.0, 2, "id", 100)];
     let predicates = vec![JoinPredicate {
         left_alias: "a".into(),

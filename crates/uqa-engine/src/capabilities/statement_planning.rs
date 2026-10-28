@@ -6,7 +6,6 @@
 
 //! Supply current catalog metadata and the configured retrieval planner to statement planning.
 use crate::Engine;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::catalog_index::CatalogIndexRow;
 use uqa_execution::storage_errors::storage_error;
@@ -16,7 +15,7 @@ use uqa_planner::{
         PlannerStatisticsCatalog, RetrievalSourceCosting, StatementStatisticsContext,
         StatisticsTableState,
     },
-    ColumnStats, LocalAccessEstimate,
+    ColumnStatistics, LocalAccessEstimate,
 };
 use uqa_sql::{ast::OperatorJoinRelations, SQLError, ScalarExpr};
 
@@ -123,10 +122,12 @@ impl PlannerStatisticsCatalog for Engine {
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError> {
         self.table_row_estimate(table)
     }
-    fn column_statistics(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, SQLError> {
-        self.try_query_column_stats(table).map_err(|error| {
-            storage_error(&format!("read optimizer statistics for `{table}`"), &error)
-        })
+    fn column_statistics(&self, table: &str) -> Result<ColumnStatistics, SQLError> {
+        self.try_query_column_stats(table)
+            .map(Into::into)
+            .map_err(|error| {
+                storage_error(&format!("read optimizer statistics for `{table}`"), &error)
+            })
     }
     fn resolved_table_name(&self, table: &str) -> Result<Option<String>, SQLError> {
         self.resolve_table_name(table)

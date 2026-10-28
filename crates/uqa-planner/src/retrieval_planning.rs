@@ -24,7 +24,6 @@ use indexes::index_candidates;
 pub use joins::estimate_cross_relation_operator_join;
 pub use paradigm::operator_tree_paradigm;
 use statistics::{graph_context, index_stats};
-use std::collections::BTreeMap;
 use uqa_operators::OperatorTree;
 use uqa_sql::SQLError;
 type PlanningResult<T> = Result<T, SQLError>;
@@ -45,7 +44,7 @@ pub fn query_optimizer(
     let candidates = index_candidates(catalog, table, tree)?;
     let stats = index_stats(catalog, table, tree)?;
     let column_stats = if table.is_empty() {
-        BTreeMap::new()
+        crate::ColumnStatistics::default()
     } else {
         catalog.try_query_column_stats(table).map_err(|error| {
             SQLError::Internal(format!(

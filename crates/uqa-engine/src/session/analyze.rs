@@ -462,6 +462,15 @@ impl Engine {
         table: &str,
         refresh: StatisticsRefresh,
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
+        self.column_stats_snapshot_in_execution(table, refresh)
+            .map(|columns| (*columns).clone())
+    }
+
+    fn column_stats_snapshot_in_execution(
+        &self,
+        table: &str,
+        refresh: StatisticsRefresh,
+    ) -> StorageBackendResult<Arc<crate::ColumnStatsMap>> {
         self.synchronize_table_data()?;
         let canonical_name = self
             .try_resolve_table_name(table)?
@@ -487,27 +496,27 @@ impl Engine {
                 if due {
                     self.analyze_table(&canonical_name, &t, false, None, true)?;
                 }
-                return Ok(t.column_stats.read().clone());
+                return Ok(t.column_stats.snapshot());
             }
             self.run_analyze(Some(&canonical_name))?;
             // Starting maintenance can refresh session-local table bindings.
             let refreshed = self.try_table(&canonical_name)?.ok_or_else(|| {
                 StorageBackendError::Other(format!("table `{canonical_name}` does not exist"))
             })?;
-            return Ok(refreshed.column_stats.read().clone());
+            return Ok(refreshed.column_stats.snapshot());
         }
-        let stats = t.column_stats.read().clone();
+        let stats = t.column_stats.snapshot();
         Ok(stats)
     }
 
     pub(crate) fn try_query_column_stats(
         &self,
         table: &str,
-    ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
+    ) -> StorageBackendResult<Arc<crate::ColumnStatsMap>> {
         // Memory-only engines have no durable independent sessions or blob
         // I/O. Retain their automatic lazy refresh at this boundary.
         if self.storage.provider.is_none() && self.query_table_snapshots.is_none() {
-            return self.column_stats_in_execution(table, StatisticsRefresh::Maintained);
+            return self.column_stats_snapshot_in_execution(table, StatisticsRefresh::Maintained);
         }
         let table = self
             .try_query_table(table)?
@@ -516,7 +525,7 @@ impl Engine {
         // a synchronous full-table ANALYZE (including unrelated BLOB fields).
         // Keep using the last collected estimate while the database worker
         // refreshes it. A genuinely new table uses ordinary planner estimates.
-        let stats = table.column_stats.read().clone();
+        let stats = table.column_stats.snapshot();
         Ok(stats)
     }
 }

@@ -146,7 +146,8 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
                     mcv_frequencies: vec![0.25],
                     ..Default::default()
                 },
-            )]),
+            )])
+            .into(),
         }];
         let aliases = BTreeSet::from(["a".into()]);
         let owners = ColumnOwners::new(&relations);

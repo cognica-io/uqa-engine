@@ -192,7 +192,8 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
                         ..Default::default()
                     },
                 ),
-            ]),
+            ])
+            .into(),
         }];
         let aliases = BTreeSet::from(["a".into()]);
         let owners = ColumnOwners::new(&relations);
