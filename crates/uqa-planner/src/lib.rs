@@ -71,8 +71,8 @@ pub use join_enumerator::{
 };
 pub use join_graph::{JoinEdge, JoinGraph, JoinGraphError, JoinGraphResult};
 pub use join_order::{
-    JoinAlgorithm, JoinCondition, JoinOrderOptimizer, JoinOrderResult, JoinOrderTree,
-    JoinPredicate, JoinRelation,
+    JoinAlgorithm, JoinCondition, JoinOrderError, JoinOrderOptimizer, JoinOrderResult,
+    JoinOrderTree, JoinPredicate, JoinRelation,
 };
 pub use optimizer::{
     optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,

@@ -25172,6 +25172,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_join_tree_moves_owned_statistics_without_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_order/tests/memory.rs",
+      "capability": "Admitted join graph selection",
+      "workload": "Two join relations with a four MiB statistics value.",
+      "invariant": "Move owned relation statistics into the selected tree without changing their allocation identity or copying the large payload; additional allocation stays below 64 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "join_selection_admits_graph_storage_and_releases_it_before_return",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_order/tests/memory.rs",
+      "capability": "Admitted join graph selection",
+      "workload": "Singleton, connected and disconnected two/eight/eighteen/sixty-four relation graphs at measured allowance boundaries.",
+      "invariant": "Preserve the selected tree and floating-point bits, admit every graph/search allocation before construction and retain only selected tree nodes after return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "rejected_or_cancelled_join_selection_does_not_copy_graph_inputs",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_order/tests/memory.rs",
+      "capability": "Admitted join graph selection",
+      "workload": "A four MiB relation alias with zero allowance or either cancelled token.",
+      "invariant": "Reject before copying graph inputs or allocating any candidate storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "join_selection_preserves_input_errors_and_releases_partial_graphs",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_order/tests/memory.rs",
+      "capability": "Admitted join graph selection",
+      "workload": "Empty graphs, invalid or duplicate relations, a sixty-fifth relation, unknown aliases and ignored singleton predicates.",
+      "invariant": "Preserve ordered graph diagnostics and singleton semantics while releasing all partially constructed graph storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "join_selection_respects_ancestor_admission_and_consumer_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_order/tests/memory.rs",
+      "capability": "Admitted join graph selection",
+      "workload": "Sibling-held parent allowance followed by consumer unwind and recovery.",
+      "invariant": "Respect the ancestor allowance and release all graph/search/output reservations on error or unwind, allowing a later selection.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -62,8 +62,8 @@ pub struct JoinGraph {
     pub(crate) cardinalities: Vec<f64>,
     /// Cost of producing each base relation after its local access predicates.
     pub(crate) access_costs: Vec<f64>,
-    /// Connecting edges. Order is irrelevant; the enumerator probes
-    /// them by bitmask membership.
+    /// Connecting edges in predicate order. Costing preserves that order
+    /// when multiplying selectivities and selecting the first crossing edge.
     pub(crate) edges: Vec<JoinEdge>,
 }
 
@@ -83,9 +83,21 @@ impl JoinGraph {
         access_cost: f64,
     ) -> JoinGraphResult<usize> {
         let idx = self.relations.len();
-        let name = name.into();
-        if idx >= 64 {
-            return Err(JoinGraphError::TooManyRelations { name, index: idx });
+        let name = Self::validate_relation(idx, name.into(), rows, access_cost)?;
+        self.relations.push(name);
+        self.cardinalities.push(rows);
+        self.access_costs.push(access_cost);
+        Ok(idx)
+    }
+
+    pub(crate) fn validate_relation(
+        index: usize,
+        name: String,
+        rows: f64,
+        access_cost: f64,
+    ) -> JoinGraphResult<String> {
+        if index >= 64 {
+            return Err(JoinGraphError::TooManyRelations { name, index });
         }
         if !rows.is_finite() || rows < 0.0 {
             return Err(JoinGraphError::InvalidCardinality { name, rows });
@@ -96,10 +108,7 @@ impl JoinGraph {
                 cost: access_cost,
             });
         }
-        self.relations.push(name);
-        self.cardinalities.push(rows);
-        self.access_costs.push(access_cost);
-        Ok(idx)
+        Ok(name)
     }
 
     pub fn add_edge(
@@ -108,23 +117,33 @@ impl JoinGraph {
         right_idx: usize,
         selectivity: f64,
     ) -> JoinGraphResult<()> {
+        let edge = Self::validated_edge(self.relation_count(), left_idx, right_idx, selectivity)?;
+        self.edges.push(edge);
+        Ok(())
+    }
+
+    pub(crate) fn validated_edge(
+        relation_count: usize,
+        left_idx: usize,
+        right_idx: usize,
+        selectivity: f64,
+    ) -> JoinGraphResult<JoinEdge> {
         for index in [left_idx, right_idx] {
-            if index >= self.relations.len() {
+            if index >= relation_count {
                 return Err(JoinGraphError::UnknownRelation {
                     index,
-                    relation_count: self.relations.len(),
+                    relation_count,
                 });
             }
         }
         if !selectivity.is_finite() || !(0.0..=1.0).contains(&selectivity) {
             return Err(JoinGraphError::InvalidSelectivity { selectivity });
         }
-        self.edges.push(JoinEdge {
+        Ok(JoinEdge {
             left: 1u64 << left_idx,
             right: 1u64 << right_idx,
             selectivity,
-        });
-        Ok(())
+        })
     }
 
     pub fn relation_count(&self) -> usize {
