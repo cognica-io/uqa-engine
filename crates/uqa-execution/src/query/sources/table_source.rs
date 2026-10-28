@@ -120,7 +120,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 ));
             }
 
-            if let Some((mut plan, mut definition_scope)) = ctes.take_deferred_input(name) {
+            if let Some((plan, mut definition_scope)) = ctes.take_deferred_input(name) {
+                // Drop the rewritten CTE body before the leases transferred by specialization.
+                let mut specialized_memory = uqa_sql::plan::ExecutableMemory::default();
+                let mut plan = plan;
                 if let (Some(query), Some(prepared)) =
                     (plan.body.query_mut(), executable_query.as_deref())
                 {
@@ -155,7 +158,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .transpose()?
                     .flatten();
                 let filters = if let Some(specialized) = specialized {
-                    *plan.body.query_mut().expect("query specialization") = specialized;
+                    let (query, memory) = specialized.into_unboxed();
+                    *plan.body.query_mut().expect("query specialization") = query;
+                    specialized_memory.absorb(memory);
                     None
                 } else {
                     filters
@@ -332,13 +337,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     filters
                 };
                 let propagated_plan = inherited_lock.as_ref().map(|target| {
-                    let mut plan = specialized_plan.clone().unwrap_or_else(|| plan.clone());
+                    let mut plan = specialized_plan.as_deref().unwrap_or(plan).clone();
                     apply_propagated_view_lock(&mut plan, target);
                     plan
                 });
                 let execution_plan = propagated_plan
                     .as_ref()
-                    .or(specialized_plan.as_ref())
+                    .or(specialized_plan.as_deref())
                     .unwrap_or(plan);
                 let mut execution_plan = execution_plan.clone();
                 if executable_query.is_none() {
@@ -365,15 +370,16 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         ctes.row_lock_outer_row().map(|row| &row.schema),
                     )?;
                 }
-                let optimized = if executable_query.is_some() {
-                    execution_plan
+                let optimized;
+                let execution_plan = if executable_query.is_some() {
+                    &execution_plan
                 } else {
-                    context
+                    optimized = context
                         .ctes
                         .rewrites
-                        .optimize_retained_query(execution_plan)?
+                        .optimize_retained_query(execution_plan)?;
+                    optimized.as_ref()
                 };
-                let execution_plan = &optimized;
                 let streamed = match try_build_streaming_subquery_operator(
                     context,
                     execution_plan,

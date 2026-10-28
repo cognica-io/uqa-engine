@@ -494,7 +494,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     .with_optional_source_sql(source_sql);
                     execute_plan(
                         &mut executor,
-                        analyzed.as_ref().unwrap_or(initial_plan.as_ref()),
+                        analyzed.as_deref().unwrap_or(initial_plan.as_ref()),
                         consumer,
                         source.prepared,
                     )
@@ -781,18 +781,16 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 // Catalog generations protect identity, while SQL analysis decides
                 // whether input constants also require a fresh message boundary.
                 let optimized = if source.prepared.is_some() {
-                    initial_plan.clone()
+                    initial_plan.clone().into()
                 } else if let Some(plan) = cached_optimized_plan {
                     plan
                 } else {
                     let (plan, reusable) = context
                         .planning
                         .plan_for_statement_cache(initial_plan.as_ref().clone(), params)?;
-                    let plan = Arc::new(plan);
+
                     if cache_single_statement && reusable {
-                        context
-                            .cache
-                            .cache_optimized_sql_plan(sql, Arc::clone(&plan));
+                        context.cache.cache_optimized_sql_plan(sql, plan.clone());
                     }
                     plan
                 };

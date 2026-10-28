@@ -30,6 +30,8 @@ mod memory;
 mod model;
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
+mod owned;
+pub use owned::{ExecutableMemory, OwnedExecutablePlan, OwnedQueryPlan, SharedExecutablePlan};
 mod query;
 mod query_visit;
 mod retained;

@@ -69,10 +69,7 @@ fn immutable_inputs_reuse_optimized_plans_while_parameter_types_are_reanalyzed()
     engine.sql(sql, &[]).unwrap();
     let first = engine.cached_optimized_sql_plan(sql).unwrap();
     engine.sql(sql, &[]).unwrap();
-    assert!(Arc::ptr_eq(
-        &first,
-        &engine.cached_optimized_sql_plan(sql).unwrap()
-    ));
+    assert!(first.ptr_eq(&engine.cached_optimized_sql_plan(sql).unwrap()));
     for value in [
         uqa_sql::SQLParam::Scalar(Value::Int(7)),
         uqa_sql::SQLParam::Scalar(Value::Str("text".into())),
@@ -100,10 +97,7 @@ fn session_independent_temporal_inputs_reuse_optimized_plans() {
         engine.sql(iso, &[]).unwrap().rows[0]["value"],
         date("2020-02-03")
     );
-    assert!(Arc::ptr_eq(
-        &first,
-        &engine.cached_optimized_sql_plan(iso).unwrap()
-    ));
+    assert!(first.ptr_eq(&engine.cached_optimized_sql_plan(iso).unwrap()));
     // A literal whose field order DateStyle selects is read again by every message.
     let ambiguous = "SELECT '02-03-2020'::date AS value";
     assert_eq!(

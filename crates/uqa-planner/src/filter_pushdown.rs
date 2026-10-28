@@ -495,7 +495,7 @@ pub fn push_output_filter_into_query_plan(
     qualifier: &str,
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
-) -> Result<Option<QueryPlan>, SQLError> {
+) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
     if query_contains_volatile_function(context.volatility, plan)? {
         return Ok(None);
     }
@@ -509,7 +509,7 @@ pub fn push_derived_output_filter(
     qualifier: &str,
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
-) -> Result<Option<QueryPlan>, SQLError> {
+) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
     let Some(mut columns) = plan
         .analyzed_output
         .as_ref()
@@ -539,12 +539,12 @@ pub fn push_derived_output_filter(
     else {
         return Ok(None);
     };
-    match (context.optimizer)(UnifiedPlan::Query(Box::new(specialized)))? {
-        UnifiedPlan::Query(plan) => Ok(Some(*plan)),
-        UnifiedPlan::Command(_) => Err(SQLError::Internal(
-            "query optimizer changed a query into a command plan".into(),
-        )),
-    }
+    (context.optimizer)(UnifiedPlan::Query(Box::new(specialized)))?
+        .into_query()
+        .map(Some)
+        .map_err(|_| {
+            SQLError::Internal("query optimizer changed a query into a command plan".into())
+        })
 }
 
 pub fn specialize_query_output_filter(

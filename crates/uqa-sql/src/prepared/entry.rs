@@ -20,7 +20,7 @@ pub struct PreparedStatementPlan {
     pub dependencies: super::dependencies::PreparedAnalysisDependencies,
     pub dependency_snapshot: Option<super::dependencies::PreparedDependencySnapshot>,
     /// Immutable generic executable shared by the cache and its active executions.
-    pub plan: Option<Arc<crate::plan::UnifiedPlan>>,
+    pub plan: Option<crate::plan::SharedExecutablePlan>,
     pub parameter_types: Vec<Option<crate::ast::ColumnType>>,
     pub result_schema: Option<crate::RowSchema>,
     pub source_sql: Option<Arc<str>>,

@@ -18,7 +18,6 @@ use std::{
 use uqa_sql::{
     ast::{Expr, Statement},
     binding::statements::ProceduralPlanAnalysis,
-    plan::UnifiedPlan,
     plpgsql::{
         parameterize_statement_variables, PLpgSQLCursorArguments, PLpgSQLExpression, PLpgSQLSource,
         PLpgSQLStatement, PLpgSQLVariableReference,
@@ -307,7 +306,7 @@ impl Interpreter<'_> {
         &self,
         prepared: &PreparedFragment,
         parameters: &[SQLParam],
-    ) -> Result<Arc<UnifiedPlan>, SQLError> {
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
         prepared
             .variants
             .select(|entry| {

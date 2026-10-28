@@ -74,13 +74,10 @@ fn unavailable_function_cost_does_not_copy_join_predicates() {
             };
             *on = Some(predicate);
         }
+        let control = ProductionControl::uncontrolled();
+        let mut rewrite = JoinRewrite::new(plan, &control);
         let allocation = allocation_counter::measure(|| {
-            reorder_unified_plan_joins(
-                &mut plan,
-                &|_: &str| None,
-                &ProductionControl::uncontrolled(),
-            )
-            .unwrap();
+            rewrite.run(&|_: &str| None, &control).unwrap();
         });
         assert!(
             allocation.bytes_total < 4096,
@@ -190,3 +187,31 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
         assert_eq!(result, expected);
     }
 }
+
+#[derive(Debug)]
+struct SelectedSource {
+    source: SourcePlan,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
+}
+impl std::ops::Deref for SelectedSource {
+    type Target = SourcePlan;
+    fn deref(&self) -> &Self::Target {
+        &self.source
+    }
+}
+
+fn reordered_inner_join_source(
+    source: &mut SourcePlan,
+    external: &[&ScalarExpr],
+    statistics: &dyn SourceStatistics,
+    control: &ProductionControl<'_>,
+) -> OptimizerResult<Option<SelectedSource>> {
+    let mut output = Output::new(control);
+    let source = rewrite_inner_join_source(source, external, statistics, control, &mut output)?;
+    Ok(source.map(|source| SelectedSource {
+        source,
+        _memory: output.finish(),
+    }))
+}
+
+mod output;

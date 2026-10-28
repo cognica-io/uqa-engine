@@ -264,9 +264,9 @@ fn wide_predicate_rejection(where_clause: bool) {
         let _ = original.check();
         let _ = invoking.check();
         let control = ProductionControl::new(&budget, &original, &invoking);
+        let mut rewrite = JoinRewrite::new(plan, &control);
         let allocation = allocation_counter::measure(|| {
-            let error =
-                reorder_unified_plan_joins(&mut plan, &|_: &str| None, &control).unwrap_err();
+            let error = rewrite.run(&|_: &str| None, &control).unwrap_err();
             let crate::optimizer::OptimizerError::Expression(error) = error else {
                 panic!("typed admission")
             };
@@ -281,12 +281,13 @@ fn wide_predicate_rejection(where_clause: bool) {
         );
         assert_eq!(allocation.bytes_current, 0);
         assert_eq!(budget.used(), 0);
-        let items = wide_inputs(&plan, where_clause);
+        let items = wide_inputs(&rewrite.plan, where_clause);
         assert_eq!(items.as_ptr(), pointer);
         assert_eq!(items.len(), 65536);
         assert!(items
             .iter()
             .all(|item| matches!(item, ScalarExpr::Literal(Value::Bool(true)))));
+        plan = rewrite.plan;
     }
 }
 
@@ -308,12 +309,13 @@ fn non_join_sources_do_not_collect_unused_where_predicates() {
         let budget = MemoryBudget::new(0);
         let token = CancellationToken::new();
         let control = ProductionControl::new(&budget, &token, &token);
+        let mut rewrite = JoinRewrite::new(plan, &control);
         let allocation = allocation_counter::measure(|| {
-            reorder_unified_plan_joins(&mut plan, &|_: &str| None, &control).unwrap();
+            rewrite.run(&|_: &str| None, &control).unwrap();
         });
         assert_eq!(allocation.bytes_total, 0);
         assert_eq!(budget.used(), 0);
-        assert_eq!(wide_inputs(&plan, true).len(), 65536);
+        assert_eq!(wide_inputs(&rewrite.plan, true).len(), 65536);
     }
 }
 

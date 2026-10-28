@@ -367,7 +367,7 @@ mod unified_plan_tests {
     use super::support::compile_logical_plans;
     use crate::{capabilities::statement_planning::optimize_engine_plan, Engine};
 
-    fn one(engine: &Engine, sql: &str) -> UnifiedPlan {
+    fn one(engine: &Engine, sql: &str) -> uqa_sql::plan::OwnedExecutablePlan {
         let mut plans = compile_logical_plans(engine, sql).expect("statement plans");
         assert_eq!(plans.len(), 1);
         optimize_engine_plan(engine, plans.remove(0)).expect("optimized statement plan")
@@ -381,7 +381,7 @@ mod unified_plan_tests {
             .expect("plan source table");
 
         let arithmetic = one(&engine, "SELECT amount * 2 + 1 AS adjusted FROM ledger");
-        let UnifiedPlan::Query(query) = arithmetic else {
+        let UnifiedPlan::Query(query) = &*arithmetic else {
             panic!("arithmetic SELECT must be a QueryPlan");
         };
         let RelationalPlan::QueryBlock(block) = &query.root else {
@@ -393,7 +393,7 @@ mod unified_plan_tests {
             &engine,
             "SELECT row_number() OVER (PARTITION BY account ORDER BY amount) FROM ledger",
         );
-        let UnifiedPlan::Query(query) = window else {
+        let UnifiedPlan::Query(query) = &*window else {
             panic!("window SELECT must be a QueryPlan");
         };
         let RelationalPlan::QueryBlock(block) = &query.root else {
@@ -405,7 +405,7 @@ mod unified_plan_tests {
             &engine,
             "SELECT q.total FROM (SELECT sum(amount) AS total FROM ledger) AS q",
         );
-        let UnifiedPlan::Query(query) = subquery else {
+        let UnifiedPlan::Query(query) = &*subquery else {
             panic!("subquery SELECT must be a QueryPlan");
         };
         let RelationalPlan::QueryBlock(block) = &query.root else {
@@ -418,8 +418,8 @@ mod unified_plan_tests {
             "UPDATE ledger SET amount = amount + 1 WHERE amount > 0",
         );
         assert!(matches!(
-            mutation,
-            UnifiedPlan::Command(command) if matches!(*command, CommandPlan::Update(_))
+            mutation.as_ref(),
+            UnifiedPlan::Command(command) if matches!(command.as_ref(), CommandPlan::Update(_))
         ));
 
         // Exercise the public SQL cache boundary after the catalog-aware plan checks.
@@ -453,7 +453,7 @@ mod unified_plan_tests {
             .cached_sql_statement(query)
             .and_then(|cached| cached.optimized_plan)
             .expect("optimized plan remains cached");
-        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert!(first.ptr_eq(&second));
 
         engine
             .sql("INSERT INTO items (id) VALUES (3)", &[])
@@ -468,12 +468,9 @@ mod unified_plan_tests {
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[2]["id"], uqa_core::Value::Int(3));
         let replanned = engine.cached_optimized_sql_plan(query).unwrap();
-        assert!(!std::sync::Arc::ptr_eq(&first, &replanned));
+        assert!(!first.ptr_eq(&replanned));
         engine.sql(query, &[]).unwrap();
-        assert!(std::sync::Arc::ptr_eq(
-            &replanned,
-            &engine.cached_optimized_sql_plan(query).unwrap()
-        ));
+        assert!(replanned.ptr_eq(&engine.cached_optimized_sql_plan(query).unwrap()));
     }
 
     #[test]

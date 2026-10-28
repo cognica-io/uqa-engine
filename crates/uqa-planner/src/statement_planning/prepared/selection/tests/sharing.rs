@@ -54,9 +54,9 @@ fn cached_prepared_selection_does_not_copy_executable_payloads() {
         });
         assert!(measured.bytes_total < 16 * 1024, "{measured:?}");
         assert!(measured.bytes_current < 16 * 1024, "{measured:?}");
-        assert!(Arc::ptr_eq(&selected.unwrap(), &cached));
+        assert!(selected.unwrap().ptr_eq(&cached));
         let snapshot = inputs.entry.borrow().as_ref().unwrap().clone();
-        assert!(Arc::ptr_eq(snapshot.plan.as_ref().unwrap(), &cached));
+        assert!(snapshot.plan.as_ref().unwrap().ptr_eq(&cached));
         assert_eq!(snapshot.generic_plans, used);
         assert_eq!(snapshot.custom_plans, 5);
     }
@@ -70,27 +70,25 @@ fn generic_execution_outlives_its_invalidated_cache_without_copying() {
         ..Inputs::default()
     };
     let selected = inputs.select().unwrap().unwrap();
-    let weak = Arc::downgrade(&selected);
     {
         let mut entry = inputs.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        assert!(Arc::ptr_eq(entry.plan.as_ref().unwrap(), &selected));
+        assert!(entry.plan.as_ref().unwrap().ptr_eq(&selected));
         entry.invalidate();
         assert!(entry.plan.is_none());
         assert!(entry.needs_analysis);
     }
     assert!(has_parameter(&selected));
-    assert_eq!(weak.strong_count(), 1);
-    drop(selected);
-    assert!(weak.upgrade().is_none());
+    assert_eq!(selected.strong_count(), 1);
+    let released = allocation_counter::measure(|| drop(selected));
+    assert!(released.bytes_current < 0, "{released:?}");
 
     let rebuilt = inputs.select().unwrap().unwrap();
-    let weak = Arc::downgrade(&rebuilt);
     assert!(inputs.entry.borrow_mut().take().is_some());
     assert!(has_parameter(&rebuilt));
-    assert_eq!(weak.strong_count(), 1);
-    drop(rebuilt);
-    assert!(weak.upgrade().is_none());
+    assert_eq!(rebuilt.strong_count(), 1);
+    let released = allocation_counter::measure(|| drop(rebuilt));
+    assert!(released.bytes_current < 0, "{released:?}");
 }
 
 #[test]
@@ -107,12 +105,12 @@ fn custom_selection_does_not_modify_the_shared_generic_plan() {
         .unwrap();
     let original = serde_json::to_value(generic.as_ref()).unwrap();
     let custom = inputs.select().unwrap().unwrap();
-    assert!(!Arc::ptr_eq(&generic, &custom));
+    assert!(!generic.ptr_eq(&custom));
     assert!(!has_parameter(&custom));
     assert_eq!(serde_json::to_value(generic.as_ref()).unwrap(), original);
     let entry = inputs.entry.borrow();
     let entry = entry.as_ref().unwrap();
-    assert!(Arc::ptr_eq(entry.plan.as_ref().unwrap(), &generic));
+    assert!(entry.plan.as_ref().unwrap().ptr_eq(&generic));
     assert_eq!(entry.generic_plans, 0);
     assert_eq!(entry.custom_plans, 6);
 }
@@ -121,7 +119,10 @@ fn custom_selection_does_not_modify_the_shared_generic_plan() {
 fn failed_or_unwound_selection_preserves_shared_cache_ownership() {
     struct Failure(bool);
     impl PreparedPlanOptimization for Failure {
-        fn optimize_plan(&self, _: UnifiedPlan) -> Result<UnifiedPlan, SQLError> {
+        fn optimize_plan(
+            &self,
+            _: UnifiedPlan,
+        ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
             assert!(!self.0, "optimizer unwind");
             Err(SQLError::Internal("optimizer error".into()))
         }
@@ -157,8 +158,8 @@ fn failed_or_unwound_selection_preserves_shared_cache_ownership() {
         }
         let entry = inputs.entry.borrow();
         let entry = entry.as_ref().unwrap();
-        assert!(Arc::ptr_eq(entry.plan.as_ref().unwrap(), &generic));
-        assert_eq!(Arc::strong_count(&generic), 2);
+        assert!(entry.plan.as_ref().unwrap().ptr_eq(&generic));
+        assert_eq!(generic.strong_count(), 2);
         assert_eq!(serde_json::to_value(generic.as_ref()).unwrap(), original);
         assert_eq!((entry.generic_plans, entry.custom_plans), (0, 5));
         assert!(!inputs.events.borrow().contains(&"publish"));

@@ -195,8 +195,14 @@ impl RoutineStatements for Engine {
             params,
         )
     }
-    fn optimize_plan(&self, plan: UnifiedPlan) -> Result<UnifiedPlan, SQLError> {
-        crate::capabilities::statement_planning::optimize_engine_plan(self, plan)
+    fn optimize_plan(
+        &self,
+        plan: UnifiedPlan,
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
+        uqa_planner::statement_planning::executable::optimize_shared_plan(
+            &self.statement_planning_context(),
+            plan,
+        )
     }
     fn assertions_enabled(&self) -> bool {
         self.plpgsql_asserts_enabled()

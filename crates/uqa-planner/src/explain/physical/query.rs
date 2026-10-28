@@ -292,7 +292,7 @@ impl Collector<'_, '_, '_> {
         &self,
         cte: &CtePlan,
         filter: Option<&(String, ScalarExpr)>,
-    ) -> Result<Option<QueryPlan>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
         if !cte_references_own_name_with_control(cte, self.control)?
             || cte.search.is_some()
             || cte.cycle.is_some()
@@ -330,11 +330,21 @@ impl Collector<'_, '_, '_> {
         let (Some(anchor), Some(step)) = (anchor, step) else {
             return Ok(None);
         };
+        let mut memory = uqa_sql::plan::ExecutableMemory::default();
         let mut specialized = query.clone();
         if let RelationalPlan::SetOp { left, right, .. } = &mut specialized.root {
-            **left = anchor;
-            **right = step;
+            let (anchor, anchor_memory) = anchor.into_parts();
+            let (step, step_memory) = step.into_parts();
+            *left = anchor;
+            *right = step;
+            memory.absorb(anchor_memory);
+            memory.absorb(step_memory);
         }
-        Ok(Some(specialized))
+        let (query, mut output) =
+            uqa_sql::plan::OwnedQueryPlan::from_query(specialized, &self.control)?.into_parts();
+        output.absorb(memory);
+        Ok(Some(uqa_sql::plan::OwnedQueryPlan::from_parts(
+            query, output,
+        )))
     }
 }

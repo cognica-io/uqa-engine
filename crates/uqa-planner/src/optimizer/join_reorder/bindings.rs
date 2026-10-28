@@ -52,53 +52,128 @@ impl PredicateBindings {
     }
 }
 
-pub(super) fn attach_join_predicates(
-    source: &mut SourcePlan,
-    selected: &crate::JoinPlan,
-    predicates: &mut [JoinPredicateBinding],
-    root: bool,
-) {
-    let SourcePlan::Join {
-        left, right, on, ..
-    } = source
-    else {
-        return;
-    };
-    attach_join_predicates(
-        left,
-        selected.left.as_deref().expect("selected join left"),
-        predicates,
-        false,
-    );
-    attach_join_predicates(
-        right,
-        selected.right.as_deref().expect("selected join right"),
-        predicates,
-        false,
-    );
-    let assign = |predicate: &JoinPredicateBinding| {
-        predicate.expression.is_some()
-            && (root
-                || (predicate.relations != 0 && predicate.relations & !selected.relations == 0))
-    };
-    let count = predicates
-        .iter()
-        .filter(|predicate| assign(predicate))
-        .count();
-    *on = match count {
-        0 => None,
-        1 => predicates
-            .iter_mut()
-            .find(|predicate| assign(predicate))
-            .and_then(|predicate| predicate.expression.take()),
-        _ => {
-            let mut assigned = Vec::with_capacity(count);
-            for predicate in predicates {
-                if assign(predicate) {
-                    assigned.push(predicate.expression.take().expect("assigned predicate"));
+/// Destination masks and conjunction buffers are complete before any source node moves.
+pub(super) struct PredicateAttachments {
+    buffers: [Option<super::output::Conjunction>; 63],
+    count: usize,
+}
+
+impl PredicateAttachments {
+    pub(super) fn prepare(
+        selected: &crate::JoinPlan,
+        predicates: &mut [JoinPredicateBinding],
+        output: &super::Output,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        fn destination(tree: &crate::JoinPlan, relations: u64) -> u64 {
+            if relations != 0 {
+                for child in [tree.left.as_deref(), tree.right.as_deref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    if child.left.is_some() && relations & !child.relations == 0 {
+                        return destination(child, relations);
+                    }
                 }
             }
-            Some(ScalarExpr::And(assigned))
+            tree.relations
         }
-    };
+        for predicate in predicates.iter_mut() {
+            predicate.relations = destination(selected, predicate.relations);
+        }
+        let mut prepared = Self {
+            buffers: std::array::from_fn(|_| None),
+            count: 0,
+        };
+        prepared.prepare_nodes(selected, predicates, output, control)?;
+        Ok(prepared)
+    }
+
+    fn prepare_nodes(
+        &mut self,
+        tree: &crate::JoinPlan,
+        predicates: &[JoinPredicateBinding],
+        output: &super::Output,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let (Some(left), Some(right)) = (&tree.left, &tree.right) else {
+            return Ok(());
+        };
+        self.prepare_nodes(left, predicates, output, control)?;
+        self.prepare_nodes(right, predicates, output, control)?;
+        let count = predicates
+            .iter()
+            .filter(|predicate| predicate.relations == tree.relations)
+            .count();
+        if count > 1 {
+            self.buffers[self.count] = Some(output.prepare_conjunction(count, control)?);
+        }
+        self.count += 1;
+        Ok(())
+    }
+
+    pub(super) fn attach(
+        mut self,
+        source: &mut SourcePlan,
+        selected: &crate::JoinPlan,
+        predicates: &mut [JoinPredicateBinding],
+        output: &mut super::Output,
+    ) {
+        let mut index = 0;
+        self.attach_nodes(source, selected, predicates, output, &mut index);
+        assert_eq!(
+            index, self.count,
+            "each selected join receives its prepared output"
+        );
+    }
+
+    fn attach_nodes(
+        &mut self,
+        source: &mut SourcePlan,
+        selected: &crate::JoinPlan,
+        predicates: &mut [JoinPredicateBinding],
+        output: &mut super::Output,
+        index: &mut usize,
+    ) {
+        let SourcePlan::Join {
+            left, right, on, ..
+        } = source
+        else {
+            return;
+        };
+        self.attach_nodes(
+            left,
+            selected.left.as_deref().expect("selected join left"),
+            predicates,
+            output,
+            index,
+        );
+        self.attach_nodes(
+            right,
+            selected.right.as_deref().expect("selected join right"),
+            predicates,
+            output,
+            index,
+        );
+        let mut conjunction = self.buffers[*index].take();
+        *index += 1;
+        for predicate in predicates
+            .iter_mut()
+            .filter(|predicate| predicate.relations == selected.relations)
+        {
+            let expression = predicate.expression.take().expect("assigned predicate");
+            if let Some(conjunction) = &mut conjunction {
+                conjunction.push(expression);
+            } else {
+                assert!(
+                    on.is_none(),
+                    "multiple predicates have an admitted conjunction"
+                );
+                *on = Some(expression);
+            }
+        }
+        if let Some(conjunction) = conjunction {
+            *on = Some(conjunction.publish(output));
+        }
+    }
 }

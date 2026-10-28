@@ -67,7 +67,11 @@ impl StatementCache for Engine {
     ) {
         Engine::cache_sql_statement(self, sql, statement, logical_plan, parser);
     }
-    fn cache_optimized_sql_plan(&self, sql: &str, optimized_plan: Arc<UnifiedPlan>) {
+    fn cache_optimized_sql_plan(
+        &self,
+        sql: &str,
+        optimized_plan: uqa_sql::plan::SharedExecutablePlan,
+    ) {
         Engine::cache_optimized_sql_plan(self, sql, optimized_plan);
     }
 }

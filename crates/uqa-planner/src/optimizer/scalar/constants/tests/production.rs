@@ -160,10 +160,10 @@ fn nested_constant_folding_releases_intermediate_values_and_preserves_lazy_error
         );
         if let Some(expected) = expected {
             let plan = result.unwrap();
-            let uqa_sql::plan::UnifiedPlan::Query(query) = plan else {
+            let uqa_sql::plan::UnifiedPlan::Query(query) = &*plan else {
                 panic!("query")
             };
-            let uqa_sql::plan::RelationalPlan::QueryBlock(select) = query.root else {
+            let uqa_sql::plan::RelationalPlan::QueryBlock(select) = &query.root else {
                 panic!("select")
             };
             assert_eq!(

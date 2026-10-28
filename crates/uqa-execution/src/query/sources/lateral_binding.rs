@@ -84,7 +84,7 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
         } else {
             binding.filters
         };
-        let right = specialized.as_ref().unwrap_or(binding.right);
+        let right = specialized.as_deref().unwrap_or(binding.right);
         let runtime_columns = bound.columns_are_open(None);
         let bind = |left_schema: RowSchema, right_schema: RowSchema| {
             let left_nulls = null_row_for_schema(left_schema.columns());

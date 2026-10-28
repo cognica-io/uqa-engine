@@ -82,7 +82,7 @@ impl Inputs {
     fn record(&self, event: &'static str) {
         self.events.borrow_mut().push(event);
     }
-    fn select(&self) -> Result<Option<Arc<UnifiedPlan>>, SQLError> {
+    fn select(&self) -> Result<Option<uqa_sql::plan::SharedExecutablePlan>, SQLError> {
         select_plan(
             &self.context(),
             "saved",
@@ -110,7 +110,7 @@ impl Inputs {
         entry.source_sql = Some(Arc::from(sql));
         entry.prepared_at_micros = 42;
         entry.from_sql = true;
-        entry.plan = Some(Arc::clone(&entry.logical_plan));
+        entry.plan = Some(Arc::clone(&entry.logical_plan).into());
         entry.generic_cost = Some(1.0);
         self.events.borrow_mut().clear();
     }
@@ -163,13 +163,16 @@ impl PreparedPlanSession for Inputs {
     }
 }
 impl PreparedPlanOptimization for Inputs {
-    fn optimize_plan(&self, plan: UnifiedPlan) -> Result<UnifiedPlan, SQLError> {
+    fn optimize_plan(
+        &self,
+        plan: UnifiedPlan,
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
         self.record(if has_parameter(&plan) {
             "optimize.generic"
         } else {
             "optimize.custom"
         });
-        Ok(plan)
+        Ok(plan.into())
     }
     fn estimate_plan(&self, plan: &UnifiedPlan) -> Result<crate::plan_cost::PlanCost, SQLError> {
         let generic = has_parameter(plan);
@@ -373,7 +376,7 @@ fn cached_generic_plan_reuses_its_descriptor_and_only_publishes_usage() {
     {
         let mut entry = inputs.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        entry.plan = Some(Arc::clone(&entry.logical_plan));
+        entry.plan = Some(Arc::clone(&entry.logical_plan).into());
         entry.generic_cost = Some(1.0);
     }
     assert!(has_parameter(&inputs.select().unwrap().unwrap()));

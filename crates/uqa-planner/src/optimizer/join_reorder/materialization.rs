@@ -7,14 +7,15 @@
 //! Reassemble an eligible source tree using its existing leaves and boxed nodes.
 
 use super::{
-    JoinExecutionStrategy, JoinGraphError, JoinGraphResult, JoinPredicateBinding, ScalarExpr,
-    SourcePlan,
+    output::Output, JoinExecutionStrategy, JoinGraphError, JoinGraphResult, JoinPredicateBinding,
+    ScalarExpr, SourcePlan,
 };
 
 pub(super) fn reorder(
     source: &mut SourcePlan,
     tree: &crate::JoinPlan,
     predicates: &mut [JoinPredicateBinding],
+    output: &mut Output,
 ) -> JoinGraphResult<SourcePlan> {
     let mut sources = Sources {
         atoms: std::array::from_fn(|_| None),
@@ -25,7 +26,7 @@ pub(super) fn reorder(
     let mut original = predicates
         .iter_mut()
         .filter(|predicate| predicate.expression.is_none());
-    sources.collect(take_source(source), &mut original);
+    sources.collect(take_source(source), &mut original, output);
     assert!(
         original.next().is_none(),
         "all original join predicates were moved"
@@ -45,6 +46,7 @@ impl Sources {
         &mut self,
         source: SourcePlan,
         predicates: &mut impl Iterator<Item = &'a mut JoinPredicateBinding>,
+        output: &mut Output,
     ) {
         let SourcePlan::Join {
             left, right, on, ..
@@ -52,10 +54,10 @@ impl Sources {
         else {
             unreachable!("selected source root has at least two atoms");
         };
-        self.collect_box(left, predicates);
-        self.collect_box(right, predicates);
+        self.collect_box(left, predicates, output);
+        self.collect_box(right, predicates, output);
         if let Some(on) = on {
-            move_conjuncts(on, predicates);
+            move_conjuncts(on, predicates, output);
         }
     }
 
@@ -63,9 +65,10 @@ impl Sources {
         &mut self,
         mut source: Box<SourcePlan>,
         predicates: &mut impl Iterator<Item = &'a mut JoinPredicateBinding>,
+        output: &mut Output,
     ) {
         if matches!(source.as_ref(), SourcePlan::Join { .. }) {
-            self.collect(take_source(&mut source), predicates);
+            self.collect(take_source(&mut source), predicates, output);
             self.boxes[self.box_count] = Some(source);
             self.box_count += 1;
         } else {
@@ -150,11 +153,14 @@ impl Sources {
 fn move_conjuncts<'a>(
     expression: ScalarExpr,
     predicates: &mut impl Iterator<Item = &'a mut JoinPredicateBinding>,
+    output: &mut Output,
 ) {
     if let ScalarExpr::And(items) = expression {
+        let memory = output.take_conjunction_memory(&items);
         for item in items {
-            move_conjuncts(item, predicates);
+            move_conjuncts(item, predicates, output);
         }
+        drop(memory);
     } else {
         predicates
             .next()

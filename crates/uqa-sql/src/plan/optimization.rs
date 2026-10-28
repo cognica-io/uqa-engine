@@ -6,7 +6,7 @@
 
 //! SQL-plan contract for a caller-selected executable planner.
 
-use super::UnifiedPlan;
+use super::{SharedExecutablePlan, UnifiedPlan};
 use crate::{binding::statements::AnalyzedResult, SQLError, SQLParam};
 
 /// Analyze and optimize a logical plan using metadata captured for this call.
@@ -19,7 +19,7 @@ pub trait ExecutablePlanOptimizer {
         _cached: Option<std::sync::Arc<crate::binding::statements::AnalyzedStatement>>,
     ) -> Result<
         (
-            UnifiedPlan,
+            SharedExecutablePlan,
             Option<std::sync::Arc<crate::binding::statements::AnalyzedStatement>>,
         ),
         SQLError,
@@ -34,7 +34,7 @@ pub trait ExecutablePlanOptimizer {
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<(UnifiedPlan, bool), SQLError> {
+    ) -> Result<(SharedExecutablePlan, bool), SQLError> {
         self.plan_for_execution(plan, params)
             .map(|plan| (plan, false))
     }
@@ -43,12 +43,12 @@ pub trait ExecutablePlanOptimizer {
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<UnifiedPlan, SQLError>;
+    ) -> Result<SharedExecutablePlan, SQLError>;
 
     /// Analyze and optimize a logical plan, and return what its analysis derives about its result.
     fn plan_with_result(
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<(UnifiedPlan, AnalyzedResult), SQLError>;
+    ) -> Result<(SharedExecutablePlan, AnalyzedResult), SQLError>;
 }

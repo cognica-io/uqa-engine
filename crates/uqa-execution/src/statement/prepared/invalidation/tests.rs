@@ -86,7 +86,7 @@ fn cached_entry(executable: &str) -> PreparedStatementPlan {
         effective_search_path: None,
         dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
         dependency_snapshot: None,
-        plan: Some(Arc::new(lower(executable))),
+        plan: Some(lower(executable).into()),
         parameter_types: Vec::new(),
         result_schema: Some(RowSchema::with_types(
             vec!["value".into()],
@@ -120,23 +120,23 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
         vec!["folded".into(), "live".into()],
         vec![Some(ColumnType::Text), Some(ColumnType::Text)],
     ));
-    std::sync::Arc::make_mut(mixed.plan.as_mut().unwrap()).rewrite_scalar_expressions(
-        &mut |expression| {
-            if let ScalarExpr::Func { binding, .. } = expression {
-                *binding = Some(FunctionBinding {
-                    name: "pg_catalog.upper".into(),
-                    argument_types: vec!["text".into()],
-                    builtin: true,
-                    object_id: None,
-                    dispatch: None,
-                    invocation: None,
-                    value_binding: None,
-                    resolution_error: None,
-                    input_collation: None,
-                });
-            }
-        },
-    );
+    let mut executable = mixed.plan.as_deref().unwrap().clone();
+    executable.rewrite_scalar_expressions(&mut |expression| {
+        if let ScalarExpr::Func { binding, .. } = expression {
+            *binding = Some(FunctionBinding {
+                name: "pg_catalog.upper".into(),
+                argument_types: vec!["text".into()],
+                builtin: true,
+                object_id: None,
+                dispatch: None,
+                invocation: None,
+                value_binding: None,
+                resolution_error: None,
+                input_collation: None,
+            });
+        }
+    });
+    mixed.plan = Some(executable.into());
     CatalogRegistryChange::BuiltinRoutinePrivileges.invalidate([
         &mut constant,
         &mut unbound,

@@ -186,7 +186,7 @@ fn selected(entry: &PreparedStatementPlan) -> uqa_sql::prepared::planning::Prepa
     let plan = entry
         .plan
         .clone()
-        .unwrap_or_else(|| Arc::clone(&entry.logical_plan));
+        .unwrap_or_else(|| Arc::clone(&entry.logical_plan).into());
     uqa_sql::prepared::planning::PreparedPlanSelection {
         plan: plan.clone(),
         update: uqa_sql::prepared::planning::PreparedPlanUpdate {
@@ -212,11 +212,11 @@ fn routine_plan_reuse_shares_executable_storage() {
         });
     let statement = SQLRoutineStatement::new(definition);
     let first = statement.select(|entry| Ok(selected(entry))).unwrap();
-    let weak = Arc::downgrade(&first);
+    let weak = Arc::downgrade(&statement.variants.snapshot().logical_plan);
     for _ in 0..32 {
         let measured = allocation_counter::measure(|| {
             let next = statement.select(|entry| Ok(selected(entry))).unwrap();
-            assert!(Arc::ptr_eq(&next, &first));
+            assert!(next.ptr_eq(&first));
         });
         assert!(measured.bytes_total < 4096, "{measured:?}");
         assert_eq!(measured.bytes_current, 0, "{measured:?}");

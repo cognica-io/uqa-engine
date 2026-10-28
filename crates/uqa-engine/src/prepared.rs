@@ -231,12 +231,13 @@ impl Engine {
     }
 
     /// Retain the current generic executable, or its analyzed input before planning, without copying the plan tree.
-    pub fn lookup_prepared(&self, name: &str) -> Option<Arc<uqa_planner::UnifiedPlan>> {
-        self.session
-            .prepared
-            .read()
-            .get(name)
-            .map(|entry| Arc::clone(entry.plan.as_ref().unwrap_or(&entry.logical_plan)))
+    pub fn lookup_prepared(&self, name: &str) -> Option<uqa_sql::plan::SharedExecutablePlan> {
+        self.session.prepared.read().get(name).map(|entry| {
+            entry
+                .plan
+                .clone()
+                .unwrap_or_else(|| entry.logical_plan.clone().into())
+        })
     }
 
     /// Invalidate executable plans without removing connection-owned definitions.

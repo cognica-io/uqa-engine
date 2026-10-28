@@ -32,7 +32,7 @@ pub trait PhysicalExplainPlanning: Sync {
     fn plan_explained_statement(
         &self,
         body: uqa_sql::plan::PlanRef<'_>,
-    ) -> Result<UnifiedPlan, SQLError>;
+    ) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError>;
     fn explained_plan_estimates(
         &self,
         body: &UnifiedPlan,

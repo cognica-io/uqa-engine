@@ -174,8 +174,14 @@ impl uqa_planner::statement_planning::prepared::selection::PreparedPlanSession f
 }
 
 impl uqa_planner::statement_planning::prepared::selection::PreparedPlanOptimization for Engine {
-    fn optimize_plan(&self, plan: UnifiedPlan) -> Result<UnifiedPlan, SQLError> {
-        super::statement_planning::optimize_engine_plan(self, plan)
+    fn optimize_plan(
+        &self,
+        plan: UnifiedPlan,
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
+        uqa_planner::statement_planning::executable::optimize_shared_plan(
+            &self.statement_planning_context(),
+            plan,
+        )
     }
     fn estimate_plan(
         &self,
@@ -190,7 +196,7 @@ impl uqa_sql::prepared::planning::PreparedPlanProvider for Engine {
         &self,
         name: &str,
         parameters: &[SQLParam],
-    ) -> Result<Option<std::sync::Arc<UnifiedPlan>>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::SharedExecutablePlan>, SQLError> {
         uqa_planner::statement_planning::prepared::selection::select_plan(
             &uqa_planner::statement_planning::prepared::selection::PreparedPlanningContext {
                 session: self,

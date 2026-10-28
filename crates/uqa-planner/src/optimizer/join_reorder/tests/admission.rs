@@ -38,7 +38,7 @@ fn optimizer_routes_nested_join_search_through_request_admission() {
             let result = crate::optimize(input.clone(), &config);
             if failure == 3 {
                 let actual = result.unwrap();
-                assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{sql}");
+                assert_eq!(format!("{:?}", actual.as_ref()), format!("{:?}", expected.as_ref()), "{sql}");
                 assert!(budget.peak() > 0, "join search bypassed admission: {sql}");
                 drop(actual);
             } else {

@@ -80,8 +80,8 @@ pub fn materialize_recursive_cte<S: Clone>(
 
     let declared_columns = (!cte.columns.is_empty()).then_some(cte.columns.as_slice());
     let controls_recursion = cte.search.is_some() || cte.cycle.is_some();
-    let (anchor_plan, step_plan) = if controls_recursion {
-        ((**left).clone(), (**right).clone())
+    let specialized = if controls_recursion {
+        None
     } else if let Some((qualifier, filter)) = output_filter {
         let output_columns = declared_columns
             .map(<[String]>::to_vec)
@@ -101,15 +101,20 @@ pub fn materialize_recursive_cte<S: Clone>(
                     Some(&output_columns),
                 )?;
                 match (specialized_anchor, specialized_step) {
-                    (Some(anchor), Some(step)) => (anchor, step),
-                    _ => ((**left).clone(), (**right).clone()),
+                    (Some(anchor), Some(step)) => Some((anchor, step)),
+                    _ => None,
                 }
             }
-            None => ((**left).clone(), (**right).clone()),
+            None => None,
         }
     } else {
-        ((**left).clone(), (**right).clone())
+        None
     };
+    let (anchor_plan, step_plan) = specialized
+        .as_ref()
+        .map_or((left.as_ref(), right.as_ref()), |(anchor, step)| {
+            (anchor.as_ref(), step.as_ref())
+        });
 
     if controls_recursion {
         return materialize_controlled_recursive_cte(
@@ -117,13 +122,13 @@ pub fn materialize_recursive_cte<S: Clone>(
             cte,
             params,
             ctes,
-            &anchor_plan,
-            &step_plan,
+            anchor_plan,
+            step_plan,
             *all,
         );
     }
 
-    let anchor = context.queries.execute_query(&anchor_plan, params, ctes)?;
+    let anchor = context.queries.execute_query(anchor_plan, params, ctes)?;
     let anchor_columns = if cte.columns.is_empty() {
         anchor.columns.clone()
     } else {
@@ -158,7 +163,7 @@ pub fn materialize_recursive_cte<S: Clone>(
 
         append_shared_spill(&mut accumulated, &working)?;
         ctes.insert_shared(cte.name.clone(), working);
-        let step_result = context.queries.execute_query(&step_plan, params, ctes);
+        let step_result = context.queries.execute_query(step_plan, params, ctes);
         ctes.remove_materialized(&cte.name);
         let step = step_result?;
         working = alias_query_output_to_shared(context, step, &anchor_columns)?;

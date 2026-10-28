@@ -25,7 +25,7 @@ pub(super) struct SQLStatementCache {
 pub(crate) struct CachedSQLStatement {
     pub(crate) statement: Arc<uqa_sql::ast::Statement>,
     pub(crate) logical_plan: Arc<uqa_planner::UnifiedPlan>,
-    pub(crate) optimized_plan: Option<Arc<uqa_planner::UnifiedPlan>>,
+    pub(crate) optimized_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub(crate) analyzed_plan: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
     catalog_epochs: CatalogEpochs,
     function_registry_revision: u64,
@@ -89,7 +89,7 @@ impl SQLStatementCache {
     pub(super) fn set_optimized(
         &mut self,
         sql: &str,
-        optimized_plan: Arc<uqa_planner::UnifiedPlan>,
+        optimized_plan: uqa_sql::plan::SharedExecutablePlan,
         data_epoch: u64,
     ) {
         if let Some(entry) = self.entries.get_mut(sql) {
@@ -173,7 +173,7 @@ impl Engine {
     pub(crate) fn cached_optimized_sql_plan(
         &self,
         sql: &str,
-    ) -> Option<Arc<uqa_planner::UnifiedPlan>> {
+    ) -> Option<uqa_sql::plan::SharedExecutablePlan> {
         self.cached_sql_statement(sql)?.optimized_plan
     }
 
@@ -198,7 +198,7 @@ impl Engine {
     pub(crate) fn cache_optimized_sql_plan(
         &self,
         sql: &str,
-        optimized_plan: Arc<uqa_planner::UnifiedPlan>,
+        optimized_plan: uqa_sql::plan::SharedExecutablePlan,
     ) {
         let data_epoch = self.catalog_epochs().table_data;
         self.session

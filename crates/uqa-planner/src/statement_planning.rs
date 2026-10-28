@@ -99,7 +99,7 @@ pub fn optimize_plan(
     aggregates: &dyn crate::AggregateClassifier,
     constant_evaluator: crate::ConstantEvaluator,
     plan: UnifiedPlan,
-) -> Result<UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     optimize_plan_authorized(
         context,
         rules,
@@ -115,7 +115,7 @@ pub(super) fn optimize_plan_authorized(
     aggregates: &dyn crate::AggregateClassifier,
     optimizer_config: crate::optimizer::OptimizerConfig<'_>,
     mut plan: UnifiedPlan,
-) -> Result<UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     rule_inputs::rewrite_plan(rules, &mut plan, &optimizer_config)?;
     let callback_error = std::cell::RefCell::new(None);
     let statistics = CatalogSourceStatistics {
@@ -141,7 +141,7 @@ fn optimize_plan_with_statistics(
     mut optimizer_config: crate::optimizer::OptimizerConfig<'_>,
     plan: crate::UnifiedPlan,
     statistics: &dyn crate::SourceStatistics,
-) -> Result<crate::UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     if uqa_sql::semantics::volatility::unified_plan_contains_volatile_function(
         volatility_catalog,
         &plan,

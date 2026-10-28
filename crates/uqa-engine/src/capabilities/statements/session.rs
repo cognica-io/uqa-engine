@@ -8,7 +8,6 @@
 
 use uqa_sql::{
     ast::{ColumnType, DiscardTarget, SetConstraintName, TransactionStmt},
-    plan::UnifiedPlan,
     SQLError,
 };
 
@@ -67,7 +66,7 @@ impl StatementControl for Engine {
     }
 }
 impl PreparedPlanState for Engine {
-    fn lookup_prepared(&self, name: &str) -> Option<std::sync::Arc<UnifiedPlan>> {
+    fn lookup_prepared(&self, name: &str) -> Option<uqa_sql::plan::SharedExecutablePlan> {
         Engine::lookup_prepared(self, name)
     }
     fn prepared_parameter_types(&self, name: &str) -> Option<Vec<Option<ColumnType>>> {

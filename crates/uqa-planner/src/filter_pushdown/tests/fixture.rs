@@ -56,7 +56,7 @@ impl Fixture {
                 resolution: &self.resolution,
                 scoped_relations: None,
             },
-            optimizer: &Ok,
+            optimizer: &|plan| Ok(plan.into()),
         }
     }
     pub(super) fn scope(&self) -> FilterPushdownScope<'_> {

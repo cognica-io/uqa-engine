@@ -7,7 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
-struct FunctionEstimates;
+pub(super) struct FunctionEstimates;
 
 impl SourceStatistics for FunctionEstimates {
     fn relation_statistics(&self, _: &str) -> Option<crate::RelationStats> {
@@ -28,7 +28,7 @@ impl SourceStatistics for FunctionEstimates {
     }
 }
 
-fn fixture(count: usize, payload_bytes: usize) -> SourcePlan {
+pub(super) fn fixture(count: usize, payload_bytes: usize) -> SourcePlan {
     let inputs = (0..count)
         .map(|index| format!("regexp_split_to_table('x', ',') AS s{index}(v)"))
         .collect::<Vec<_>>()
@@ -222,7 +222,8 @@ fn selected_sql_join_moves_table_execution_plans_without_copying() {
     });
     assert!(measured.bytes_total < 16 * 1024, "{measured:?}");
     assert_eq!(measured.bytes_current, 0, "{measured:?}");
-    let SourcePlan::Join { left, .. } = selected.unwrap() else {
+    let selected = selected.unwrap();
+    let SourcePlan::Join { left, .. } = &*selected else {
         panic!("join");
     };
     let SourcePlan::Table {
@@ -276,18 +277,19 @@ fn sql_join_predicates_move_only_after_search_admission() {
             "admitted={admitted}: {measured:?}"
         );
         let selected = selected.unwrap();
-        if admitted {
-            source = selected.unwrap().unwrap();
+        let selected = if admitted {
+            Some(selected.unwrap().unwrap())
         } else {
             let crate::optimizer::OptimizerError::Expression(error) = selected.unwrap_err() else {
                 panic!("admission error");
             };
             assert_eq!(error.sqlstate(), Some("53200"));
-        }
+            None
+        };
         let SourcePlan::Join {
             on: Some(ScalarExpr::Binary { lhs, .. }),
             ..
-        } = &source
+        } = selected.as_deref().unwrap_or(&source)
         else {
             panic!("predicate");
         };
@@ -337,9 +339,39 @@ fn sql_join_materialization_preserves_nested_conjunct_order() {
     let SourcePlan::Join {
         on: Some(ScalarExpr::And(actual)),
         ..
-    } = selected
+    } = &*selected
     else {
         panic!("root conjunction");
     };
-    assert_eq!(actual, expected);
+    assert_eq!(actual, &expected);
+}
+
+#[test]
+fn inferred_join_output_retains_its_allocation_owner() {
+    let mut source = fixture(2, 1);
+    let expression = ScalarExpr::Binary {
+        op: BinaryOp::Equal,
+        lhs: Box::new(ScalarExpr::QualifiedColumn {
+            qualifier: "s0".into(),
+            column: "v".repeat(4 * 1024 * 1024).into(),
+        }),
+        rhs: Box::new(ScalarExpr::QualifiedColumn {
+            qualifier: "s1".into(),
+            column: "v".into(),
+        }),
+    };
+    let budget = MemoryBudget::new(16 * 1024 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let selected =
+        reordered_inner_join_source(&mut source, &[&expression], &FunctionEstimates, &control)
+            .unwrap()
+            .unwrap();
+    assert!(
+        budget.used() >= 4 * 1024 * 1024,
+        "live inferred output lost its lease: {}",
+        budget.used()
+    );
+    drop(selected);
+    assert_eq!(budget.used(), 0);
 }

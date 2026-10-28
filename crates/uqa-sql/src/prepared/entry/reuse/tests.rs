@@ -22,7 +22,7 @@ fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
         effective_search_path: None,
         dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies::default(),
         dependency_snapshot: None,
-        plan: Some(Arc::new(plan(executable))),
+        plan: Some(plan(executable).into()),
         parameter_types: Vec::new(),
         result_schema: Some(RowSchema::with_types(
             vec!["value".into()],
@@ -173,7 +173,7 @@ fn mixed_entry() -> PreparedStatementPlan {
         vec!["folded".into(), "live".into()],
         vec![Some(ColumnType::Text), Some(ColumnType::Text)],
     ));
-    Arc::make_mut(mixed.plan.as_mut().unwrap()).rewrite_scalar_expressions(&mut |expression| {
+    rewrite_fixture(&mut mixed, &mut |expression| {
         if let ScalarExpr::Func { binding, .. } = expression {
             *binding = Some(FunctionBinding {
                 name: "pg_catalog.upper".into(),
@@ -205,20 +205,18 @@ fn mixed_constants_and_exact_builtin_calls_keep_one_executable() {
         ("pg_catalog.upper", "text", true, Some([7; 16])),
     ] {
         let mut changed = mixed.clone();
-        Arc::make_mut(changed.plan.as_mut().unwrap()).rewrite_scalar_expressions(
-            &mut |expression| {
-                if let ScalarExpr::Func {
-                    binding: Some(binding),
-                    ..
-                } = expression
-                {
-                    binding.name = name.into();
-                    binding.argument_types = vec![argument_type.into()];
-                    binding.builtin = builtin;
-                    binding.object_id = object_id;
-                }
-            },
-        );
+        rewrite_fixture(&mut changed, &mut |expression| {
+            if let ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } = expression
+            {
+                binding.name = name.into();
+                binding.argument_types = vec![argument_type.into()];
+                binding.builtin = builtin;
+                binding.object_id = object_id;
+            }
+        });
         assert!(
             !changed.has_tracked_executable_dependencies(),
             "{name}({argument_type})"
@@ -226,7 +224,7 @@ fn mixed_constants_and_exact_builtin_calls_keep_one_executable() {
         assert!(mixed.has_tracked_executable_dependencies());
     }
     let mut unbound = mixed;
-    Arc::make_mut(unbound.plan.as_mut().unwrap()).rewrite_scalar_expressions(&mut |expression| {
+    rewrite_fixture(&mut unbound, &mut |expression| {
         if let ScalarExpr::Func { binding, .. } = expression {
             *binding = None;
         }
@@ -243,20 +241,18 @@ fn missing_and_specialized_descriptors_are_not_catalog_independent() {
     missing.result_schema = Some(RowSchema::with_types(vec!["value".into()], vec![None]));
     assert!(!missing.has_tracked_executable_dependencies());
     let mut specialized = mixed_entry();
-    Arc::make_mut(specialized.plan.as_mut().unwrap()).rewrite_scalar_expressions(
-        &mut |expression| {
-            if matches!(expression, ScalarExpr::Param(_)) {
-                *expression = ScalarExpr::TypedLiteral {
-                    collation_oid: None,
-                    composite_source: None,
-                    value: uqa_core::Value::Str("first".into()),
-                    ty: "text".into(),
-                    bound_type: Some(ColumnType::Text),
-                    parameter_index: Some(1),
-                };
-            }
-        },
-    );
+    rewrite_fixture(&mut specialized, &mut |expression| {
+        if matches!(expression, ScalarExpr::Param(_)) {
+            *expression = ScalarExpr::TypedLiteral {
+                collation_oid: None,
+                composite_source: None,
+                value: uqa_core::Value::Str("first".into()),
+                ty: "text".into(),
+                bound_type: Some(ColumnType::Text),
+                parameter_index: Some(1),
+            };
+        }
+    });
     assert!(!specialized.has_tracked_executable_dependencies());
 }
 
@@ -284,4 +280,10 @@ fn relation_executables_require_complete_exact_analysis_revisions() {
     assert!(relation.has_tracked_executable_dependencies());
     relation.dependencies.relations.insert(43);
     assert!(!relation.has_tracked_executable_dependencies());
+}
+
+fn rewrite_fixture(entry: &mut PreparedStatementPlan, rewrite: &mut impl FnMut(&mut ScalarExpr)) {
+    let mut plan = entry.plan.as_deref().unwrap().clone();
+    plan.rewrite_scalar_expressions(rewrite);
+    entry.plan = Some(plan.into());
 }

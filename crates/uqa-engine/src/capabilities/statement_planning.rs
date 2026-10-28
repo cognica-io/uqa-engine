@@ -27,7 +27,7 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
         cached: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
     ) -> Result<
         (
-            uqa_sql::plan::UnifiedPlan,
+            uqa_sql::plan::SharedExecutablePlan,
             Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
         ),
         SQLError,
@@ -44,7 +44,7 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
         &self,
         plan: uqa_sql::plan::UnifiedPlan,
         params: &[uqa_sql::SQLParam],
-    ) -> Result<(uqa_sql::plan::UnifiedPlan, bool), SQLError> {
+    ) -> Result<(uqa_sql::plan::SharedExecutablePlan, bool), SQLError> {
         uqa_sql::plan::ExecutablePlanOptimizer::plan_for_statement_cache(
             &self.statement_planning_context(),
             plan,
@@ -56,7 +56,7 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
         &self,
         plan: uqa_sql::plan::UnifiedPlan,
         params: &[uqa_sql::SQLParam],
-    ) -> Result<uqa_sql::plan::UnifiedPlan, SQLError> {
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
         uqa_sql::plan::ExecutablePlanOptimizer::plan_for_execution(
             &self.statement_planning_context(),
             plan,
@@ -70,7 +70,7 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
         params: &[uqa_sql::SQLParam],
     ) -> Result<
         (
-            uqa_sql::plan::UnifiedPlan,
+            uqa_sql::plan::SharedExecutablePlan,
             uqa_sql::binding::statements::AnalyzedResult,
         ),
         SQLError,
@@ -253,7 +253,7 @@ pub(crate) fn estimate_engine_plan(
 pub(crate) fn optimize_engine_query(
     engine: &Engine,
     query: std::borrow::Cow<'_, uqa_planner::QueryPlan>,
-) -> Result<uqa_planner::QueryPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError> {
     uqa_planner::statement_planning::executable::optimize_query(
         &engine.statement_planning_context(),
         query,
@@ -263,7 +263,7 @@ pub(crate) fn optimize_engine_query(
 pub(crate) fn optimize_engine_plan(
     engine: &Engine,
     plan: uqa_planner::UnifiedPlan,
-) -> Result<uqa_planner::UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     uqa_planner::statement_planning::executable::optimize_plan(
         &engine.statement_planning_context(),
         plan,

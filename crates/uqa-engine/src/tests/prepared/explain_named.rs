@@ -58,10 +58,7 @@ fn check_selected_borrow(engine: &crate::Engine) {
     assert_eq!(retained.memory().used(), baseline);
     let statements = engine.session.prepared.read();
     let cached = &statements["large_explanation"];
-    assert!(std::sync::Arc::ptr_eq(
-        cached.plan.as_ref().unwrap(),
-        &selected
-    ));
+    assert!(cached.plan.as_ref().unwrap().ptr_eq(&selected));
     assert_eq!((cached.generic_plans, cached.custom_plans), (2, 0));
 }
 
@@ -184,7 +181,7 @@ fn named_explain_prepares_private_sources_and_preserves_cache_recovery(#[case] p
     assert!(engine.session.prepared.read()["write_explanation"]
         .plan
         .as_ref()
-        .is_none_or(|current| !std::sync::Arc::ptr_eq(current, &original)));
+        .is_none_or(|current| !current.ptr_eq(&original)));
     assert_eq!(
         engine
             .sql("SELECT max(n) FROM explanation_writes", &[])

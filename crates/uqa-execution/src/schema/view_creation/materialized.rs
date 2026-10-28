@@ -127,7 +127,7 @@ fn execute_materialized_source(
         (query.plan, Some(query.measurement))
     } else {
         optimized = context.queries.optimize(plan)?;
-        (&optimized, None)
+        (optimized.as_ref(), None)
     };
     let result = context.queries.execute(executable, params, measurement)?;
     materialized_rows(&result, output_columns)

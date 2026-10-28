@@ -5,7 +5,6 @@
 //
 
 use crate::tests::providers::Provider;
-use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{prepared::planning::PreparedPlanProvider, SQLParam};
 
@@ -33,10 +32,10 @@ fn native_prepared_executions_share_cached_plans_until_replacement(#[case] provi
         .plan
         .clone()
         .unwrap();
-    let weak = Arc::downgrade(&retained);
+    assert!(retained.reserved_bytes() > 0);
     for lower in [1, 3, 2] {
         let observed = engine.lookup_prepared("shared").unwrap();
-        assert!(Arc::ptr_eq(&observed, &retained));
+        assert!(observed.ptr_eq(&retained));
         let rows = engine
             .sql(&format!("EXECUTE shared({lower})"), &[])
             .unwrap();
@@ -53,14 +52,12 @@ fn native_prepared_executions_share_cached_plans_until_replacement(#[case] provi
             .plan_for_execution("shared", &[SQLParam::Scalar(Value::Int(lower))])
             .unwrap()
             .unwrap();
-        assert!(Arc::ptr_eq(&selected, &retained));
-        assert!(Arc::ptr_eq(
-            engine.session.prepared.read()["shared"]
-                .plan
-                .as_ref()
-                .unwrap(),
-            &retained
-        ));
+        assert!(selected.ptr_eq(&retained));
+        assert!(engine.session.prepared.read()["shared"]
+            .plan
+            .as_ref()
+            .unwrap()
+            .ptr_eq(&retained));
     }
     {
         let entries = engine.session.prepared.read();
@@ -72,15 +69,17 @@ fn native_prepared_executions_share_cached_plans_until_replacement(#[case] provi
         .plan
         .clone()
         .unwrap();
-    assert!(!Arc::ptr_eq(&replacement, &retained));
-    assert_eq!(weak.strong_count(), 1);
+    assert!(!replacement.ptr_eq(&retained));
+    assert_eq!(retained.strong_count(), 1);
+    let control = engine.query_retention_control().unwrap();
+    let before = control.memory().used();
+    let reserved = retained.reserved_bytes();
     drop(retained);
-    assert!(weak.upgrade().is_none());
-    let weak = Arc::downgrade(&replacement);
+    assert_eq!(control.memory().used(), before - reserved);
     engine.sql("DEALLOCATE ALL", &[]).unwrap();
-    assert_eq!(weak.strong_count(), 1);
+    assert_eq!(replacement.strong_count(), 1);
     engine.close().unwrap();
     drop(engine);
     drop(replacement);
-    assert!(weak.upgrade().is_none());
+    assert_eq!(control.memory().used(), 0);
 }

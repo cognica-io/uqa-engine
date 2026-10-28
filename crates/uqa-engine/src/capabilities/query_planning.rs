@@ -93,7 +93,7 @@ pub(crate) fn push_output_filter_into_query_plan(
     qualifier: &str,
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
-) -> Result<Option<QueryPlan>, SQLError> {
+) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
     with_context(engine, |context| {
         uqa_planner::filter_pushdown::push_output_filter_into_query_plan(
             context,
@@ -121,7 +121,7 @@ pub(crate) fn push_derived_output_filter(
     qualifier: &str,
     filter: &ScalarExpr,
     output_columns: Option<&[String]>,
-) -> Result<Option<QueryPlan>, SQLError> {
+) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
     with_context(engine, |context| {
         uqa_planner::filter_pushdown::push_derived_output_filter(
             context,

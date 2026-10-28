@@ -109,7 +109,10 @@ impl QueryOutputRewriter for Engine {
         )
     }
 
-    fn optimize_retained_query(&self, query: QueryPlan) -> Result<QueryPlan, SQLError> {
+    fn optimize_retained_query(
+        &self,
+        query: QueryPlan,
+    ) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError> {
         super::statement_planning::optimize_engine_query(self, std::borrow::Cow::Owned(query))
     }
 
@@ -119,7 +122,7 @@ impl QueryOutputRewriter for Engine {
         qualifier: &str,
         filter: &ScalarExpr,
         columns: Option<&[String]>,
-    ) -> Result<Option<QueryPlan>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
         super::query_planning::push_output_filter_into_query_plan(
             self, query, qualifier, filter, columns,
         )
@@ -131,7 +134,7 @@ impl QueryOutputRewriter for Engine {
         qualifier: &str,
         filter: &ScalarExpr,
         columns: Option<&[String]>,
-    ) -> Result<Option<QueryPlan>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
         super::query_planning::push_derived_output_filter(self, query, qualifier, filter, columns)
     }
 }

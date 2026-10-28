@@ -189,11 +189,9 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             let (plan, reusable) = context
                 .planning
                 .plan_for_statement_cache(initial_plan.as_ref().clone(), params)?;
-            let plan = Arc::new(plan);
+
             if reusable {
-                context
-                    .cache
-                    .cache_optimized_sql_plan(sql, Arc::clone(&plan));
+                context.cache.cache_optimized_sql_plan(sql, plan.clone());
             }
             plan
         };

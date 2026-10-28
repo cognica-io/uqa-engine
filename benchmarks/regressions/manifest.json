@@ -26407,12 +26407,142 @@
       "source": "crates/uqa-engine/src/tests/queries/planning_memory/inference.rs",
       "capability": "Native join inference recovery",
       "workload": "Plan a three-table disjunctive equality under constrained request memory, then execute it directly, prepared and with EXPLAIN ANALYZE MEMORY on all four providers.",
-      "invariant": "Reject with 53200 below 256 KiB additional allocation, return the independently captured PostgreSQL 18.4 IDs 1 and 2 after recovery, and release request memory on close.",
+      "invariant": "Reject with 53200 below 256 KiB additional allocation, return independently captured PostgreSQL 18.4 IDs 1 and 2, retain exact inferred-output leases through 64 allocation-free shared handles and cache invalidation, and release them with the last owner.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_query_projection_preserves_storage_and_last_reader_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/owned/tests.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Project a four MiB executable to its query and back, then share it with 64 readers.",
+      "invariant": "Projection and reader clones allocate nothing, preserve payload identities and retain all constructor leases until the last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_root_and_shared_wrapper_reject_before_allocation_and_release_their_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/owned/tests.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Exhaust the exact copy allowance before query boxing or shared-wrapper construction.",
+      "invariant": "Return 53200 below four KiB diagnostic allocation, release rejected input owners and preserve a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_sharing_and_consumer_unwind_release_the_complete_executable",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/owned/tests.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Cancel either scope before sharing and unwind after projecting a four MiB owned query.",
+      "invariant": "Both cancellation tokens preserve 57014 and every failure or unwind returns all executable reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unboxing_releases_only_the_original_root_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/owned/tests.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Move a controlled four MiB query out of its original root box.",
+      "invariant": "Unboxing allocates nothing and releases exactly the freed box while the complete payload reservation remains live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_lookup_shares_its_existing_syntax_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/owned/tests.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Share one ordinary four MiB syntax Arc through 64 executable lookup handles.",
+      "invariant": "Lookup allocates nothing, preserves the original syntax address and makes no retroactive admission claim.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "inferred_join_output_retains_its_allocation_owner",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/materialization.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Select a two-source join with an inferred equality containing a four MiB column name.",
+      "invariant": "The escaped output retains its payload reservation and dropping that output returns the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "inferred_scalars_and_output_buffers_retain_exact_live_allocation_leases",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/output.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Attach two inferred equalities including four MiB of copied column names to a selected join.",
+      "invariant": "Live scalar and AND-buffer reservations equal allocator-observed retained bytes; dropping the source releases them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "inferred_payload_admission_rejects_before_copy_and_releases_partial_output",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/output.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Use an exhausted ancestor and a partially sufficient allowance for two four MiB equality operands.",
+      "invariant": "Reject with 53200 before unadmitted copies, release partial output and preserve the original source and sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "parent_reordering_retires_consumed_child_conjunction_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/output.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Rewrite a three-source tree whose child and parent each have a two-predicate ON conjunction.",
+      "invariant": "Final reservations equal live output allocation after accounting for freed input buffers; consumed intermediate AND buffers retain no charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "parent_failure_releases_already_published_child_output",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/output.rs",
+      "capability": "Executable allocation lifetime",
+      "workload": "Cancel either scope or unwind a statistics callback after a child join has published its output.",
+      "invariant": "The owning rewrite destroys the partial tree and releases every child output reservation on all three failure paths.",
+      "case_names": [
+        ""
       ]
     }
   ]

@@ -107,7 +107,7 @@ impl Collector<'_, '_, '_> {
             })
             .transpose()?
             .flatten();
-        self.query(specialized.as_ref().unwrap_or(query), scope, path)
+        self.query(specialized.as_deref().unwrap_or(query), scope, path)
     }
 
     fn table_source(

@@ -169,7 +169,10 @@ impl AggregateClassifier for NoRegisteredAggregates {
 }
 
 /// Optimize a fully lowered plan using the built-in aggregate catalogue.
-pub fn optimize(plan: UnifiedPlan, config: &OptimizerConfig) -> OptimizerResult<UnifiedPlan> {
+pub fn optimize(
+    plan: UnifiedPlan,
+    config: &OptimizerConfig,
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_with_aggregates_and_statistics(
         plan,
         config,
@@ -183,7 +186,7 @@ pub fn optimize_with_aggregates(
     plan: UnifiedPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) -> OptimizerResult<UnifiedPlan> {
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_with_aggregates_and_statistics(plan, config, aggregates, &NoSourceStatistics)
 }
 
@@ -192,7 +195,7 @@ pub fn optimize_with_statistics(
     plan: UnifiedPlan,
     config: &OptimizerConfig,
     statistics: &dyn SourceStatistics,
-) -> OptimizerResult<UnifiedPlan> {
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_with_aggregates_and_statistics(plan, config, &NoRegisteredAggregates, statistics)
 }
 
@@ -203,10 +206,11 @@ pub fn optimize_with_aggregates_and_statistics(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
     statistics: &dyn SourceStatistics,
-) -> OptimizerResult<UnifiedPlan> {
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_unified_plan(&mut plan, config, aggregates)?;
     if config.enable_join_reordering {
-        reorder_unified_plan_joins(&mut plan, statistics, &config.production)?;
+        reorder_unified_plan_joins(plan, statistics, &config.production)
+    } else {
+        Ok(plan.into())
     }
-    Ok(plan)
 }

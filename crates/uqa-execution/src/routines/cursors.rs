@@ -57,8 +57,7 @@ impl Interpreter<'_> {
             } => {
                 let (text, params) = self.eval_dynamic_sql(query, params)?;
                 (
-                    self.lower_cursor_plan(self.compile_dynamic_cursor(&text)?)?
-                        .into(),
+                    self.lower_cursor_plan(self.compile_dynamic_cursor(&text)?)?,
                     params,
                     *scroll,
                     text.into(),
@@ -349,7 +348,7 @@ impl Interpreter<'_> {
         query: PLpgSQLStatement,
         fields: &[PLpgSQLRowField],
         arguments: &PLpgSQLCursorArguments,
-    ) -> Result<(std::sync::Arc<UnifiedPlan>, Vec<SQLParam>), SQLError> {
+    ) -> Result<(uqa_sql::plan::SharedExecutablePlan, Vec<SQLParam>), SQLError> {
         let values = self.evaluate_cursor_arguments(cursor_name, fields, arguments)?;
         let saved_values = fields
             .iter()
@@ -379,7 +378,10 @@ impl Interpreter<'_> {
         query
     }
 
-    fn lower_cursor_plan(&self, statement: Statement) -> Result<UnifiedPlan, SQLError> {
+    fn lower_cursor_plan(
+        &self,
+        statement: Statement,
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
         let plan = UnifiedPlan::lower_with(statement, &|name: &str| {
             self.services.runtime.has_aggregate_function(name)
         });

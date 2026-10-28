@@ -15,6 +15,7 @@ use uqa_core::{
 };
 use uqa_sql::{
     binding::statements::{analyze_executable_plan, AnalyzedResult, StatementAnalysisContext},
+    plan::{OwnedExecutablePlan, OwnedQueryPlan, SharedExecutablePlan},
     SQLError, SQLParam,
 };
 
@@ -79,7 +80,7 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
         cached: Option<std::sync::Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
     ) -> Result<
         (
-            UnifiedPlan,
+            SharedExecutablePlan,
             Option<std::sync::Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
         ),
         SQLError,
@@ -96,14 +97,14 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
             )?;
             (plan, retained.map(std::sync::Arc::new))
         };
-        Ok((optimize_plan(self, plan)?, retained))
+        Ok((optimize_shared_plan(self, plan)?, retained))
     }
 
     fn plan_for_statement_cache(
         &self,
         mut plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<(UnifiedPlan, bool), SQLError> {
+    ) -> Result<(SharedExecutablePlan, bool), SQLError> {
         let (_, reusable) = uqa_sql::binding::statements::analyze_executable_plan_for_cache(
             &self.analysis,
             &mut plan,
@@ -114,14 +115,14 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
                 .optimization
                 .routine_inlining()
                 .is_some_and(|routines| routines.requires_replanning(&plan));
-        Ok((optimize_plan(self, plan)?, reusable))
+        Ok((optimize_shared_plan(self, plan)?, reusable))
     }
 
     fn plan_for_execution(
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<UnifiedPlan, SQLError> {
+    ) -> Result<SharedExecutablePlan, SQLError> {
         plan_for_execution(self, plan, params)
     }
 
@@ -129,9 +130,9 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
         &self,
         mut plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<(UnifiedPlan, AnalyzedResult), SQLError> {
+    ) -> Result<(SharedExecutablePlan, AnalyzedResult), SQLError> {
         let result = analyze_executable_plan(&self.analysis, &mut plan, params)?;
-        Ok((optimize_plan(self, plan)?, result))
+        Ok((optimize_shared_plan(self, plan)?, result))
     }
 }
 
@@ -139,21 +140,27 @@ pub fn plan_for_execution(
     context: &StatementPlanningContext<'_>,
     mut plan: UnifiedPlan,
     params: &[SQLParam],
-) -> Result<UnifiedPlan, SQLError> {
+) -> Result<SharedExecutablePlan, SQLError> {
     analyze_executable_plan(&context.analysis, &mut plan, params)?;
-    optimize_plan(context, plan)
+    optimize_shared_plan(context, plan)
 }
 /// Move an owned query through optimization; a borrowed catalog or utility query still receives its independent destination.
 pub fn optimize_query(
     context: &StatementPlanningContext<'_>,
     query: Cow<'_, QueryPlan>,
-) -> Result<QueryPlan, SQLError> {
-    match optimize_plan(context, UnifiedPlan::Query(Box::new(query.into_owned())))? {
-        UnifiedPlan::Query(query) => Ok(*query),
-        UnifiedPlan::Command(_) => Err(SQLError::Internal(
-            "query optimization produced a command".into(),
-        )),
-    }
+) -> Result<OwnedQueryPlan, SQLError> {
+    let resources = context.optimization.production_resources()?;
+    let control = resources
+        .as_ref()
+        .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
+    let (query, mut memory) =
+        OwnedQueryPlan::from_query(query.into_owned(), &control)?.into_parts();
+    let (plan, output) =
+        optimize_with_control(context, UnifiedPlan::Query(query), control)?.into_parts();
+    memory.absorb(output);
+    OwnedExecutablePlan::from_parts(plan, memory)
+        .into_query()
+        .map_err(|_| SQLError::Internal("query optimization produced a command".into()))
 }
 
 /// Cost a selected native executable with the same request resources used by its optimizer.
@@ -171,12 +178,21 @@ pub fn estimate_plan(
 pub fn optimize_plan(
     context: &StatementPlanningContext<'_>,
     plan: UnifiedPlan,
-) -> Result<UnifiedPlan, SQLError> {
+) -> Result<OwnedExecutablePlan, SQLError> {
     let resources = context.optimization.production_resources()?;
-    let mut config = crate::optimizer::OptimizerConfig::new(context.constant_evaluator);
-    config.production = resources
+    let control = resources
         .as_ref()
         .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
+    optimize_with_control(context, plan, control)
+}
+
+fn optimize_with_control(
+    context: &StatementPlanningContext<'_>,
+    plan: UnifiedPlan,
+    control: ProductionControl<'_>,
+) -> Result<OwnedExecutablePlan, SQLError> {
+    let mut config = crate::optimizer::OptimizerConfig::new(context.constant_evaluator);
+    config.production = control;
     config.builtin_permissions = context.optimization.builtin_permissions();
     config.routine_inlining = context.optimization.routine_inlining();
     let storage = || context.optimization.constant_storage();
@@ -188,6 +204,17 @@ pub fn optimize_plan(
         config,
         plan,
     )
+}
+
+pub fn optimize_shared_plan(
+    context: &StatementPlanningContext<'_>,
+    plan: UnifiedPlan,
+) -> Result<SharedExecutablePlan, SQLError> {
+    let resources = context.optimization.production_resources()?;
+    let control = resources
+        .as_ref()
+        .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
+    optimize_with_control(context, plan, control)?.into_shared(&control)
 }
 
 #[cfg(test)]

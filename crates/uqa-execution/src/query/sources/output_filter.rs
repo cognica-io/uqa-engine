@@ -8,11 +8,29 @@
 
 use super::{qualifier_filter, QualifierFilters, QueryPlan, SQLError, SourceContext};
 
+pub(super) struct SpecializedSource {
+    source: super::SourcePlan,
+    _memory: uqa_sql::plan::ExecutableMemory,
+}
+
+impl AsRef<super::SourcePlan> for SpecializedSource {
+    fn as_ref(&self) -> &super::SourcePlan {
+        &self.source
+    }
+}
+
+impl std::ops::Deref for SpecializedSource {
+    type Target = super::SourcePlan;
+    fn deref(&self) -> &Self::Target {
+        &self.source
+    }
+}
+
 pub(super) fn specialize_lateral_source<S: Clone>(
     context: &SourceContext<'_, S>,
     source: &super::SourcePlan,
     filters: Option<&QualifierFilters>,
-) -> Result<Option<super::SourcePlan>, SQLError> {
+) -> Result<Option<SpecializedSource>, SQLError> {
     let super::SourcePlan::Subquery {
         body,
         alias,
@@ -36,8 +54,12 @@ pub(super) fn specialize_lateral_source<S: Clone>(
     let super::SourcePlan::Subquery { body, .. } = &mut source else {
         unreachable!()
     };
-    **body = specialized;
-    Ok(Some(source))
+    let (query, memory) = specialized.into_parts();
+    *body = query;
+    Ok(Some(SpecializedSource {
+        source,
+        _memory: memory,
+    }))
 }
 
 pub(super) fn specialize_source_filter<S: Clone>(
@@ -46,7 +68,7 @@ pub(super) fn specialize_source_filter<S: Clone>(
     qualifier: &str,
     aliases: &[String],
     filters: Option<&QualifierFilters>,
-) -> Result<Option<QueryPlan>, SQLError> {
+) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
     let Some(filter) = qualifier_filter(filters, qualifier) else {
         return Ok(None);
     };

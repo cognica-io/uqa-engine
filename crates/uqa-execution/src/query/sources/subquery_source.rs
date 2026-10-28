@@ -40,7 +40,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                 filters,
             )?;
             let filters = if specialized.is_some() { None } else { filters };
-            let body = specialized.as_ref().unwrap_or(body);
+            let body = specialized.as_deref().unwrap_or(body);
             let mut recheck_scope = ctes.enter_recheck_storage_pins(&visible_qualifier);
             let ctes: &mut CteScope<S> = &mut recheck_scope;
             if let Some(operator) =

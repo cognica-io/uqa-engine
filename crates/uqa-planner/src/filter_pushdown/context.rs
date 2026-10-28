@@ -18,7 +18,7 @@ use uqa_sql::{
 pub struct FilterPushdownContext<'a> {
     pub volatility: &'a dyn VolatilityCatalog,
     pub correlation: CorrelationContext<'a>,
-    pub optimizer: &'a dyn Fn(UnifiedPlan) -> Result<UnifiedPlan, SQLError>,
+    pub optimizer: &'a dyn Fn(UnifiedPlan) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError>,
 }
 
 #[derive(Clone, Copy)]

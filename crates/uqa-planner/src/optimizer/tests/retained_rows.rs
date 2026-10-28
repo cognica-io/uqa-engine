@@ -49,7 +49,7 @@ fn retained_row_plans_preserve_cardinality_identity_and_internal_predicates() {
         };
         assert_eq!(retained, &source);
 
-        let UnifiedPlan::Query(mut query) = plan else {
+        let UnifiedPlan::Query(mut query) = uncontrolled(plan) else {
             panic!("query")
         };
         let RelationalPlan::QueryBlock(block) = &mut query.root else {

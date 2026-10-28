@@ -22,11 +22,17 @@ fn native_inferred_join_conditions_recover_and_preserve_postgresql_rows(
     let retention = engine.query_retention_control().unwrap();
     let memory = retention.memory();
     let input = UnifiedPlan::lower(uqa_sql::compile(INFERRED).unwrap().remove(0));
+    let before = memory.used();
     let baseline =
         crate::capabilities::statement_planning::optimize_engine_plan(&engine, input.clone())
             .unwrap();
+    assert!(
+        baseline.reserved_bytes() > 0,
+        "{provider:?}: inferred output has no lease"
+    );
+    assert_eq!(memory.used(), before + baseline.reserved_bytes());
     drop(baseline);
-    let before = memory.used();
+    assert_eq!(memory.used(), before);
     let occupied = memory.reserve(memory.available() - 512).unwrap();
     let allocation = allocation_counter::measure(|| {
         let error = crate::capabilities::statement_planning::optimize_engine_plan(&engine, input)
@@ -62,6 +68,27 @@ fn native_inferred_join_conditions_recover_and_preserve_postgresql_rows(
             &[],
         )
         .unwrap();
+    let selected = engine.lookup_prepared("inferred_join").unwrap();
+    assert!(
+        selected.reserved_bytes() > 0,
+        "{provider:?}: prepared output has no lease"
+    );
+    let mut copies = std::array::from_fn::<_, 64, _>(|_| None);
+    let before = memory.used();
+    let allocation = allocation_counter::measure(|| {
+        for copy in &mut copies {
+            *copy = Some(selected.clone());
+        }
+    });
+    assert_eq!(allocation.count_total, 0);
+    assert_eq!(memory.used(), before);
+    drop(copies);
+    engine.sql("DEALLOCATE inferred_join", &[]).unwrap();
+    assert_eq!(selected.strong_count(), 1);
+    let before = memory.used();
+    let reserved = selected.reserved_bytes();
+    drop(selected);
+    assert_eq!(memory.used(), before - reserved);
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);

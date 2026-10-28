@@ -81,7 +81,7 @@ fn column_resolution_preserves_unique_ambiguous_and_unknown_names() {
 
 #[test]
 fn rejected_join_search_does_not_copy_unused_column_names() {
-    let mut plan = UnifiedPlan::lower(
+    let plan = UnifiedPlan::lower(
         uqa_sql::compile("SELECT 1 FROM a CROSS JOIN b")
             .unwrap()
             .remove(0),
@@ -107,7 +107,7 @@ fn rejected_join_search_does_not_copy_unused_column_names() {
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
     let allocation = allocation_counter::measure(|| {
-        let error = reorder_unified_plan_joins(&mut plan, &statistics, &control).unwrap_err();
+        let error = reorder_unified_plan_joins(plan, &statistics, &control).unwrap_err();
         let crate::optimizer::OptimizerError::Expression(error) = error else {
             panic!("typed admission failure")
         };

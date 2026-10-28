@@ -56,7 +56,7 @@ impl QueryEffectCatalog for Catalog {
     fn view_plan(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
         Ok(None)
     }
-    fn lookup_prepared(&self, _: &str) -> Option<std::sync::Arc<UnifiedPlan>> {
+    fn lookup_prepared(&self, _: &str) -> Option<crate::plan::SharedExecutablePlan> {
         None
     }
 }

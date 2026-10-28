@@ -24,8 +24,10 @@ mod tests;
 mod bindings;
 mod inference;
 mod inputs;
-use bindings::{attach_join_predicates, PredicateBindings};
+use bindings::{PredicateAttachments, PredicateBindings};
+mod output;
 use inference::{implied_join_predicates, join_predicate};
+use output::Output;
 mod materialization;
 mod relations;
 use inputs::{
@@ -33,27 +35,62 @@ use inputs::{
 };
 use relations::RelationMetadata;
 
+struct JoinRewrite {
+    // Destroy the partially rewritten tree before its output leases on every failure path.
+    plan: UnifiedPlan,
+    output: Output,
+}
+
+impl JoinRewrite {
+    fn new(plan: UnifiedPlan, control: &ProductionControl<'_>) -> Self {
+        Self {
+            plan,
+            output: Output::new(control),
+        }
+    }
+
+    fn run(
+        &mut self,
+        statistics: &dyn SourceStatistics,
+        control: &ProductionControl<'_>,
+    ) -> OptimizerResult<()> {
+        match &mut self.plan {
+            UnifiedPlan::Query(query) => {
+                reorder_query_joins(query, statistics, control, &mut self.output)
+            }
+            UnifiedPlan::Command(command) => {
+                reorder_command_joins(command, statistics, control, &mut self.output)
+            }
+        }
+    }
+}
+
 pub(super) fn reorder_unified_plan_joins(
-    plan: &mut UnifiedPlan,
+    plan: UnifiedPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> OptimizerResult<()> {
-    match plan {
-        UnifiedPlan::Query(query) => reorder_query_joins(query, statistics, control),
-        UnifiedPlan::Command(command) => reorder_command_joins(command, statistics, control),
-    }
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
+    let mut rewrite = JoinRewrite::new(plan, control);
+    rewrite.run(statistics, control)?;
+    Ok(uqa_sql::plan::OwnedExecutablePlan::from_parts(
+        rewrite.plan,
+        rewrite.output.finish(),
+    ))
 }
 
 fn reorder_query_joins(
     query: &mut QueryPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
+    output: &mut Output,
 ) -> OptimizerResult<()> {
     for cte in &mut query.ctes {
         match &mut cte.body {
-            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control)?,
+            crate::CtePlanBody::Query(query) => {
+                reorder_query_joins(query, statistics, control, output)?;
+            }
             crate::CtePlanBody::Command(command) => {
-                reorder_command_joins(command, statistics, control)?;
+                reorder_command_joins(command, statistics, control, output)?;
             }
         }
     }
@@ -66,19 +103,19 @@ fn reorder_query_joins(
                         collect_conjuncts(predicate, &mut where_predicates, control)?;
                     }
                 }
-                reorder_source_joins(source, &where_predicates, statistics, control)?;
+                reorder_source_joins(source, &where_predicates, statistics, control, output)?;
             }
             for subquery in &mut block.subqueries {
-                reorder_query_joins(subquery, statistics, control)?;
+                reorder_query_joins(subquery, statistics, control, output)?;
             }
         }
         RelationalPlan::SetOp { left, right, .. } => {
-            reorder_query_joins(left, statistics, control)?;
-            reorder_query_joins(right, statistics, control)?;
+            reorder_query_joins(left, statistics, control, output)?;
+            reorder_query_joins(right, statistics, control, output)?;
         }
         RelationalPlan::Values { subqueries, .. } => {
             for subquery in subqueries {
-                reorder_query_joins(subquery, statistics, control)?;
+                reorder_query_joins(subquery, statistics, control, output)?;
             }
         }
     }
@@ -89,10 +126,13 @@ fn reorder_cte_joins(
     cte: &mut crate::CtePlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
+    output: &mut Output,
 ) -> OptimizerResult<()> {
     match &mut cte.body {
-        crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control),
-        crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics, control),
+        crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control, output),
+        crate::CtePlanBody::Command(command) => {
+            reorder_command_joins(command, statistics, control, output)
+        }
     }
 }
 
@@ -104,45 +144,46 @@ fn reorder_command_joins(
     command: &mut CommandPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
+    output: &mut Output,
 ) -> OptimizerResult<()> {
     match command {
-        CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics, control)?,
+        CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics, control, output)?,
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
-                reorder_cte_joins(cte, statistics, control)?;
+                reorder_cte_joins(cte, statistics, control, output)?;
             }
             if let Some(source) = &mut plan.source {
-                reorder_source_joins(source, &[], statistics, control)?;
+                reorder_source_joins(source, &[], statistics, control, output)?;
             }
             for subquery in &mut plan.subqueries {
-                reorder_query_joins(subquery, statistics, control)?;
+                reorder_query_joins(subquery, statistics, control, output)?;
             }
         }
         CommandPlan::Delete(plan) => {
             for cte in &mut plan.ctes {
-                reorder_cte_joins(cte, statistics, control)?;
+                reorder_cte_joins(cte, statistics, control, output)?;
             }
             if let Some(source) = &mut plan.source {
-                reorder_source_joins(source, &[], statistics, control)?;
+                reorder_source_joins(source, &[], statistics, control, output)?;
             }
             for subquery in &mut plan.subqueries {
-                reorder_query_joins(subquery, statistics, control)?;
+                reorder_query_joins(subquery, statistics, control, output)?;
             }
         }
         CommandPlan::Merge(plan) => {
             for cte in &mut plan.ctes {
-                reorder_cte_joins(cte, statistics, control)?;
+                reorder_cte_joins(cte, statistics, control, output)?;
             }
-            reorder_source_joins(&mut plan.source, &[], statistics, control)?;
+            reorder_source_joins(&mut plan.source, &[], statistics, control, output)?;
             for subquery in &mut plan.subqueries {
-                reorder_query_joins(subquery, statistics, control)?;
+                reorder_query_joins(subquery, statistics, control, output)?;
             }
         }
         CommandPlan::DeclareCursor { query, .. } => {
-            reorder_query_joins(query, statistics, control)?;
+            reorder_query_joins(query, statistics, control, output)?;
         }
         CommandPlan::Call { args: params, .. } => {
-            reorder_expression_subquery_joins(params, statistics, control)?;
+            reorder_expression_subquery_joins(params, statistics, control, output)?;
         }
         CommandPlan::Explain { .. }
         | CommandPlan::CreateTableAs { .. }
@@ -224,20 +265,23 @@ fn reorder_insert_joins(
     plan: &mut crate::unified_plan::InsertPlan,
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
+    output: &mut Output,
 ) -> OptimizerResult<()> {
     for cte in &mut plan.ctes {
         match &mut cte.body {
-            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics, control)?,
+            crate::CtePlanBody::Query(query) => {
+                reorder_query_joins(query, statistics, control, output)?;
+            }
             crate::CtePlanBody::Command(command) => {
-                reorder_command_joins(command, statistics, control)?;
+                reorder_command_joins(command, statistics, control, output)?;
             }
         }
     }
     if let Some(source) = &mut plan.source {
-        reorder_query_joins(source, statistics, control)?;
+        reorder_query_joins(source, statistics, control, output)?;
     }
     for subquery in &mut plan.subqueries {
-        reorder_query_joins(subquery, statistics, control)?;
+        reorder_query_joins(subquery, statistics, control, output)?;
     }
     Ok(())
 }
@@ -246,10 +290,11 @@ fn reorder_expression_subquery_joins(
     expressions: &mut [ExpressionPlan],
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
+    output: &mut Output,
 ) -> OptimizerResult<()> {
     for expression in expressions {
         for subquery in &mut expression.subqueries {
-            reorder_query_joins(subquery, statistics, control)?;
+            reorder_query_joins(subquery, statistics, control, output)?;
         }
     }
     Ok(())
@@ -260,14 +305,17 @@ fn reorder_source_joins(
     external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
+    output: &mut Output,
 ) -> OptimizerResult<()> {
     match source {
         SourcePlan::RetainedRows(_) => {}
         SourcePlan::Join { left, right, .. } => {
-            reorder_source_joins(left, &[], statistics, control)?;
-            reorder_source_joins(right, &[], statistics, control)?;
+            reorder_source_joins(left, &[], statistics, control, output)?;
+            reorder_source_joins(right, &[], statistics, control, output)?;
         }
-        SourcePlan::Subquery { body, .. } => reorder_query_joins(body, statistics, control)?,
+        SourcePlan::Subquery { body, .. } => {
+            reorder_query_joins(body, statistics, control, output)?;
+        }
         SourcePlan::Table { .. }
         | SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
@@ -275,7 +323,7 @@ fn reorder_source_joins(
     }
 
     if let Some(reordered) =
-        reordered_inner_join_source(source, external_predicates, statistics, control)?
+        rewrite_inner_join_source(source, external_predicates, statistics, control, output)?
     {
         *source = reordered;
     }
@@ -292,11 +340,12 @@ struct JoinPredicateBinding {
     clippy::too_many_lines,
     reason = "join rewrite preserves predicate ownership and relation order atomically"
 )]
-fn reordered_inner_join_source(
+fn rewrite_inner_join_source(
     source: &mut SourcePlan,
     external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
+    output: &mut Output,
 ) -> OptimizerResult<Option<SourcePlan>> {
     let mut atoms = ProductionSmallVec::<[&SourcePlan; 64]>::new(*control);
     let mut expressions = ProductionVec::new(*control);
@@ -442,15 +491,24 @@ fn reordered_inner_join_source(
         .zip(inferred.iter())
     {
         control.check().map_err(uqa_sql::SQLError::from)?;
-        slot.expression = Some((*expression).clone());
+        slot.expression = Some(
+            output.retain_predicate(
+                expression
+                    .clone_with_control(control)
+                    .map_err(uqa_sql::SQLError::from)?,
+            ),
+        );
     }
+    let attachments =
+        PredicateAttachments::prepare(&selected, predicates.as_mut_slice(), output, control)?;
     drop(graph_predicates);
     drop(inferred);
     drop(expressions);
     drop(atoms);
     drop(relation_storage);
-    let mut reordered = materialization::reorder(source, &selected, predicates.as_mut_slice())?;
-    attach_join_predicates(&mut reordered, &selected, predicates.as_mut_slice(), true);
+    let mut reordered =
+        materialization::reorder(source, &selected, predicates.as_mut_slice(), output)?;
+    attachments.attach(&mut reordered, &selected, predicates.as_mut_slice(), output);
     let remaining = predicates
         .as_slice()
         .iter()

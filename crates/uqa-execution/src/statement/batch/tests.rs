@@ -145,7 +145,7 @@ impl ExecutablePlanOptimizer for Inputs {
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<UnifiedPlan, SQLError> {
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
         assert!(
             matches!(plan, UnifiedPlan::Command(command) if matches!(*command, uqa_sql::plan::CommandPlan::Delete(_)))
         );
@@ -165,7 +165,13 @@ impl ExecutablePlanOptimizer for Inputs {
         &self,
         _: UnifiedPlan,
         _: &[SQLParam],
-    ) -> Result<(UnifiedPlan, uqa_sql::binding::statements::AnalyzedResult), SQLError> {
+    ) -> Result<
+        (
+            uqa_sql::plan::SharedExecutablePlan,
+            uqa_sql::binding::statements::AnalyzedResult,
+        ),
+        SQLError,
+    > {
         panic!("these statements run without a result check")
     }
 }
@@ -199,7 +205,7 @@ impl StatementCache for Inputs {
         }
         self.record(format!("cache.write.{}", self.snapshot.get()));
     }
-    fn cache_optimized_sql_plan(&self, _: &str, _: Arc<UnifiedPlan>) {
+    fn cache_optimized_sql_plan(&self, _: &str, _: uqa_sql::plan::SharedExecutablePlan) {
         panic!("a rejected plan cannot enter the optimized cache")
     }
 }

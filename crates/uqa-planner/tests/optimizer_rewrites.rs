@@ -65,6 +65,11 @@ fn select_with_where(filter: Expr) -> SelectStmt {
 fn optimize_select(stmt: SelectStmt) -> UnifiedPlan {
     let cfg = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
+        .map(|plan| {
+            let (plan, memory) = plan.into_parts();
+            assert_eq!(memory.reserved_bytes(), 0);
+            plan
+        })
         .expect("optimizer succeeds")
 }
 
@@ -290,7 +295,7 @@ fn window_definitions_follow_subquery_remapping_and_source_constants() {
     )
     .unwrap();
     assert_eq!(
-        serde_json::to_value(repeated).unwrap(),
+        serde_json::to_value(repeated.as_ref()).unwrap(),
         serde_json::to_value(plan).unwrap()
     );
 }

@@ -33,7 +33,7 @@ pub(super) struct SQLStatements<'a> {
 }
 
 pub(super) enum SQLBodyPlan {
-    Selected(std::sync::Arc<UnifiedPlan>),
+    Selected(uqa_sql::plan::SharedExecutablePlan),
     Uncached(UnifiedPlan),
 }
 

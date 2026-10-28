@@ -217,7 +217,10 @@ fn native_join_planning_shares_request_allowance_and_cancellation(#[case] provid
     engine.reset_cancellation();
     let actual =
         crate::capabilities::statement_planning::optimize_engine_plan(&engine, input).unwrap();
-    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    assert_eq!(
+        format!("{:?}", actual.as_ref()),
+        format!("{:?}", expected.as_ref())
+    );
     drop((actual, expected));
     engine.close().unwrap();
     drop(engine);
@@ -348,7 +351,10 @@ fn native_scalar_translation_shares_request_resources(#[case] provider: Provider
     engine.reset_cancellation();
     let actual =
         crate::capabilities::statement_planning::optimize_engine_plan(&engine, input).unwrap();
-    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    assert_eq!(
+        format!("{:?}", actual.as_ref()),
+        format!("{:?}", expected.as_ref())
+    );
     drop((actual, expected));
     engine.close().unwrap();
     drop(engine);

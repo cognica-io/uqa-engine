@@ -5,6 +5,7 @@
 //
 use super::*;
 use crate::statement::prepared::invalidation::{PreparedCatalogChange, PreparedInvalidationLog};
+use uqa_sql::plan::UnifiedPlan;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 fn fragment() -> PreparedFragment {
@@ -237,7 +238,7 @@ fn executable_invalidation_reaches_procedural_owners_and_fences_recursive_public
         let plan = entry
             .plan
             .clone()
-            .unwrap_or_else(|| Arc::clone(&entry.logical_plan));
+            .unwrap_or_else(|| Arc::clone(&entry.logical_plan).into());
         uqa_sql::prepared::planning::PreparedPlanSelection {
             plan: plan.clone(),
             update: uqa_sql::prepared::planning::PreparedPlanUpdate {

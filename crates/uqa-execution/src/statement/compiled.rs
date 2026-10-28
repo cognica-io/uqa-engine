@@ -115,7 +115,7 @@ fn stored_plan<S: Clone + 'static>(
     context: &CompiledStatementContext<'_, S>,
     statement: Statement,
     params: &[SQLParam],
-) -> Result<UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
     let mut plan = UnifiedPlan::lower_with(statement, context.aggregates);
     mark_catalog_statement_relations_bound(&mut plan)?;
     context.planning.plan_for_execution(plan, params)

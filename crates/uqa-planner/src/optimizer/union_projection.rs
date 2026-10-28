@@ -224,6 +224,11 @@ mod tests {
                 uqa_execution::scalar::eval_constant_scalar_with_control,
             ),
         )
+        .map(|plan| {
+            let (plan, memory) = plan.into_parts();
+            assert_eq!(memory.reserved_bytes(), 0);
+            plan
+        })
         .unwrap() else {
             panic!("query");
         };
@@ -233,6 +238,11 @@ mod tests {
                 uqa_execution::scalar::eval_constant_scalar_with_control,
             ),
         )
+        .map(|plan| {
+            let (plan, memory) = plan.into_parts();
+            assert_eq!(memory.reserved_bytes(), 0);
+            plan
+        })
         .unwrap() else {
             panic!("reoptimized query");
         };

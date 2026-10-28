@@ -138,23 +138,27 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
         settings: &ExplainSettings,
         planning: Planning,
     ) -> Result<SQLResult, SQLError> {
-        let mut planned = self
+        let planned = self
             .context
             .physical_explain
             .plan_explained_statement(query)?;
         self.lock_explained_relations(&planned)?;
-        if let UnifiedPlan::Query(query) = &mut planned {
-            let ctes = self
-                .context
-                .queries
-                .statement_scope(self.privilege_subject.as_ref());
-            crate::query::sources::prepared_queries::prepare_in_place(
-                &self.context.queries.query_context().source,
-                query,
-                self.params,
-                &ctes,
-            )?;
-        }
+        let planned = match planned.into_query() {
+            Ok(query) => {
+                let ctes = self
+                    .context
+                    .queries
+                    .statement_scope(self.privilege_subject.as_ref());
+                crate::query::sources::prepared_queries::prepare_in_place(
+                    &self.context.queries.query_context().source,
+                    query,
+                    self.params,
+                    &ctes,
+                )?
+                .into_executable()
+            }
+            Err(command) => command,
+        };
         self.explain_prepared_query(&planned, destination, settings, planning)
     }
 
@@ -182,7 +186,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 .context
                 .queries
                 .statement_scope(self.privilege_subject.as_ref());
-            if let std::borrow::Cow::Owned(prepared) =
+            if let crate::query::sources::prepared_queries::PreparedQuery::Owned(prepared) =
                 crate::query::sources::prepared_queries::prepare(
                     &self.context.queries.query_context().source,
                     query,
@@ -190,15 +194,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                     &ctes,
                 )?
             {
-                let retained = self.context.diagnostics.diagnostics_control()?;
-                let control = uqa_core::memory::ProductionControl::new(
-                    retained.memory(),
-                    retained.cancellation(),
-                    self.context.runtime.cancellation,
-                );
-                // The source preparer owns the returned query's payloads. This lease admits only the new enclosing box, and outlives that box on every return path.
-                let _query_box_memory = control.reserve(size_of::<uqa_sql::plan::QueryPlan>())?;
-                let prepared = UnifiedPlan::Query(Box::new(prepared));
+                let prepared = prepared.into_executable();
                 return self.explain_prepared_query(&prepared, None, settings, planning);
             }
         }

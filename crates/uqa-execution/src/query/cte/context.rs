@@ -65,7 +65,10 @@ pub trait QueryOutputRewriter: Sync {
     ) -> Result<(), SQLError>;
 
     /// Consume the private catalog-query destination before assembling its streaming or materialized execution path. The caller has already restored layouts and applied its output demand.
-    fn optimize_retained_query(&self, query: QueryPlan) -> Result<QueryPlan, SQLError>;
+    fn optimize_retained_query(
+        &self,
+        query: QueryPlan,
+    ) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError>;
 
     /// Return a plan that applies the complete output predicate, or `None` when the caller must retain it.
     fn push_output_filter(
@@ -74,7 +77,7 @@ pub trait QueryOutputRewriter: Sync {
         qualifier: &str,
         filter: &ScalarExpr,
         output_columns: Option<&[String]>,
-    ) -> Result<Option<QueryPlan>, SQLError>;
+    ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError>;
 
     /// Place a predicate inside an ordinary derived source. Recursive specialization keeps its separate effect boundary through `push_output_filter`.
     fn push_derived_output_filter(
@@ -83,7 +86,7 @@ pub trait QueryOutputRewriter: Sync {
         qualifier: &str,
         filter: &ScalarExpr,
         output_columns: Option<&[String]>,
-    ) -> Result<Option<QueryPlan>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
         self.push_output_filter(query, qualifier, filter, output_columns)
     }
 }

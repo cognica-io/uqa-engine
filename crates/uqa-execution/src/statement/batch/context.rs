@@ -37,13 +37,16 @@ pub fn statement_deadline<S: Clone + 'static>(
 pub struct CachedStatement {
     pub statement: Arc<Statement>,
     pub logical_plan: Arc<UnifiedPlan>,
-    pub optimized_plan: Option<Arc<UnifiedPlan>>,
+    pub optimized_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub parser: uqa_sql::parser::ParserMetadata,
 }
 
 impl CachedStatement {
     /// Optimized entries were analyzed without parameters; any supplied inputs require native binding, including inputs the query does not reference.
-    pub(crate) fn optimized_plan_for(&self, params: &[SQLParam]) -> Option<&Arc<UnifiedPlan>> {
+    pub(crate) fn optimized_plan_for(
+        &self,
+        params: &[SQLParam],
+    ) -> Option<&uqa_sql::plan::SharedExecutablePlan> {
         if params.is_empty() {
             self.optimized_plan.as_ref()
         } else {
@@ -75,7 +78,11 @@ pub trait StatementCache {
         logical_plan: Arc<UnifiedPlan>,
         parser: uqa_sql::parser::ParserMetadata,
     );
-    fn cache_optimized_sql_plan(&self, sql: &str, optimized_plan: Arc<UnifiedPlan>);
+    fn cache_optimized_sql_plan(
+        &self,
+        sql: &str,
+        optimized_plan: uqa_sql::plan::SharedExecutablePlan,
+    );
 }
 
 /// Transaction state changes requested at the native scheduler's boundaries.

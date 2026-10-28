@@ -9,7 +9,6 @@
 use parking_lot::Mutex;
 use std::sync::Arc;
 use uqa_sql::{
-    plan::UnifiedPlan,
     prepared::{
         definition::PreparedDefinition, entry::PreparedStatementPlan,
         planning::PreparedPlanSelection,
@@ -46,7 +45,7 @@ impl RoutinePlanVariants {
     pub(super) fn select(
         &self,
         select: impl FnOnce(&PreparedStatementPlan) -> Result<PreparedPlanSelection, SQLError>,
-    ) -> Result<Arc<UnifiedPlan>, SQLError> {
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
         let entry = self.0.lock().clone();
         let selected = select(&entry)?;
         let mut current = self.0.lock();

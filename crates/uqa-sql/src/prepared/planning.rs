@@ -14,7 +14,7 @@ pub trait PreparedPlanProvider {
         &self,
         name: &str,
         parameters: &[SQLParam],
-    ) -> Result<Option<Arc<UnifiedPlan>>, SQLError>;
+    ) -> Result<Option<crate::plan::SharedExecutablePlan>, SQLError>;
 }
 
 /// A successful replacement analysis and the namespace it used, published together against the original definition identity.
@@ -28,13 +28,13 @@ pub struct PreparedPlanAnalysis {
 pub struct PreparedPlanUpdate {
     pub composite_inputs: super::composites::CompositeInputs,
     pub reanalyzed: Option<PreparedPlanAnalysis>,
-    pub generic_plan: Option<Arc<UnifiedPlan>>,
+    pub generic_plan: Option<crate::plan::SharedExecutablePlan>,
     pub generic_cost: Option<f64>,
     pub custom_cost: Option<f64>,
 }
 
 /// A selected immutable executable and its cache update. Reuse shares the cached executable; custom specialization and composite projection retain separate plans. The owner publishes the update only against the definition it supplied to selection.
 pub struct PreparedPlanSelection {
-    pub plan: Arc<UnifiedPlan>,
+    pub plan: crate::plan::SharedExecutablePlan,
     pub update: PreparedPlanUpdate,
 }

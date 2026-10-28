@@ -206,7 +206,7 @@ fn values_queries_bound_folded_payloads_before_cloning_their_native_plans() {
         });
         assert!(allocation.bytes_max < 8 * 1024 * 1024, "{allocation:?}");
         let (copy, plan) = output.unwrap();
-        for query in [copy, plan] {
+        for query in [&copy, plan.as_ref()] {
             let mut count = 0;
             query.visit_scalar_expressions(&mut |expression| {
                 expression.visit(&mut |scalar| {

@@ -38,6 +38,7 @@ fn optimized(sql: &str) -> UnifiedPlan {
         UnifiedPlan::lower(statements.remove(0)),
         &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
     )
+    .map(uncontrolled)
     .expect("optimizer succeeds")
 }
 
@@ -61,6 +62,7 @@ fn optimized_with_rows(sql: &str, rows: &[(&str, u64)]) -> UnifiedPlan {
             })
         },
     )
+    .map(uncontrolled)
     .expect("optimizer succeeds")
 }
 
@@ -718,6 +720,7 @@ fn dpccp_resolves_unique_unqualified_where_join_columns() {
             Some(stats)
         },
     )
+    .map(uncontrolled)
     .expect("optimizer succeeds");
     let source = query_block(&plan).from.as_ref().expect("join source");
 
@@ -813,6 +816,7 @@ fn join_reordering_preserves_lateral_boundary() {
             })
         },
     )
+    .map(uncontrolled)
     .expect("optimizer succeeds");
     let source = query_block(&plan).from.as_ref().expect("join source");
     let SourcePlan::Join {
@@ -884,4 +888,10 @@ fn merge_action_remains_a_row_input_during_constant_folding() {
             ..
         }
     ));
+}
+
+fn uncontrolled(plan: uqa_sql::plan::OwnedExecutablePlan) -> UnifiedPlan {
+    let (plan, memory) = plan.into_parts();
+    assert_eq!(memory.reserved_bytes(), 0);
+    plan
 }
