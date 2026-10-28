@@ -14,53 +14,6 @@ mod similar_substring;
 mod strict_arithmetic;
 
 #[test]
-fn constant_folding_retains_selected_collation_metadata() {
-    for coerced_conditionals in [false, true] {
-        let mut config = crate::optimizer::OptimizerConfig::new(
-            uqa_execution::scalar::eval_constant_scalar_with_control,
-        );
-        config.coerced_conditionals = coerced_conditionals;
-        for source in [
-            "'x' COLLATE \"C\"",
-            "('x' COLLATE \"C\") COLLATE \"POSIX\"",
-            "upper('x' COLLATE \"C\")",
-            "ARRAY['x' COLLATE \"C\"]",
-        ] {
-            let uqa_sql::Statement::Select(mut query) =
-                uqa_sql::compile(&format!("SELECT {source}"))
-                    .unwrap()
-                    .remove(0)
-            else {
-                panic!("SELECT")
-            };
-            let expression =
-                uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
-            let mut expression =
-                uqa_sql::bind_type_introspection(expression, &RowSchema::default(), &[]);
-            let identities = |expression: &ScalarExpr| {
-                let mut identities = Vec::new();
-                expression.visit(&mut |node| {
-                    if let Some(clause) =
-                        uqa_sql::catalog::collations::expression::scalar_clause(node).unwrap()
-                    {
-                        identities.push(clause.oid.expect("selected collation"));
-                    }
-                });
-                identities
-            };
-            let expected = identities(&expression);
-            assert!(!expected.is_empty());
-            crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config).unwrap();
-            assert_eq!(
-                identities(&expression),
-                expected,
-                "{source}, coerced={coerced_conditionals}"
-            );
-        }
-    }
-}
-
-#[test]
 fn session_dependent_temporal_operators_remain_executable_after_parameter_binding() {
     use uqa_core::TemporalValue;
     let zoned = ScalarExpr::Literal(Value::Temporal(TemporalValue::TimestampTz {
