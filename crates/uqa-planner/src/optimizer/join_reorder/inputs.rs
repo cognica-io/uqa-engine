@@ -29,7 +29,7 @@ impl<'a> ColumnOwners<'a> {
         self.alias_index(alias).is_some()
     }
 
-    fn alias_index(&self, alias: &str) -> Option<usize> {
+    pub(super) fn alias_index(&self, alias: &str) -> Option<usize> {
         self.aliases[..self.relations.len()]
             .binary_search_by_key(&alias, |(name, _)| *name)
             .ok()

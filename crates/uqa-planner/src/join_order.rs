@@ -85,6 +85,25 @@ pub struct JoinPredicate {
     pub right_field: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct JoinPredicateRef<'a> {
+    pub left_alias: &'a str,
+    pub right_alias: &'a str,
+    pub left_field: &'a str,
+    pub right_field: &'a str,
+}
+
+impl JoinPredicate {
+    fn as_join_predicate(&self) -> JoinPredicateRef<'_> {
+        JoinPredicateRef {
+            left_alias: &self.left_alias,
+            right_alias: &self.right_alias,
+            left_field: &self.left_field,
+            right_field: &self.right_field,
+        }
+    }
+}
+
 /// Algorithm hint for an inner join.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinAlgorithm {
@@ -151,7 +170,7 @@ impl JoinOrderOptimizer {
     ) -> JoinGraphResult<JoinOrderResult> {
         let selection::Selection { plan, aliases } = match self.select(
             relations.iter().map(JoinRelation::as_join_relation),
-            &predicates,
+            predicates.iter().map(JoinPredicate::as_join_predicate),
             &ProductionControl::uncontrolled(),
         ) {
             Ok(selection) => selection,
@@ -192,15 +211,15 @@ impl JoinOrderOptimizer {
     ) -> Result<Produced<JoinPlan>, JoinOrderError> {
         self.select_relations_with_control(
             relations.iter().map(JoinRelation::as_join_relation),
-            predicates,
+            predicates.iter().map(JoinPredicate::as_join_predicate),
             control,
         )
     }
 
-    pub(crate) fn select_relations_with_control<'a>(
+    pub(crate) fn select_relations_with_control<'a, 'p>(
         &self,
         relations: impl ExactSizeIterator<Item = JoinRelationRef<'a>> + Clone,
-        predicates: &[JoinPredicate],
+        predicates: impl Iterator<Item = JoinPredicateRef<'p>>,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<JoinPlan>, JoinOrderError> {
         self.select(relations, predicates, control)

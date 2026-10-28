@@ -26307,6 +26307,113 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "ordered_production_scratch_tracks_exact_nodes_and_reuses_existing_keys",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/map/tests.rs",
+      "capability": "Admitted ordered scratch",
+      "workload": "Insert three ordered keys, replace at capacity, reject another node, remove one key and reuse the released space.",
+      "invariant": "The sorted values remain exact, each live node retains its complete reservation, replacement allocates no node and final drop releases all capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "ordered_production_scratch_rejects_before_allocation_and_preserves_cancelled_entries",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/map/tests.rs",
+      "capability": "Admitted ordered scratch",
+      "workload": "Insert under zero allowance and replace an existing key after either cancellation scope fires.",
+      "invariant": "Zero allowance rejects without an allocation; cancellation preserves the original value and removal still frees its node and lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "ordered_production_scratch_borrows_payloads_and_releases_nodes_on_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/map/tests.rs",
+      "capability": "Admitted ordered scratch",
+      "workload": "Borrow a four MiB key through controlled insertion, consumer unwind and the ordinary map adapter.",
+      "invariant": "The original key address survives, charged bytes equal the node allocation, and unwind releases every node reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "inferred_join_decisions_borrow_expression_and_column_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/inference.rs",
+      "capability": "Borrowed join predicate inference",
+      "workload": "Infer a simple cross-relation equality containing a four MiB column name.",
+      "invariant": "Keep the original expression and key addresses with less than four KiB additional allocation instead of copying the payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "inferred_join_intersections_keep_first_orientation_and_canonical_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/inference.rs",
+      "capability": "Borrowed join predicate inference",
+      "workload": "Intersect conjunctions with repeated reversed equalities, first-branch-only keys and later-branch-only keys.",
+      "invariant": "Keep exactly the common canonical keys, the first original expression and orientation, and release temporary nodes before returning the exact output leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "inference_workspace_observes_ancestor_limits_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/inference.rs",
+      "capability": "Borrowed join predicate inference",
+      "workload": "Exhaust an ancestor allowance during union and intersection pruning, cancel either request scope and unwind after success.",
+      "invariant": "Reject with 53200 or 57014 at the owning operation, preserve the sibling reservation and release all partial workspace below four KiB additional allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "predicate_slots_retain_the_buffer_lease_when_expressions_move",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/bindings.rs",
+      "capability": "Admitted predicate attachment slots",
+      "workload": "Move an existing four MiB expression through a four-slot buffer, unwind another buffer and reject a 65536-slot request.",
+      "invariant": "Slot allocation equals its retained reservation; moving a payload preserves its address without retiring buffer capacity, and failure or unwind preserves sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_inferred_join_conditions_recover_and_preserve_postgresql_rows",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/inference.rs",
+      "capability": "Native join inference recovery",
+      "workload": "Plan a three-table disjunctive equality under constrained request memory, then execute it directly, prepared and with EXPLAIN ANALYZE MEMORY on all four providers.",
+      "invariant": "Reject with 53200 below 256 KiB additional allocation, return the independently captured PostgreSQL 18.4 IDs 1 and 2 after recovery, and release request memory on close.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

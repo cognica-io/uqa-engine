@@ -6,7 +6,7 @@
 
 use super::{
     JoinGraph, JoinGraphError, JoinGraphResult, JoinOrderError, JoinOrderOptimizer, JoinPlan,
-    JoinPredicate, JoinRelationRef, Produced, ProductionControl,
+    JoinPredicateRef, JoinRelationRef, Produced, ProductionControl,
 };
 use crate::join_enumerator::enumerate_dpccp_with_control;
 use uqa_core::memory::ProductionVec;
@@ -56,10 +56,10 @@ impl<'a> Aliases<'a> {
 }
 
 impl JoinOrderOptimizer {
-    pub(super) fn select<'a>(
+    pub(super) fn select<'a, 'p>(
         &self,
         relations: impl ExactSizeIterator<Item = JoinRelationRef<'a>> + Clone,
-        predicates: &[JoinPredicate],
+        predicates: impl Iterator<Item = JoinPredicateRef<'p>>,
         control: &ProductionControl<'_>,
     ) -> Result<Selection<'a>, JoinOrderError> {
         control.check()?;
@@ -91,14 +91,14 @@ impl JoinOrderOptimizer {
         if relations.len() > 1 {
             for predicate in predicates {
                 control.check()?;
-                let left = aliases.index(&predicate.left_alias)?;
-                let right = aliases.index(&predicate.right_alias)?;
+                let left = aliases.index(predicate.left_alias)?;
+                let right = aliases.index(predicate.right_alias)?;
                 let selectivity = Self::estimate_predicate_selectivity(
                     relations.clone(),
                     left,
                     right,
-                    &predicate.left_field,
-                    &predicate.right_field,
+                    predicate.left_field,
+                    predicate.right_field,
                 );
                 edges.push_copy(JoinGraph::validated_edge(
                     relations.len(),

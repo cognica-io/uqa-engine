@@ -7,8 +7,10 @@
 use super::*;
 
 mod admission;
+mod bindings;
 mod columns;
 mod costing;
+mod inference;
 mod materialization;
 mod metadata;
 mod scratch;
