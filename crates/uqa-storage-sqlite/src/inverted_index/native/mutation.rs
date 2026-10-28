@@ -6,6 +6,7 @@
 
 //! Projected changes coalesce into complete native rows before the provider stages any result. After a whole-index replacement, rows arrive one at a time in ascending key order within each family, so each row is staged once the next row of its family arrives instead of every row being held until the batch ends.
 
+mod drafts;
 mod encoding;
 
 use super::{
@@ -13,7 +14,6 @@ use super::{
     records::{self, invalid},
 };
 use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordOwner};
-use std::collections::BTreeMap;
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
 use uqa_storage::key_value::occurrence_format::{
     OccurrenceAddress as Address, OccurrenceProjection as Projection,
@@ -32,7 +32,7 @@ pub(super) struct ProjectionBatch<'a> {
     read: &'a NativeRead,
     native: &'a mut dyn KeyValueBatch,
     owner: Option<NativeRecordOwner>,
-    rows: BTreeMap<Vec<u8>, Draft>,
+    rows: drafts::Drafts,
     cleared: bool,
     /// After a whole-index replacement, the last row of each family.
     replacing: Vec<ReplacedRow>,
@@ -85,7 +85,7 @@ impl<'a> ProjectionBatch<'a> {
             read,
             native,
             owner: read.owner,
-            rows: BTreeMap::new(),
+            rows: drafts::Drafts::new(&read.snapshot.control),
             cleared: false,
             replacing: Vec::new(),
             replaced: false,
@@ -129,42 +129,36 @@ impl<'a> ProjectionBatch<'a> {
         if self.cleared {
             return self.replace_row(key, address, slot, value, merge);
         }
-        let (key, key_memory) = key.into_parts();
-        let entry = self.rows.entry(key);
-        let draft = match entry {
-            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                let memory = control
-                    .memory()
-                    .reserve(std::mem::size_of::<(Vec<u8>, Draft)>())?;
-                let mut values = [None, None];
-                if !self.cleared && projections.len() > 1 {
-                    self.read.row(address, control, |row| {
-                        if let Some(row) = row {
-                            for (slot, &projection) in projections.iter().enumerate() {
-                                values[slot] =
-                                    Some(records::project(row, projection, control, |bytes| {
-                                        let mut value = BudgetedVec::new(control.memory());
-                                        value.extend_from_slice(bytes)?;
-                                        Ok(value)
-                                    })?);
-                            }
+        let mut draft = if let Some(draft) = self.rows.take_for_update(&key)? {
+            draft
+        } else {
+            let mut values = [None, None];
+            if !self.cleared && projections.len() > 1 {
+                self.read.row(address, control, |row| {
+                    if let Some(row) = row {
+                        for (slot, &projection) in projections.iter().enumerate() {
+                            values[slot] =
+                                Some(records::project(row, projection, control, |bytes| {
+                                    let mut value = BudgetedVec::new(control.memory());
+                                    value.extend_from_slice(bytes)?;
+                                    Ok(value)
+                                })?);
                         }
-                        Ok(())
-                    })?;
-                }
-                entry.insert(Draft {
-                    address: address.encode(control)?,
-                    values,
-                    _key: key_memory,
-                    _entry: memory,
-                    merge,
-                })
+                    }
+                    Ok(())
+                })?;
+            }
+            Draft {
+                address: address.encode(control)?,
+                values,
+                _key: control.memory().empty_reservation(),
+                _entry: control.memory().empty_reservation(),
+                merge,
             }
         };
         draft.merge &= merge;
         draft.values[slot] = owned_value(value, control)?;
-        Ok(())
+        self.rows.put(&key, draft)
     }
 
     /// Change a row after a whole-index replacement, which writes each record once and the rows of a family in ascending key order. A row is staged as soon as its last projection arrives, from that value instead of a copy, and a row of a later key stages the row its family left incomplete; an earlier key, or a record of a staged row, could change a row already staged, so it is rejected.
@@ -253,20 +247,17 @@ impl<'a> ProjectionBatch<'a> {
         Ok(())
     }
 
-    pub(super) fn flush(self) -> StorageBackendResult<()> {
+    pub(super) fn flush(mut self) -> StorageBackendResult<()> {
         let Some(owner) = self.owner else {
             return Ok(());
         };
+        self.rows
+            .visit(|key, draft| write_row(self.native, self.read, owner, key, &draft))?;
         let replacing = self
             .replacing
             .iter()
             .filter_map(|row| row.draft.as_ref().map(|draft| (&*row.key, draft)));
-        for (key, draft) in self
-            .rows
-            .iter()
-            .map(|(key, draft)| (key.as_slice(), draft))
-            .chain(replacing)
-        {
+        for (key, draft) in replacing {
             self.read.snapshot.control.check()?;
             write_row(self.native, self.read, owner, key, draft)?;
         }
@@ -393,26 +384,13 @@ impl KeyValueBatch for ProjectionBatch<'_> {
             }
         }
         // Include rows introduced earlier in this same callback, preserving delete-after-put order.
-        for draft in self.rows.values_mut().chain(
-            self.replacing
-                .iter_mut()
-                .filter_map(|row| row.draft.as_mut()),
-        ) {
-            control.check()?;
-            let address = Address::decode(&draft.address)?;
-            let family = records::family(address.projection.expect("complete address"))
-                .expect("current family");
-            for (slot, &projection) in records::projections(family).iter().enumerate() {
-                if (Address {
-                    projection: Some(projection),
-                    ..address
-                })
-                .encode(control)?
-                .starts_with(prefix)
-                {
-                    draft.values[slot] = None;
-                }
-            }
+        self.rows.remove_prefix(prefix)?;
+        for draft in self
+            .replacing
+            .iter_mut()
+            .filter_map(|row| row.draft.as_mut())
+        {
+            draft.remove_prefix(prefix, control)?;
         }
         Ok(())
     }
@@ -420,5 +398,31 @@ impl KeyValueBatch for ProjectionBatch<'_> {
         Err(invalid(
             "native occurrence batches are committed by their enclosing operation",
         ))
+    }
+}
+
+impl Draft {
+    fn remove_prefix(
+        &mut self,
+        prefix: &[u8],
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        let mut changed = false;
+        control.check()?;
+        let address = Address::decode(&self.address)?;
+        let family =
+            records::family(address.projection.expect("complete address")).expect("current family");
+        for (slot, &projection) in records::projections(family).iter().enumerate() {
+            if (Address {
+                projection: Some(projection),
+                ..address
+            })
+            .encode(control)?
+            .starts_with(prefix)
+            {
+                changed |= self.values[slot].take().is_some();
+            }
+        }
+        Ok(changed)
     }
 }

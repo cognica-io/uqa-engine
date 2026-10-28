@@ -19,6 +19,73 @@ fn fields<const N: usize>(pairs: [(&str, &str); N]) -> std::collections::BTreeMa
 }
 
 #[test]
+fn large_text_replacements_remain_bounded_across_one_transaction() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("text-replacements.db");
+    let mut body = String::new();
+    for term in 0..4096 {
+        write!(body, "term{term:05} ").unwrap();
+    }
+    {
+        let connection = ManagedConnection::open(&path).unwrap();
+        Catalog::open(connection.clone()).unwrap();
+        connection
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let mut index = SQLiteInvertedIndex::new(
+            connection.clone(),
+            "records",
+            uqa_analysis::whitespace_analyzer(),
+        );
+        connection.begin_transaction().unwrap();
+        index.add_document(1, fields([("body", &body)])).unwrap();
+        index.add_document(2, fields([("body", &body)])).unwrap();
+        connection.commit_transaction().unwrap();
+    }
+    body.push_str("additional");
+    {
+        let connection = ManagedConnection::open(&path).unwrap();
+        connection
+            .bind_native_records(VersionedSessionOptions {
+                retained_bytes: 2 << 20,
+            })
+            .unwrap();
+        let mut index = SQLiteInvertedIndex::new(
+            connection.clone(),
+            "records",
+            uqa_analysis::whitespace_analyzer(),
+        );
+        connection.begin_transaction().unwrap();
+        index
+            .add_document(1, fields([("body", &body)]))
+            .expect("first replacement");
+        index
+            .add_document(2, fields([("body", &body)]))
+            .expect("second replacement in the same transaction");
+        connection.commit_transaction().unwrap();
+    }
+    let connection = ManagedConnection::open(&path).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions {
+            retained_bytes: 2 << 20,
+        })
+        .unwrap();
+    let index =
+        SQLiteInvertedIndex::new(connection, "records", uqa_analysis::whitespace_analyzer());
+    for document in [1, 2] {
+        assert_eq!(index.get_doc_length(document, "body").unwrap(), 4097);
+        assert_eq!(
+            index.get_term_freq(document, "body", "additional").unwrap(),
+            1
+        );
+        assert_eq!(
+            index.get_term_freq(document, "body", "term04095").unwrap(),
+            1
+        );
+    }
+}
+
+#[test]
 fn native_occurrence_commit_batches_unchanged_snapshot_reads() {
     for terms in [64, 256, 1024] {
         let directory = tempfile::tempdir().unwrap();
