@@ -25237,6 +25237,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "scalar_costing_borrows_large_literal_and_membership_values",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/tests/memory.rs",
+      "capability": "Borrowed scalar planning costs",
+      "workload": "A four MiB text literal in equality, IN and NOT IN with expression and folded-array operands.",
+      "invariant": "Preserve MCV-derived estimates while borrowing literal and membership payloads; additional allocation stays below 4 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "borrowed_scalar_costing_preserves_estimates_and_cast_fallbacks",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/tests/memory.rs",
+      "capability": "Borrowed scalar planning costs",
+      "workload": "Twenty independent estimate expectations covering NULL, MCV frequency, boolean compositions, range fallback, casts, parameters and vector top-k.",
+      "invariant": "Preserve the existing probability formulas, successful constant casts and lazy failed-cast fallback without changing predicate evaluation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "local_join_costing_borrows_predicates_and_column_statistics",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests.rs",
+      "capability": "Borrowed scalar planning costs",
+      "workload": "A single local join predicate with four MiB literal/statistics payloads, both with and without a provider access estimate.",
+      "invariant": "Borrow the original predicate exactly once and reuse owned column statistics; preserve provider preference, cardinality, cost and paradigm while allocating less than 4 KiB.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

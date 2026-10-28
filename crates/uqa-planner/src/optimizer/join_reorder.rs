@@ -479,7 +479,7 @@ fn apply_local_filter_estimates(
     source_statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     let estimator = crate::CardinalityEstimator::new();
-    let mut predicates_by_alias = BTreeMap::<String, Vec<ScalarExpr>>::new();
+    let mut predicates_by_alias = BTreeMap::<String, Vec<&ScalarExpr>>::new();
     for predicate in predicates {
         let mut referenced = BTreeSet::new();
         if !collect_resolved_aliases(predicate, aliases, column_owners, &mut referenced)
@@ -493,7 +493,7 @@ fn apply_local_filter_estimates(
         predicates_by_alias
             .entry(alias.clone())
             .or_default()
-            .push((*predicate).clone());
+            .push(*predicate);
     }
 
     for relation in relations.iter_mut() {
@@ -501,12 +501,14 @@ fn apply_local_filter_estimates(
             continue;
         };
         let predicate = match predicates.as_slice() {
-            [predicate] => predicate.clone(),
-            _ => ScalarExpr::And(predicates),
+            [predicate] => std::borrow::Cow::Borrowed(*predicate),
+            _ => {
+                std::borrow::Cow::Owned(ScalarExpr::And(predicates.into_iter().cloned().collect()))
+            }
         };
-        let statistics = crate::RelationStats {
+        let statistics = crate::cardinality::RelationStatsRef {
             row_count: relation.cardinality.round() as u64,
-            columns: relation.column_stats.clone(),
+            columns: &relation.column_stats,
         };
         let local_estimate = relation_tables
             .get(&relation.alias)
@@ -529,7 +531,9 @@ fn apply_local_filter_estimates(
             relation.paradigm = estimate.paradigm;
             continue;
         }
-        let selectivity = estimator.scalar_selectivity(&predicate, &statistics).raw();
+        let selectivity = estimator
+            .scalar_selectivity_with_statistics(&predicate, statistics)
+            .raw();
         relation.cardinality = (relation.cardinality * selectivity).max(0.0);
         relation.access_cost += crate::CostEstimator::default()
             .estimate_unary(crate::OperatorKind::Filter, statistics.row_count as f64)

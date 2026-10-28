@@ -38,6 +38,7 @@ mod sampling_rng;
 mod stats;
 
 pub use entropy::{column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate};
+pub(crate) use stats::RelationStatsRef;
 pub use stats::{
     AccessParadigm, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler, LocalAccessEstimate,
     RelationStats, Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY,

@@ -8,8 +8,9 @@
 
 use super::{
     column_of, histogram_range_selectivity, literal_of, BinaryOp, CardinalityEstimator, Expr,
-    GraphStoreSampler, RelationStats, Selectivity,
+    GraphStoreSampler, RelationStats, RelationStatsRef, Selectivity,
 };
+use std::borrow::Cow;
 use uqa_core::Value;
 use uqa_sql::ScalarExpr;
 
@@ -108,6 +109,20 @@ impl CardinalityEstimator {
     /// keeps join ordering sensitive to local WHERE filters without converting
     /// the optimized plan back into parser AST nodes.
     pub fn scalar_selectivity(&self, predicate: &ScalarExpr, stats: &RelationStats) -> Selectivity {
+        self.scalar_selectivity_with_statistics(
+            predicate,
+            RelationStatsRef {
+                row_count: stats.row_count,
+                columns: &stats.columns,
+            },
+        )
+    }
+
+    pub(crate) fn scalar_selectivity_with_statistics(
+        &self,
+        predicate: &ScalarExpr,
+        stats: RelationStatsRef<'_>,
+    ) -> Selectivity {
         if let Some(membership) = uqa_sql::semantics::membership_operands(predicate) {
             let selectivity = scalar_column(membership.value)
                 .and_then(|column| stats.column(column))
@@ -123,7 +138,7 @@ impl CardinalityEstimator {
                                         scalar_literal(expression)
                                     }
                                     uqa_sql::semantics::MembershipItem::Constant(value) => {
-                                        Some(value.clone())
+                                        Some(Cow::Borrowed(value))
                                     }
                                 }
                                 .map_or_else(
@@ -146,18 +161,19 @@ impl CardinalityEstimator {
             ScalarExpr::And(parts) => Selectivity(
                 parts
                     .iter()
-                    .map(|part| self.scalar_selectivity(part, stats).raw())
+                    .map(|part| self.scalar_selectivity_with_statistics(part, stats).raw())
                     .product(),
             )
             .clamp(),
             ScalarExpr::Or(parts) => {
                 let anti = parts.iter().fold(1.0, |anti, part| {
-                    anti * (1.0 - self.scalar_selectivity(part, stats).raw())
+                    anti * (1.0 - self.scalar_selectivity_with_statistics(part, stats).raw())
                 });
                 Selectivity(1.0 - anti).clamp()
             }
             ScalarExpr::Not(inner) => {
-                Selectivity(1.0 - self.scalar_selectivity(inner, stats).raw()).clamp()
+                Selectivity(1.0 - self.scalar_selectivity_with_statistics(inner, stats).raw())
+                    .clamp()
             }
             ScalarExpr::IsNull { expr, negated } => {
                 let null_fraction = scalar_column(expr)
@@ -204,7 +220,7 @@ impl CardinalityEstimator {
         name: &str,
         binding: Option<&uqa_sql::ast::FunctionBinding>,
         args: &[ScalarExpr],
-        stats: &RelationStats,
+        stats: RelationStatsRef<'_>,
     ) -> Selectivity {
         if let Some(uqa_sql::ast::FunctionDispatch::Pattern { operator, .. }) =
             binding.and_then(|binding| binding.dispatch)
@@ -237,7 +253,7 @@ impl CardinalityEstimator {
                 let support = args
                     .iter()
                     .filter(|signal| !scalar_named_argument(signal))
-                    .map(|signal| self.scalar_selectivity(signal, stats).raw())
+                    .map(|signal| self.scalar_selectivity_with_statistics(signal, stats).raw())
                     .sum::<f64>();
                 Selectivity(support.min(1.0)).clamp()
             }
@@ -250,18 +266,18 @@ impl CardinalityEstimator {
         op: BinaryOp,
         lhs: &ScalarExpr,
         rhs: &ScalarExpr,
-        stats: &RelationStats,
+        stats: RelationStatsRef<'_>,
     ) -> Selectivity {
         let column = scalar_column(lhs).or_else(|| scalar_column(rhs));
         let value = scalar_literal(rhs).or_else(|| scalar_literal(lhs));
         let column_stats = column.and_then(|column| stats.column(column));
-        if matches!(value, Some(Value::Null)) {
+        if matches!(value.as_deref(), Some(Value::Null)) {
             return Selectivity(0.0);
         }
         match op {
             BinaryOp::Equal => {
                 if let Some(column) = column_stats {
-                    return Selectivity(value.as_ref().map_or_else(
+                    return Selectivity(value.as_deref().map_or_else(
                         || column.equality_selectivity(),
                         |value| column.equality_selectivity_for(value),
                     ))
@@ -277,7 +293,7 @@ impl CardinalityEstimator {
                     .clamp()
             }
             BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
-                if let (Some(column), Some(value)) = (column_stats, value.as_ref()) {
+                if let (Some(column), Some(value)) = (column_stats, value.as_deref()) {
                     if let Some(selectivity) = histogram_range_selectivity(column, op, value) {
                         return Selectivity(selectivity).clamp();
                     }
@@ -318,13 +334,15 @@ fn scalar_column(expression: &ScalarExpr) -> Option<&str> {
     }
 }
 
-fn scalar_literal(expression: &ScalarExpr) -> Option<Value> {
+fn scalar_literal(expression: &ScalarExpr) -> Option<Cow<'_, Value>> {
     match expression {
         ScalarExpr::Collated { expr, .. } => scalar_literal(expr),
-        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value.clone()),
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            Some(Cow::Borrowed(value))
+        }
         ScalarExpr::Cast { expr, ty, .. } => {
             let value = scalar_literal(expr)?;
-            uqa_sql::expr::cast_value(&value, ty).ok()
+            uqa_sql::expr::cast_value(&value, ty).ok().map(Cow::Owned)
         }
         _ => None,
     }

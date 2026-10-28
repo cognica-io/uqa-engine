@@ -175,6 +175,19 @@ pub struct RelationStats {
     pub columns: BTreeMap<String, ColumnStats>,
 }
 
+/// A costing observation over columns retained by the relation's owner.
+#[derive(Clone, Copy)]
+pub(crate) struct RelationStatsRef<'a> {
+    pub row_count: u64,
+    pub columns: &'a BTreeMap<String, ColumnStats>,
+}
+
+impl RelationStatsRef<'_> {
+    pub fn column(&self, name: &str) -> Option<&ColumnStats> {
+        self.columns.get(name)
+    }
+}
+
 impl RelationStats {
     pub fn new(row_count: u64) -> Self {
         Self {

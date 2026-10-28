@@ -8,6 +8,8 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use uqa_operators::{EdgePatternIR, VertexPatternIR};
 
+mod memory;
+
 fn col(name: &str) -> Expr {
     Expr::Column(name.into())
 }
