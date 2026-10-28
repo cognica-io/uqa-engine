@@ -18925,6 +18925,84 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "command_snapshot_releases_large_resident_roots_for_the_next_producer",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Command snapshot retained workspace",
+      "workload": "Freeze 24 private 16 KiB values under 1 MiB, admit a following 768 KiB producer and replace a record while retaining the original view.",
+      "invariant": "A command view preserves its original values and revision without pinning the previous producer's large writable tier; exact contents survive writer drop and all reservations are released."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "savepoint_releases_large_resident_roots_and_undo_preserves_their_values",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Savepoint retained workspace",
+      "workload": "Save 24 private 16 KiB values under 1 MiB, admit a following 768 KiB producer, delete a value and roll back to the saved root.",
+      "invariant": "Undo roots preserve every value without pinning large writable buffers; deletion rollback, savepoint release and final memory release retain their original meanings."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "failed_retained_root_capture_preserves_values_revisions_and_savepoint_state",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained root failed admission",
+      "workload": "Attempt to capture a large private command and undo root with one byte of remaining allowance, then release the peer and capture the same values.",
+      "invariant": "Failed capture releases partial spill workspace, preserves every value and private revision, and creates no savepoint; retry after releasing the peer succeeds without a state reset."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_root_capture_never_rewrites_older_spilled_payloads",
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/retained_roots.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained-root capture work boundary",
+      "workload": "Capture four 384 KiB private roots under 1 MiB, then invoke another mutation while retaining every preceding view.",
+      "invariant": "Capture writes only its current resident tier and copies zero preceding spilled payload bytes; the next mutation compacts eligible runs, preserves every frozen value and releases all reservations with the final owners."
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "test",
+      "test": "word_tokenizers_fit_large_outputs_without_duplicate_array_retention",
+      "source": "crates/uqa-analysis/tests/analysis/tokenizer_memory.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Word-tokenizer output peak ownership",
+      "workload": "Produce 4097 whitespace, standard and letter tokens while a peer retains 64 KiB, with room for one complete token array and its source attributes.",
+      "invariant": "Every term, source range and graph position is exact; array growth does not require a second complete array and dropping output and peer releases all charged memory."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "merged_snapshot_point_reads_share_private_blocks_only_within_their_scope",
+      "source": "crates/uqa-storage/src/mvcc/overlay/read_scope/tests.rs",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Merged snapshot private-block read ownership",
+      "workload": "Thirty-two point reads of a spilled private record through a merged committed/private view, followed by writer replacement, scope release and cancellation under 128 KiB.",
+      "invariant": "A warmed operation reads no further entry blocks; the fixed view preserves its original bytes, its scope releases cached bytes while the view remains, and dropping all owners releases every reservation."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "private_snapshot_read_scopes_preserve_frozen_visibility_and_failed_admission",
       "source": "crates/uqa-storage/src/mvcc/overlay/read_scope/tests.rs",
       "cases": 1,
