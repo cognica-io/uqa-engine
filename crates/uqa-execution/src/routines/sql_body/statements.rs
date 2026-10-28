@@ -33,14 +33,15 @@ pub(super) struct SQLStatements<'a> {
 }
 
 pub(super) enum SQLBodyPlan {
-    Selected(UnifiedPlan),
+    Selected(std::sync::Arc<UnifiedPlan>),
     Uncached(UnifiedPlan),
 }
 
 impl SQLBodyPlan {
     pub(super) fn plan(&self) -> &UnifiedPlan {
         match self {
-            Self::Selected(plan) | Self::Uncached(plan) => plan,
+            Self::Selected(plan) => plan,
+            Self::Uncached(plan) => plan,
         }
     }
 

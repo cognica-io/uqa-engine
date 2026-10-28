@@ -22,7 +22,7 @@ fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
         effective_search_path: None,
         dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies::default(),
         dependency_snapshot: None,
-        plan: Some(plan(executable)),
+        plan: Some(Arc::new(plan(executable))),
         parameter_types: Vec::new(),
         result_schema: Some(RowSchema::with_types(
             vec!["value".into()],
@@ -173,25 +173,21 @@ fn mixed_entry() -> PreparedStatementPlan {
         vec!["folded".into(), "live".into()],
         vec![Some(ColumnType::Text), Some(ColumnType::Text)],
     ));
-    mixed
-        .plan
-        .as_mut()
-        .unwrap()
-        .rewrite_scalar_expressions(&mut |expression| {
-            if let ScalarExpr::Func { binding, .. } = expression {
-                *binding = Some(FunctionBinding {
-                    name: "pg_catalog.upper".into(),
-                    argument_types: vec!["text".into()],
-                    builtin: true,
-                    object_id: None,
-                    dispatch: None,
-                    invocation: None,
-                    value_binding: None,
-                    resolution_error: None,
-                    input_collation: None,
-                });
-            }
-        });
+    Arc::make_mut(mixed.plan.as_mut().unwrap()).rewrite_scalar_expressions(&mut |expression| {
+        if let ScalarExpr::Func { binding, .. } = expression {
+            *binding = Some(FunctionBinding {
+                name: "pg_catalog.upper".into(),
+                argument_types: vec!["text".into()],
+                builtin: true,
+                object_id: None,
+                dispatch: None,
+                invocation: None,
+                value_binding: None,
+                resolution_error: None,
+                input_collation: None,
+            });
+        }
+    });
     mixed
 }
 
@@ -209,11 +205,8 @@ fn mixed_constants_and_exact_builtin_calls_keep_one_executable() {
         ("pg_catalog.upper", "text", true, Some([7; 16])),
     ] {
         let mut changed = mixed.clone();
-        changed
-            .plan
-            .as_mut()
-            .unwrap()
-            .rewrite_scalar_expressions(&mut |expression| {
+        Arc::make_mut(changed.plan.as_mut().unwrap()).rewrite_scalar_expressions(
+            &mut |expression| {
                 if let ScalarExpr::Func {
                     binding: Some(binding),
                     ..
@@ -224,22 +217,20 @@ fn mixed_constants_and_exact_builtin_calls_keep_one_executable() {
                     binding.builtin = builtin;
                     binding.object_id = object_id;
                 }
-            });
+            },
+        );
         assert!(
             !changed.has_tracked_executable_dependencies(),
             "{name}({argument_type})"
         );
+        assert!(mixed.has_tracked_executable_dependencies());
     }
     let mut unbound = mixed;
-    unbound
-        .plan
-        .as_mut()
-        .unwrap()
-        .rewrite_scalar_expressions(&mut |expression| {
-            if let ScalarExpr::Func { binding, .. } = expression {
-                *binding = None;
-            }
-        });
+    Arc::make_mut(unbound.plan.as_mut().unwrap()).rewrite_scalar_expressions(&mut |expression| {
+        if let ScalarExpr::Func { binding, .. } = expression {
+            *binding = None;
+        }
+    });
     assert!(!unbound.has_tracked_executable_dependencies());
 }
 
@@ -252,11 +243,8 @@ fn missing_and_specialized_descriptors_are_not_catalog_independent() {
     missing.result_schema = Some(RowSchema::with_types(vec!["value".into()], vec![None]));
     assert!(!missing.has_tracked_executable_dependencies());
     let mut specialized = mixed_entry();
-    specialized
-        .plan
-        .as_mut()
-        .unwrap()
-        .rewrite_scalar_expressions(&mut |expression| {
+    Arc::make_mut(specialized.plan.as_mut().unwrap()).rewrite_scalar_expressions(
+        &mut |expression| {
             if matches!(expression, ScalarExpr::Param(_)) {
                 *expression = ScalarExpr::TypedLiteral {
                     collation_oid: None,
@@ -267,7 +255,8 @@ fn missing_and_specialized_descriptors_are_not_catalog_independent() {
                     parameter_index: Some(1),
                 };
             }
-        });
+        },
+    );
     assert!(!specialized.has_tracked_executable_dependencies());
 }
 

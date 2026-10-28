@@ -307,7 +307,7 @@ impl Interpreter<'_> {
         &self,
         prepared: &PreparedFragment,
         parameters: &[SQLParam],
-    ) -> Result<UnifiedPlan, SQLError> {
+    ) -> Result<Arc<UnifiedPlan>, SQLError> {
         prepared
             .variants
             .select(|entry| {

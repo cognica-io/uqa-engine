@@ -19,7 +19,8 @@ pub struct PreparedStatementPlan {
     pub effective_search_path: Option<crate::catalog::resolution::EffectiveSearchPath>,
     pub dependencies: super::dependencies::PreparedAnalysisDependencies,
     pub dependency_snapshot: Option<super::dependencies::PreparedDependencySnapshot>,
-    pub plan: Option<crate::plan::UnifiedPlan>,
+    /// Immutable generic executable shared by the cache and its active executions.
+    pub plan: Option<Arc<crate::plan::UnifiedPlan>>,
     pub parameter_types: Vec<Option<crate::ast::ColumnType>>,
     pub result_schema: Option<crate::RowSchema>,
     pub source_sql: Option<Arc<str>>,

@@ -46,7 +46,7 @@ impl RoutinePlanVariants {
     pub(super) fn select(
         &self,
         select: impl FnOnce(&PreparedStatementPlan) -> Result<PreparedPlanSelection, SQLError>,
-    ) -> Result<UnifiedPlan, SQLError> {
+    ) -> Result<Arc<UnifiedPlan>, SQLError> {
         let entry = self.0.lock().clone();
         let selected = select(&entry)?;
         let mut current = self.0.lock();

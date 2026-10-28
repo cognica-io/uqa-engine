@@ -57,7 +57,8 @@ impl Interpreter<'_> {
             } => {
                 let (text, params) = self.eval_dynamic_sql(query, params)?;
                 (
-                    self.lower_cursor_plan(self.compile_dynamic_cursor(&text)?)?,
+                    self.lower_cursor_plan(self.compile_dynamic_cursor(&text)?)?
+                        .into(),
                     params,
                     *scroll,
                     text.into(),
@@ -348,7 +349,7 @@ impl Interpreter<'_> {
         query: PLpgSQLStatement,
         fields: &[PLpgSQLRowField],
         arguments: &PLpgSQLCursorArguments,
-    ) -> Result<(UnifiedPlan, Vec<SQLParam>), SQLError> {
+    ) -> Result<(std::sync::Arc<UnifiedPlan>, Vec<SQLParam>), SQLError> {
         let values = self.evaluate_cursor_arguments(cursor_name, fields, arguments)?;
         let saved_values = fields
             .iter()

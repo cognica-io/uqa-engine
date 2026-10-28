@@ -237,7 +237,7 @@ fn executable_invalidation_reaches_procedural_owners_and_fences_recursive_public
         let plan = entry
             .plan
             .clone()
-            .unwrap_or_else(|| (*entry.logical_plan).clone());
+            .unwrap_or_else(|| Arc::clone(&entry.logical_plan));
         uqa_sql::prepared::planning::PreparedPlanSelection {
             plan: plan.clone(),
             update: uqa_sql::prepared::planning::PreparedPlanUpdate {

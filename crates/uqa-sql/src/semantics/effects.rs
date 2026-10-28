@@ -22,7 +22,7 @@ pub trait QueryEffectCatalog: RoutineResolution + EngineHook {
     fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String>;
     fn table_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String>;
     fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
-    fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan>;
+    fn lookup_prepared(&self, name: &str) -> Option<std::sync::Arc<UnifiedPlan>>;
 }
 
 mod domains;

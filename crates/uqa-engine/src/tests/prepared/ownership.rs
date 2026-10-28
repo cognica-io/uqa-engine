@@ -22,7 +22,7 @@ fn replaced_or_deallocated_definition_never_receives_a_previous_plans_usage() {
     let update = || PreparedPlanUpdate {
         composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
         reanalyzed: None,
-        generic_plan: Some((*original).clone()),
+        generic_plan: Some(Arc::clone(&original)),
         generic_cost: Some(42.0),
         custom_cost: None,
     };

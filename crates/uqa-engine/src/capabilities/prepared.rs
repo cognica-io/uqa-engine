@@ -190,7 +190,7 @@ impl uqa_sql::prepared::planning::PreparedPlanProvider for Engine {
         &self,
         name: &str,
         parameters: &[SQLParam],
-    ) -> Result<Option<UnifiedPlan>, SQLError> {
+    ) -> Result<Option<std::sync::Arc<UnifiedPlan>>, SQLError> {
         uqa_planner::statement_planning::prepared::selection::select_plan(
             &uqa_planner::statement_planning::prepared::selection::PreparedPlanningContext {
                 session: self,

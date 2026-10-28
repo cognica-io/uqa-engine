@@ -67,7 +67,7 @@ impl StatementControl for Engine {
     }
 }
 impl PreparedPlanState for Engine {
-    fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan> {
+    fn lookup_prepared(&self, name: &str) -> Option<std::sync::Arc<UnifiedPlan>> {
         Engine::lookup_prepared(self, name)
     }
     fn prepared_parameter_types(&self, name: &str) -> Option<Vec<Option<ColumnType>>> {

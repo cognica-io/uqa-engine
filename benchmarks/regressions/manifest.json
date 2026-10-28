@@ -25425,6 +25425,87 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "cached_prepared_selection_does_not_copy_executable_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/prepared/selection/tests/sharing.rs",
+      "capability": "Shared prepared executables",
+      "workload": "Thirty-two generic selections of a prepared executable containing a four MiB constant.",
+      "invariant": "Share the identical cached executable, retain usage counts without reoptimization, and allocate less than 16 KiB per selection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "generic_execution_outlives_its_invalidated_cache_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/prepared/selection/tests/sharing.rs",
+      "capability": "Shared prepared executables",
+      "workload": "Initial generic selection, cache invalidation, reanalysis and removal while a selected executable remains live.",
+      "invariant": "Retain the original selected plan after cache removal and release its storage exactly when the last execution owner drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "custom_selection_does_not_modify_the_shared_generic_plan",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/prepared/selection/tests/sharing.rs",
+      "capability": "Shared prepared executables",
+      "workload": "Forced custom specialization with an existing generic plan and parameterized logical input.",
+      "invariant": "Specialize a separate executable, preserve the generic tree and its identity, and update only custom usage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "failed_or_unwound_selection_preserves_shared_cache_ownership",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/prepared/selection/tests/sharing.rs",
+      "capability": "Shared prepared executables",
+      "workload": "Custom optimization returning an error or unwinding while a generic executable is retained.",
+      "invariant": "Publish no failed update, preserve the generic contents and counters, and drop every temporary executable reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_plan_reuse_shares_executable_storage",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/sql_body/inputs/tests.rs",
+      "capability": "Shared prepared executables",
+      "workload": "Thirty-two routine-owned generic selections with a four MiB scalar payload and subsequent owner retirement.",
+      "invariant": "Retain the identical executable with less than four KiB allocated per selection and no retained temporary storage; release it after both cache and active owner drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_prepared_executions_share_cached_plans_until_replacement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/prepared/sharing.rs",
+      "capability": "Shared prepared executables",
+      "workload": "Named prepared execution with changing parameters, borrowed lookup and selection, replacement and deallocation on four storage providers.",
+      "invariant": "Preserve result rows, generic/custom counts and executable identity across reuse; old executions survive replacement and storage releases with their last owner.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

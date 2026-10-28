@@ -180,7 +180,7 @@ impl uqa_sql::semantics::effects::QueryEffectCatalog for Catalog {
     fn view_plan(&self, _: &str) -> Result<Option<uqa_sql::plan::QueryPlan>, SQLError> {
         Ok(None)
     }
-    fn lookup_prepared(&self, _: &str) -> Option<UnifiedPlan> {
+    fn lookup_prepared(&self, _: &str) -> Option<std::sync::Arc<UnifiedPlan>> {
         None
     }
 }

@@ -14,6 +14,7 @@ use uqa_sql::{
     ColumnType, RowSchema, ScalarExpr,
 };
 mod fixtures;
+mod sharing;
 mod utility;
 use fixtures::NoRoutines;
 
@@ -81,7 +82,7 @@ impl Inputs {
     fn record(&self, event: &'static str) {
         self.events.borrow_mut().push(event);
     }
-    fn select(&self) -> Result<Option<UnifiedPlan>, SQLError> {
+    fn select(&self) -> Result<Option<Arc<UnifiedPlan>>, SQLError> {
         select_plan(
             &self.context(),
             "saved",
@@ -109,7 +110,7 @@ impl Inputs {
         entry.source_sql = Some(Arc::from(sql));
         entry.prepared_at_micros = 42;
         entry.from_sql = true;
-        entry.plan = Some((*entry.logical_plan).clone());
+        entry.plan = Some(Arc::clone(&entry.logical_plan));
         entry.generic_cost = Some(1.0);
         self.events.borrow_mut().clear();
     }
@@ -372,7 +373,7 @@ fn cached_generic_plan_reuses_its_descriptor_and_only_publishes_usage() {
     {
         let mut entry = inputs.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        entry.plan = Some((*entry.logical_plan).clone());
+        entry.plan = Some(Arc::clone(&entry.logical_plan));
         entry.generic_cost = Some(1.0);
     }
     assert!(has_parameter(&inputs.select().unwrap().unwrap()));
@@ -413,22 +414,10 @@ fn invalidation_reads_original_inputs_and_only_publishes_successful_analysis() {
             inputs.entry.borrow_mut().as_mut().unwrap().invalidate();
         }
         let _execution_clock = uqa_sql::expr::TransactionClockScope::enter(clock);
-        let mut selected = select_plan(&inputs.context(), "saved", &[])
+        let selected = select_plan(&inputs.context(), "saved", &[])
             .unwrap()
             .unwrap();
-        let mut values = Vec::new();
-        selected.rewrite_scalar_expressions(&mut |expression| {
-            if let ScalarExpr::TypedLiteral {
-                value:
-                    Value::Temporal(uqa_core::TemporalValue::Timestamp {
-                        postgres_micros: micros,
-                    }),
-                ..
-            } = expression
-            {
-                values.push(*micros);
-            }
-        });
+        let values = temporal_inputs(&selected);
         assert_eq!(values, [expected - uqa_core::POSTGRES_EPOCH_MICROS]);
         assert!(!inputs.entry.borrow().as_ref().unwrap().needs_analysis);
     }

@@ -86,7 +86,7 @@ fn cached_entry(executable: &str) -> PreparedStatementPlan {
         effective_search_path: None,
         dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
         dependency_snapshot: None,
-        plan: Some(lower(executable)),
+        plan: Some(Arc::new(lower(executable))),
         parameter_types: Vec::new(),
         result_schema: Some(RowSchema::with_types(
             vec!["value".into()],
@@ -120,11 +120,8 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
         vec!["folded".into(), "live".into()],
         vec![Some(ColumnType::Text), Some(ColumnType::Text)],
     ));
-    mixed
-        .plan
-        .as_mut()
-        .unwrap()
-        .rewrite_scalar_expressions(&mut |expression| {
+    std::sync::Arc::make_mut(mixed.plan.as_mut().unwrap()).rewrite_scalar_expressions(
+        &mut |expression| {
             if let ScalarExpr::Func { binding, .. } = expression {
                 *binding = Some(FunctionBinding {
                     name: "pg_catalog.upper".into(),
@@ -138,7 +135,8 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
                     input_collation: None,
                 });
             }
-        });
+        },
+    );
     CatalogRegistryChange::BuiltinRoutinePrivileges.invalidate([
         &mut constant,
         &mut unbound,

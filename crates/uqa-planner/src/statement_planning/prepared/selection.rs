@@ -64,7 +64,7 @@ pub fn select_plan(
     context: &PreparedPlanningContext<'_>,
     name: &str,
     parameters: &[SQLParam],
-) -> Result<Option<UnifiedPlan>, SQLError> {
+) -> Result<Option<Arc<UnifiedPlan>>, SQLError> {
     let Some(entry) = context.session.prepared_entry(name) else {
         return Ok(None);
     };
@@ -186,7 +186,7 @@ fn select(
         let plan = context.optimization.optimize_plan(logical_plan.clone())?;
         composite_inputs = inputs.with_generic(&plan, context.analysis.types)?;
         generic_cost = Some(context.optimization.estimate_plan(&plan)?.execution);
-        generic_plan = Some(plan);
+        generic_plan = Some(Arc::new(plan));
         // Building the first generic plan supplies its previously unknown cost.
         // Recheck before execution so an expensive generic plan is never used just to measure it.
         custom = super::choose_custom_plan(usage, &mode, generic_cost);
@@ -205,13 +205,13 @@ fn select(
             .optimization
             .estimate_plan(&plan)?
             .including_planning(&crate::CostEstimator::default());
-        (plan, Some(cost))
+        (Arc::new(plan), Some(cost))
     } else {
         let cached = generic_plan.as_ref().expect("generic plan was built");
         (
             composite_inputs
                 .project_generic(cached, context.analysis.types)?
-                .unwrap_or_else(|| cached.clone()),
+                .map_or_else(|| Arc::clone(cached), Arc::new),
             None,
         )
     };

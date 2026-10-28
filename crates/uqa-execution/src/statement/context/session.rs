@@ -57,7 +57,7 @@ pub trait StatementPortals {
     fn close_all_session_portals(&self);
 }
 pub trait PreparedPlanState {
-    fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan>;
+    fn lookup_prepared(&self, name: &str) -> Option<std::sync::Arc<UnifiedPlan>>;
     fn prepared_parameter_types(&self, name: &str) -> Option<Vec<Option<ColumnType>>>;
     fn deallocate_prepared(&self, name: Option<&str>);
 }

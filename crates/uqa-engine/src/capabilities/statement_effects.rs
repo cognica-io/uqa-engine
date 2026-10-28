@@ -30,7 +30,7 @@ impl uqa_sql::semantics::effects::QueryEffectCatalog for Engine {
     fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
         Engine::view_plan(self, name)
     }
-    fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan> {
+    fn lookup_prepared(&self, name: &str) -> Option<std::sync::Arc<UnifiedPlan>> {
         Engine::lookup_prepared(self, name)
     }
 }

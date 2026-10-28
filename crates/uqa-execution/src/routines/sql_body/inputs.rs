@@ -79,7 +79,7 @@ impl SQLRoutineStatement {
             &PreparedStatementPlan,
         )
             -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError>,
-    ) -> Result<uqa_sql::plan::UnifiedPlan, SQLError> {
+    ) -> Result<Arc<uqa_sql::plan::UnifiedPlan>, SQLError> {
         self.variants.select(select)
     }
 }
