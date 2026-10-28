@@ -86,6 +86,61 @@ fn large_text_replacements_remain_bounded_across_one_transaction() {
 }
 
 #[test]
+fn warm_text_replacements_remain_bounded_across_commits() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("warm-text.db");
+    let connection = ManagedConnection::open(&path).unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions {
+            retained_bytes: 2 << 20,
+        })
+        .unwrap();
+    let mut index = SQLiteInvertedIndex::new(
+        connection.clone(),
+        "records",
+        uqa_analysis::whitespace_analyzer(),
+    );
+    let mut body = String::new();
+    for term in 0..4096 {
+        write!(body, "term{term:05} ").unwrap();
+    }
+    for document in [1, 2] {
+        index
+            .add_document(document, fields([("body", &body)]))
+            .unwrap();
+    }
+    body.push_str("additional");
+    connection.begin_transaction().unwrap();
+    for document in [1, 2] {
+        index
+            .add_document(document, fields([("body", &body)]))
+            .unwrap();
+    }
+    connection.commit_transaction().unwrap();
+    drop((index, connection));
+    let connection = ManagedConnection::open(&path).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions {
+            retained_bytes: 2 << 20,
+        })
+        .unwrap();
+    let index =
+        SQLiteInvertedIndex::new(connection, "records", uqa_analysis::whitespace_analyzer());
+    for document in [1, 2] {
+        assert_eq!(index.get_doc_length(document, "body").unwrap(), 4097);
+        assert_eq!(
+            index.get_term_freq(document, "body", "additional").unwrap(),
+            1
+        );
+        assert_eq!(
+            index.get_term_freq(document, "body", "term04095").unwrap(),
+            1
+        );
+    }
+}
+
+#[test]
 fn native_occurrence_commit_batches_unchanged_snapshot_reads() {
     for terms in [64, 256, 1024] {
         let directory = tempfile::tempdir().unwrap();

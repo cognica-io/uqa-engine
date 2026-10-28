@@ -15700,6 +15700,19 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "warm_text_replacements_remain_bounded_across_commits",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests/occurrences.rs",
+      "capability": "Native text retention across commits",
+      "workload": "Insert two 4096-term documents in separate commits, replace both in one transaction, and reopen, retaining the same 2 MiB session allowance throughout mutation.",
+      "invariant": "Repeated committed and private mutations preserve exact document lengths and old and added term frequencies without resetting the connection or enlarging its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "native_occurrence_commit_batches_unchanged_snapshot_reads",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/native/projection/tests/occurrences.rs",
