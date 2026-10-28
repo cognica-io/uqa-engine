@@ -25360,6 +25360,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_sql_join_reuses_source_payloads_and_node_allocations",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/materialization.rs",
+      "capability": "Owned SQL join materialization",
+      "workload": "Selected SQL joins over 2, 8 and 64 function sources, including one four MiB argument.",
+      "invariant": "Retain every original source-box and argument allocation, preserve cardinality-ordered disconnected sources, and allocate less than 512 KiB of temporary planning storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "rejected_sql_join_selection_leaves_source_ownership_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/materialization.rs",
+      "capability": "Owned SQL join materialization",
+      "workload": "Eight sources with exhausted admission, either cancellation token, and unavailable function estimates.",
+      "invariant": "Keep the original source contents and allocation identities on rejection or declined eligibility, without leaked request reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_sql_join_moves_table_execution_plans_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/materialization.rs",
+      "capability": "Owned SQL join materialization",
+      "workload": "A joined table retains an executable query containing a four MiB literal.",
+      "invariant": "Move the existing execution query and payload allocations into the selected source tree while additional allocation remains below 16 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sql_join_predicates_move_only_after_search_admission",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/materialization.rs",
+      "capability": "Owned SQL join materialization",
+      "workload": "A four MiB ON predicate under rejected and successful join search admission.",
+      "invariant": "Borrow the predicate during selection and move the original value only after success; additional allocations stay below 16 KiB and the original payload identity survives either outcome.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "sql_join_materialization_preserves_nested_conjunct_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/materialization.rs",
+      "capability": "Owned SQL join materialization",
+      "workload": "Nested and empty AND nodes across two source join boundaries.",
+      "invariant": "Move flattened original predicates in their existing left/right/postorder and retain the exact ordered root qualification.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

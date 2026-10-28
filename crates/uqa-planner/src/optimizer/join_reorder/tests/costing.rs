@@ -10,17 +10,17 @@ use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
 #[test]
 fn rejected_compound_join_costing_does_not_copy_large_literals() {
-    let UnifiedPlan::Query(query) = UnifiedPlan::lower(
+    let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(
         uqa_sql::compile("SELECT a.id FROM a JOIN b ON a.id = b.id")
             .unwrap()
             .remove(0),
     ) else {
         panic!("query");
     };
-    let RelationalPlan::QueryBlock(block) = &query.root else {
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
         panic!("query block");
     };
-    let source = block.from.as_ref().unwrap();
+    let source = block.from.as_mut().unwrap();
     let predicates = [
         equality("payload", Value::Str("x".repeat(4 * 1024 * 1024))),
         equality("id", Value::Int(1)),

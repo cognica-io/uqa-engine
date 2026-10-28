@@ -21,6 +21,8 @@ const DEFAULT_JOIN_CARDINALITY: u64 = 1_000;
 #[cfg(test)]
 mod tests;
 
+mod materialization;
+
 pub(super) fn reorder_unified_plan_joins(
     plan: &mut UnifiedPlan,
     statistics: &dyn SourceStatistics,
@@ -275,7 +277,7 @@ fn reorder_source_joins(
 
 #[derive(Debug)]
 struct JoinPredicateBinding {
-    expression: ScalarExpr,
+    expression: Option<ScalarExpr>,
     qualifiers: BTreeSet<String>,
     pushable: bool,
 }
@@ -285,7 +287,7 @@ struct JoinPredicateBinding {
     reason = "join rewrite preserves predicate ownership and relation order atomically"
 )]
 fn reordered_inner_join_source(
-    source: &SourcePlan,
+    source: &mut SourcePlan,
     external_predicates: &[&ScalarExpr],
     statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
@@ -388,7 +390,11 @@ fn reordered_inner_join_source(
 
     let mut predicates = Vec::new();
     let mut graph_predicates = Vec::new();
-    for expression in expressions.into_iter().cloned().chain(inferred) {
+    for expression in expressions
+        .into_iter()
+        .map(std::borrow::Cow::Borrowed)
+        .chain(inferred.into_iter().map(std::borrow::Cow::Owned))
+    {
         let mut qualifiers = BTreeSet::new();
         collect_scalar_qualifiers(&expression, &mut qualifiers);
         let graph_predicate = join_predicate(&expression, &aliases, &column_owners);
@@ -399,7 +405,10 @@ fn reordered_inner_join_source(
         let pushable = graph_predicate.is_some();
         graph_predicates.extend(graph_predicate);
         predicates.push(JoinPredicateBinding {
-            expression,
+            expression: match expression {
+                std::borrow::Cow::Borrowed(_) => None,
+                std::borrow::Cow::Owned(expression) => Some(expression),
+            },
             qualifiers,
             pushable,
         });
@@ -407,7 +416,7 @@ fn reordered_inner_join_source(
 
     let selected =
         JoinOrderOptimizer::new().select_with_control(&relations, &graph_predicates, control)?;
-    let mut reordered = materialize_join_order(&selected, &atoms)?;
+    let mut reordered = materialization::reorder(source, &selected, &mut predicates)?;
     attach_join_predicates(&mut reordered, &mut predicates, true);
     if !predicates.is_empty() {
         return Err(JoinGraphError::InvalidPlan {
@@ -756,62 +765,6 @@ fn implied_join_predicates(
     }
 }
 
-fn materialize_join_order(
-    tree: &crate::JoinPlan,
-    atoms: &[&SourcePlan],
-) -> JoinGraphResult<SourcePlan> {
-    match (&tree.left, &tree.right) {
-        (None, None) => {
-            let source_id = usize::try_from(tree.relations.trailing_zeros()).map_err(|_| {
-                JoinGraphError::InvalidPlan {
-                    detail: "join leaf index exceeds the addressable source range".into(),
-                }
-            })?;
-            atoms
-                .get(source_id)
-                .map(|source| (*source).clone())
-                .ok_or_else(|| JoinGraphError::InvalidPlan {
-                    detail: format!(
-                        "join source id {source_id} is outside {} source atom(s)",
-                        atoms.len()
-                    ),
-                })
-        }
-        (Some(left), Some(right)) => {
-            let strategy = match (tree.join_edge, tree.kind) {
-                (None, _) => JoinExecutionStrategy::Auto,
-                (Some(_), Some(crate::OperatorKind::HashJoinInner)) => JoinExecutionStrategy::Hash,
-                (Some(_), Some(kind)) => {
-                    return Err(JoinGraphError::InvalidPlan {
-                        detail: format!("DPccp selected non-executable equijoin strategy {kind:?}"),
-                    })
-                }
-                (Some(_), None) => {
-                    return Err(JoinGraphError::InvalidPlan {
-                        detail: "DPccp equijoin node has no physical strategy".into(),
-                    })
-                }
-            };
-            Ok(SourcePlan::Join {
-                comma: false,
-                left: Box::new(materialize_join_order(left, atoms)?),
-                right: Box::new(materialize_join_order(right, atoms)?),
-                kind: uqa_sql::ast::JoinKind::Inner,
-                on: None,
-                using: None,
-                natural: false,
-                alias: None,
-                column_aliases: Vec::new(),
-                lateral: false,
-                strategy,
-            })
-        }
-        _ => Err(JoinGraphError::InvalidPlan {
-            detail: "join node contains exactly one child".into(),
-        }),
-    }
-}
-
 fn attach_join_predicates(
     source: &mut SourcePlan,
     predicates: &mut Vec<JoinPredicateBinding>,
@@ -835,7 +788,7 @@ fn attach_join_predicates(
                 && !predicate.qualifiers.is_empty()
                 && predicate.qualifiers.is_subset(&available))
         {
-            assigned.push(predicate.expression);
+            assigned.push(predicate.expression.expect("materialized join predicate"));
         } else {
             retained.push(predicate);
         }

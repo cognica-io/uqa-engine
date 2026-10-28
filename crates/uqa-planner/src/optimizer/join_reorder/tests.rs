@@ -8,6 +8,7 @@ use super::*;
 
 mod admission;
 mod costing;
+mod materialization;
 
 #[test]
 fn unavailable_function_cost_does_not_copy_join_source_payloads() {
