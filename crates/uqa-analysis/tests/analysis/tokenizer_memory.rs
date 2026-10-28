@@ -27,6 +27,38 @@ fn tokenizers() -> Vec<Tokenizer> {
 }
 
 #[test]
+fn word_tokenizers_fit_large_outputs_without_duplicate_array_retention() {
+    const COUNT: usize = 4097;
+    const PEER: usize = 64 * 1024;
+    let input = "word ".repeat(COUNT);
+    for tokenizer in [
+        Tokenizer::Whitespace,
+        Tokenizer::Standard,
+        Tokenizer::Letter,
+    ] {
+        let budget = MemoryBudget::new(
+            PEER + COUNT * size_of::<uqa_analysis::AnalysisToken>() + 4 * input.len() + 16 * 1024,
+        );
+        let peer = budget.reserve(PEER).unwrap();
+        let output = tokenizer
+            .tokenize_with_offsets_budgeted(&input, &budget, || Ok(()))
+            .unwrap();
+        assert_eq!(output.tokens().len(), COUNT);
+        for (index, token) in output.tokens().iter().enumerate() {
+            assert_eq!(token.term(), "word");
+            assert_eq!(token.offsets().unwrap().utf8, index * 5..index * 5 + 4);
+            assert_eq!(token.position_increment(), 1);
+            assert_eq!(token.position_length(), 1);
+        }
+        assert_eq!(output.final_offsets().utf8.end, input.len());
+        drop(output);
+        assert_eq!(budget.used(), PEER);
+        drop(peer);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn budgeted_tokenizers_preserve_scalar_spans_and_emission_order() {
     let cases = [
         (
