@@ -588,6 +588,7 @@ pub(super) fn check_inlined_similar_substring(
     permissions: Option<&dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
     resolver: Option<&dyn FunctionTypeResolver>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     let ScalarExpr::Func {
         binding: Some(binding),
@@ -620,10 +621,7 @@ pub(super) fn check_inlined_similar_substring(
     if permissions.is_some_and(|permissions| permissions.require_execute(binding).is_err()) {
         return Ok(());
     }
-    uqa_sql::expr::check_constant_similar_translation(
-        &[pattern.into_owned(), escape.into_owned()],
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
+    uqa_sql::expr::check_constant_similar_translation(&pattern, &escape, control)
 }
 
 #[cfg(test)]

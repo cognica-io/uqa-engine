@@ -57,7 +57,7 @@ fn evaluate(
         return extract(&input, &pattern, collation, control);
     }
     // The planner folds a constant NULL argument of this strict form before execution. At run time PostgreSQL evaluates its inlined body, `textregexsubstr($1, similar_to_escape($2, $3))`: a NULL pattern or escape yields NULL, the translation runs and can fail even for a NULL input, and only the extraction is skipped for that input.
-    let Some(escaped) = translate(&arguments[1..], control)? else {
+    let Some(escaped) = translate(&arguments[1], &arguments[2], control)? else {
         return plain(Value::Null, control);
     };
     let Value::Str(pattern) = &*escaped else {
@@ -74,24 +74,24 @@ fn evaluate(
 
 /// Translate the SQL form's constant pattern and escape while planning. `PostgreSQL` inlines `substring(text, text, text)` and folds a constant `similar_to_escape` call, so its errors surface even when no row is read; the call itself is unchanged.
 pub fn check_constant_similar_translation(
-    pattern_and_escape: &[Value],
+    pattern: &Value,
+    escape: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<()> {
-    translate(pattern_and_escape, control).map(drop)
+    translate(pattern, escape, control).map(drop)
 }
 
 /// `similar_to_escape(pattern, escape)`, or `None` when either strict operand is NULL.
 fn translate(
-    pattern_and_escape: &[Value],
+    pattern: &Value,
+    escape: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>> {
-    if pattern_and_escape
-        .iter()
-        .any(|value| matches!(value, Value::Null))
-    {
+    control.check()?;
+    if matches!(pattern, Value::Null) || matches!(escape, Value::Null) {
         return Ok(None);
     }
-    crate::expr::pattern::escape(true, pattern_and_escape, control).map(Some)
+    crate::expr::pattern::escape_similar(pattern, escape, control).map(Some)
 }
 
 /// `textregexsubstr`: the first parenthesized subexpression when the pattern has one, otherwise the whole match. No match, or a first subexpression that did not take part in the match, yields NULL. The pattern is compiled before the input is converted.

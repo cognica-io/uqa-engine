@@ -240,6 +240,7 @@ fn finish_scalar(
             .routine_inlining
             .as_ref()
             .map(|context| context.routines as &dyn uqa_sql::FunctionTypeResolver),
+        &config.production,
     )?;
     let optimized = constants::fold_composite_constructor(
         constants::retain_record_result(optimized, row_syntax),

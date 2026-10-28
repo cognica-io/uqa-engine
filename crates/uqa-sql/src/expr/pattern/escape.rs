@@ -24,12 +24,31 @@ pub(in crate::expr) fn evaluate(
     if !(arguments.len() == 2 || similar && arguments.len() == 1) {
         return Err(SQLError::Internal("invalid pattern escape operands".into()));
     }
-    if arguments.iter().any(|value| matches!(value, Value::Null)) {
+    evaluate_operands(similar, &arguments[0], arguments.get(1), control)
+}
+
+/// The SQL substring planner lends separate constants instead of copying them into an argument array.
+pub(in crate::expr) fn evaluate_similar(
+    pattern: &Value,
+    escape: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    evaluate_operands(true, pattern, Some(escape), control)
+}
+
+fn evaluate_operands(
+    similar: bool,
+    pattern: &Value,
+    escape: Option<&Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
+    if matches!(pattern, Value::Null) || matches!(escape, Some(Value::Null)) {
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
     if !similar {
-        if let Some(pattern) = binary_payload(&arguments[0], control)? {
-            let escape = binary_payload(&arguments[1], control)?
+        if let Some(pattern) = binary_payload(pattern, control)? {
+            let escape = binary_payload(escape.expect("LIKE escape has two operands"), control)?
                 .ok_or_else(|| SQLError::Internal("bytea escape has an invalid carrier".into()))?;
             let escape = match escape.bytes() {
                 [] => None,
@@ -44,9 +63,8 @@ pub(in crate::expr) fn evaluate(
             return Ok(control.finish(Value::Bytes(bytes), memory)?);
         }
     }
-    let pattern = value_to_string_with_control(&arguments[0], control)?;
-    let escape = arguments
-        .get(1)
+    let pattern = value_to_string_with_control(pattern, control)?;
+    let escape = escape
         .map(|value| value_to_string_with_control(value, control))
         .transpose()?;
     let escape = escape.as_deref().map(String::as_str);

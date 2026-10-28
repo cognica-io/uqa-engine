@@ -25506,6 +25506,77 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "similar_translation_planning_rejects_before_copying_large_operands",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/similar_substring.rs",
+      "capability": "Admitted scalar planning workspace",
+      "workload": "A four MiB constant SIMILAR pattern with a runtime input, zero or insufficient allowance and either cancelled token.",
+      "invariant": "Reject before copying inputs or translating the pattern, allocate less than 16 KiB of additional planner storage and release every temporary reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "similar_translation_planning_keeps_lazy_errors_and_releases_workspace",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/similar_substring.rs",
+      "capability": "Admitted scalar planning workspace",
+      "workload": "Valid and invalid constant translations, strict NULL, unreachable CASE arms and denied inlining under exhausted admission.",
+      "invariant": "Preserve 22025/2200C error order and deferred authority, avoid evaluating runtime inputs and release workspace after success and failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constant_similar_translation_respects_exact_and_shared_workspace_allowances",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/regex/tests/substring_patterns.rs",
+      "capability": "Admitted scalar planning workspace",
+      "workload": "Borrowed pattern and escape under zero, partial, exact and surplus allowance shared with a sibling.",
+      "invariant": "Pre-admit conversion and translation buffers at their SQL owner; keep sibling reservations intact and release all temporary storage on every return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_scalar_translation_shares_request_resources",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory.rs",
+      "capability": "Admitted scalar planning workspace",
+      "workload": "Native partial substring planning with exhausted request allowance and cancellation on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Return typed 53200/57014 diagnostics, recover the same plan through the native adapter and release resources at owner retirement.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_scalar_translation_requests_recover_after_rejection",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory.rs",
+      "capability": "Admitted scalar planning workspace",
+      "workload": "Direct SQL, forced custom/generic prepared calls and JSON EXPLAIN after scalar-planning rejection on all four providers and persistent reopen.",
+      "invariant": "Retain failed-transaction admission and savepoint recovery, reproduce the original row or explanation and release resources before reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }
