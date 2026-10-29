@@ -27736,6 +27736,175 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scoped_reference_observation_does_not_construct_empty_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "64 nested scalar-query frames without source descriptors.",
+      "invariant": "Observe the one original external reference without allocating empty schemas or copied frame vectors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_scoped_references_borrow_lateral_layouts_without_an_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "A derived LATERAL source with retained left/right layouts and two external references under a zero-byte allowance.",
+      "invariant": "Borrow preceding and local schemas, preserve external-reference order and allocate no traversal storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_scoped_references_keep_missing_layouts_stars_and_nested_arenas",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "Empty descriptors, missing source analysis, nested scalar arenas, VALUES and an absent arena index.",
+      "invariant": "Retain conservative completeness and empty-frame star/ordinal behavior without treating missing analysis as resolved names.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_scoped_reference_callbacks_stop_on_failure_both_cancellations_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "The first external LATERAL reference returns a SQL error, cancels either owner or unwinds.",
+      "invariant": "Stop before the next reference, preserve the original SQLSTATE and leave ancestor/sibling reservations intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_query_inputs_admit_decoded_order_labels_and_preserve_output_precedence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "Projection roots followed by SQL92 ORDER BY aliases and a decoded quoted function label.",
+      "invariant": "Preserve original expression addresses and ordering precedence; reject label decoding with 53200 before observing later roots and release scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "borrowed_column_keys_preserve_owned_hash_and_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/identity_lookup/tests.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "Unqualified and qualified structured identities with dots, quotes, empty strings and Unicode.",
+      "invariant": "Keep the owned key hash and equality for borrowed qualifier/column lookup without conflating punctuation with qualification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_slot_observation_borrows_wide_keys_and_wildcard_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/identity_lookup/tests.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "64 KiB qualifiers, column names and hidden aliases read repeatedly through physical-slot lookup.",
+      "invariant": "Look up existing slots and wildcard membership without allocating key, label or type copies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_wildcard_demand_rejects_before_copying_wide_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/control.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "A qualified wildcard over 1,024 named typed columns under a 128-byte child allowance.",
+      "invariant": "Reject positional nodes with 53200 before 8 KiB allocation or query mutation, without consuming a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_demand_observes_both_cancellations_before_workspace_allocation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/control.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "A wide analyzed wildcard with either original or invoking cancellation already requested.",
+      "invariant": "Return 57014 before large descriptor copies, any request peak or query mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_cte_names_reject_before_copying_wide_identity",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/control.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "A 64 KiB CTE identity under a 1 KiB request allowance.",
+      "invariant": "Admit scope entries and owned names before construction, reject with 53200 below 8 KiB allocation and release partial scope storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_reference_membership_preserves_hidden_aliases_and_partial_copy_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/control.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "Qualified-star and whole-row references to hidden physical aliases, repeated slots and a partially admitted demand copy.",
+      "invariant": "Preserve exact slot membership and duplicate reuse; release failed-copy nodes, retain the original demand and retire every owner beside its sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_cte_frames_preserve_visibility_and_retire_with_their_owners",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/control.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "Nested escaped CTE identities with sequential and recursive visibility.",
+      "invariant": "Resolve invisible inner names through the original outer scope, preserve recursive visibility and release only the retiring lexical frame.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_cte_definition_pruning_borrows_completed_demand",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/control.rs",
+      "capability": "Positional source demand ownership",
+      "workload": "A CTE with 1,024 demanded positions observed through definition pruning.",
+      "invariant": "Keep the completed admitted demand in its lexical owner without copying nodes or increasing live reservation bytes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

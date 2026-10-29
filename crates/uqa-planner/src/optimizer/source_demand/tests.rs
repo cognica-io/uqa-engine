@@ -8,6 +8,7 @@ use super::*;
 use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{ast::InternalRelationId, ColumnType, ScalarExpr};
+mod control;
 
 fn query(sql: &str) -> Box<QueryPlan> {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
@@ -29,8 +30,10 @@ fn hidden_captured_outputs_follow_physical_demand() {
     let context = Context {
         config: &config,
         aggregates: &|_: &str| false,
-        ctes: Vec::new(),
+        ctes: None,
     };
+    let mut demand = Demand::new(config.production);
+    demand.extend([0]).unwrap();
     context
         .outputs(
             &mut plan,
@@ -38,7 +41,7 @@ fn hidden_captured_outputs_follow_physical_demand() {
                 schema,
                 children: None,
             },
-            &Demand::from([0]),
+            &demand,
             Some(relation),
         )
         .unwrap();

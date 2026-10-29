@@ -15,6 +15,7 @@ pub(crate) type SchemaSet<T> = HashSet<T, ahash::RandomState>;
 use std::sync::Arc;
 
 mod collations;
+mod identity_lookup;
 mod lateral;
 mod name_binding;
 mod open_columns;

@@ -6,17 +6,18 @@
 
 //! Positional output demand through analyzed join namespaces before scalar simplification.
 
+mod ctes;
+mod positions;
 mod references;
 
-use std::collections::{BTreeMap, BTreeSet};
+use positions::Demand;
+use uqa_core::{RelationIdentity, RelationName};
 
 use uqa_sql::plan::AnalyzedSource;
 use uqa_sql::{RowSchema, SQLError};
 
 use super::OptimizerConfig;
 use crate::{AggregateClassifier, CommandPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan};
-
-type Demand = BTreeSet<usize>;
 
 #[cfg(test)]
 mod tests;
@@ -26,10 +27,10 @@ pub(super) fn prune(
     config: &OptimizerConfig<'_>,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
-    let mut context = Context {
+    let context = Context {
         config,
         aggregates,
-        ctes: Vec::new(),
+        ctes: None,
     };
     match plan {
         UnifiedPlan::Query(query) => context.query(query),
@@ -40,17 +41,11 @@ pub(super) fn prune(
 struct Context<'a, 'catalog> {
     config: &'a OptimizerConfig<'catalog>,
     aggregates: &'a dyn AggregateClassifier,
-    ctes: Vec<BTreeMap<String, CteDemand>>,
+    ctes: Option<&'a ctes::Scope<'a, 'catalog>>,
 }
 
-struct CteDemand {
-    positions: Option<Demand>,
-    observed: bool,
-    visible: bool,
-}
-
-impl Context<'_, '_> {
-    fn command(&mut self, command: &mut CommandPlan) -> Result<(), SQLError> {
+impl<'catalog> Context<'_, 'catalog> {
+    fn command(&self, command: &mut CommandPlan) -> Result<(), SQLError> {
         if !matches!(
             command,
             CommandPlan::Insert(_)
@@ -66,65 +61,53 @@ impl Context<'_, '_> {
             });
             return result;
         }
-        let owns_scope = !command.ctes().is_empty();
-        if owns_scope {
-            self.ctes.push(
-                command
-                    .ctes()
-                    .iter()
-                    .map(|cte| {
-                        (
-                            cte.name.clone(),
-                            CteDemand {
-                                positions: None,
-                                observed: false,
-                                visible: true,
-                            },
-                        )
-                    })
-                    .collect(),
-            );
-        }
+        let scope = if command.ctes().is_empty() {
+            None
+        } else {
+            Some(ctes::Scope::command(
+                command.ctes(),
+                self.config.production,
+                self.ctes,
+            )?)
+        };
+        let context = Context {
+            config: self.config,
+            aggregates: self.aggregates,
+            ctes: scope.as_ref().or(self.ctes),
+        };
         if let Some(ctes) = command.ctes_mut() {
             for index in 0..ctes.len() {
-                let recursive = ctes[index].recursive;
-                for (position, cte) in ctes.iter().enumerate() {
-                    self.ctes
-                        .last_mut()
-                        .expect("command CTE scope")
-                        .get_mut(&cte.name)
-                        .expect("declared CTE")
-                        .visible = recursive || position < index;
-                }
+                self.config.production.check()?;
+                context.ctes.expect("command CTE scope").set_visible(
+                    ctes,
+                    index,
+                    ctes[index].recursive,
+                    self.config.production,
+                )?;
                 match &mut ctes[index].body {
-                    crate::CtePlanBody::Query(query) => self.query(query)?,
-                    crate::CtePlanBody::Command(command) => self.command(command)?,
+                    crate::CtePlanBody::Query(query) => context.query(query)?,
+                    crate::CtePlanBody::Command(command) => context.command(command)?,
                 }
             }
         }
-        if owns_scope {
-            for demand in self
-                .ctes
-                .last_mut()
-                .expect("command CTE scope")
-                .values_mut()
-            {
-                demand.visible = true;
-            }
+        if let Some(scope) = &scope {
+            scope.set_visible(
+                command.ctes(),
+                command.ctes().len(),
+                true,
+                self.config.production,
+            )?;
         }
         for query in command.query_inputs_mut() {
-            self.query(query)?;
+            context.query(query)?;
         }
         if let Some(source) = command.source_input_mut() {
-            self.source_queries(source)?;
-        }
-        if owns_scope {
-            self.ctes.pop();
+            context.source_queries(source)?;
         }
         Ok(())
     }
 
-    fn source_queries(&mut self, source: &mut SourcePlan) -> Result<(), SQLError> {
+    fn source_queries(&self, source: &mut SourcePlan) -> Result<(), SQLError> {
         match source {
             SourcePlan::Subquery { body, .. } => self.query(body)?,
             SourcePlan::Table {
@@ -132,15 +115,13 @@ impl Context<'_, '_> {
                 executable_query: Some(body),
                 ..
             } => {
-                if uqa_sql::semantics::cte_reference_name(name)
-                    .is_some_and(|name| self.visible_cte(&name))
-                {
+                if self.referenced_cte(name).is_some() {
                     self.query(body)?;
                 } else {
                     Context {
                         config: self.config,
                         aggregates: self.aggregates,
-                        ctes: Vec::new(),
+                        ctes: None,
                     }
                     .query(body)?;
                 }
@@ -156,23 +137,37 @@ impl Context<'_, '_> {
 
     fn visible_cte(&self, name: &str) -> bool {
         self.ctes
-            .iter()
-            .rev()
-            .any(|scope| scope.get(name).is_some_and(|cte| cte.visible))
+            .is_some_and(|scope| scope.find(RelationName::decoded(name)).is_some())
     }
 
-    fn query(&mut self, query: &mut QueryPlan) -> Result<(), SQLError> {
-        let order = self.push_ctes(query)?;
+    fn referenced_cte(&self, reference: &str) -> Option<&ctes::CteDemand<'catalog>> {
+        let reference = RelationIdentity::borrowed_reference(reference)?;
+        if reference.schema.is_some() {
+            return None;
+        }
+        self.ctes?.find(reference.name)
+    }
+
+    fn query(&self, query: &mut QueryPlan) -> Result<(), SQLError> {
+        self.config.production.check()?;
+        let (scope, order) = ctes::Scope::query(query, self.config, self.ctes)?;
+        let context = Context {
+            config: self.config,
+            aggregates: self.aggregates,
+            ctes: Some(&scope),
+        };
         let subqueries = match &mut query.root {
             RelationalPlan::QueryBlock(block) => {
                 if let Some(analysis) = &query.analyzed_source {
-                    let mut demand = Demand::new();
+                    let mut demand = Demand::new(self.config.production);
                     let mut references = references::References::new(&analysis.schema, &mut demand);
-                    for expression in references::query_inputs(block) {
-                        references.expression(expression, &block.subqueries);
-                    }
+                    references::visit_query_inputs_with_control(
+                        block,
+                        &self.config.production,
+                        &mut |expression| references.expression(expression, &block.subqueries),
+                    )?;
                     if let Some(source) = &mut block.from {
-                        self.source(source, analysis, &demand, &block.subqueries)?;
+                        context.source(source, analysis, &demand, &block.subqueries)?;
                     }
                 }
                 &mut block.subqueries
@@ -183,106 +178,52 @@ impl Context<'_, '_> {
                 subqueries,
                 ..
             } => {
-                self.query(left)?;
-                self.query(right)?;
+                context.query(left)?;
+                context.query(right)?;
                 subqueries
             }
             RelationalPlan::Values { subqueries, .. } => subqueries,
         };
         for query in subqueries {
-            self.query(query)?;
+            context.query(query)?;
         }
-        self.cte_definitions(query, &order)?;
-        self.ctes.pop();
+        context.cte_definitions(query, &order)?;
         Ok(())
     }
 
-    fn push_ctes(&mut self, query: &QueryPlan) -> Result<Vec<usize>, SQLError> {
-        let folded =
-            self.config
-                .routine_inlining
-                .as_ref()
-                .map(|context| {
-                    uqa_sql::semantics::cte_strategy::schedule_plan_ctes(context.volatility, query)
-                        .map(|scheduled| {
-                            scheduled
-                                .into_iter()
-                                .filter(|cte| cte.deferred)
-                                .map(|cte| cte.plan.name.clone())
-                                .collect::<BTreeSet<_>>()
-                        })
-                })
-                .transpose()?
-                .unwrap_or_default();
-        self.ctes.push(
-            query
-                .ctes
-                .iter()
-                .map(|cte| {
-                    (
-                        cte.name.clone(),
-                        CteDemand {
-                            positions: folded.contains(&cte.name).then(Demand::new),
-                            observed: false,
-                            visible: true,
-                        },
-                    )
-                })
-                .collect(),
-        );
-        let positions = query
-            .ctes
-            .iter()
-            .enumerate()
-            .map(|(index, cte)| (cte.name.as_str(), index))
-            .collect::<BTreeMap<_, _>>();
-        Ok(uqa_sql::semantics::ordered_plan_ctes(query)?
-            .iter()
-            .map(|cte| positions[cte.name.as_str()])
-            .collect())
-    }
-
-    fn cte_definitions(&mut self, query: &mut QueryPlan, order: &[usize]) -> Result<(), SQLError> {
-        // Reverse dependency order propagates each consumer's demand before its producer is simplified, including forward references in WITH RECURSIVE.
+    fn cte_definitions(&self, query: &mut QueryPlan, order: &[usize]) -> Result<(), SQLError> {
+        // Reverse dependency order propagates consumer demand before producer simplification, including forward references in WITH RECURSIVE.
         for &index in order.iter().rev() {
+            self.config.production.check()?;
             let cte = &query.ctes[index];
-            let scope = self.ctes.last_mut().expect("query CTE scope");
-            let positions = scope
-                .get(&cte.name)
-                .filter(|demand| demand.observed)
-                .and_then(|demand| demand.positions.clone());
-            for (position, definition) in query.ctes.iter().enumerate() {
-                scope
-                    .get_mut(&definition.name)
-                    .expect("CTE definition")
-                    .visible = cte.recursive || position < index;
-            }
+            let scope = self.ctes.expect("query CTE scope");
+            let demand = scope.local(&cte.name);
+            scope.set_visible(&query.ctes, index, cte.recursive, self.config.production)?;
             match &mut query.ctes[index].body {
                 crate::CtePlanBody::Query(query) => {
-                    if let Some(positions) = positions {
-                        let routines = self.config.routine_inlining.as_ref();
-                        super::derived_projection::prune_positions(
-                            query,
-                            &|position| positions.contains(&position),
-                            None,
-                            super::OutputPruningContext {
-                                production: self.config.production,
-                                aggregates: self.aggregates,
-                                routines: routines.map(|context| context.routines),
-                                volatility: routines.map(|context| context.volatility),
-                                visible_ctes: &|name| self.visible_cte(name),
-                            },
-                        )?;
+                    if demand.observed.get() {
+                        let retained = demand.positions.borrow();
+                        if let Some(positions) = retained.as_ref() {
+                            let routines = self.config.routine_inlining.as_ref();
+                            super::derived_projection::prune_positions(
+                                query,
+                                &|position| positions.contains(position),
+                                None,
+                                super::OutputPruningContext {
+                                    production: self.config.production,
+                                    aggregates: self.aggregates,
+                                    routines: routines.map(|context| context.routines),
+                                    volatility: routines.map(|context| context.volatility),
+                                    visible_ctes: &|name| self.visible_cte(name),
+                                },
+                            )?;
+                        }
                     }
                     self.query(query)?;
                 }
                 crate::CtePlanBody::Command(command) => {
-                    // Command input layouts are not retained by query analysis. Preserve their visible CTE values until command demand has the same positional authority.
-                    for scope in &mut self.ctes {
-                        for demand in scope.values_mut().filter(|demand| demand.visible) {
-                            demand.positions = None;
-                        }
-                    }
+                    // Command input layouts are not retained by query analysis. Preserve visible CTE values until command demand has the same positional authority.
+                    scope.retain_visible_values(self.config.production)?;
                     self.command(command)?;
                 }
             }
@@ -291,29 +232,23 @@ impl Context<'_, '_> {
     }
 
     fn source(
-        &mut self,
+        &self,
         source: &mut SourcePlan,
         analysis: &AnalyzedSource,
-        demand: &Demand,
+        demand: &Demand<'_>,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
+        self.config.production.check()?;
         if let SourcePlan::Table { name, .. } = source {
-            if let Some(name) = uqa_sql::semantics::cte_reference_name(name) {
-                if let Some(selected) = self
-                    .ctes
-                    .iter_mut()
-                    .rev()
-                    .find_map(|scope| scope.get_mut(&name).filter(|demand| demand.visible))
-                {
-                    if let Some(positions) = &mut selected.positions {
-                        selected.observed = true;
-                        positions.extend((0..analysis.schema.len()).filter(|position| {
-                            analysis
-                                .schema
-                                .slot(*position)
-                                .is_some_and(|slot| demand.contains(&slot))
-                        }));
-                    }
+            if let Some(selected) = self.referenced_cte(name) {
+                if let Some(positions) = &mut *selected.positions.borrow_mut() {
+                    selected.observed.set(true);
+                    positions.extend((0..analysis.schema.len()).filter(|position| {
+                        analysis
+                            .schema
+                            .slot(*position)
+                            .is_some_and(|slot| demand.contains(slot))
+                    }))?;
                 }
             }
         }
@@ -331,16 +266,14 @@ impl Context<'_, '_> {
                 executable_query: Some(body),
                 ..
             } => {
-                if uqa_sql::semantics::cte_reference_name(name)
-                    .is_some_and(|name| self.visible_cte(&name))
-                {
+                if self.referenced_cte(name).is_some() {
                     self.outputs(body, analysis, demand, None)?;
                     self.query(body)
                 } else {
-                    let mut context = Context {
+                    let context = Context {
                         config: self.config,
                         aggregates: self.aggregates,
-                        ctes: Vec::new(),
+                        ctes: None,
                     };
                     context.outputs(body, analysis, demand, None)?;
                     context.query(body)
@@ -355,7 +288,7 @@ impl Context<'_, '_> {
         &self,
         query: &mut QueryPlan,
         analysis: &AnalyzedSource,
-        demand: &Demand,
+        demand: &Demand<'_>,
         captured: Option<uqa_sql::ast::InternalRelationId>,
     ) -> Result<(), SQLError> {
         let routines = self.config.routine_inlining.as_ref();
@@ -367,7 +300,7 @@ impl Context<'_, '_> {
                         || analysis.schema.slot(position),
                         |relation| analysis.schema.internal_slot(relation.column(position)),
                     )
-                    .is_some_and(|slot| demand.contains(&slot))
+                    .is_some_and(|slot| demand.contains(slot))
             },
             None,
             super::OutputPruningContext {
@@ -381,10 +314,10 @@ impl Context<'_, '_> {
     }
 
     fn join(
-        &mut self,
+        &self,
         source: &mut SourcePlan,
         analysis: &AnalyzedSource,
-        demanded: &Demand,
+        demanded: &Demand<'_>,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         let SourcePlan::Join {
@@ -404,10 +337,10 @@ impl Context<'_, '_> {
         };
         let (left_schema, right_schema) = (&children.0.schema, &children.1.schema);
         let input = RowSchema::join(left_schema, right_schema, std::iter::empty());
-        let mut demand = demanded.clone();
+        let mut demand = demanded.copy()?;
         let mut references = references::References::new(&input, &mut demand);
         if let Some(on) = on {
-            references.expression(on, subqueries);
+            references.expression(on, subqueries)?;
         }
         if let Some(using) = uqa_sql::semantics::resolve_join_using(
             using.as_ref(),
@@ -418,19 +351,14 @@ impl Context<'_, '_> {
             if let Some(predicate) =
                 uqa_sql::semantics::join_using_predicate(&using, left_schema, right_schema)
             {
-                references.expression(&predicate, subqueries);
+                references.expression(&predicate, subqueries)?;
             }
         }
         let boundary = left_schema.physical_width();
-        let mut left_demand = demand
-            .iter()
-            .copied()
-            .filter(|slot| *slot < boundary)
-            .collect::<Demand>();
-        let right_demand = demand
-            .iter()
-            .filter_map(|slot| slot.checked_sub(boundary))
-            .collect::<Demand>();
+        let mut left_demand = Demand::new(self.config.production);
+        left_demand.extend(demand.iter().copied().filter(|slot| *slot < boundary))?;
+        let mut right_demand = Demand::new(self.config.production);
+        right_demand.extend(demand.iter().filter_map(|slot| slot.checked_sub(boundary)))?;
         self.source(right, &children.1, &right_demand, subqueries)?;
         // Only expressions still consumed by the right input can demand a preceding value. A discarded LATERAL output must not keep its producer's unused error alive.
         references::References::new(left_schema, &mut left_demand).source(
@@ -439,7 +367,7 @@ impl Context<'_, '_> {
             subqueries,
             &[],
             *lateral,
-        );
+        )?;
         self.source(left, &children.0, &left_demand, subqueries)
     }
 }
