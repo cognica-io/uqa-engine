@@ -10,45 +10,21 @@ use super::{
     owned::{OwnedScalarExpr, ScalarMemory},
     resources::{Control, Lowering, Result},
     source::Source,
-    ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
+    ScalarExpr,
 };
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
+
+mod iterative;
 
 impl ScalarExpr {
-    /// Copy a scalar tree, admitting every destination allocation before creating it and retaining the complete reservation. Subquery identities still refer to the enclosing plan's query arena.
+    /// Copy a scalar tree using admitted constructor frames instead of recursive scalar calls. The immutable result combines only destination reservations; temporary frame storage is released before return.
     pub fn clone_with_control(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>> {
-        control.check()?;
-        if control.budget().is_none() {
-            return Ok(control.finish(self.clone(), None)?);
-        }
-        let mut copying = Lowering {
-            control: Some(Control::from_production(*control)),
-            owned_children: None,
-        };
-        let expression = copying.scalar_copy(self)?;
-        Ok(copying.finish(expression)?.into())
+        iterative::immutable(self, *control)
     }
 
-    /// Copy into a mutable scalar owner. Every node records only its direct allocations, allowing later rewrites to discard or move complete children without retaining leases for deleted payloads. Query children remain identities in the enclosing query arena.
+    /// Copy into a mutable scalar owner with independent direct and child reservations. Iterative constructors preserve field order, destination admission and query-arena identities in both ordinary and controlled modes.
     pub fn copy_for_rewrite(&self, control: &ProductionControl<'_>) -> Result<OwnedScalarExpr> {
-        control.check()?;
-        let Some(budget) = control.budget() else {
-            return Ok(OwnedScalarExpr::uncontrolled(self.clone()));
-        };
-        let mut copying = Lowering {
-            control: Some(Control::from_production(*control)),
-            owned_children: Some(BudgetedVec::new(budget)),
-        };
-        let expression = copying.scalar_copy_node(self)?;
-        let output = OwnedScalarExpr {
-            expression,
-            memory: Some(ScalarMemory {
-                direct: copying.control.expect("controlled scalar copy").memory,
-                children: copying.owned_children.expect("mutable scalar copy"),
-            }),
-        };
-        control.check()?;
-        Ok(output)
+        iterative::mutable(self, *control)
     }
 }
 
@@ -58,7 +34,9 @@ impl Lowering<'_> {
         ty: Option<&crate::ast::ColumnType>,
     ) -> Result<Option<crate::ast::ColumnType>> {
         ty.map(|ty| {
-            let control = self.control.as_mut().expect("controlled scalar copy");
+            let Some(control) = self.control.as_mut() else {
+                return Ok(ty.clone());
+            };
             let (ty, memory) = ty.clone_with_control(&control.production)?.into_parts();
             control.memory.absorb(memory.expect("controlled type copy"));
             Ok(ty)
@@ -66,27 +44,7 @@ impl Lowering<'_> {
         .transpose()
     }
 
-    fn scalar_copy(&mut self, expression: &ScalarExpr) -> Result<ScalarExpr> {
-        let Some(children) = &mut self.owned_children else {
-            return self.scalar_copy_node(expression);
-        };
-        // Reserve the metadata slot before constructing its child. A child uses a fresh lowerer, so its payload lease can never be absorbed into the parent's direct allocations, including on error or unwind.
-        children.reserve(1)?;
-        let child = expression.copy_for_rewrite(
-            &self
-                .control
-                .as_ref()
-                .expect("controlled scalar copy")
-                .production,
-        )?;
-        OwnedScalarExpr::attach_child(self, child)
-    }
-
-    #[expect(
-        clippy::too_many_lines,
-        reason = "exhaustive scalar copying shares the lowerer's destination admission"
-    )]
-    fn scalar_copy_node(&mut self, expression: &ScalarExpr) -> Result<ScalarExpr> {
+    fn scalar_leaf_copy(&mut self, expression: &ScalarExpr) -> Result<ScalarExpr> {
         self.check()?;
         Ok(match expression {
             ScalarExpr::Star => ScalarExpr::Star,
@@ -123,176 +81,28 @@ impl Lowering<'_> {
                 }
             }
             ScalarExpr::Param(index) => ScalarExpr::Param(*index),
-            ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                distinct,
-                order_by,
-                order_syntax,
-                filter,
-            } => ScalarExpr::Func {
-                name: self.copy_text(name)?,
-                binding: binding
-                    .as_ref()
-                    .map(|binding| self.binding(Source::Borrowed(binding)))
-                    .transpose()?,
-                args: self.map(args.iter(), Self::scalar_copy)?,
-                distinct: *distinct,
-                order_by: self.map(order_by.iter(), Self::scalar_order_copy)?,
-                order_syntax: *order_syntax,
-                filter: self.scalar_optional_copy(filter.as_deref())?,
-            },
-            ScalarExpr::Array(items) => {
-                ScalarExpr::Array(self.map(items.iter(), Self::scalar_copy)?)
-            }
-            ScalarExpr::CompositeRow {
-                items,
-                binding,
-                bound_type,
-            } => ScalarExpr::CompositeRow {
-                bound_type: self.scalar_type_copy(bound_type.as_ref())?,
-                items: self.map(items.iter(), Self::scalar_copy)?,
-                binding: self.composite_binding(Source::Borrowed(binding))?,
-            },
-            ScalarExpr::Row(items) => ScalarExpr::Row(self.map(items.iter(), Self::scalar_copy)?),
-            ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
-                op: *op,
-                lhs: self.scalar_box_copy(lhs)?,
-                rhs: self.scalar_box_copy(rhs)?,
-            },
-            ScalarExpr::UnaryMinus(expression) => {
-                ScalarExpr::UnaryMinus(self.scalar_box_copy(expression)?)
-            }
-            ScalarExpr::Not(expression) => ScalarExpr::Not(self.scalar_box_copy(expression)?),
-            ScalarExpr::And(items) => ScalarExpr::And(self.map(items.iter(), Self::scalar_copy)?),
-            ScalarExpr::Or(items) => ScalarExpr::Or(self.map(items.iter(), Self::scalar_copy)?),
-            ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
-                expr: self.scalar_box_copy(expr)?,
-                negated: *negated,
-            },
-            ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
-                expr: self.scalar_box_copy(expr)?,
-                low: self.scalar_box_copy(low)?,
-                high: self.scalar_box_copy(high)?,
-            },
-            ScalarExpr::InList {
-                expr,
-                list,
-                negated,
-            } => ScalarExpr::InList {
-                expr: self.scalar_box_copy(expr)?,
-                list: self.map(list.iter(), Self::scalar_copy)?,
-                negated: *negated,
-            },
-            ScalarExpr::WindowCall {
-                name,
-                args,
-                spec,
-                filter,
-                modifiers,
-            } => ScalarExpr::WindowCall {
-                name: self.copy_text(name)?,
-                args: self.map(args.iter(), Self::scalar_copy)?,
-                spec: ScalarWindowSpec {
-                    definition: spec.definition,
-                    partition_by: self.map(spec.partition_by.iter(), Self::scalar_copy)?,
-                    order_by: self.map(spec.order_by.iter(), Self::scalar_order_copy)?,
-                    frame: spec
-                        .frame
-                        .as_ref()
-                        .map(|frame| {
-                            Ok::<_, crate::schema::retention::CatalogRetentionError>(
-                                ScalarWindowFrame {
-                                    mode: frame.mode,
-                                    start: self.scalar_bound_copy(&frame.start)?,
-                                    end: self.scalar_bound_copy(&frame.end)?,
-                                    between: frame.between,
-                                    exclusion: frame.exclusion,
-                                },
-                            )
-                        })
-                        .transpose()?,
-                },
-                filter: self.scalar_optional_copy(filter.as_deref())?,
-                modifiers: *modifiers,
-            },
-            ScalarExpr::Case {
-                base,
-                when,
-                else_branch,
-            } => ScalarExpr::Case {
-                base: self.scalar_optional_copy(base.as_deref())?,
-                when: self.map(when.iter(), |this, (condition, value)| {
-                    Ok((this.scalar_copy(condition)?, this.scalar_copy(value)?))
-                })?,
-                else_branch: self.scalar_optional_copy(else_branch.as_deref())?,
-            },
-            ScalarExpr::Collated {
-                expr,
-                ty,
-                collation,
-            } => ScalarExpr::Collated {
-                expr: self.scalar_box_copy(expr)?,
-                ty: self
-                    .scalar_type_copy(Some(ty))?
-                    .expect("retained result type"),
-                collation: *collation,
-            },
-            ScalarExpr::Cast { implicit, expr, ty } => ScalarExpr::Cast {
-                implicit: *implicit,
-                expr: self.scalar_box_copy(expr)?,
-                ty: self.copy_text(ty)?,
-            },
             ScalarExpr::ScalarSubquery(query) => ScalarExpr::ScalarSubquery(*query),
             ScalarExpr::Exists { subquery, negated } => ScalarExpr::Exists {
                 subquery: *subquery,
                 negated: *negated,
             },
-            ScalarExpr::InSubquery {
-                expr,
-                subquery,
-                negated,
-            } => ScalarExpr::InSubquery {
-                expr: self.scalar_box_copy(expr)?,
-                subquery: *subquery,
-                negated: *negated,
-            },
-        })
-    }
-
-    fn scalar_box_copy(&mut self, expression: &ScalarExpr) -> Result<Box<ScalarExpr>> {
-        self.boxed(|this| this.scalar_copy(expression))
-    }
-
-    fn scalar_optional_copy(
-        &mut self,
-        expression: Option<&ScalarExpr>,
-    ) -> Result<Option<Box<ScalarExpr>>> {
-        expression
-            .map(|expression| self.scalar_box_copy(expression))
-            .transpose()
-    }
-
-    fn scalar_order_copy(&mut self, order: &ScalarOrder) -> Result<ScalarOrder> {
-        Ok(ScalarOrder {
-            expr: self.scalar_copy(&order.expr)?,
-            descending: order.descending,
-            nulls: order.nulls,
-        })
-    }
-
-    fn scalar_bound_copy(&mut self, bound: &ScalarFrameBound) -> Result<ScalarFrameBound> {
-        Ok(match bound {
-            ScalarFrameBound::UnboundedPreceding => ScalarFrameBound::UnboundedPreceding,
-            ScalarFrameBound::UnboundedFollowing => ScalarFrameBound::UnboundedFollowing,
-            ScalarFrameBound::CurrentRow => ScalarFrameBound::CurrentRow,
-            ScalarFrameBound::Preceding(expression) => {
-                ScalarFrameBound::Preceding(self.scalar_box_copy(expression)?)
-            }
-            ScalarFrameBound::Following(expression) => {
-                ScalarFrameBound::Following(self.scalar_box_copy(expression)?)
-            }
+            ScalarExpr::Func { .. }
+            | ScalarExpr::Array(_)
+            | ScalarExpr::CompositeRow { .. }
+            | ScalarExpr::Row(_)
+            | ScalarExpr::Binary { .. }
+            | ScalarExpr::UnaryMinus(_)
+            | ScalarExpr::Not(_)
+            | ScalarExpr::And(_)
+            | ScalarExpr::Or(_)
+            | ScalarExpr::IsNull { .. }
+            | ScalarExpr::Between { .. }
+            | ScalarExpr::InList { .. }
+            | ScalarExpr::WindowCall { .. }
+            | ScalarExpr::Case { .. }
+            | ScalarExpr::Collated { .. }
+            | ScalarExpr::Cast { .. }
+            | ScalarExpr::InSubquery { .. } => unreachable!("scalar leaf constructor"),
         })
     }
 }

@@ -29418,6 +29418,84 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_mutable_and_immutable_scalar_copies_use_bounded_thread_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/tests/iterative.rs",
+      "capability": "Iterative scalar construction and allocation ownership",
+      "workload": "Copy 128- and 1,024-level scalar trees in mutable, immutable, ordinary and controlled modes.",
+      "invariant": "Use bounded scalar call stack, preserve the complete depth and payload, retain exact destination bytes and release all suspended-frame storage before return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_scalar_copy_rejects_workspace_before_allocation_and_preserves_independent_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/tests/iterative.rs",
+      "capability": "Iterative scalar construction and allocation ownership",
+      "workload": "Copy a 1,024-level tree with 8 KiB shared by construction frames and an independent retained value.",
+      "invariant": "Reject before workspace exceeds the allowance, release partial destinations and frames, and preserve the source and unrelated reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "late_scalar_metadata_failure_releases_completed_children_without_copying_large_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/tests/iterative.rs",
+      "capability": "Iterative scalar construction and allocation ownership",
+      "workload": "Copy CAST and composite-row scalars whose post-child metadata exceeds 4 MiB under a 4 KiB allowance.",
+      "invariant": "Preserve child-before-metadata order, reject large fields before allocation and release every completed child and constructor lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "all_scalar_copy_modes_preserve_child_shapes_and_empty_optional_groups",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/copies.rs",
+      "capability": "Iterative scalar construction and allocation ownership",
+      "workload": "Copy every child shape, wide calls/windows and empty intermediate groups in all four ownership modes.",
+      "invariant": "Match independent shallow Clone output, keep all flags and child order, release mutable metadata on freezing and retain only final destination bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancellation_during_scalar_construction_releases_suspended_and_completed_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests.rs",
+      "capability": "Iterative scalar construction and allocation ownership",
+      "workload": "Cancel either token before child discovery, attachment or completion with suspended ancestors and completed siblings.",
+      "invariant": "Propagate cancellation from each constructor boundary and release all private allocations while preserving an independent retained owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unwinding_partial_case_construction_releases_unpaired_condition_and_pending_result",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests.rs",
+      "capability": "Iterative scalar construction and allocation ownership",
+      "workload": "Unwind while a CASE condition is retained separately from its pending result beneath suspended ancestors.",
+      "invariant": "Release unpaired condition, pending child, ancestor frames and all associated leases without retiring an independent value.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
