@@ -10,10 +10,12 @@ use super::{Budgeted, MemoryBudget, MemoryReservation};
 use crate::{CancellationToken, Value, ValueRetentionError};
 
 mod map;
+mod owned;
 mod small_vec;
 mod string;
 mod vec;
 pub use map::ProductionMap;
+pub use owned::OwnedProductionControl;
 pub use small_vec::ProductionSmallVec;
 pub use string::ProductionString;
 pub use vec::ProductionVec;
@@ -272,6 +274,28 @@ impl<T> std::ops::Deref for Produced<T> {
 impl<T: PartialEq> PartialEq for Produced<T> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
+    }
+}
+
+impl<T: Eq> Eq for Produced<T> {}
+impl<T: Ord> PartialOrd for Produced<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<T: Ord> Ord for Produced<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+impl std::borrow::Borrow<str> for Produced<String> {
+    fn borrow(&self) -> &str {
+        &self.value
+    }
+}
+impl std::borrow::Borrow<String> for Produced<String> {
+    fn borrow(&self) -> &String {
+        &self.value
     }
 }
 

@@ -75,10 +75,17 @@ pub(super) fn remove<K: Borrow<Q>, V, Q: Ord + ?Sized>(
     link: &mut Link<K, V>,
     key: &Q,
 ) -> Option<(K, V)> {
+    extract(link, key).map(into_entry)
+}
+
+pub(super) fn extract<K: Borrow<Q>, V, Q: Ord + ?Sized>(
+    link: &mut Link<K, V>,
+    key: &Q,
+) -> Option<OwnedNode<K, V>> {
     let node = link.as_mut()?;
     let removed = match key.cmp(node.key.borrow()) {
-        Ordering::Less => remove(&mut node.value.left, key),
-        Ordering::Greater => remove(&mut node.value.right, key),
+        Ordering::Less => extract(&mut node.value.left, key),
+        Ordering::Greater => extract(&mut node.value.right, key),
         Ordering::Equal => {
             let mut node = link.take().expect("selected removal node");
             *link = if node.right.is_none() {
@@ -89,7 +96,8 @@ pub(super) fn remove<K: Borrow<Q>, V, Q: Ord + ?Sized>(
                 successor.value.right = node.value.right.take();
                 Some(successor)
             };
-            Some(into_entry(node))
+            node.value.height = 1;
+            Some(node)
         }
     };
     if removed.is_some() {

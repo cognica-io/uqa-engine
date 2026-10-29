@@ -34,14 +34,21 @@ impl RelationIdentity {
     }
 
     pub fn qualified_name(&self) -> String {
+        self.qualified_name_with_control(&crate::memory::ProductionControl::uncontrolled())
+            .expect("ordinary relation names cannot be cancelled or limited")
+            .into_uncontrolled()
+            .expect("ordinary relation names have no reservation")
+    }
+
+    pub fn qualified_name_with_control(
+        &self,
+        control: &crate::memory::ProductionControl<'_>,
+    ) -> Result<crate::memory::Produced<String>, crate::ValueRetentionError> {
         RelationReference {
             schema: Some(RelationName::decoded(&self.schema)),
             name: RelationName::decoded(&self.name),
         }
-        .render_with_control(&crate::memory::ProductionControl::uncontrolled())
-        .expect("ordinary relation names cannot be cancelled or limited")
-        .into_uncontrolled()
-        .expect("ordinary relation names have no reservation")
+        .render_with_control(control)
     }
 
     /// Physical owner keys that can refer to this relation. New writes use

@@ -35,7 +35,8 @@ pub use map::{
 };
 pub use observation::{AllocationObserver, AllocationUsage, ObserveAllocations};
 pub use production::{
-    Produced, ProductionControl, ProductionMap, ProductionSmallVec, ProductionString, ProductionVec,
+    OwnedProductionControl, Produced, ProductionControl, ProductionMap, ProductionSmallVec,
+    ProductionString, ProductionVec,
 };
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;

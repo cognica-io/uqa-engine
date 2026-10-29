@@ -86,7 +86,7 @@ pub use temporal::{
 };
 pub use value::{
     compare_bytes_with_control, fixed_char_comparison_text_with_control, JsonValueDecoder, Value,
-    ValueRetentionError,
+    ValueRetentionError, ValueSerialization,
 };
 
 #[cfg(test)]

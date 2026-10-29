@@ -6,6 +6,7 @@
 
 //! Ordinary ordered owners expose exact allocation layouts for later immutable retention.
 
+mod iter_mut;
 mod serialization;
 mod set;
 #[cfg(test)]
@@ -62,6 +63,13 @@ impl<K, V> OwnedMap<K, V> {
 
     pub fn keys(&self) -> impl ExactSizeIterator<Item = &K> + std::iter::FusedIterator {
         self.iter().map(|(key, _)| key)
+    }
+
+    /// Mutate values without changing keys, node ownership or traversal storage.
+    pub fn values_mut(
+        &mut self,
+    ) -> impl ExactSizeIterator<Item = &mut V> + std::iter::FusedIterator {
+        iter_mut::IterMut::new(&mut self.root, self.len).map(|(_, value)| value)
     }
 
     pub fn values(&self) -> impl ExactSizeIterator<Item = &V> + std::iter::FusedIterator {
@@ -128,10 +136,23 @@ impl<K: Ord, V> OwnedMap<K, V> {
         value: V,
         budget: &MemoryBudget,
     ) -> Result<Option<V>, MemoryError> {
+        self.insert_budgeted_with(key, budget, || Ok(value))
+    }
+
+    /// Admit a new node before constructing its value. A failed value producer
+    /// releases the provisional node lease and preserves the previous map. A
+    /// replacement needs no new node and is published only after production succeeds.
+    pub fn insert_budgeted_with<E: From<MemoryError>>(
+        &mut self,
+        key: K,
+        budget: &MemoryBudget,
+        produce: impl FnOnce() -> Result<V, E>,
+    ) -> Result<Option<V>, E> {
         if let Some(previous) = self.get_mut(&key) {
-            return Ok(Some(std::mem::replace(previous, value)));
+            return Ok(Some(std::mem::replace(previous, produce()?)));
         }
         let memory = budget.reserve(Self::entry_bytes())?;
+        let value = produce()?;
         let entry = OwnedNode {
             value: Box::new(Node {
                 key,
@@ -184,6 +205,17 @@ impl<K: Ord, V> OwnedMap<K, V> {
         let removed = tree::remove(&mut self.root, key);
         self.len -= usize::from(removed.is_some());
         removed
+    }
+
+    /// Detach one entry while retaining its exact node, key, value and admission lease. Appending the returned map restores it without allocation.
+    pub fn extract<Q: Ord + ?Sized>(&mut self, key: &Q) -> Self
+    where
+        K: Borrow<Q>,
+    {
+        let root = tree::extract(&mut self.root, key);
+        let len = usize::from(root.is_some());
+        self.len -= len;
+        Self { root, len }
     }
 
     /// Borrow the first entry at or after a lower bound in logarithmic time without scratch allocation.

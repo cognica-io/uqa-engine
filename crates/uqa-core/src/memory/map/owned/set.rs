@@ -62,6 +62,15 @@ impl<K: Ord> OwnedSet<K> {
         self.0.insert(key, ()).is_none()
     }
 
+    /// Admit a new set node before allocation; duplicate identities retain their existing owner.
+    pub fn insert_budgeted(
+        &mut self,
+        key: K,
+        budget: &crate::memory::MemoryBudget,
+    ) -> Result<bool, crate::memory::MemoryError> {
+        Ok(self.0.insert_budgeted(key, (), budget)?.is_none())
+    }
+
     pub fn remove<Q: Ord + ?Sized>(&mut self, key: &Q) -> bool
     where
         K: Borrow<Q>,

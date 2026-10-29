@@ -13,6 +13,22 @@ use crate::{
 };
 
 impl RelationReference<'_> {
+    /// Decode borrowed components directly into their retained identity buffers.
+    pub fn identity_with_control(
+        &self,
+        default_schema: RelationName<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<super::RelationIdentity>, ValueRetentionError> {
+        let schema = control.format(format_args!("{}", self.schema.unwrap_or(default_schema)))?;
+        let name = control.format(format_args!("{}", self.name))?;
+        let (schema, schema_memory) = schema.into_parts();
+        let (name, name_memory) = name.into_parts();
+        control.finish(
+            super::RelationIdentity { schema, name },
+            control.combine(schema_memory, name_memory),
+        )
+    }
+
     pub fn render_with_control(
         &self,
         control: &ProductionControl<'_>,

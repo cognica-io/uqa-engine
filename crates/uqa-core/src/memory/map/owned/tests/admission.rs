@@ -52,3 +52,46 @@ fn failed_admission_does_not_publish_a_node_or_remove_existing_values() {
     drop(map);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn node_admission_precedes_value_production_and_failed_producers_preserve_entries() {
+    let bytes = OwnedMap::<u32, u32>::entry_bytes();
+    let budget = MemoryBudget::new(bytes);
+    let mut map = OwnedMap::new();
+    map.insert_budgeted_with(1, &budget, || -> Result<_, MemoryError> {
+        assert_eq!(budget.used(), bytes);
+        Ok(10)
+    })
+    .unwrap();
+    let pointer = std::ptr::from_ref(map.get(&1).unwrap());
+    let result = map.insert_budgeted_with(2, &budget, || -> Result<_, MemoryError> {
+        panic!("a rejected node must not invoke its producer")
+    });
+    assert!(result.is_err());
+    assert!(map
+        .insert_budgeted_with(1, &budget, || -> Result<u32, MemoryError> {
+            budget.reserve(1)?;
+            Ok(20)
+        })
+        .is_err());
+    assert_eq!(map.get(&1), Some(&10));
+    assert_eq!(std::ptr::from_ref(map.get(&1).unwrap()), pointer);
+    map.clear();
+    assert!(map
+        .insert_budgeted_with(2, &budget, || -> Result<u32, MemoryError> {
+            budget.reserve(1)?;
+            Ok(20)
+        })
+        .is_err());
+    assert!(map.is_empty());
+    assert_eq!(budget.used(), 0);
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = map.insert_budgeted_with(3, &budget, || -> Result<u32, MemoryError> {
+            assert_eq!(budget.used(), bytes);
+            panic!("producer unwind")
+        });
+    }));
+    assert!(unwind.is_err());
+    assert_eq!(budget.used(), 0);
+    assert!(map.is_empty());
+}
