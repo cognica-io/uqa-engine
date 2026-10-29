@@ -53,7 +53,7 @@ pub fn optimize_rule_condition(
     if reject_unknown(&mut expression.scalar) {
         optimize_scalar_expression(&mut expression.scalar, &config)?;
     }
-    uqa_sql::plan::subqueries::prune_expression(expression);
+    uqa_sql::plan::subqueries::prune_expression_with_control(expression, config.production)?;
     Ok(())
 }
 

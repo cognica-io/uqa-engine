@@ -17,6 +17,7 @@ mod inference;
 mod retrieval;
 mod sources;
 mod statistics;
+mod subqueries;
 
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]

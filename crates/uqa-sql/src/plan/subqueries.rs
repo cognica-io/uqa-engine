@@ -7,9 +7,13 @@
 //! Compact scalar-subquery arenas after expression rewrites discard inputs.
 
 use crate::ScalarExpr;
-use std::collections::BTreeMap;
 
 use super::{CommandPlan, QueryPlan, RelationalPlan, SourcePlan};
+
+mod compaction;
+pub use compaction::{
+    prune_command_with_control, prune_expression_with_control, prune_query_with_control,
+};
 
 mod transfer;
 pub use transfer::transfer_expression;
@@ -22,21 +26,8 @@ pub(crate) use transform::{
 
 /// Drop unreferenced query children and remap local command expressions without evaluating them.
 pub fn prune_command(command: &mut CommandPlan) {
-    let Some(arena) = command_arena(command) else {
-        return;
-    };
-    let arena = std::mem::take(arena);
-    let arena = compact(arena, |visitor| {
-        for expression in command.expressions_mut() {
-            super::rewrite_scalar_expression(expression, visitor);
-        }
-        if let Some(source) = command.source_input_mut() {
-            visit_source(source, visitor);
-        }
-    });
-    if let Some(target) = command_arena(command) {
-        *target = arena;
-    }
+    prune_command_with_control(command, uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("uncontrolled scalar-subquery compaction");
 }
 
 fn command_arena(command: &mut CommandPlan) -> Option<&mut Vec<QueryPlan>> {
@@ -51,17 +42,14 @@ fn command_arena(command: &mut CommandPlan) -> Option<&mut Vec<QueryPlan>> {
 
 /// Drop unreferenced query children and remap local query expressions, including canonical window definitions.
 pub fn prune_query(query: &mut QueryPlan) {
-    let arena = std::mem::take(query_arena(&mut query.root));
-    let arena = compact(arena, |visitor| visit_root(&mut query.root, visitor));
-    *query_arena(&mut query.root) = arena;
+    prune_query_with_control(query, uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("uncontrolled scalar-subquery compaction");
 }
 
 /// Retain only query children actually referenced by one scalar expression.
 pub fn prune_expression(plan: &mut super::ExpressionPlan) {
-    let arena = std::mem::take(&mut plan.subqueries);
-    plan.subqueries = compact(arena, |visitor| {
-        super::rewrite_scalar_expression(&mut plan.scalar, visitor);
-    });
+    prune_expression_with_control(plan, uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("uncontrolled scalar-subquery compaction");
 }
 
 fn query_arena(root: &mut RelationalPlan) -> &mut Vec<QueryPlan> {
@@ -71,39 +59,6 @@ fn query_arena(root: &mut RelationalPlan) -> &mut Vec<QueryPlan> {
             subqueries
         }
     }
-}
-
-fn compact(
-    arena: Vec<QueryPlan>,
-    mut visit: impl FnMut(&mut dyn FnMut(&mut ScalarExpr)),
-) -> Vec<QueryPlan> {
-    if arena.is_empty() {
-        return arena;
-    }
-    let mut remap = BTreeMap::new();
-    visit(&mut |expression| {
-        if let Some(id) = subquery_id(expression) {
-            remap.insert(*id, 0);
-        }
-    });
-    // Invalid references retain their original diagnostic rather than aliasing
-    // a surviving entry after compaction.
-    if remap.keys().any(|id| *id >= arena.len()) || remap.len() == arena.len() {
-        return arena;
-    }
-    for (position, value) in remap.values_mut().enumerate() {
-        *value = position;
-    }
-    visit(&mut |expression| {
-        if let Some(id) = subquery_id(expression) {
-            *id = remap[id];
-        }
-    });
-    arena
-        .into_iter()
-        .enumerate()
-        .filter_map(|(id, query)| remap.contains_key(&id).then_some(query))
-        .collect()
 }
 
 fn subquery_id(expression: &mut ScalarExpr) -> Option<&mut usize> {

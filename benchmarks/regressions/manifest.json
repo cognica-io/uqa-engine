@@ -28168,6 +28168,204 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_admits_scratch_before_mutation_and_releases_partial_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Compact 1024 referenced child queries under zero, one-byte and partial allowances.",
+      "invariant": "Reject before uncontrolled growth, preserve the complete input and release scratch while retaining sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_moves_surviving_queries_without_reallocating_the_arena",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Compact sparse repeated references in nonmonotonic expression order.",
+      "invariant": "Preserve stable child order and arena buffer/capacity; only admitted distinct map nodes allocate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_preserves_mutation_sources_and_independent_query_namespaces",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Compact INSERT, UPDATE, DELETE, MERGE, VALUES, set operations and derived-query namespaces.",
+      "invariant": "Discard only the owning arena's unreferenced queries and preserve source/assignment/returning inputs and independent child IDs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_retains_canonical_window_inputs_after_discarding_a_projection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Discard an earlier scalar projection while retaining partition, order and frame scalar-query inputs.",
+      "invariant": "Remap canonical window references to the same surviving child queries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_preserves_invalid_references_and_zero_allocation_empty_cases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Observe an invalid query ID and compact an unreferenced arena twice.",
+      "invariant": "Keep invalid references and original diagnostics; empty/no-reference compaction allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_observes_both_cancellations_before_changing_query_ids",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Cancel each production scope before collecting a local arena.",
+      "invariant": "Return 57014 before allocation or mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_scratch_retires_after_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Cancel after collecting scratch and unwind during private remap construction.",
+      "invariant": "Release each temporary owner without consuming sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "fallible_query_traversal_stops_before_later_query_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Stop at each query in CTE, mutation, set-operation, EXPLAIN and CALL ownership trees.",
+      "invariant": "Visit original query identities in order and stop before later owners on first error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "compaction_releases_discarded_constant_owners_without_detaching_survivors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Compact child queries containing independently admitted retained constants.",
+      "invariant": "Release discarded owners immediately and keep surviving shared constants charged until their last owner drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "initialization_stops_when_a_callback_cancels_either_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/builtin_routines/initialization/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Cancel original and invoking controls during a scalar initialization callback.",
+      "invariant": "Stop before visiting the next branch and return 57014.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "live_subquery_scratch_rejects_before_unbounded_collection",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/subqueries/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Collect 1024 live scalar-query slots with zero and partial allowances.",
+      "invariant": "Return 53200 below 8 KiB allocation and release all temporary nodes while preserving siblings.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "live_subquery_scratch_owns_distinct_nodes_until_its_last_reader_finishes",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/subqueries/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Collect repeated out-of-order query IDs and retain the resulting membership map.",
+      "invariant": "Account for exactly the distinct live nodes until the map drops, preserving ascending slot order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "live_subquery_planning_keeps_dead_case_and_coalesce_children_for_typing",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/subqueries/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Plan searched CASE, simple CASE and COALESCE containing unreachable division errors.",
+      "invariant": "Optimize only executable child slots and retain untouched unreachable children for result typing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "live_subquery_collection_observes_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/subqueries/tests.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Collect empty and nonempty slot lists after cancelling either scope.",
+      "invariant": "Return 57014 without allocating scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_subquery_compaction_shares_request_allowance_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/subqueries.rs",
+      "capability": "Scalar-query planning scratch",
+      "workload": "Compact a rule-condition execution copy under exhausted native request memory on all four providers.",
+      "invariant": "Return 53200 without changing the arena, preserve sibling owners, discard cancelled execution copies and compact successfully after recovery.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }
