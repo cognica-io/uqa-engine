@@ -12,7 +12,7 @@ mod memberships;
 mod rename;
 mod tuples;
 use fixtures::{create, Catalog};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use uqa_sql::ast::{DropRoleStmt, RoleAttribute, RoleMembershipOptions};
 
 #[test]
@@ -118,7 +118,7 @@ fn alter_authorizes_before_tuple_wait_and_holds_the_write_guard_for_publication(
     *catalog.current.borrow_mut() = "creator".into();
     let statement = AlterRoleStmt {
         name: "managed".into(),
-        attributes: BTreeMap::from([(RoleAttribute::Login, true)]),
+        attributes: [(RoleAttribute::Login, true)].into_iter().collect(),
         connection_limit: Some(3),
         membership_action: None,
         members: Vec::new(),

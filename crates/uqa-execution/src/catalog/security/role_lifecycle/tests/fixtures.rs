@@ -185,7 +185,7 @@ impl crate::catalog::security::roles::temporary::TemporaryRoleDependencyReads fo
 pub(super) fn create(name: &str) -> CreateRoleStmt {
     CreateRoleStmt {
         name: name.into(),
-        attributes: BTreeSet::from([RoleAttribute::Inherit]),
+        attributes: uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]),
         connection_limit: -1,
         in_roles: Vec::new(),
         role_members: Vec::new(),

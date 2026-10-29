@@ -178,7 +178,7 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
         target,
         target_qualifier,
         target_alias,
-        target_column_bindings: std::collections::BTreeMap::new(),
+        target_column_bindings: uqa_core::memory::OwnedMap::new(),
         include_descendants,
         source,
         join_condition,

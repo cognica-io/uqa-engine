@@ -6,6 +6,7 @@
 
 //! Ordinary ordered owners expose exact allocation layouts for later immutable retention.
 
+mod serialization;
 mod set;
 #[cfg(test)]
 mod tests;

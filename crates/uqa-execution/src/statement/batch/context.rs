@@ -60,13 +60,13 @@ pub trait StatementCache {
     fn cached_sql_analysis(
         &self,
         _sql: &str,
-    ) -> Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>> {
+    ) -> Option<uqa_sql::binding::statements::AnalyzedStatement> {
         None
     }
     fn cache_sql_analysis(
         &self,
         _sql: &str,
-        _analysis: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+        _analysis: Option<uqa_sql::binding::statements::AnalyzedStatement>,
     ) {
     }
 

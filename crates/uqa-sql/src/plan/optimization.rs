@@ -16,11 +16,11 @@ pub trait ExecutablePlanOptimizer {
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-        _cached: Option<std::sync::Arc<crate::binding::statements::AnalyzedStatement>>,
+        _cached: Option<crate::binding::statements::AnalyzedStatement>,
     ) -> Result<
         (
             SharedExecutablePlan,
-            Option<std::sync::Arc<crate::binding::statements::AnalyzedStatement>>,
+            Option<crate::binding::statements::AnalyzedStatement>,
         ),
         SQLError,
     > {

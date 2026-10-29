@@ -26,7 +26,7 @@ pub(crate) struct CachedSQLStatement {
     pub(crate) statement: Arc<uqa_sql::ast::Statement>,
     pub(crate) logical_plan: Arc<uqa_planner::UnifiedPlan>,
     pub(crate) optimized_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
-    pub(crate) analyzed_plan: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+    pub(crate) analyzed_plan: Option<uqa_sql::binding::statements::AnalyzedStatement>,
     catalog_epochs: CatalogEpochs,
     function_registry_revision: u64,
     pub(crate) parser: uqa_sql::parser::ParserMetadata,
@@ -119,7 +119,7 @@ impl Engine {
     pub(crate) fn cached_sql_analysis(
         &self,
         sql: &str,
-    ) -> Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>> {
+    ) -> Option<uqa_sql::binding::statements::AnalyzedStatement> {
         if self.analysis_catalog_is_dirty() {
             return None;
         }
@@ -129,7 +129,7 @@ impl Engine {
     pub(crate) fn cache_sql_analysis(
         &self,
         sql: &str,
-        analysis: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+        analysis: Option<uqa_sql::binding::statements::AnalyzedStatement>,
     ) {
         if !self.analysis_catalog_is_dirty() {
             if let Some(entry) = self

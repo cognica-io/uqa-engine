@@ -24,11 +24,11 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
         &self,
         plan: uqa_sql::plan::UnifiedPlan,
         params: &[uqa_sql::SQLParam],
-        cached: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+        cached: Option<uqa_sql::binding::statements::AnalyzedStatement>,
     ) -> Result<
         (
             uqa_sql::plan::SharedExecutablePlan,
-            Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+            Option<uqa_sql::binding::statements::AnalyzedStatement>,
         ),
         SQLError,
     > {

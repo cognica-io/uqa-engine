@@ -176,6 +176,43 @@ fn failed_sql_analysis_precedes_optimizer_inputs_and_constant_evaluation() {
 }
 
 #[test]
+fn failed_cached_analysis_precedes_request_resources_for_new_and_mismatched_entries() {
+    use uqa_sql::plan::ExecutablePlanOptimizer;
+    let seed = UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0));
+    let cached = uqa_sql::binding::statements::AnalyzedStatement::capture_with_control(
+        &seed,
+        &[],
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
+    for cached in [None, cached] {
+        let inputs = Inputs {
+            captured: Cell::new(false),
+            analyzed: false,
+        };
+        let context = StatementPlanningContext {
+            analysis: StatementAnalysisContext {
+                scopes: &inputs,
+                routines: &NoRoutines,
+                aliases: &NoRoutines,
+            },
+            aggregates: &|_: &str| false,
+            optimization: &inputs,
+            constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
+        };
+        let plan = UnifiedPlan::lower(uqa_sql::compile("SELECT missing, 1 / 0").unwrap().remove(0));
+        let error = context
+            .plan_with_cached_analysis(plan, &[SQLParam::Scalar(uqa_core::Value::Int(1))], cached)
+            .err()
+            .unwrap();
+        assert!(
+            matches!(error, SQLError::Internal(message) if message == "analysis scope unavailable")
+        );
+        assert!(inputs.captured.get());
+    }
+}
+
+#[test]
 fn analyzed_rule_conditions_discard_dead_inputs_but_retain_reachable_planning_errors() {
     let inputs = Inputs {
         captured: Cell::new(false),

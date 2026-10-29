@@ -27001,6 +27001,217 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "owned_map_serialization_matches_ordered_map_values_and_collisions",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/serialization.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Random ordered-map keys and values with repeated keys.",
+      "invariant": "Match the standard ordered map wire representation and decoded ordered values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "owned_map_serialization_writes_borrowed_entries_without_scratch",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/serialization.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Serialize a one MiB owned map value into an already sized output.",
+      "invariant": "Write original borrowed entries without allocating scratch or copying the payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "owned_map_deserialization_keeps_last_values_and_releases_partial_errors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/serialization.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Decode duplicate keys and a malformed value after a completed entry.",
+      "invariant": "Keep last-value collision semantics and release all partial map nodes and values on error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_handles_share_complete_utility_syntax_without_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_ownership.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Clone a reusable analysis handle containing a four MiB utility argument.",
+      "invariant": "Allocate nothing, share the identical syntax and preserve it after the original handle drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_capture_retains_exact_storage_until_the_last_handle_drops",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_ownership.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Capture utility syntax and a nested declared parameter type under exact and insufficient allowances.",
+      "invariant": "Admit exact owned storage before allocation, retain its lease across shared handles and release it on the last drop or failed publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_capture_admits_parameter_types_without_retaining_argument_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_ownership.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Capture a four MiB argument value and reject a four MiB declared type under a four KiB allowance.",
+      "invariant": "Retain only parameter shape, reject oversized type production before copying and release partial shape storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_capture_preserves_ancestor_allowance_cancellation_and_unwind_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_ownership.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Capture large analyzed syntax under sibling exhaustion, both cancellation owners and a consumer unwind.",
+      "invariant": "Keep typed resource failures and sibling reservations while releasing every cache-owned allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_syntax_copy_preserves_utility_and_nested_statement_semantics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Copy query, mutation, DDL, privilege, routine, cursor, transaction, prepared and EXPLAIN syntax.",
+      "invariant": "Preserve serialized syntax and transient diagnostics while live reservations equal actual retained allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_syntax_copy_admits_payloads_before_allocation_and_releases_partial_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Copy a four MiB nested utility under exact, partial and ancestor-exhausted allowances.",
+      "invariant": "Reject before payload construction, release partial destinations, preserve sibling bytes and recover with the exact allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_syntax_copy_honors_both_cancellation_scopes_and_unwind_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Copy a large utility with either cancellation owner signaled and unwind a successful consumer.",
+      "invariant": "Return typed cancellation before copying and release all owned syntax reservations on unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_syntax_copy_preserves_transient_routine_source_positions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax/metadata.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Copy a SQL routine with escaped non-ASCII source text.",
+      "invariant": "Preserve the original source mapping and every serialized and transient field with exact admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_syntax_copy_retains_stored_merge_target_identities_and_domain_dependencies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax/metadata.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Copy a stored routine containing creation-bound MERGE targets and domain identities.",
+      "invariant": "Preserve attribute identity, ordered dependencies and the persisted wire representation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_syntax_copy_shares_immutable_window_identity_without_a_json_copy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax/metadata.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Copy a routine carrying a four MiB immutable raw window descriptor.",
+      "invariant": "Share the original descriptor without duplicating JSON while retaining exact owned syntax storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "complete_syntax_copy_preserves_unbound_parameter_carriers_without_observing_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax/metadata.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Copy EXPLAIN parameters containing declared types, deferred errors, signed-zero/NaN vectors and tensor carriers.",
+      "invariant": "Preserve raw carrier bits, lazy errors, original tensor shape and typed dimensions without evaluating or converting inputs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "failed_cached_analysis_precedes_request_resources_for_new_and_mismatched_entries",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/executable/tests.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Plan invalid SQL with absent and parameter-mismatched reusable analysis.",
+      "invariant": "Preserve analysis error precedence without capturing optimizer resources or cache storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_analysis_cache_admits_utility_payloads_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/analysis_cache.rs",
+      "capability": "Admitted immutable analysis cache",
+      "workload": "Plan a four MiB cacheable utility with sixteen KiB remaining allowance on all four providers.",
+      "invariant": "Reject native cache capture with 53200, preserve sibling bytes, recover and retain the reservation until the cache owner drops.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

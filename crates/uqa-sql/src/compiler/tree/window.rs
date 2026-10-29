@@ -78,7 +78,7 @@ pub(super) fn raw_definition(definition: &pg_query::protobuf::WindowDef) -> Wind
         "end": definition.end_offset,
     });
     remove_source_locations(&mut key);
-    WindowDefinitionSyntax(key)
+    WindowDefinitionSyntax(std::sync::Arc::new(key))
 }
 
 fn remove_source_locations(value: &mut serde_json::Value) {

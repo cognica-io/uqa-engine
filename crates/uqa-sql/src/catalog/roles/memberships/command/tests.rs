@@ -215,7 +215,7 @@ fn group_checks_target_authority_before_recipients_and_accepts_inherited_admin()
         name: "missing_target".into(),
         members: vec!["missing_member".into()],
         membership_action: Some(RoleMembershipAction::Add),
-        attributes: BTreeMap::new(),
+        attributes: uqa_core::memory::OwnedMap::new(),
         connection_limit: None,
     };
     let authorize = |memberships: &BTreeMap<_, _>, statement: &AlterRoleStmt| {

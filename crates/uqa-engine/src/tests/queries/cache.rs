@@ -51,10 +51,7 @@ fn statement_analysis_survives_data_commits_and_rechecks_types_and_definitions(
             .unwrap();
         assert_eq!(result.rows[0]["id"], Value::Int(id));
         assert_eq!(result.rows[0]["body"], Value::Str(format!("row-{id}")));
-        assert!(Arc::ptr_eq(
-            &analyzed,
-            &engine.cached_sql_analysis(sql).unwrap()
-        ));
+        assert!(analyzed.ptr_eq(&engine.cached_sql_analysis(sql).unwrap()));
     }
     engine.sql("BEGIN", &[]).unwrap();
     engine

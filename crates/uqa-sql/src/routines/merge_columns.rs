@@ -78,18 +78,16 @@ pub fn bind_stored_merge_target_columns(
                     if coerced_targets.contains(&name) {
                         collect_target_domains(&column.ty, &mut domain_dependencies);
                     }
-                    merge
-                        .target_column_bindings
-                        .entry(name)
-                        .or_insert(MergeTargetColumnBinding {
-                            object_id,
-                            attribute_number: Some(
-                                crate::catalog::relation_attributes::column_number(
-                                    column, position,
-                                )?,
-                            ),
-                            domain_dependencies,
-                        });
+                    let binding = MergeTargetColumnBinding {
+                        object_id,
+                        attribute_number: Some(crate::catalog::relation_attributes::column_number(
+                            column, position,
+                        )?),
+                        domain_dependencies: domain_dependencies.into_iter().collect(),
+                    };
+                    if !merge.target_column_bindings.contains_key(&name) {
+                        merge.target_column_bindings.insert(name, binding);
+                    }
                 }
             }
         }

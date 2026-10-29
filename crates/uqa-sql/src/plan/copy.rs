@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Destination admission for executable query and mutation plan copies.
+//! Destination admission for complete SQL syntax and executable query/mutation copies.
 
 use super::{CommandPlan, ExpressionPlan, PlanRef, QueryPlan, UnifiedPlan};
 use crate::{catalog::roles::RoleReference, SQLError, ScalarExpr};
@@ -13,6 +13,7 @@ use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, Produ
 mod command;
 mod query;
 mod source;
+mod syntax;
 #[cfg(test)]
 mod tests;
 
@@ -55,6 +56,16 @@ impl ExpressionPlan {
 }
 
 impl UnifiedPlan {
+    /// Copy complete analyzed syntax, including utility commands, admitting each owned destination before construction. Transient bindings and shared immutable input owners preserve their original identities.
+    pub fn clone_with_control(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>> {
+        control.check()?;
+        let Some(mut copying) = Copying::new(*control) else {
+            return Ok(control.finish(self.clone(), None)?);
+        };
+        let plan = syntax::SyntaxCopy::copy_syntax(self, &mut copying)?;
+        copying.finish(plan)
+    }
+
     /// Copy a query or INSERT/UPDATE/DELETE/MERGE executable. Utility commands have separate preparation and lifetime owners and are rejected by this executable-only operation.
     pub fn clone_executable_with_control(
         &self,

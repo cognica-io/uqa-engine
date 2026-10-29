@@ -33,7 +33,7 @@ impl Copying<'_> {
         })
     }
 
-    fn insert(&mut self, plan: &InsertPlan) -> Result<InsertPlan> {
+    pub(super) fn insert(&mut self, plan: &InsertPlan) -> Result<InsertPlan> {
         Ok(InsertPlan {
             table: self.text(&plan.table)?,
             target_relation_bound: plan.target_relation_bound,
@@ -85,7 +85,7 @@ impl Copying<'_> {
         })
     }
 
-    fn update(&mut self, plan: &UpdatePlan) -> Result<UpdatePlan> {
+    pub(super) fn update(&mut self, plan: &UpdatePlan) -> Result<UpdatePlan> {
         Ok(UpdatePlan {
             table: self.text(&plan.table)?,
             target_relation_bound: plan.target_relation_bound,
@@ -126,7 +126,7 @@ impl Copying<'_> {
         })
     }
 
-    fn delete(&mut self, plan: &DeletePlan) -> Result<DeletePlan> {
+    pub(super) fn delete(&mut self, plan: &DeletePlan) -> Result<DeletePlan> {
         Ok(DeletePlan {
             table: self.text(&plan.table)?,
             target_relation_bound: plan.target_relation_bound,
@@ -155,7 +155,7 @@ impl Copying<'_> {
         })
     }
 
-    fn merge(&mut self, plan: &MergePlan) -> Result<MergePlan> {
+    pub(super) fn merge(&mut self, plan: &MergePlan) -> Result<MergePlan> {
         Ok(MergePlan {
             ctes: self.map(plan.ctes.iter(), Self::cte)?,
             target: self.text(&plan.target)?,

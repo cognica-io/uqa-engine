@@ -15,6 +15,8 @@ use std::{
     },
 };
 
+mod serialization;
+
 proptest! {
     #[test]
     fn appending_preserves_nodes_and_matches_ordered_map_collision_semantics(

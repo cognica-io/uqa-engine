@@ -55,27 +55,42 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-        cached: Option<std::sync::Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+        cached: Option<uqa_sql::binding::statements::AnalyzedStatement>,
     ) -> Result<
         (
             SharedExecutablePlan,
-            Option<std::sync::Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
+            Option<uqa_sql::binding::statements::AnalyzedStatement>,
         ),
         SQLError,
     > {
-        let (plan, retained) = if let Some((plan, cached)) =
+        let (plan, retained, reusable) = if let Some((plan, cached)) =
             cached.and_then(|cached| cached.plan_for(params).cloned().map(|plan| (plan, cached)))
         {
-            (plan, Some(cached))
+            (plan, Some(cached), false)
         } else {
-            let (plan, retained) = uqa_sql::binding::statements::analyze_for_statement_reuse(
+            let mut plan = plan;
+            let (_, reusable) = uqa_sql::binding::statements::analyze_reusable_inputs(
                 &self.analysis,
-                plan,
+                &mut plan,
                 params,
             )?;
-            (plan, retained.map(std::sync::Arc::new))
+            (plan, None, reusable)
         };
-        Ok((optimize_shared_plan(self, plan)?, retained))
+        let resources = self.optimization.production_resources()?;
+        let control = resources
+            .as_ref()
+            .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
+        let retained = if reusable {
+            uqa_sql::binding::statements::AnalyzedStatement::capture_with_control(
+                &plan, params, &control,
+            )?
+        } else {
+            retained
+        };
+        Ok((
+            optimize_with_control(self, plan, control)?.into_shared(&control)?,
+            retained,
+        ))
     }
 
     fn plan_for_statement_cache(

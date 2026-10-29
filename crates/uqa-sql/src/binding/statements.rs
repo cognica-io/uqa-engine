@@ -104,7 +104,8 @@ pub fn analyze_executable_plan_for_cache(
         .map(|(result, reusable)| (result, reusable && params.is_empty()))
 }
 
-fn analyze_reusable_inputs(
+/// Analyze in the selected scope and report whether immutable input conversions can survive ordinary messages. Callers capture optimizer resources only after successful analysis, then retain reusable syntax through `AnalyzedStatement`.
+pub fn analyze_reusable_inputs(
     context: &StatementAnalysisContext<'_>,
     plan: &mut UnifiedPlan,
     params: &[SQLParam],

@@ -12,6 +12,8 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod syntax;
+
 fn one(sql: &str) -> UnifiedPlan {
     UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
 }
