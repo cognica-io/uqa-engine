@@ -38,6 +38,7 @@ mod retained;
 pub use retained::RetainedCtePlan;
 mod rewrite;
 mod scalar;
+pub use scalar::{OwnedScalarChildren, OwnedScalarExpr};
 mod scoped_visit;
 pub use scoped_visit::ScopedPlanVisitor;
 mod source_metadata;

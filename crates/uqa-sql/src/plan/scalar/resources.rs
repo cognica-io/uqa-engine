@@ -48,6 +48,7 @@ impl<'a> Control<'a> {
 
 pub(super) struct Lowering<'a> {
     pub(super) control: Option<Control<'a>>,
+    pub(super) owned_children: Option<BudgetedVec<Option<super::owned::ScalarMemory>>>,
 }
 
 impl Lowering<'_> {

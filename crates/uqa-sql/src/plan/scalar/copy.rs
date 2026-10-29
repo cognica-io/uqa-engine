@@ -7,11 +7,12 @@
 //! Admission-aware copies of already analyzed scalar expressions. Query children remain references into their enclosing plan, as in an ordinary scalar clone.
 
 use super::{
+    owned::{OwnedScalarExpr, ScalarMemory},
     resources::{Control, Lowering, Result},
     source::Source,
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
 impl ScalarExpr {
     /// Copy a scalar tree, admitting every destination allocation before creating it and retaining the complete reservation. Subquery identities still refer to the enclosing plan's query arena.
@@ -22,9 +23,32 @@ impl ScalarExpr {
         }
         let mut copying = Lowering {
             control: Some(Control::from_production(*control)),
+            owned_children: None,
         };
         let expression = copying.scalar_copy(self)?;
         Ok(copying.finish(expression)?.into())
+    }
+
+    /// Copy into a mutable scalar owner. Every node records only its direct allocations, allowing later rewrites to discard or move complete children without retaining leases for deleted payloads. Query children remain identities in the enclosing query arena.
+    pub fn copy_for_rewrite(&self, control: &ProductionControl<'_>) -> Result<OwnedScalarExpr> {
+        control.check()?;
+        let Some(budget) = control.budget() else {
+            return Ok(OwnedScalarExpr::uncontrolled(self.clone()));
+        };
+        let mut copying = Lowering {
+            control: Some(Control::from_production(*control)),
+            owned_children: Some(BudgetedVec::new(budget)),
+        };
+        let expression = copying.scalar_copy_node(self)?;
+        let output = OwnedScalarExpr {
+            expression,
+            memory: Some(ScalarMemory {
+                direct: copying.control.expect("controlled scalar copy").memory,
+                children: copying.owned_children.expect("mutable scalar copy"),
+            }),
+        };
+        control.check()?;
+        Ok(output)
     }
 }
 
@@ -42,11 +66,27 @@ impl Lowering<'_> {
         .transpose()
     }
 
+    fn scalar_copy(&mut self, expression: &ScalarExpr) -> Result<ScalarExpr> {
+        let Some(children) = &mut self.owned_children else {
+            return self.scalar_copy_node(expression);
+        };
+        // Reserve the metadata slot before constructing its child. A child uses a fresh lowerer, so its payload lease can never be absorbed into the parent's direct allocations, including on error or unwind.
+        children.reserve(1)?;
+        let child = expression.copy_for_rewrite(
+            &self
+                .control
+                .as_ref()
+                .expect("controlled scalar copy")
+                .production,
+        )?;
+        OwnedScalarExpr::attach_child(self, child)
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "exhaustive scalar copying shares the lowerer's destination admission"
     )]
-    fn scalar_copy(&mut self, expression: &ScalarExpr) -> Result<ScalarExpr> {
+    fn scalar_copy_node(&mut self, expression: &ScalarExpr) -> Result<ScalarExpr> {
         self.check()?;
         Ok(match expression {
             ScalarExpr::Star => ScalarExpr::Star,

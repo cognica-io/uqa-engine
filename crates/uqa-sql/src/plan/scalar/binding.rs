@@ -26,6 +26,7 @@ impl FunctionBinding {
         }
         let mut copying = Lowering {
             control: Some(super::resources::Control::from_production(*control)),
+            owned_children: None,
         };
         let binding = copying.binding(Source::Borrowed(self))?;
         Ok(copying.finish(binding)?.into())

@@ -20,6 +20,8 @@ use uqa_core::{
 
 mod binding;
 mod copy;
+mod owned;
+pub use owned::{OwnedScalarChildren, OwnedScalarExpr};
 mod resources;
 mod source;
 mod window;
@@ -34,6 +36,7 @@ impl super::ExpressionPlan {
     ) -> Result<Budgeted<ScalarExpr>> {
         let mut lowering = Lowering {
             control: Some(Control::new(budget, original, invoking)),
+            owned_children: None,
         };
         let scalar = lowering.expression(
             Source::Borrowed(expression),
@@ -49,9 +52,12 @@ pub(super) fn lower_scalar_expression(
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> ScalarExpr {
-    Lowering { control: None }
-        .expression(Source::Owned(expression), aggregates, subqueries)
-        .expect("owned lowering has no admission failure")
+    Lowering {
+        control: None,
+        owned_children: None,
+    }
+    .expression(Source::Owned(expression), aggregates, subqueries)
+    .expect("owned lowering has no admission failure")
 }
 
 pub(super) fn lower_window_spec(
@@ -59,9 +65,12 @@ pub(super) fn lower_window_spec(
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> ScalarWindowSpec {
-    Lowering { control: None }
-        .window(Source::Owned(specification), aggregates, subqueries)
-        .expect("owned lowering has no admission failure")
+    Lowering {
+        control: None,
+        owned_children: None,
+    }
+    .window(Source::Owned(specification), aggregates, subqueries)
+    .expect("owned lowering has no admission failure")
 }
 
 impl Lowering<'_> {

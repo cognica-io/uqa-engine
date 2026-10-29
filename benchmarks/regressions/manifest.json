@@ -28528,6 +28528,279 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutable_copy_charges_exact_live_allocations_and_freezing_releases_only_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Copy a nested scalar with separately sized string children and freeze the completed owner.",
+      "invariant": "Actual allocator bytes equal retained reservations; freezing allocates nothing, releases only metadata and retains exactly the immutable copier payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selecting_nested_children_frees_parent_boxes_vectors_and_discarded_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Select a 257-byte leaf through a row, boxed NOT and array, discarding larger siblings.",
+      "invariant": "Selection allocates nothing and leaves exactly 257 bytes reserved; deallocation equals returned allowance and borrowed source remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "child_rewrites_preserve_container_addresses_and_return_discarded_allowances_immediately",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Replace a boxed array child with its first scalar while keeping the outer row and NOT.",
+      "invariant": "Parent vector and box addresses remain unchanged; live allocation reductions exactly match released reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "replacement_constructor_can_reuse_the_discarded_child_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Rewrite an 8 KiB child under an allowance with no spare room.",
+      "invariant": "A simultaneous copy is rejected, while dropping the old child permits equal-sized admitted replacement without changing sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_copy_rejects_large_payload_before_allocation_and_releases_partial_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Copy a row with a small first child and a four MiB second child under 4 KiB.",
+      "invariant": "Reject before the large payload allocation; actual peak stays at most 4 KiB, all partial memory is released and the source remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_replacement_drops_visited_and_unvisited_children_without_mutating_borrowed_source",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Fail a large replacement after visiting the second child of a nested row.",
+      "invariant": "Stop on the first error, destroy every private child and reservation, and preserve the borrowed source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "both_cancellation_scopes_stop_before_copy_and_after_child_callback",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Cancel each scope inside the first child callback and attempt another copy.",
+      "invariant": "Both scopes stop immediately after one callback, release the complete private tree and reject subsequent copying without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "callback_error_and_unwind_destroy_the_complete_private_rewrite",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Return an error or unwind from the second child callback.",
+      "invariant": "Exactly two children are visited and all parent, visited and unvisited reservations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_child_keeps_ancestor_allowance_and_blocks_sibling_until_final_drop",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Select a 16 KiB child under a parent allowance and occupy the rest from a sibling.",
+      "invariant": "Selected storage remains charged to both child and parent; the sibling cannot grow until that owner drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_child_rewrites_move_payloads_and_freezing_keeps_the_explicit_ordinary_mode",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Select a nested ordinary child and freeze it without a request allowance.",
+      "invariant": "Preserve the selected value and explicit ordinary ownership without claiming pre-admission for the original allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mismatched_replacement_ownership_is_rejected_without_leaking_either_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Return an ordinary or foreign-budget replacement to a controlled parent.",
+      "invariant": "Reject the invalid ownership transfer and release both the original and replacement trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "every_scalar_child_shape_transfers_the_matching_payload_and_retains_semantics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Copy, map and independently select uniquely sized children of every scalar container shape, including CASE, windows and composite metadata.",
+      "invariant": "Child order matches known IR fields, selected bytes match only the selected payload and freezing preserves the original expression.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "copied_shared_literal_keeps_its_original_owner_until_the_final_reader",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Select two copies of an admitted shared literal under a separate rewrite allowance.",
+      "invariant": "Copies retain the original source lease without payload duplication or reassignment and release it only with the last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "child_iterator_releases_parent_on_exhaustion_and_unvisited_children_on_drop",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Consume all children or abandon an iterator after its first child.",
+      "invariant": "The parent is released at exhaustion; early destruction frees unvisited payloads while preserving exactly the selected owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rebuilding_a_boolean_moves_children_and_admits_only_new_containers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Rebuild ordinary and admitted row children as both AND and OR.",
+      "invariant": "Payload addresses and order remain unchanged; only new containers are admitted and frozen ownership equals actual payload plus vector capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_destination_rejection_releases_consumed_and_unvisited_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Exhaust the allowance before rebuilding a boolean destination.",
+      "invariant": "Reject before allocating a new container and return every input lease while preserving the sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_boolean_iteration_releases_partial_output_and_remaining_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Cancel either scope when an input iterator produces its second child.",
+      "invariant": "Stop after two inputs and release both the partial boolean and all remaining input storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "every_scalar_shape_moves_its_children_without_copying_or_retaining_parent_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Move children from all scalar container variants with known expected values.",
+      "invariant": "Iteration allocates nothing, preserves order and returns all parent and child bytes on exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ownership_metadata_rejection_drops_partially_constructed_boolean",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Permit the destination vector and one child metadata slot, then reject growth at the second child.",
+      "invariant": "Release partial destination and unvisited input owners; the independent sibling lease remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "iterating_a_leaf_releases_it_immediately_and_empty_boolean_needs_no_headroom",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Consume a 4 KiB leaf as an empty child sequence and construct an empty AND with the allowance occupied.",
+      "invariant": "Leaf storage is released immediately; empty construction requires no allocation or reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wide_call_and_window_slots_preserve_order_without_rewrite_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests.rs",
+      "capability": "Mutable scalar allocation ownership",
+      "workload": "Map call and window expressions with 512 arguments, partition keys and ordering keys, with and without frame/filter slots.",
+      "invariant": "Visit every known positional parameter exactly once, allocate no rewrite workspace, preserve the complete expression and release all parent storage when selecting its inline final child.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
