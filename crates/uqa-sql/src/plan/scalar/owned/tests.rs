@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod edits;
 mod fixtures;
 
 fn text(length: usize) -> ScalarExpr {

@@ -28960,6 +28960,175 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "swapping_every_scalar_shape_moves_exact_child_owners_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Swap the first and final child across every scalar container fixture, then select the moved child.",
+      "invariant": "Move exact child reservations without allocation; selection retains the independently measured child owner and releases its former parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "case_truncation_releases_discarded_values_and_keeps_base_and_else_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Truncate a CASE with a base, three unequal payload pairs and ELSE to one and then zero arms.",
+      "invariant": "Release exactly discarded payload bytes while retaining original boxes, arm capacity and the correctly shifted ELSE owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "call_argument_truncation_preserves_ordering_and_filter_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Truncate a call with three arguments, two ordering keys and a filter.",
+      "invariant": "Retain parent buffers and trailing child owners, release discarded arguments immediately and select the original filter with its exact lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_permutation_and_truncation_preserve_surviving_payload_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Permute AND and OR children with unequal payload sizes, truncate to two and select one.",
+      "invariant": "Move child storage and reservations together without allocation, releasing exactly discarded payloads and the selected child's former parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "replacing_case_else_reuses_its_box_and_releases_previous_payload_immediately",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Replace an 8 KiB CASE fallback with an independently owned 257-byte value.",
+      "invariant": "Allocate no new box, release the previous payload immediately and retain exactly the replacement owner after selection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "adding_case_else_admits_box_and_metadata_and_freezes_exact_surviving_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Add an admitted fallback to CASE without ELSE and freeze the result.",
+      "invariant": "Admit new box and metadata capacity before construction, match allocator/reservation changes exactly and retire only temporary metadata when freezing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "case_else_rejects_before_either_new_metadata_or_box_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Exhaust the allowance separately before a new child-metadata buffer and before a new ELSE box.",
+      "invariant": "Return 53200 without allocating the denied destination, destroy both private inputs and preserve the independent sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structural_edits_honor_both_cancellation_scopes_and_drop_private_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Cancel either scope before swapping, truncating call/CASE/boolean children or installing ELSE.",
+      "invariant": "Return 57014, release all consumed owners and preserve independently retained fallback and sibling storage until their own drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_structural_edits_preserve_explicit_uncontrolled_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Apply the same swaps, CASE/call truncation and fallback installation to ordinary input owners.",
+      "invariant": "Preserve exact output and child ordering without claiming a reservation for the existing ordinary allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "case_fallback_rejects_foreign_or_uncontrolled_replacements_without_leaking",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Attempt to replace an admitted CASE fallback with an ordinary or foreign-allowance owner.",
+      "invariant": "Reject mixed ownership before publication and release both private input owners on unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "admitted_merge_moves_live_child_owners_and_freezes_only_surviving_allocations",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests/owned.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Merge admitted interleaved threshold calls with a 4 MiB first payload, duplicate payload and sibling lease.",
+      "invariant": "Preserve buffer/payload identities, bound scratch allocation, match exact live reservation reductions and freeze only surviving storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "nested_admitted_merge_releases_rewritten_and_unvisited_owners_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests/owned.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Merge an admitted OR whose first branch completes before a 512-field branch exhausts scratch admission.",
+      "invariant": "Release completed, partial and unvisited input owners without changing the sibling lease; recovery matches ordinary output exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "admitted_merge_cancellation_drops_the_original_payload_owners",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests/owned.rs",
+      "capability": "Scalar structural ownership through rewriting",
+      "workload": "Cancel either scope after constructing admitted threshold inputs and an independent sibling reservation.",
+      "invariant": "Return 57014 and release the complete original input ownership while preserving the sibling reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

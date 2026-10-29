@@ -15,6 +15,7 @@ use uqa_core::{
 
 mod children;
 mod construction;
+mod edit;
 mod iteration;
 pub use iteration::OwnedScalarChildren;
 

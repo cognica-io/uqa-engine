@@ -6,9 +6,9 @@
 
 //! Move the first threshold call for each field, admitting only the merge's temporary index.
 
-use super::{rewrite_box, ScalarExpr, Value};
+use super::{ScalarExpr, Value};
 use uqa_core::memory::{ProductionControl, ProductionMap, ProductionVec};
-use uqa_sql::SQLError;
+use uqa_sql::{plan::OwnedScalarExpr, SQLError};
 
 #[derive(Clone, Copy)]
 struct Selection {
@@ -92,76 +92,106 @@ fn selection_layout<'a>(
     Ok(Some((layout, survivors)))
 }
 
-fn merge_and(
-    mut items: Vec<ScalarExpr>,
+/// Existing ordinary inputs have no constructor leases; admitted inputs retain their original owners. Scratch always belongs to the invoking request.
+#[derive(Clone, Copy)]
+struct MergeControl<'a> {
+    scratch: ProductionControl<'a>,
+    storage: ProductionControl<'a>,
+}
+
+fn inline_literal(
+    value: Value,
     control: &ProductionControl<'_>,
-) -> Result<ScalarExpr, SQLError> {
-    if let Some((mut layout, survivors)) = selection_layout(&items, control)? {
-        for (item, placement) in items.iter_mut().zip(layout.iter()) {
-            control.check()?;
-            if placement.destination == REMOVED {
-                *item = ScalarExpr::Literal(Value::Null);
-            } else if let Some(threshold) = placement.threshold {
-                let ScalarExpr::Func { args, .. } = item else {
-                    unreachable!("selected threshold call")
-                };
-                args[2] = ScalarExpr::Literal(Value::Float(threshold));
-            } else {
-                merge_slot(item, control)?;
-            }
+) -> Result<OwnedScalarExpr, SQLError> {
+    debug_assert!(matches!(
+        value,
+        Value::Null | Value::Bool(_) | Value::Float(_)
+    ));
+    Ok(OwnedScalarExpr::literal(
+        control.finish(value, control.empty_reservation())?,
+        control,
+    )?)
+}
+
+fn merge_and(
+    mut expression: OwnedScalarExpr,
+    control: MergeControl<'_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    let ScalarExpr::And(items) = &*expression else {
+        unreachable!("threshold conjunction")
+    };
+    if let Some((mut layout, survivors)) = selection_layout(items, &control.scratch)? {
+        for (index, placement) in layout.iter().enumerate() {
+            control.scratch.check()?;
+            expression = expression.map_child(index, &control.storage, |item| {
+                if placement.destination == REMOVED {
+                    drop(item);
+                    inline_literal(Value::Null, &control.storage)
+                } else if let Some(threshold) = placement.threshold {
+                    item.map_child(2, &control.storage, |_| {
+                        inline_literal(Value::Float(threshold), &control.storage)
+                    })
+                } else {
+                    merge_owned_vector_thresholds(item, control)
+                }
+            })?;
         }
-        // Each swap places a surviving expression in its unique final slot. Deleted slots contain only NULL, and no output allocation or payload copy is needed.
-        for index in 0..items.len() {
+        // Each swap places a surviving expression and its owner in the same unique final slot.
+        for index in 0..layout.len() {
             loop {
-                control.check()?;
+                control.scratch.check()?;
                 let destination = layout[index].destination;
                 if destination == REMOVED || destination == index {
                     break;
                 }
-                items.swap(index, destination);
+                expression = expression.swap_children(index, destination, &control.storage)?;
                 layout.as_mut_slice().swap(index, destination);
             }
         }
-        items.truncate(survivors);
+        expression = expression.truncate_boolean_children(survivors, &control.storage)?;
     } else {
-        for item in &mut items {
-            merge_slot(item, control)?;
-        }
+        expression = expression.map_children(&control.storage, |_, item| {
+            merge_owned_vector_thresholds(item, control)
+        })?;
     }
-    Ok(match items.len() {
-        0 => ScalarExpr::Literal(Value::Bool(true)),
-        1 => items.pop().unwrap(),
-        _ => ScalarExpr::And(items),
-    })
+    match expression.child_count() {
+        0 => {
+            drop(expression);
+            inline_literal(Value::Bool(true), &control.storage)
+        }
+        1 => Ok(expression.select_child(0)),
+        _ => Ok(expression),
+    }
 }
 
-fn merge_slot(
-    expression: &mut ScalarExpr,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    let original = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
-    *expression = merge_vector_thresholds(original, control)?;
-    Ok(())
+fn merge_owned_vector_thresholds(
+    expression: OwnedScalarExpr,
+    control: MergeControl<'_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    control.scratch.check()?;
+    match &*expression {
+        ScalarExpr::And(_) => merge_and(expression, control),
+        ScalarExpr::Or(_) | ScalarExpr::Not(_) => expression
+            .map_children(&control.storage, |_, item| {
+                merge_owned_vector_thresholds(item, control)
+            }),
+        _ => Ok(expression),
+    }
 }
 
 pub(super) fn merge_vector_thresholds(
     expression: ScalarExpr,
     control: &ProductionControl<'_>,
 ) -> Result<ScalarExpr, SQLError> {
-    control.check()?;
-    Ok(match expression {
-        ScalarExpr::And(items) => merge_and(items, control)?,
-        ScalarExpr::Or(mut items) => {
-            for item in &mut items {
-                merge_slot(item, control)?;
-            }
-            ScalarExpr::Or(items)
-        }
-        ScalarExpr::Not(inner) => ScalarExpr::Not(rewrite_box(inner, |inner| {
-            merge_vector_thresholds(inner, control)
-        })?),
-        other => other,
-    })
+    let control = MergeControl {
+        scratch: *control,
+        storage: ProductionControl::uncontrolled(),
+    };
+    let output = merge_owned_vector_thresholds(OwnedScalarExpr::uncontrolled(expression), control)?;
+    // This entry point consumes an ordinary input and introduces no structural allocation. Controlled plan inputs use the same rewrite with their original storage control.
+    let (output, memory) = output.finish(&control.storage)?.into_parts();
+    debug_assert!(memory.is_none());
+    Ok(output)
 }
 
 #[cfg(test)]

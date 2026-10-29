@@ -8,6 +8,8 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::ast::FunctionOrderSyntax;
 
+mod owned;
+
 fn call(field: &str, threshold: f64, payload: ScalarExpr) -> ScalarExpr {
     ScalarExpr::Func {
         order_syntax: FunctionOrderSyntax::Ordinary,
