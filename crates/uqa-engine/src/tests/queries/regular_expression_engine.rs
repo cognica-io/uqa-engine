@@ -4,45 +4,32 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use uqa_engine::Engine;
+use crate::{tests::providers::Provider, Engine};
 
-fn open(provider: usize, path: &std::path::Path) -> Engine {
-    match provider {
-        0 => Engine::new(),
-        1 => Engine::open(path).unwrap(),
-        2 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        3 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_redb::RedbStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        _ => unreachable!(),
-    }
-}
+// The reference includes compiler scratch beyond the default retention allowance. Compare its unchanged complexity diagnostic with explicit headroom; the constrained test below still verifies rejection and recovery.
+const ORACLE_ALLOWANCE: usize = 256 << 20;
 
 #[rstest::rstest]
-#[case::memory(0)]
-#[case::sqlite(1)]
-#[case::sqlite_key_value(2)]
-#[case::redb(3)]
-fn regular_expression_engine_matches_postgresql_and_reopen(#[case] provider: usize) {
+#[case::memory(Provider::Memory)]
+#[case::sqlite(Provider::SQLiteNative)]
+#[case::sqlite_key_value(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn regular_expression_engine_matches_postgresql_and_reopen(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("regular-expression-engine.db");
-    let engine = open(provider, &path);
+    let engine = provider.open_with_retention(&path, ORACLE_ALLOWANCE);
     let mut reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/parity/pg18/regular_expression_engine_oracle.expected.json"
     )))
     .unwrap();
-    crate::pg18_oracle::verify(&engine, &reference.to_string());
-    if provider == 0 {
+    crate::tests::pg18_oracle::verify(&engine, &reference.to_string());
+    if matches!(provider, Provider::Memory) {
         return;
     }
     drop(engine);
     // A stored view and CHECK constraints keep the engine's matching and their input collations after reopening, and the row a stored default produced reads back unchanged.
-    let engine = open(provider, &path);
+    let engine = provider.open_with_retention(&path, ORACLE_ALLOWANCE);
     reference["cases"].as_array_mut().unwrap().retain(|case| {
         matches!(
             case["id"].as_str().unwrap(),
@@ -54,7 +41,32 @@ fn regular_expression_engine_matches_postgresql_and_reopen(#[case] provider: usi
         )
     });
     assert_eq!(reference["cases"].as_array().unwrap().len(), 5);
-    crate::pg18_oracle::verify(&engine, &reference.to_string());
+    crate::tests::pg18_oracle::verify(&engine, &reference.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite(Provider::SQLiteNative)]
+#[case::sqlite_key_value(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn regex_compilation_preserves_native_admission_and_recovers(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open_with_retention(&directory.path().join("regex-limit.db"), 64 << 20);
+    let retained = engine.query_retention_control().unwrap();
+    let baseline = retained.memory().used();
+    let error = engine
+        .sql(
+            "SELECT regexp_match('ab', '((((a{1,100}){1,100}){1,100}){1,100})')",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"), "{provider:?}: {error}");
+    assert_eq!(retained.memory().used(), baseline);
+    assert_eq!(engine.transaction_depth(), 0);
+    assert_eq!(engine.sql("SELECT 1 AS value", &[]).unwrap().rows.len(), 1);
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(retained.memory().used(), 0);
 }
 
 #[test]

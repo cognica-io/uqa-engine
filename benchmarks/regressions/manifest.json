@@ -15026,12 +15026,12 @@
     },
     {
       "package": "uqa-engine",
-      "kind": "test",
+      "kind": "lib",
       "test": "regular_expression_engine_matches_postgresql_and_reopen",
       "cases": 4,
-      "source": "crates/uqa-engine/tests/pg18_semantics/regular_expression_engine.rs",
+      "source": "crates/uqa-engine/src/tests/queries/regular_expression_engine.rs",
       "capability": "PostgreSQL regular expression evaluation",
-      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes.",
+      "workload": "Independent PostgreSQL 18.4 regular-expression statements covering match selection, ARE syntax, every flag, invalid patterns, replacement escapes, operators, long inputs, nested groups within and beyond the 2 MB stack budget, per-collation character classes and case folding, collation conflicts, and stored views, CHECK constraints and defaults across provider reopening, with engine allocations under fixed allowances and canceled scopes. Semantic comparison supplies a 256 MiB retention allowance so the independent complexity diagnostic is reached; separate four-provider coverage retains the 64 MiB rejection and recovery contract.",
       "invariant": "Every regular-expression function and operator returns PostgreSQL 18.4's matches, results and diagnostics through PostgreSQL's engine, each engine allocation is charged to the call's allowance and released when the call ends, a refused reservation reports the allowance's own error, and the engine's interrupt checks report the statement's cancellation.",
       "case_names": [
         "case_1_memory",
@@ -29683,6 +29683,22 @@
       "invariant": "Share the original constant and declaration, keep source cardinality and reject incompatible casts.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "regex_compilation_preserves_native_admission_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/regular_expression_engine.rs",
+      "capability": "Native regex compiler memory admission",
+      "workload": "Compile the independently captured nested-repeat pattern under the unchanged 64 MiB allowance on memory, native SQLite, SQLite Key/Value and redb, then execute another statement and close the engine.",
+      "invariant": "Compilation is refused with 53200 before exceeding the allowance, all compiler scratch is released, the failed implicit transaction ends and the session remains usable; the larger-budget oracle still requires the original PostgreSQL complexity diagnostic.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
       ]
     }
   ]

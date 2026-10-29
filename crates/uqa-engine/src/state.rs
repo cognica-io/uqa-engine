@@ -371,6 +371,18 @@ pub(super) enum RuntimeParameterValue {
 
 impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
+        Self::with_retention(
+            random_state,
+            uqa_core::memory::MemoryBudget::new(
+                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+            ),
+        )
+    }
+
+    pub(super) fn with_retention(
+        random_state: super::SessionRandomState,
+        query_retention: uqa_core::memory::MemoryBudget,
+    ) -> Self {
         let state = super::SessionStateSnapshot {
             command_overlays: Vec::new(),
             graph_overlay: None,
@@ -408,9 +420,7 @@ impl SessionContext {
             transactions: Mutex::new(Vec::new()),
             completion_counters: Mutex::new(crate::transactions::CompletionCounters::default()),
             regex_cache: Mutex::new(None),
-            query_retention: uqa_core::memory::MemoryBudget::new(
-                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
-            ),
+            query_retention,
             diskann_temporary: uqa_storage::diskann_index::build::DiskANNTemporaryBudget::new(
                 uqa_storage::diskann_index::DiskANNIndexOptions::DEFAULT_TEMPORARY_BYTES,
             ),

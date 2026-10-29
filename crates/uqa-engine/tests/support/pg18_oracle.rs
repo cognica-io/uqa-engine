@@ -6,10 +6,12 @@
 
 //! Replay checked-in `PostgreSQL` 18 simple-query oracles: command tags, SQLSTATE and message, DETAIL and HINT when the transcript records them, every result row as `PostgreSQL` text, and the notices and warnings when the transcript records them.
 
+use super::{
+    sql::{format_postgres_text, postgres_result_type},
+    Engine,
+};
 use std::borrow::Cow;
 use uqa_core::Value;
-use uqa_engine::sql::{format_postgres_text, postgres_result_type};
-use uqa_engine::Engine;
 
 /// User-defined type OIDs are database-local, so both transcripts compare them by class.
 const FIRST_USER_OID: u32 = 16_384;

@@ -875,6 +875,7 @@ mod null_qualifications;
 mod operators;
 mod planning_memory;
 mod regex_cache;
+mod regular_expression_engine;
 mod retrieval_planning;
 mod scope;
 mod score_ordering;

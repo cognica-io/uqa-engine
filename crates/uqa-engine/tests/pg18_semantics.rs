@@ -142,8 +142,6 @@ mod regexp_matches;
 mod regexp_search_loop;
 #[path = "pg18_semantics/regexp_split.rs"]
 mod regexp_split;
-#[path = "pg18_semantics/regular_expression_engine.rs"]
-mod regular_expression_engine;
 #[path = "pg18_semantics/regular_expression_identities.rs"]
 mod regular_expression_identities;
 #[path = "pg18_semantics/reverse_overloads.rs"]

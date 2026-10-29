@@ -49,10 +49,19 @@ impl Default for Engine {
 impl Engine {
     /// In-memory engine. State lives only as long as this `Engine`.
     pub fn new() -> Self {
+        Self::in_memory_with_retention(uqa_core::memory::MemoryBudget::new(
+            uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+        ))
+    }
+
+    pub(crate) fn in_memory_with_retention(memory: uqa_core::memory::MemoryBudget) -> Self {
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
-        let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
+        let session = Arc::new(super::SessionContext::with_retention(
+            super::initial_random_state(),
+            memory,
+        ));
         let client_level = session.state.client_level();
         let runtime = super::QueryRuntime::new(
             super::SQL_FUNCTION_DEPTH_LIMIT,
