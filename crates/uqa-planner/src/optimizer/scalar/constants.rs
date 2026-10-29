@@ -183,7 +183,7 @@ fn is_constant(
     }
     let constant = |expression: &ScalarExpr| is_constant(expression, types, resolver);
     match expression {
-        ScalarExpr::RetainedLiteral(_) => true,
+        ScalarExpr::RetainedLiteral(literal) => immutable_retained_literal(literal, types),
         ScalarExpr::Collated { expr, .. } => constant(expr),
         ScalarExpr::Literal(value) => immutable_literal(value),
         ScalarExpr::TypedLiteral {
@@ -281,6 +281,17 @@ fn immutable_literal(value: &Value) -> bool {
         && !uqa_sql::expr::datums::contains_datum(value)
 }
 
+fn immutable_retained_literal(
+    literal: &uqa_sql::ir::RetainedScalarLiteral,
+    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+) -> bool {
+    literal.value.resident_value().is_none_or(immutable_literal)
+        && literal
+            .declaration
+            .as_deref()
+            .is_none_or(|name| literal.ty.is_some() || constant_cast_type(name, types).is_some())
+}
+
 fn constant_scalar_type(
     expression: &ScalarExpr,
     resolver: Option<&dyn FunctionTypeResolver>,
@@ -372,7 +383,7 @@ pub(super) fn fold_selected_literal(
             }
         }
     }
-    if let Some(literal) = composite_constant_field(&expression, types) {
+    if let Some(literal) = composites::fold_field(&expression, types, &config.production) {
         return literal;
     }
     let strict_null = strict_null_expression(&expression, &config.production)?;
@@ -543,86 +554,6 @@ fn arithmetic_needs_result_type(expression: &ScalarExpr, result_type: Option<&Co
         );
     });
     unknown
-}
-
-fn composite_constant_field(
-    expression: &ScalarExpr,
-    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
-) -> Option<Result<ScalarExpr, SQLError>> {
-    let ScalarExpr::Func {
-        binding: Some(binding),
-        args,
-        ..
-    } = expression
-    else {
-        return None;
-    };
-    if binding.dispatch != Some(uqa_sql::ast::FunctionDispatch::FieldSelect) {
-        return None;
-    }
-    let [base, ScalarExpr::Literal(Value::Str(name))] = args.as_slice() else {
-        return None;
-    };
-    let base = match base {
-        ScalarExpr::Cast { expr, ty, .. }
-            if matches!(expr.as_ref(), ScalarExpr::TypedLiteral { ty: literal_type, bound_type, .. }
-            if ty == literal_type || match (bound_type, types) {
-                (Some(ColumnType::Composite(reference)), Some(types)) => types.resolve_catalog_column_type_name(ty).is_ok_and(|target| matches!(target, ColumnType::Composite(target) if target.oid == reference.oid)),
-                _ => false,
-            }) =>
-        {
-            expr
-        }
-        expression => expression,
-    };
-    let ScalarExpr::TypedLiteral {
-        value,
-        bound_type: Some(ColumnType::Composite(reference)),
-        composite_source,
-        ..
-    } = base
-    else {
-        return None;
-    };
-    let resolved;
-    let field = if let Some(field) = binding.composite_field() {
-        field
-    } else {
-        let descriptor =
-            match uqa_sql::expr::composites::descriptor(types?.composite_types(), reference.oid) {
-                Ok(descriptor) => descriptor,
-                Err(error) => return Some(Err(error)),
-            };
-        let (_, attribute) = descriptor.attribute(name)?;
-        resolved = uqa_sql::ast::CompositeFieldBinding {
-            collation_oid: Some(attribute.collation_oid()),
-            type_oid: reference.oid,
-            number: attribute.number,
-            result_type: attribute.ty.clone(),
-            dropped: false,
-            changed_type: None,
-        };
-        &resolved
-    };
-    if reference.oid != field.type_oid {
-        return None;
-    }
-    let value = match composites::constant_field(value, name, field, types)? {
-        Ok(value) => value,
-        Err(error) => return Some(Err(error)),
-    };
-    if composite_source.is_some() {
-        // Copying a selected constant can fail during planning. Keep the immutable source afterward so later descriptor changes still recompute its byte position.
-        return None;
-    }
-    Some(Ok(ScalarExpr::TypedLiteral {
-        collation_oid: field.collation_oid,
-        composite_source: None,
-        value,
-        ty: field.result_type.catalog_name(),
-        bound_type: Some(field.result_type.clone()),
-        parameter_index: None,
-    }))
 }
 
 /// Strict operators discard nonconstant siblings when an input is constant NULL, just as strict functions do. Compound predicates expose their individual comparisons before this pass.

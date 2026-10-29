@@ -568,12 +568,9 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                         ))
                     }
                 };
-                let literal = match args.first() {
-                    Some(ScalarExpr::Literal(value)) => {
-                        super::super::field_selection::literal_field_type(value, field)
-                    }
-                    _ => None,
-                };
+                let literal = args.first().and_then(|base| {
+                    super::super::field_selection::constant_field_type(base, field)
+                });
                 let field_type = if let Some(ScalarExpr::Row(items)) = args.first() {
                     let items = items
                         .iter()

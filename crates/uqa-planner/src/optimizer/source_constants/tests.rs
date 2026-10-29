@@ -48,6 +48,50 @@ fn query(sql: &str) -> QueryPlan {
 }
 
 #[test]
+fn retained_source_constants_preserve_propagation_and_grouping() {
+    use uqa_core::{memory::ProductionControl, Value};
+    use uqa_sql::ir::{RetainedConstantValue, RetainedScalarLiteral};
+    let control = ProductionControl::uncontrolled();
+    let retained = ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
+        RetainedConstantValue::from_produced(
+            control.copy_value(&Value::Str("value".into())).unwrap(),
+            &control,
+        )
+        .unwrap(),
+        Some(ColumnType::Text),
+        Some("text".into()),
+        None,
+    ));
+    for expression in [
+        retained.clone(),
+        ScalarExpr::Cast {
+            expr: Box::new(retained.clone()),
+            ty: "text".into(),
+            implicit: false,
+        },
+    ] {
+        let values = [expression.clone()];
+        let constants = constants_from_values(&values, |_| "x".into(), None);
+        assert_eq!(constants["x"].as_ref(), Some(&retained));
+        let mut plan = query("SELECT count(*) FROM (SELECT 1 WHERE false) s GROUP BY true");
+        let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+            panic!("block")
+        };
+        let source = serde_json::to_value(&block.from).unwrap();
+        block.group_by = vec![expression];
+        simplify_constant_group(block, None);
+        assert_eq!(block.group_by, [ScalarExpr::Literal(Value::Bool(true))]);
+        assert_eq!(serde_json::to_value(&block.from).unwrap(), source);
+    }
+    let incompatible = ScalarExpr::Cast {
+        expr: Box::new(retained),
+        ty: "integer".into(),
+        implicit: false,
+    };
+    assert!(!constant_literal(&incompatible, None));
+}
+
+#[test]
 fn view_constants_keep_source_authority_cardinality_and_visible_aliases() {
     for definition in [
         "SELECT 1 AS internal_name",

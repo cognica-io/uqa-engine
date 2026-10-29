@@ -52,6 +52,7 @@ pub fn comparison_key_is_constant(expression: &crate::ScalarExpr) -> bool {
     use crate::ScalarExpr;
     match expression {
         ScalarExpr::Literal(_)
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::TypedLiteral {
             parameter_index: None,
             ..
@@ -228,6 +229,34 @@ impl ComparisonSupport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_comparison_keys_keep_one_class_without_reading_the_value() {
+        use crate::ir::{ConstantValueSource, RetainedConstantValue, RetainedScalarLiteral};
+        use crate::ScalarExpr;
+        use std::sync::Arc;
+        #[derive(Debug)]
+        struct Unreadable;
+        impl ConstantValueSource for Unreadable {
+            fn read(&self, _: u64) -> Result<uqa_core::Value, SQLError> {
+                panic!("comparison classification cannot read a constant")
+            }
+        }
+        let literal = ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
+            RetainedConstantValue::new(Arc::new(Unreadable), 0),
+            Some(ColumnType::Record),
+            None,
+            None,
+        ));
+        for expression in [
+            literal.clone(),
+            ScalarExpr::Row(vec![literal.clone()]),
+            ScalarExpr::Array(vec![literal]),
+        ] {
+            assert!(comparison_key_is_constant(&expression));
+        }
+        assert!(!comparison_key_is_constant(&ScalarExpr::Param(1)));
+    }
 
     struct Types;
 

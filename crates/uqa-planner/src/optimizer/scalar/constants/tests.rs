@@ -8,6 +8,7 @@ use super::*;
 
 mod catalog_types;
 mod collations;
+mod composite_production;
 mod production;
 mod retained;
 mod similar_substring;

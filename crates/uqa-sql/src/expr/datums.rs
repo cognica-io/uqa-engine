@@ -88,14 +88,27 @@ pub fn read_with_catalog(
 
 /// Copy a selected constant field at planning time, detoasting variable-width storage without interpreting its scalar contents. Whole records remain deferred.
 pub fn copy_constant_field(value: &Value, ty: &crate::ColumnType) -> Result<Value, SQLError> {
+    copy_constant_field_with_control(value, ty, &ProductionControl::uncontrolled()).map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary constant field copy")
+    })
+}
+
+/// Admit the selected field's detoasting workspace, physical destination and retained backing before allocation. Copying preserves bytes without interpreting scalar contents or reading other fields.
+pub fn copy_constant_field_with_control(
+    value: &Value,
+    ty: &crate::ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
     let Value::Datum(datum) = value else {
-        return Ok(value.clone());
+        return control.copy_value(value).map_err(Into::into);
     };
     if crate::catalog::type_metadata::pg_type_len(ty) != -1 {
-        return Ok(value.clone());
+        return control.copy_value(value).map_err(Into::into);
     }
-    let control = ProductionControl::uncontrolled();
-    let payload = payload(datum, &control)?;
+    let payload = payload(datum, control)?;
     let size = payload
         .bytes()
         .len()
@@ -103,9 +116,13 @@ pub fn copy_constant_field(value: &Value, ty: &crate::ColumnType) -> Result<Valu
         .and_then(|size| u32::try_from(size).ok())
         .and_then(|size| size.checked_mul(4))
         .ok_or_else(|| corrupt("invalid datum length"))?;
-    let mut bytes = size.to_le_bytes().to_vec();
-    bytes.extend_from_slice(payload.bytes());
-    Ok(Value::Datum(DatumValue::new(datum.type_oid(), 0, bytes)))
+    let mut bytes = ProductionVec::new(*control);
+    bytes.reserve(payload.bytes().len() + 4)?;
+    bytes.extend_from_slice(&size.to_le_bytes())?;
+    bytes.extend_from_slice(payload.bytes())?;
+    let (datum, memory) =
+        DatumValue::with_control(datum.type_oid(), 0, bytes.finish()?, control)?.into_parts();
+    Ok(control.finish(Value::Datum(datum), memory)?)
 }
 
 pub fn read_with_control(

@@ -207,19 +207,26 @@ fn constant_literal(expr: &ScalarExpr, types: Option<&dyn RoutineTypeCatalog>) -
     match expr {
         ScalarExpr::Collated { expr, .. } => constant_literal(expr, types),
         ScalarExpr::Literal(_)
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::TypedLiteral {
             parameter_index: None,
             ..
         } => true,
         ScalarExpr::Cast { expr, ty, .. } => {
-            let ScalarExpr::TypedLiteral {
-                ty: original,
-                bound_type,
-                parameter_index: None,
-                ..
-            } = expr.as_ref()
-            else {
-                return false;
+            let (original, bound_type) = match expr.as_ref() {
+                ScalarExpr::TypedLiteral {
+                    ty,
+                    bound_type,
+                    parameter_index: None,
+                    ..
+                } => (ty.as_str(), bound_type.as_ref()),
+                ScalarExpr::RetainedLiteral(literal) => {
+                    let Some(declaration) = literal.declaration.as_deref() else {
+                        return false;
+                    };
+                    (declaration, literal.ty.as_ref())
+                }
+                _ => return false,
             };
             original == ty || match (bound_type, types) {
                 (Some(ColumnType::Composite(reference)), Some(types)) => types.resolve_catalog_column_type_name(ty).is_ok_and(|target| matches!(target, ColumnType::Composite(target) if target.oid == reference.oid)),

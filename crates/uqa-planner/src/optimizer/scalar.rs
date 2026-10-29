@@ -265,6 +265,7 @@ fn finish_scalar(
             .routine_inlining
             .as_ref()
             .map(|context| context.types),
+        &config.production,
     )?;
     let optimized = fold_selected_literal(
         optimized,

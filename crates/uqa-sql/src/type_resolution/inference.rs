@@ -276,10 +276,8 @@ pub(super) fn field_selection_type(
             control,
         );
     }
-    if let ScalarExpr::Literal(value) = base {
-        if let Some(field_type) = field_selection::literal_field_type(value, field) {
-            return copy_type(field_type?.as_ref(), control);
-        }
+    if let Some(field_type) = field_selection::constant_field_type(base, field) {
+        return copy_type(field_type?.as_ref(), control);
     }
     let ty = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
     let record = ty.as_deref() == Some(&ColumnType::Record);

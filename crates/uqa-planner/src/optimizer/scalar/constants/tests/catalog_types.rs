@@ -9,7 +9,7 @@
 use super::*;
 use uqa_sql::routines::declaration::RoutineTypeCatalog;
 
-struct Catalog;
+pub(super) struct Catalog;
 
 impl RoutineTypeCatalog for Catalog {
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<uqa_sql::ast::ColumnDef>>, String> {

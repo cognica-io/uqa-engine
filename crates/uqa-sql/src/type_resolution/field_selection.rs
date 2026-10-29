@@ -194,6 +194,21 @@ pub(crate) fn value_field_selection(
     }
 }
 
+/// Borrow an undeclared folded row from either literal owner without decoding spill storage. Declared literals resolve fields through their bound SQL type.
+pub(crate) fn constant_field_type(
+    expression: &crate::ScalarExpr,
+    field: &str,
+) -> Option<Result<Option<ColumnType>, SQLError>> {
+    let value = match expression {
+        crate::ScalarExpr::Literal(value) => value,
+        crate::ScalarExpr::RetainedLiteral(literal) if literal.declaration.is_none() => {
+            literal.value.resident_value()?
+        }
+        _ => return None,
+    };
+    literal_field_type(value, field)
+}
+
 /// The field of a folded row constant: an anonymous row's `fN` field or a named record's field.
 pub fn literal_field_type(
     value: &uqa_core::Value,
@@ -235,6 +250,44 @@ mod tests {
         plan::{RelationalPlan, UnifiedPlan},
         ColumnIdentity, RowSchema,
     };
+
+    #[test]
+    fn retained_anonymous_row_fields_preserve_literal_types_and_missing_field_errors() {
+        use crate::ast::{FunctionBinding, FunctionDispatch, FunctionOrderSyntax};
+        use crate::ir::{RetainedConstantValue, RetainedScalarLiteral};
+        use crate::ScalarExpr;
+        use uqa_core::{memory::ProductionControl, Value};
+
+        let control = ProductionControl::uncontrolled();
+        let value = Value::Row(vec![Value::Int(1), Value::Str("x".repeat(1 << 20))].into());
+        let retained = ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
+            RetainedConstantValue::from_produced(control.copy_value(&value).unwrap(), &control)
+                .unwrap(),
+            Some(ColumnType::Record),
+            None,
+            None,
+        ));
+        let ordinary = ScalarExpr::Literal(value);
+        let binding = FunctionBinding::dispatched(FunctionDispatch::FieldSelect);
+        for field in ["f1", "f2", "f0", "f01", "f3", "missing"] {
+            let call = |base| ScalarExpr::Func {
+                name: binding.name.clone(),
+                binding: Some(binding.clone()),
+                args: vec![base, ScalarExpr::Literal(Value::Str(field.into()))],
+                distinct: false,
+                order_syntax: FunctionOrderSyntax::Ordinary,
+                order_by: Vec::new(),
+                filter: None,
+            };
+            let expected = crate::scalar_type(&call(ordinary.clone()), &RowSchema::default(), &[]);
+            let expression = call(retained.clone());
+            let measured = allocation_counter::measure(|| {
+                let actual = crate::scalar_type(&expression, &RowSchema::default(), &[]);
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+            });
+            assert!(measured.bytes_total < 4096, "{measured:?}");
+        }
+    }
 
     #[test]
     fn relation_field_selection_respects_column_shadowing_and_structural_dispatch() {

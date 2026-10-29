@@ -29496,6 +29496,194 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_constant_field_copy_preserves_physical_bytes_without_scalar_interpretation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/datums/tests/constant_copy.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Copy short-header, compressed and fixed-width physical fields.",
+      "invariant": "Preserve type, bytes and offset; detoast variable-width storage without decoding scalar contents or eagerly rejecting fixed-width addresses.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constant_field_copy_admits_large_destinations_before_growth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/datums/tests/constant_copy.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Copy four MiB text and physical text under zero and partial allowances.",
+      "invariant": "Reject with 53200 before large destination growth and release every temporary reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constant_field_copy_releases_decompression_workspace_on_success_and_partial_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/datums/tests/constant_copy.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Detoast a compressed field with allowances that fit only decompression or decompression plus output bytes.",
+      "invariant": "Keep workspace and output independently admitted, release both on header rejection and retain only the completed field on success.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constant_field_copy_preserves_inline_values_and_checks_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/datums/tests/constant_copy.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Copy inline NULL/integer values under zero allowance and signal either cancellation token.",
+      "invariant": "Require no payload reservation for inline values, preserve 57014 from either token and leak no allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "composite_constructor_and_fields_preserve_values_types_collations_and_last_owner",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/composite_production.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Fold a named row and select bound/catalog fields from ordinary, retained and same-type CAST inputs.",
+      "invariant": "Match ordinary physical values and metadata, preserve selected collation and share constants without allocating until the last owner releases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "composite_constant_metadata_rejects_large_names_before_output_copy",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/composite_production.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Fold a composite and field with four MiB type names under small allowances.",
+      "invariant": "Admit result type/declaration copies at their constructors and clean completed output if later metadata cannot fit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "composite_field_copy_validates_selected_bytes_before_preserving_original_tuple",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/composite_production.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Select safe and malformed fields from a literal retaining its original composite tuple.",
+      "invariant": "Leave unreached bytes unread, retain the source after successful validation and preserve planning-time XX001 for selected corrupt compression.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "composite_constructor_releases_partial_output_on_catalog_failure_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/composite_production/failures.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Interrupt tuple retention after constructing a complete intermediate row.",
+      "invariant": "Propagate descriptor error, either cancellation token or unwind; release partial row/type storage and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_composite_constructor_admits_constant_output_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/composite_constants.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Fold a named composite containing four MiB text through the native catalog-scalar planner on all four providers.",
+      "invariant": "Reject exhausted/partial allowances before large growth, preserve cancellation and recover the same retained tuple with allocation-free clones and last-owner release.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_composite_field_copy_admits_constant_output_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/composite_constants.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Fold a selected four MiB composite field through the native catalog-scalar planner on all four providers.",
+      "invariant": "Reject before large copies, preserve sibling allowances and 57014, recover identical text and retain the output lease through its final clone.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "retained_composite_values_preserve_catalog_dependent_folding_eligibility",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/composite_production.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Nest admitted physical composite and selected-field constants in an otherwise immutable constructor.",
+      "invariant": "Preserve catalog-dependent evaluation eligibility across ordinary and shared constant representations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_anonymous_row_fields_preserve_literal_types_and_missing_field_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/field_selection.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Infer valid and invalid fields of a retained anonymous row with a one MiB payload.",
+      "invariant": "Borrow resident row storage, preserve field types and diagnostics and allocate no payload copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_comparison_keys_keep_one_class_without_reading_the_value",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/comparison.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Classify shared constants and nested ROW/ARRAY keys whose backing source rejects reads.",
+      "invariant": "Retain one constant comparison class without evaluating or decoding the value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "retained_source_constants_preserve_propagation_and_grouping",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_constants/tests.rs",
+      "capability": "Composite constant production and field-copy admission",
+      "workload": "Propagate retained source constants with and without identity casts and simplify an empty-input grouping key.",
+      "invariant": "Share the original constant and declaration, keep source cardinality and reject incompatible casts.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
