@@ -27238,6 +27238,137 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_type_scratch_is_admitted_before_wide_input_inference",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/inference/tests/scratch.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Infer an 8,192-item IN list with only 128 bytes of remaining allowance.",
+      "invariant": "Reject candidate scratch before large allocation or candidate inference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "conditional_type_scratch_is_admitted_before_wide_branch_inference",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/inference/tests/scratch.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Infer an 8,192-branch CASE with only 128 bytes of remaining allowance.",
+      "invariant": "Reject result-type scratch before large allocation or branch inference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_reference_scratch_requires_its_own_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/inference/tests/scratch.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Allow the complete IN candidate-type buffer but leave no capacity for its borrowed selection references.",
+      "invariant": "Admit the second buffer independently and release the first on 53200 without exceeding the admitted payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "inference_scratch_releases_capacity_before_publishing_the_selected_type",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/inference/tests/scratch.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Infer array-typed IN and CASE inputs with sibling reservations and an exact observed allowance.",
+      "invariant": "Retain only the selected type after scratch retirement and preserve parent and sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "inference_scratch_and_partial_types_release_on_both_cancellations_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/inference/tests/scratch.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Cancel each request owner or unwind while IN and CASE scratch already holds nested array types.",
+      "invariant": "Stop before later inputs and release every partial type and buffer without changing sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "common_type_selection_matches_postgresql_memory",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_common_type_selection.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Replay independently captured PostgreSQL common type, IN, CASE and constant source-type observations on the selected native provider.",
+      "invariant": "Preserve selected types, ELSE-first common-type selection, unknown-literal diagnostics and observable query and mutation results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "common_type_selection_matches_postgresql_sqlite",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_common_type_selection.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Replay independently captured PostgreSQL common type, IN, CASE and constant source-type observations on the selected native provider.",
+      "invariant": "Preserve selected types, ELSE-first common-type selection, unknown-literal diagnostics and observable query and mutation results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "common_type_contexts_match_postgresql_memory",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_common_type_selection.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Replay independently captured PostgreSQL common type, IN, CASE and constant source-type observations on the selected native provider.",
+      "invariant": "Preserve selected types, ELSE-first common-type selection, unknown-literal diagnostics and observable query and mutation results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "common_type_contexts_match_postgresql_sqlite",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/queries/sql_common_type_selection.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Replay independently captured PostgreSQL common type, IN, CASE and constant source-type observations on the selected native provider.",
+      "invariant": "Preserve selected types, ELSE-first common-type selection, unknown-literal diagnostics and observable query and mutation results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "common_type_selection_and_contexts_match_postgresql_key_value",
+      "cases": 2,
+      "source": "crates/uqa-engine/tests/queries/sql_common_type_selection.rs",
+      "capability": "Admitted scalar inference scratch",
+      "workload": "Replay independently captured PostgreSQL common type, IN, CASE and constant source-type observations on the selected native provider.",
+      "invariant": "Preserve selected types, ELSE-first common-type selection, unknown-literal diagnostics and observable query and mutation results.",
+      "case_names": [
+        "case_1_sqlite_key_value",
+        "case_2_redb"
+      ]
     }
   ]
 }

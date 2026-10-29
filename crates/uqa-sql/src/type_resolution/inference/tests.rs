@@ -8,6 +8,8 @@ use super::*;
 use crate::{ast::BinaryOp, RowSchema};
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
+mod scratch;
+
 fn infer(
     expression: &ScalarExpr,
     schema: &RowSchema,
