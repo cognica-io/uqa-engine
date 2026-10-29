@@ -545,4 +545,5 @@ pub fn role_has_column_privilege(
 }
 
 mod invariants;
+pub mod selection;
 pub use invariants::validate_table_security_invariants;

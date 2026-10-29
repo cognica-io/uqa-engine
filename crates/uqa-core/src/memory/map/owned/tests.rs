@@ -257,3 +257,37 @@ fn produced_text_keys_keep_payload_leases_through_replacement_and_removal() {
     assert_eq!(map.remove("saved"), Some(2));
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn set_transfer_preserves_nodes_and_releases_duplicate_owners() {
+    use crate::memory::{OwnedSet, Produced, ProductionControl};
+    let budget = crate::memory::MemoryBudget::new(1 << 20);
+    let token = crate::CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let sibling = budget.reserve(37).unwrap();
+    let mut left = OwnedSet::new();
+    let mut right = OwnedSet::new();
+    for (set, name) in [(&mut left, "first"), (&mut right, "first")] {
+        set.insert_budgeted(control.copy_text(name).unwrap(), &budget)
+            .unwrap();
+    }
+    right
+        .insert_budgeted(control.copy_text("second").unwrap(), &budget)
+        .unwrap();
+    let measured = allocation_counter::measure(|| {
+        left.append(right);
+        assert!(left.contains_by(|name| "first".cmp(name.as_str())));
+        assert!(!left.contains_by(|name| "missing".cmp(name.as_str())));
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(left.len(), 2);
+    assert_eq!(
+        budget.used(),
+        37 + 2 * OwnedSet::<Produced<String>>::entry_bytes()
+            + left.iter().map(|name| name.capacity()).sum::<usize>()
+    );
+    drop(left);
+    assert_eq!(budget.used(), 37);
+    drop(sibling);
+    assert_eq!(budget.used(), 0);
+}

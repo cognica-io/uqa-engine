@@ -4,33 +4,36 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{context::PrivilegeScope, BaseColumn, SourceLineage};
+use super::{context::PrivilegeScope, ownership::Required, SourceLineage};
 use crate::{catalog::resolution::RelationLookupMode, SQLError};
-use std::collections::BTreeSet;
 
 pub(super) fn ensure_required_select(
     lineage: &SourceLineage,
-    required: &BTreeSet<BaseColumn>,
+    required: &Required,
     scope: &PrivilegeScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<(), SQLError> {
-    let mut resolution = scope.resolution.clone();
+    let control = scope.control();
+    let mut resolution = scope.resolution.copy_with_control(&control)?;
     resolution.set_lookup_mode(RelationLookupMode::Bound);
     let subject = scope.privilege_subject()?;
     for (table, columns) in &lineage.tables {
         let relation = scope
             .catalog
-            .relation(&resolution, table)?
-            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
-        let table_required = required
+            .relation_with_control(&resolution, table, &control)?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let mut table_required = required
             .iter()
-            .filter(|column| &column.table == table)
+            .filter(|column| column.table == *table)
             .map(|column| column.column.as_str())
-            .collect::<BTreeSet<_>>();
-        if table_required.is_empty() {
-            let mut permitted =
-                scope
-                    .catalog
-                    .has_select_privilege(&resolution, &relation, None, subject)?;
+            .peekable();
+        if table_required.peek().is_none() {
+            let mut permitted = scope.catalog.has_select_privilege_with_control(
+                &resolution,
+                &relation,
+                None,
+                subject,
+                &control,
+            )?;
             // Foreign relation ACL lookup can report metadata errors even after a table grant.
             let inspect_columns = !permitted
                 || matches!(
@@ -39,11 +42,12 @@ pub(super) fn ensure_required_select(
                 );
             if inspect_columns {
                 for column in columns {
-                    if scope.catalog.has_select_privilege(
+                    if scope.catalog.has_select_privilege_with_control(
                         &resolution,
                         &relation,
                         Some(column),
                         subject,
+                        &control,
                     )? {
                         permitted = true;
                         break;
@@ -56,10 +60,13 @@ pub(super) fn ensure_required_select(
         } else {
             for column in table_required {
                 let column = columns.contains(column).then_some(column);
-                if !scope
-                    .catalog
-                    .has_select_privilege(&resolution, &relation, column, subject)?
-                {
+                if !scope.catalog.has_select_privilege_with_control(
+                    &resolution,
+                    &relation,
+                    column,
+                    subject,
+                    &control,
+                )? {
                     return relation_permission_denied(table, relation.kind.description());
                 }
             }

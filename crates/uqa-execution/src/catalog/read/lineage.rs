@@ -12,7 +12,28 @@ use uqa_sql::{
     semantics::privileges::context::{PrivilegeCatalog, PrivilegeRelation, PrivilegeRelationKind},
     SQLError,
 };
+mod production;
+
 impl PrivilegeCatalog for CatalogReadView {
+    fn relation_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<PrivilegeRelation>>, SQLError> {
+        production::relation(self, resolution, name, control)
+    }
+    fn has_select_privilege_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        relation: &PrivilegeRelation,
+        column: Option<&str>,
+        subject: &RoleReference,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        production::select(self, resolution, relation, column, subject, control)
+    }
+
     fn relation(
         &self,
         resolution: &RelationNameResolution,

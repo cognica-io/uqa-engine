@@ -58,6 +58,16 @@ impl<K> OwnedSet<K> {
 }
 
 impl<K: Ord> OwnedSet<K> {
+    /// Transfer nodes without allocating replacements. Duplicate keys retain this set's original owner.
+    pub fn append(&mut self, other: Self) {
+        self.0.append(other.0);
+    }
+
+    /// Borrow a compound key without constructing its owned representation. The comparator orders the query against each stored key and must agree with `Ord`.
+    pub fn contains_by(&self, compare: impl FnMut(&K) -> std::cmp::Ordering) -> bool {
+        self.0.get_by(compare).is_some()
+    }
+
     pub fn insert(&mut self, key: K) -> bool {
         self.0.insert(key, ()).is_none()
     }

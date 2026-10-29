@@ -15,6 +15,7 @@ use std::{
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::{catalog::resolution::RelationNameResolution, SQLError};
 
+mod ctes;
 pub(super) mod resolution;
 mod rows;
 pub use rows::{CteRowsIter, CteRowsMap};

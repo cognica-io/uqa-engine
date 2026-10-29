@@ -313,7 +313,7 @@ fn expression_schemas<S: Clone + Send + Sync + 'static>(
 fn generated_columns<S: Clone>(
     inputs: &Inputs<'_>,
     scope: &CteScope<S>,
-) -> Result<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>, SQLError> {
+) -> Result<uqa_sql::semantics::privileges::columns::ColumnDependencies, SQLError> {
     crate::query::privileges::with_scope(scope, |scope| {
         let mut qualifiers = std::collections::BTreeSet::from([
             inputs.table.to_string(),
@@ -331,15 +331,12 @@ fn generated_columns<S: Clone>(
             scope,
         )?;
         if let Some(source) = inputs.source {
-            for (table, required) in
-                uqa_sql::semantics::privileges::columns::for_source_expressions(
-                    source,
-                    &inputs.expressions,
-                    scope,
-                )?
-            {
-                columns.entry(table).or_default().extend(required);
-            }
+            let additional = uqa_sql::semantics::privileges::columns::for_source_expressions(
+                source,
+                &inputs.expressions,
+                scope,
+            )?;
+            uqa_sql::semantics::privileges::columns::merge(&mut columns, additional, scope)?;
         }
         Ok(columns)
     })

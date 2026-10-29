@@ -90,8 +90,12 @@ impl SystemRelation {
     }
 
     pub fn from_qualified_name(name: &str) -> Option<Self> {
-        let (schema, local) = uqa_core::RelationIdentity::parse_reference(name).ok()?;
-        Self::at(schema.as_deref()?, &local)
+        let reference = uqa_core::RelationIdentity::borrowed_reference(name)?;
+        let schema = reference.schema?;
+        Self::all().find(|relation| {
+            schema == uqa_core::RelationName::decoded(relation.namespace())
+                && reference.name == uqa_core::RelationName::decoded(relation.name())
+        })
     }
 
     /// Immutable built-ins retain the same identity in every session; lock managers retain database affinity.
@@ -103,33 +107,43 @@ impl SystemRelation {
     }
 
     pub fn bootstrap_security(self) -> BoundTableSecurity {
+        let (acl, count) = self.bootstrap_acl();
         let mut security = BoundTableSecurity::owner(super::roles::RoleIdentity::BOOTSTRAP);
-        let mut acl = vec![BoundTableAclEntry {
-            role: Some(security.role_owner),
-            grantor: security.role_owner,
+        security.acl = Some(acl.into_iter().take(count).collect());
+        security
+    }
+
+    /// Borrowing authorization consumers retain the at-most-two bootstrap entries inline.
+    pub fn bootstrap_acl(self) -> ([BoundTableAclEntry; 2], usize) {
+        let owner = super::roles::RoleIdentity::BOOTSTRAP;
+        let owner_entry = BoundTableAclEntry {
+            role: Some(owner),
+            grantor: owner,
             privileges: TablePrivileges::ALL,
             grant_options: TablePrivileges::default(),
-        }];
-        if !matches!(
+        };
+        let public_entry = BoundTableAclEntry {
+            role: None,
+            grantor: owner,
+            privileges: TablePrivileges {
+                select: true,
+                update: self == Self::Projected(VirtualRelation::PgSettings),
+                ..TablePrivileges::default()
+            },
+            grant_options: TablePrivileges::default(),
+        };
+        let count = if matches!(
             self,
             Self::PgShadow
                 | Self::Projected(
                     VirtualRelation::PgAuthid | VirtualRelation::AgGraph | VirtualRelation::AgLabel
                 )
         ) {
-            acl.push(BoundTableAclEntry {
-                role: None,
-                grantor: security.role_owner,
-                privileges: TablePrivileges {
-                    select: true,
-                    update: self == Self::Projected(VirtualRelation::PgSettings),
-                    ..TablePrivileges::default()
-                },
-                grant_options: TablePrivileges::default(),
-            });
-        }
-        security.acl = Some(acl);
-        security
+            1
+        } else {
+            2
+        };
+        ([owner_entry, public_entry], count)
     }
 
     /// `PostgreSQL` 18 view range-table order, followed by expression and range-table subqueries. Repeated references preserve that order; consumers own recursion and lock retention.

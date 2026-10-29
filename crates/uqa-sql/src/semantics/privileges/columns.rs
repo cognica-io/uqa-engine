@@ -7,17 +7,23 @@
 //! Base columns referenced by an executable query block, including aliases and joined output names.
 
 use super::{
-    analyze_query_block, BTreeMap, BTreeSet, CteScope, QueryBlockPlan, SQLError, SourceLineage,
+    analyze_query_block,
+    ownership::{self, Required},
+    BTreeSet, CteScope, QueryBlockPlan, SQLError, SourceLineage,
 };
+
+use uqa_core::memory::{OwnedMap, OwnedSet, Produced};
+
+pub type ColumnDependencies = OwnedMap<Produced<String>, OwnedSet<Produced<String>>>;
 
 pub fn required(
     block: &QueryBlockPlan,
     scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
-) -> Result<BTreeMap<String, BTreeSet<String>>, SQLError> {
-    let mut scope = scope.reborrow();
+) -> Result<ColumnDependencies, SQLError> {
+    let mut scope = scope.reborrow()?;
     scope.include_authorization_only_columns = false;
     let mut universe = SourceLineage::default();
-    let mut required = BTreeSet::new();
+    let mut required = Required::new();
     analyze_query_block(
         block,
         block.from.as_ref(),
@@ -26,18 +32,54 @@ pub fn required(
         &mut universe,
         &mut required,
     )?;
-    Ok(by_relation(required))
+    by_relation(required, &scope)
 }
 
-fn by_relation(required: BTreeSet<super::BaseColumn>) -> BTreeMap<String, BTreeSet<String>> {
-    let mut result: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+fn by_relation(
+    required: Required,
+    scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
+) -> Result<ColumnDependencies, SQLError> {
+    let control = scope.control();
+    let mut result = ColumnDependencies::new();
     for column in required {
-        result
-            .entry(column.table)
-            .or_default()
-            .insert(column.column);
+        let mut names = OwnedSet::new();
+        ownership::insert_set(&mut names, column.column, &control)?;
+        merge_entry(&mut result, column.table, names, &control)?;
     }
-    result
+    Ok(result)
+}
+
+pub fn merge(
+    into: &mut ColumnDependencies,
+    other: ColumnDependencies,
+    scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
+) -> Result<(), SQLError> {
+    for (name, columns) in other {
+        merge_entry(into, name, columns, &scope.control())?;
+    }
+    Ok(())
+}
+
+fn merge_entry(
+    into: &mut ColumnDependencies,
+    name: Produced<String>,
+    columns: OwnedSet<Produced<String>>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    if let Some(existing) = into.get_mut(name.as_str()) {
+        existing.append(columns);
+    } else {
+        match control.budget() {
+            Some(budget) => {
+                into.insert_budgeted(name, columns, budget)?;
+            }
+            None => {
+                into.insert(name, columns);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Columns read through a mutation's additional sources, using the same aliases as SELECT privilege analysis.
@@ -45,11 +87,11 @@ pub fn for_source_expressions(
     source: &crate::plan::SourcePlan,
     expressions: &[&crate::ScalarExpr],
     scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
-) -> Result<BTreeMap<String, BTreeSet<String>>, SQLError> {
-    let mut scope = scope.reborrow();
+) -> Result<ColumnDependencies, SQLError> {
+    let mut scope = scope.reborrow()?;
     scope.include_authorization_only_columns = false;
     let (_, required) = super::source_expression_dependencies(source, expressions, &scope)?;
-    Ok(by_relation(required))
+    by_relation(required, &scope)
 }
 
 /// Columns read from a mutation target, including RETURNING's OLD/NEW aliases and correlated subqueries.
@@ -58,8 +100,8 @@ pub fn for_target_expressions(
     qualifiers: &BTreeSet<String>,
     expressions: &[&crate::ScalarExpr],
     scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
-) -> Result<BTreeMap<String, BTreeSet<String>>, SQLError> {
-    let mut scope = scope.reborrow();
+) -> Result<ColumnDependencies, SQLError> {
+    let mut scope = scope.reborrow()?;
     scope.include_authorization_only_columns = false;
     let (_, required) = super::table_expression_dependencies(
         table,
@@ -69,5 +111,5 @@ pub fn for_target_expressions(
         &[],
         &scope,
     )?;
-    Ok(by_relation(required))
+    by_relation(required, &scope)
 }

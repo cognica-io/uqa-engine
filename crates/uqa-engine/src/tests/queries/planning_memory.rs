@@ -16,6 +16,7 @@ mod demand;
 mod indexes;
 mod inference;
 mod namespaces;
+mod privileges;
 mod retrieval;
 mod retrieval_analysis;
 mod routine_results;

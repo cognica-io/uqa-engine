@@ -231,7 +231,7 @@ fn nested_authorization_preserves_query_relation_identity_modes() {
             };
             body.relations_bound = true;
             let mut scope = catalog.scope();
-            scope.resolution.lookup_mode = enclosing;
+            scope.resolution.set_lookup_mode(enclosing);
             let result = check_query_source(root, root.from.as_ref().unwrap(), &scope);
             assert_eq!(
                 result

@@ -304,7 +304,7 @@ fn generated_calls<S: Clone + Send + Sync + 'static>(
 pub(crate) fn generated_relation_calls<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     permissions: &BuiltinRoutinePermissions,
-    columns: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    columns: uqa_sql::semantics::privileges::columns::ColumnDependencies,
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {

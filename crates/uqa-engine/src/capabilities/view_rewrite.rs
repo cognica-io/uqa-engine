@@ -208,7 +208,9 @@ impl ViewPrivilegeCatalog for Engine {
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         let scope = super::query_scope::new_for_current_routine_with_control(self, control)?;
-        uqa_execution::query::privileges::ensure_select_privileges_for_query(query, &scope)
+        uqa_execution::query::privileges::ensure_select_privileges_for_query_with_control(
+            query, &scope, control,
+        )
     }
     fn bound_role_with_control(
         &self,

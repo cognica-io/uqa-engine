@@ -198,7 +198,7 @@ fn borrowed_privilege_query_arena_preserves_denials_and_check_order() {
     let owned = scope(&catalog);
     let borrowed = context::PrivilegeScope::borrowed(
         owned.catalog,
-        owned.resolution.clone(),
+        (*owned.resolution).clone(),
         owned.inherited,
         &block.subqueries,
     );

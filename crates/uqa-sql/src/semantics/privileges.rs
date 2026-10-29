@@ -11,7 +11,7 @@ pub mod coverage;
 mod enforcement;
 
 use crate::catalog::roles::RoleReference;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use crate::SQLError;
@@ -21,119 +21,16 @@ pub mod context;
 use context::PrivilegeScope as CteScope;
 use enforcement::ensure_required_select;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct BaseColumn {
-    table: String,
-    column: String,
-}
-
-#[derive(Clone, Debug)]
-struct OutputColumn {
-    name: String,
-    sources: BTreeSet<BaseColumn>,
-}
-
-#[derive(Clone, Default)]
-struct SourceLineage {
-    output: Vec<OutputColumn>,
-    qualifiers: BTreeMap<String, Vec<OutputColumn>>,
-    system_qualifiers: BTreeMap<String, BTreeSet<String>>,
-    tables: BTreeMap<String, BTreeSet<String>>,
-}
-
-impl SourceLineage {
-    fn has_unqualified(&self, column: &str) -> bool {
-        self.output.iter().any(|output| output.name == column)
-    }
-
-    fn has_qualifier(&self, qualifier: &str) -> bool {
-        self.qualifiers.contains_key(qualifier) || self.system_qualifiers.contains_key(qualifier)
-    }
-
-    fn require_unqualified(&self, column: &str, required: &mut BTreeSet<BaseColumn>) {
-        for output in self.output.iter().filter(|output| output.name == column) {
-            required.extend(output.sources.iter().cloned());
-        }
-    }
-
-    fn require_qualified(
-        &self,
-        qualifier: &str,
-        column: &str,
-        required: &mut BTreeSet<BaseColumn>,
-    ) {
-        if let Some(columns) = self.qualifiers.get(qualifier) {
-            for output in columns.iter().filter(|output| output.name == column) {
-                required.extend(output.sources.iter().cloned());
-            }
-        }
-    }
-
-    fn require_all(&self, required: &mut BTreeSet<BaseColumn>) {
-        for output in &self.output {
-            required.extend(output.sources.iter().cloned());
-        }
-    }
-
-    fn require_qualified_all(&self, qualifier: &str, required: &mut BTreeSet<BaseColumn>) {
-        if let Some(columns) = self.qualifiers.get(qualifier) {
-            for output in columns {
-                required.extend(output.sources.iter().cloned());
-            }
-        }
-    }
-
-    fn require_unqualified_system(&self, column: &str, required: &mut BTreeSet<BaseColumn>) {
-        for table in self.system_qualifiers.values().flatten() {
-            required.insert(BaseColumn {
-                table: table.clone(),
-                column: column.to_string(),
-            });
-        }
-    }
-
-    fn require_qualified_system(
-        &self,
-        qualifier: &str,
-        column: &str,
-        required: &mut BTreeSet<BaseColumn>,
-    ) {
-        if let Some(tables) = self.system_qualifiers.get(qualifier) {
-            required.extend(tables.iter().cloned().map(|table| BaseColumn {
-                table,
-                column: column.to_string(),
-            }));
-        }
-    }
-
-    fn include_tables(&mut self, other: &Self) {
-        for (table, columns) in &other.tables {
-            self.tables
-                .entry(table.clone())
-                .or_default()
-                .extend(columns.iter().cloned());
-        }
-    }
-}
-
-fn opaque_lineage(columns: Vec<String>, qualifier: Option<String>) -> SourceLineage {
-    let output = columns
-        .into_iter()
-        .map(|name| OutputColumn {
-            name,
-            sources: BTreeSet::new(),
-        })
-        .collect::<Vec<_>>();
-    let qualifiers = qualifier.map_or_else(BTreeMap::new, |qualifier| {
-        BTreeMap::from([(qualifier, output.clone())])
-    });
-    SourceLineage {
-        output,
-        qualifiers,
-        system_qualifiers: BTreeMap::new(),
-        tables: BTreeMap::new(),
-    }
-}
+mod lineage;
+mod ownership;
+#[cfg(test)]
+mod ownership_tests;
+use lineage::{
+    function_lineage, join_lineage, opaque_columns, opaque_lineage, query_columns,
+    relation_lineage, table_lineage, values_lineage,
+};
+use ownership::{insert_set, require, scopes, Required, SourceLineage};
+use uqa_core::memory::{OwnedSet, ProductionControl};
 
 fn is_system_column(column: &str) -> bool {
     matches!(
@@ -142,204 +39,81 @@ fn is_system_column(column: &str) -> bool {
     )
 }
 
-fn rename_output_columns(output: &mut [OutputColumn], aliases: &[String]) {
-    for (column, alias) in output.iter_mut().zip(aliases) {
-        column.name.clone_from(alias);
-    }
-}
-
-fn table_lineage(
-    name: &str,
-    qualifier: &str,
-    alias: Option<&str>,
-    column_aliases: &[String],
-    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
-) -> Result<SourceLineage, SQLError> {
-    if ctes.is_visible_cte(name) {
-        let columns = ctes
-            .materialized_for_scan(name)
-            .or_else(|| {
-                ctes.deferred_reference(name)
-                    .and_then(|cte| cte.body.query())
-                    .and_then(crate::semantics::projection::query_plan_output_columns)
-            })
-            .unwrap_or_default();
-        let mut output = opaque_lineage(columns, Some(alias.unwrap_or(qualifier).to_string()));
-        rename_output_columns(&mut output.output, column_aliases);
-        for columns in output.qualifiers.values_mut() {
-            rename_output_columns(columns, column_aliases);
-        }
-        return Ok(output);
-    }
-    let catalog = ctes.catalog;
-    let resolution = ctes.resolution.clone();
-    let Some(relation) = catalog.relation(&resolution, name)? else {
-        return Ok(SourceLineage::default());
-    };
-    let canonical = relation.canonical;
-    let columns = relation.columns;
-    let system_columns = relation.kind.has_system_columns();
-    let visible_qualifier = alias.unwrap_or(qualifier).to_string();
-    let mut output = columns
-        .iter()
-        .map(|column| OutputColumn {
-            name: column.clone(),
-            sources: BTreeSet::from([BaseColumn {
-                table: canonical.clone(),
-                column: column.clone(),
-            }]),
-        })
-        .collect::<Vec<_>>();
-    rename_output_columns(&mut output, column_aliases);
-    Ok(SourceLineage {
-        output: output.clone(),
-        qualifiers: BTreeMap::from([(visible_qualifier, output)]),
-        system_qualifiers: if system_columns {
-            BTreeMap::from([(
-                alias.unwrap_or(qualifier).to_string(),
-                BTreeSet::from([canonical.clone()]),
-            )])
-        } else {
-            BTreeMap::new()
-        },
-        tables: BTreeMap::from([(canonical, columns.into_iter().collect())]),
-    })
-}
-
-fn join_lineage(
-    left: SourceLineage,
-    right: SourceLineage,
-    using: Option<&crate::ast::JoinUsing>,
-    natural: bool,
-    alias: Option<&str>,
-    column_aliases: &[String],
-) -> SourceLineage {
-    let using_columns = using.map_or_else(
-        || {
-            if natural {
-                left.output
-                    .iter()
-                    .filter(|left| right.output.iter().any(|right| right.name == left.name))
-                    .map(|column| column.name.clone())
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
+fn collect_column(
+    qualifier: Option<&str>,
+    column: &str,
+    scopes: &[&SourceLineage],
+    required: &mut Required,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    if let Some(qualifier) = qualifier {
+        if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
+            scope.require_qualified(qualifier, column, required, control)?;
+            if is_system_column(column) {
+                scope.require_qualified_system(qualifier, column, required, control)?;
             }
-        },
-        |using| using.columns.clone(),
-    );
-    let using_set = using_columns.iter().collect::<BTreeSet<_>>();
-    let mut output = Vec::new();
-    for column in &using_columns {
-        let mut sources = BTreeSet::new();
-        for candidate in left
-            .output
-            .iter()
-            .chain(&right.output)
-            .filter(|candidate| candidate.name == *column)
-        {
-            sources.extend(candidate.sources.iter().cloned());
         }
-        output.push(OutputColumn {
-            name: column.clone(),
-            sources,
-        });
-    }
-    output.extend(
-        left.output
+    } else if let Some(scope) = scopes.iter().find(|scope| scope.has_unqualified(column)) {
+        scope.require_unqualified(column, required, control)?;
+    } else if is_system_column(column) {
+        if let Some(scope) = scopes
             .iter()
-            .chain(&right.output)
-            .filter(|column| !using_set.contains(&column.name))
-            .cloned(),
-    );
-    let mut tables = left.tables.clone();
-    for (table, columns) in &right.tables {
-        tables
-            .entry(table.clone())
-            .or_default()
-            .extend(columns.iter().cloned());
+            .find(|scope| !scope.system_qualifiers.is_empty())
+        {
+            scope.require_unqualified_system(column, required, control)?;
+        }
     }
-    let (qualifiers, system_qualifiers) = if let Some(alias) = alias {
-        rename_output_columns(&mut output, column_aliases);
-        (
-            BTreeMap::from([(alias.to_string(), output.clone())]),
-            BTreeMap::new(),
-        )
-    } else {
-        let mut qualifiers = left.qualifiers;
-        qualifiers.extend(right.qualifiers);
-        let mut system_qualifiers = left.system_qualifiers;
-        system_qualifiers.extend(right.system_qualifiers);
-        (qualifiers, system_qualifiers)
-    };
-    SourceLineage {
-        output,
-        qualifiers,
-        system_qualifiers,
-        tables,
-    }
+    Ok(())
 }
 
 fn collect_expression_columns(
     expression: &ScalarExpr,
     scopes: &[&SourceLineage],
     direct_star: bool,
-    required: &mut BTreeSet<BaseColumn>,
-) -> BTreeSet<usize> {
+    required: &mut Required,
+    control: &ProductionControl<'_>,
+) -> Result<OwnedSet<usize>, SQLError> {
+    control.check()?;
     if direct_star {
         match expression {
             ScalarExpr::Star => {
                 if let Some(scope) = scopes.iter().find(|scope| !scope.output.is_empty()) {
-                    scope.require_all(required);
+                    scope.require_all(required, control)?;
                 }
-                return BTreeSet::new();
+                return Ok(OwnedSet::new());
             }
             ScalarExpr::QualifiedStar(qualifier) => {
                 if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
-                    scope.require_qualified_all(qualifier, required);
+                    scope.require_qualified_all(qualifier, required, control)?;
                 }
-                return BTreeSet::new();
+                return Ok(OwnedSet::new());
             }
             _ => {}
         }
     }
-    let mut subquery_ids = BTreeSet::new();
-    expression.visit(&mut |node| match node {
-        ScalarExpr::Column(column) => {
-            if let Some(scope) = scopes.iter().find(|scope| scope.has_unqualified(column)) {
-                scope.require_unqualified(column, required);
-            } else if is_system_column(column) {
-                if let Some(scope) = scopes
-                    .iter()
-                    .find(|scope| !scope.system_qualifiers.is_empty())
-                {
-                    scope.require_unqualified_system(column, required);
+    let mut subquery_ids = OwnedSet::new();
+    expression.try_visit(&mut |node| {
+        control.check()?;
+        match node {
+            ScalarExpr::Column(column) => collect_column(None, column, scopes, required, control)?,
+            ScalarExpr::QualifiedColumn {
+                qualifier, column, ..
+            } => collect_column(Some(qualifier), column, scopes, required, control)?,
+            ScalarExpr::QualifiedStar(qualifier) => {
+                if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
+                    scope.require_qualified_all(qualifier, required, control)?;
                 }
             }
-        }
-        ScalarExpr::QualifiedColumn {
-            qualifier, column, ..
-        } => {
-            if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
-                scope.require_qualified(qualifier, column, required);
-                if is_system_column(column) {
-                    scope.require_qualified_system(qualifier, column, required);
-                }
+            ScalarExpr::ScalarSubquery(subquery)
+            | ScalarExpr::Exists { subquery, .. }
+            | ScalarExpr::InSubquery { subquery, .. } => {
+                insert_set(&mut subquery_ids, *subquery, control)?;
             }
+            _ => {}
         }
-        ScalarExpr::QualifiedStar(qualifier) => {
-            if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
-                scope.require_qualified_all(qualifier, required);
-            }
-        }
-        ScalarExpr::ScalarSubquery(subquery)
-        | ScalarExpr::Exists { subquery, .. }
-        | ScalarExpr::InSubquery { subquery, .. } => {
-            subquery_ids.insert(*subquery);
-        }
-        _ => {}
-    });
-    subquery_ids
+        Ok::<bool, SQLError>(true)
+    })?;
+    Ok(subquery_ids)
 }
 
 fn collect_expression_and_subqueries(
@@ -349,9 +123,11 @@ fn collect_expression_and_subqueries(
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
-    required: &mut BTreeSet<BaseColumn>,
+    required: &mut Required,
 ) -> Result<(), SQLError> {
-    for subquery in collect_expression_columns(expression, scopes, direct_star, required) {
+    for subquery in
+        collect_expression_columns(expression, scopes, direct_star, required, &ctes.control())?
+    {
         let plan = subqueries.get(subquery).ok_or_else(|| {
             SQLError::Internal(format!(
                 "column privilege analysis cannot resolve scalar subquery slot {subquery}"
@@ -362,50 +138,13 @@ fn collect_expression_and_subqueries(
     Ok(())
 }
 
-fn values_lineage(
-    rows: &[Vec<ScalarExpr>],
-    alias: Option<&str>,
-    column_aliases: &[String],
-) -> SourceLineage {
-    let columns = if column_aliases.is_empty() {
-        (1..=rows.first().map_or(0, Vec::len))
-            .map(|index| format!("column{index}"))
-            .collect()
-    } else {
-        column_aliases.to_vec()
-    };
-    opaque_lineage(columns, alias.map(str::to_string))
-}
-
-fn function_lineage(
-    name: &str,
-    output_name: &str,
-    alias: Option<&str>,
-    column_aliases: &[String],
-) -> SourceLineage {
-    let columns = if column_aliases.is_empty() {
-        vec![if output_name.is_empty() {
-            name.rsplit('.').next().unwrap_or(name).to_string()
-        } else {
-            output_name.to_string()
-        }]
-    } else {
-        column_aliases.to_vec()
-    };
-    let qualifier = alias.map_or_else(
-        || name.rsplit('.').next().unwrap_or(name).to_string(),
-        str::to_string,
-    );
-    opaque_lineage(columns, Some(qualifier))
-}
-
 fn analyze_join_source_lineage(
     source: &SourcePlan,
     outer_scopes: &[&SourceLineage],
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
-    required: &mut BTreeSet<BaseColumn>,
+    required: &mut Required,
 ) -> Result<SourceLineage, SQLError> {
     let SourcePlan::Join {
         left,
@@ -421,13 +160,19 @@ fn analyze_join_source_lineage(
         unreachable!("join lineage helper requires a join source")
     };
     let left = analyze_source_lineage(left, outer_scopes, subqueries, ctes, universe, required)?;
-    let mut right_scopes = vec![&left];
-    right_scopes.extend_from_slice(outer_scopes);
+    let right_scopes = scopes(&left, outer_scopes, ctes.control())?;
     let right = analyze_source_lineage(right, &right_scopes, subqueries, ctes, universe, required)?;
     if let Some(on) = on {
-        let inputs = join_lineage(left.clone(), right.clone(), None, false, None, &[]);
-        let mut condition_scopes = vec![&inputs];
-        condition_scopes.extend_from_slice(outer_scopes);
+        let inputs = join_lineage(
+            left.copy(&ctes.control())?,
+            right.copy(&ctes.control())?,
+            None,
+            false,
+            None,
+            &[],
+            &ctes.control(),
+        )?;
+        let condition_scopes = scopes(&inputs, outer_scopes, ctes.control())?;
         collect_expression_and_subqueries(
             on,
             &condition_scopes,
@@ -440,8 +185,8 @@ fn analyze_join_source_lineage(
     }
     if let Some(using) = using {
         for column in &using.columns {
-            left.require_unqualified(column, required);
-            right.require_unqualified(column, required);
+            left.require_unqualified(column, required, &ctes.control())?;
+            right.require_unqualified(column, required, &ctes.control())?;
         }
     } else if *natural {
         for column in left
@@ -449,18 +194,19 @@ fn analyze_join_source_lineage(
             .iter()
             .filter(|left| right.output.iter().any(|right| right.name == left.name))
         {
-            left.require_unqualified(&column.name, required);
-            right.require_unqualified(&column.name, required);
+            left.require_unqualified(&column.name, required, &ctes.control())?;
+            right.require_unqualified(&column.name, required, &ctes.control())?;
         }
     }
-    Ok(join_lineage(
+    join_lineage(
         left,
         right,
         using.as_ref(),
         *natural,
         alias.as_deref(),
         column_aliases,
-    ))
+        &ctes.control(),
+    )
 }
 
 fn analyze_function_group_lineage(
@@ -469,7 +215,7 @@ fn analyze_function_group_lineage(
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
-    required: &mut BTreeSet<BaseColumn>,
+    required: &mut Required,
 ) -> Result<SourceLineage, SQLError> {
     let SourcePlan::FunctionGroup {
         functions,
@@ -491,21 +237,23 @@ fn analyze_function_group_lineage(
             required,
         )?;
     }
+    let control = ctes.control();
     let columns = if column_aliases.is_empty() {
-        functions
-            .iter()
-            .flat_map(|function| {
-                if function.column_aliases.is_empty() {
-                    vec![function.output_name.clone()]
+        opaque_columns(
+            functions.iter().flat_map(|function| {
+                let columns = if function.column_aliases.is_empty() {
+                    std::slice::from_ref(&function.output_name)
                 } else {
-                    function.column_aliases.clone()
-                }
-            })
-            .collect()
+                    function.column_aliases.as_slice()
+                };
+                columns.iter().map(String::as_str)
+            }),
+            &control,
+        )?
     } else {
-        column_aliases.clone()
+        opaque_columns(column_aliases.iter().map(String::as_str), &control)?
     };
-    Ok(opaque_lineage(columns, alias.clone()))
+    opaque_lineage(columns, alias.as_deref(), &control)
 }
 
 fn analyze_source_lineage(
@@ -514,7 +262,7 @@ fn analyze_source_lineage(
     subqueries: &[QueryPlan],
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     universe: &mut SourceLineage,
-    required: &mut BTreeSet<BaseColumn>,
+    required: &mut Required,
 ) -> Result<SourceLineage, SQLError> {
     match source {
         crate::plan::SourcePlan::RetainedRows(_) => Ok(SourceLineage::default()),
@@ -545,7 +293,7 @@ fn analyze_source_lineage(
                     required,
                 )?;
             }
-            Ok(values_lineage(rows, alias.as_deref(), column_aliases))
+            values_lineage(rows, alias.as_deref(), column_aliases, &ctes.control())
         }
         SourcePlan::Function {
             name,
@@ -566,12 +314,13 @@ fn analyze_source_lineage(
                     required,
                 )?;
             }
-            Ok(function_lineage(
+            function_lineage(
                 name,
                 output_name,
                 alias.as_deref(),
                 column_aliases,
-            ))
+                &ctes.control(),
+            )
         }
         source @ SourcePlan::FunctionGroup { .. } => analyze_function_group_lineage(
             source,
@@ -588,12 +337,8 @@ fn analyze_source_lineage(
             ..
         } => {
             analyze_query_plan(body, ctes, outer_scopes, universe, required)?;
-            let mut columns =
-                crate::semantics::projection::query_plan_output_columns(body).unwrap_or_default();
-            for (column, alias) in columns.iter_mut().zip(column_aliases) {
-                column.clone_from(alias);
-            }
-            Ok(opaque_lineage(columns, alias.clone()))
+            let columns = query_columns(body, column_aliases, &ctes.control())?;
+            opaque_lineage(columns, alias.as_deref(), &ctes.control())
         }
     }
 }
@@ -604,7 +349,7 @@ fn analyze_query_block(
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     outer_scopes: &[&SourceLineage],
     universe: &mut SourceLineage,
-    required: &mut BTreeSet<BaseColumn>,
+    required: &mut Required,
 ) -> Result<(), SQLError> {
     let lineage = source.map_or_else(
         || Ok(SourceLineage::default()),
@@ -619,19 +364,20 @@ fn analyze_query_block(
             )
         },
     )?;
-    universe.include_tables(&lineage);
-    let mut scopes = vec![&lineage];
-    scopes.extend_from_slice(outer_scopes);
+    universe.include_tables(&lineage, &ctes.control())?;
+    let scopes = scopes(&lineage, outer_scopes, ctes.control())?;
     for column in block
         .privilege_columns
         .iter()
         .filter(|_| ctes.include_authorization_only_columns)
     {
-        let expression = column.qualifier().map_or_else(
-            || ScalarExpr::Column(column.column().to_string().into()),
-            |qualifier| ScalarExpr::qualified_column(qualifier, column.column()),
-        );
-        collect_expression_columns(&expression, &scopes, false, required);
+        collect_column(
+            column.qualifier(),
+            column.column(),
+            &scopes,
+            required,
+            &ctes.control(),
+        )?;
     }
     for projection in &block.projections {
         collect_expression_and_subqueries(
@@ -673,18 +419,20 @@ fn analyze_query_plan(
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     outer_scopes: &[&SourceLineage],
     universe: &mut SourceLineage,
-    required: &mut BTreeSet<BaseColumn>,
+    required: &mut Required,
 ) -> Result<(), SQLError> {
-    let mut root_ctes = ctes.reborrow();
-    root_ctes.resolution.lookup_mode = if plan.relations_bound {
-        crate::catalog::resolution::RelationLookupMode::Bound
-    } else {
-        crate::catalog::resolution::RelationLookupMode::Dynamic
-    };
+    let mut root_ctes = ctes.reborrow()?;
+    root_ctes
+        .resolution
+        .set_lookup_mode(if plan.relations_bound {
+            crate::catalog::resolution::RelationLookupMode::Bound
+        } else {
+            crate::catalog::resolution::RelationLookupMode::Dynamic
+        });
     if let Some(subject) = &plan.relation_privilege_subject {
-        root_ctes.relation_privilege_subject = Some(subject.clone());
+        root_ctes.relation_privilege_subject = Some(subject.clone_with_control(&ctes.control())?);
         let mut owned_universe = SourceLineage::default();
-        let mut owned_required = BTreeSet::new();
+        let mut owned_required = Required::new();
         analyze_query_plan_in_scope(
             plan,
             &root_ctes,
@@ -702,27 +450,29 @@ fn analyze_query_plan_in_scope(
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
     outer_scopes: &[&SourceLineage],
     universe: &mut SourceLineage,
-    required: &mut BTreeSet<BaseColumn>,
+    required: &mut Required,
 ) -> Result<(), SQLError> {
-    let reachable = crate::semantics::reachable_plan_cte_names(plan);
-    let mut root_ctes = ctes.reborrow();
-    let mut preceding_ctes = root_ctes.reborrow();
-    for cte in &plan.ctes {
-        if reachable.contains(&cte.name) {
-            let mut definition_ctes = preceding_ctes.reborrow();
+    let reachable =
+        crate::semantics::cte_order::analysis::CteAnalysis::query(plan, ctes.control())?
+            .reachable()?;
+    let mut root_ctes = ctes.reborrow()?;
+    let mut preceding_ctes = root_ctes.reborrow()?;
+    for (index, cte) in plan.ctes.iter().enumerate() {
+        if reachable[index] {
+            let mut definition_ctes = preceding_ctes.reborrow()?;
             if cte.recursive {
                 for local in &plan.ctes {
-                    definition_ctes.insert_deferred_ref(local);
+                    definition_ctes.insert_deferred_ref(local)?;
                 }
             }
             if let Some(query) = cte.body.query() {
                 analyze_query_plan(query, &definition_ctes, outer_scopes, universe, required)?;
             }
         }
-        preceding_ctes.insert_deferred_ref(cte);
+        preceding_ctes.insert_deferred_ref(cte)?;
     }
     for cte in &plan.ctes {
-        root_ctes.insert_deferred_ref(cte);
+        root_ctes.insert_deferred_ref(cte)?;
     }
     match &plan.root {
         RelationalPlan::QueryBlock(block) => analyze_query_block(
@@ -745,11 +495,11 @@ fn analyze_query_plan_in_scope(
             analyze_query_plan(left, &root_ctes, outer_scopes, universe, required)?;
             analyze_query_plan(right, &root_ctes, outer_scopes, universe, required)?;
             let result_scope = opaque_lineage(
-                crate::semantics::projection::query_plan_output_columns(left).unwrap_or_default(),
+                query_columns(left, &[], &ctes.control())?,
                 None,
-            );
-            let mut scopes = vec![&result_scope];
-            scopes.extend_from_slice(outer_scopes);
+                &ctes.control(),
+            )?;
+            let scopes = scopes(&result_scope, outer_scopes, ctes.control())?;
             for expression in order_by
                 .iter()
                 .map(|order| &order.expr)
@@ -784,7 +534,7 @@ pub fn ensure_select_privileges_for_query(
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<(), SQLError> {
     let mut universe = SourceLineage::default();
-    let mut required = BTreeSet::new();
+    let mut required = Required::new();
     analyze_query_plan(query, ctes, &[], &mut universe, &mut required)?;
     ensure_required_select(&universe, &required, ctes)
 }
@@ -795,7 +545,7 @@ pub fn ensure_select_privileges_for_query_block(
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<(), SQLError> {
     let mut universe = SourceLineage::default();
-    let mut required = BTreeSet::new();
+    let mut required = Required::new();
     analyze_query_block(
         statement,
         Some(source),
@@ -820,9 +570,9 @@ fn source_expression_dependencies(
     source: &SourcePlan,
     expressions: &[&ScalarExpr],
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
-) -> Result<(SourceLineage, BTreeSet<BaseColumn>), SQLError> {
+) -> Result<(SourceLineage, Required), SQLError> {
     let mut universe = SourceLineage::default();
-    let mut required = BTreeSet::new();
+    let mut required = Required::new();
     let lineage = analyze_source_lineage(
         source,
         &[],
@@ -831,7 +581,7 @@ fn source_expression_dependencies(
         &mut universe,
         &mut required,
     )?;
-    universe.include_tables(&lineage);
+    universe.include_tables(&lineage, &ctes.control())?;
     let scopes = [&lineage];
     for expression in expressions {
         collect_expression_and_subqueries(
@@ -873,51 +623,27 @@ fn table_expression_dependencies(
     subqueries: &[QueryPlan],
     required_columns: &[String],
     ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
-) -> Result<(SourceLineage, BTreeSet<BaseColumn>), SQLError> {
-    let catalog = ctes.catalog;
-    let mut resolution = ctes.resolution.clone();
+) -> Result<(SourceLineage, Required), SQLError> {
+    let control = ctes.control();
+    let mut resolution = ctes.resolution.copy_with_control(&control)?;
     resolution.set_lookup_mode(crate::catalog::resolution::RelationLookupMode::Bound);
-    let Some(relation) = catalog.relation(&resolution, table)? else {
+    let Some(relation) = ctes
+        .catalog
+        .relation_with_control(&resolution, table, &control)?
+    else {
         return Err(SQLError::UnknownTable(table.to_string()));
     };
-    let canonical = relation.canonical;
-    let columns = relation.columns;
-    let system_columns = relation.kind.has_system_columns();
-    let output = columns
-        .iter()
-        .map(|column| OutputColumn {
-            name: column.clone(),
-            sources: BTreeSet::from([BaseColumn {
-                table: canonical.clone(),
-                column: column.clone(),
-            }]),
-        })
-        .collect::<Vec<_>>();
-    let lineage = SourceLineage {
-        output: output.clone(),
-        qualifiers: qualifiers
-            .iter()
-            .map(|qualifier| (qualifier.clone(), output.clone()))
-            .collect(),
-        system_qualifiers: if system_columns {
-            qualifiers
-                .iter()
-                .map(|qualifier| (qualifier.clone(), BTreeSet::from([canonical.clone()])))
-                .collect()
-        } else {
-            BTreeMap::new()
-        },
-        tables: BTreeMap::from([(canonical.clone(), columns.into_iter().collect())]),
-    };
+    let lineage = relation_lineage(
+        &relation,
+        qualifiers.iter().map(String::as_str),
+        &[],
+        &control,
+    )?;
     let mut universe = SourceLineage::default();
-    let mut required = required_columns
-        .iter()
-        .cloned()
-        .map(|column| BaseColumn {
-            table: canonical.clone(),
-            column,
-        })
-        .collect::<BTreeSet<_>>();
+    let mut required = Required::new();
+    for column in required_columns {
+        require(&mut required, &relation.canonical, column, &control)?;
+    }
     let scopes = [&lineage];
     for expression in expressions {
         collect_expression_and_subqueries(
@@ -930,8 +656,11 @@ fn table_expression_dependencies(
             &mut required,
         )?;
     }
-    if required.iter().any(|column| column.table == canonical) {
-        universe.include_tables(&lineage);
+    if required
+        .iter()
+        .any(|column| column.table.as_str() == relation.canonical)
+    {
+        universe.include_tables(&lineage, &ctes.control())?;
     }
     Ok((universe, required))
 }
