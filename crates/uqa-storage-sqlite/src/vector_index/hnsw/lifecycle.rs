@@ -65,12 +65,15 @@ impl VectorIndex for SQLiteHNSWIndex {
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         if let Some(snapshot) = self.native_snapshot()? {
-            let graph = snapshot
-                .persistent
-                .read_native(|read| snapshot.cached_native_graph(read))?
-                .flatten();
-            if graph.is_none() && self.require_persisted_graph {
-                return Err(super::mutation::missing_metadata(self));
+            // The retained native view already fixes canonical vectors and graph records. Loading the graph here would hydrate every captured index, including indexes the query never searches.
+            match snapshot.load_meta()? {
+                Some((dimensions, params, _, _)) => {
+                    snapshot.validate_header(dimensions, params)?;
+                }
+                None if self.require_persisted_graph => {
+                    return Err(super::mutation::missing_metadata(self));
+                }
+                None => {}
             }
             return Ok(Arc::new(snapshot));
         }

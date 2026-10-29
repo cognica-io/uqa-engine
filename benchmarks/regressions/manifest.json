@@ -2,6 +2,45 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "cold_native_snapshots_retain_the_view_without_loading_vector_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/hnsw/native/tests/retention.rs",
+      "capability": "Native HNSW snapshot retention",
+      "workload": "64 persisted 768-dimensional vectors, cold nested captures with only 128 KiB free, then source mutation and closure before the first retained search.",
+      "invariant": "Capture performs zero graph restorations, original ranked results remain visible, and the original allowance is completely released with the final owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_hnsw_catalog_validation_checks_persisted_parameters_and_missing_headers",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/hnsw/native/tests.rs",
+      "capability": "Native HNSW snapshot validation",
+      "workload": "Incompatible parameters and removal of required persisted metadata after a retained capture.",
+      "invariant": "Capture rejects invalid required headers while an earlier retained view remains searchable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_warm_graphs_reject_private_and_committed_canonical_drift",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/hnsw/native/tests.rs",
+      "capability": "Native HNSW snapshot validation",
+      "workload": "Private and committed canonical vector drift, newly retained corrupt views, earlier valid snapshots and rollback.",
+      "invariant": "The first search on a corrupt retained view rejects canonical drift before returning results; earlier valid snapshots and restored live views keep their exact results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "retained_integer_aggregate_metadata_keeps_positional_updates",
