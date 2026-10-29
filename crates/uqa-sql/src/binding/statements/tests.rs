@@ -8,6 +8,7 @@ use super::*;
 use crate::{ast::FunctionBinding, ColumnType, FunctionTypeResolver};
 use std::{cell::RefCell, collections::BTreeMap};
 
+mod cache_matching;
 mod cache_ownership;
 mod comparison_keys;
 mod retained_analysis;

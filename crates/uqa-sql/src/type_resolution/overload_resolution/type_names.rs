@@ -191,6 +191,11 @@ pub(in crate::type_resolution) const fn builtin_canonical_type_name(
         ColumnType::Xml => "xml",
         ColumnType::JsonB => "jsonb",
         ColumnType::Oid => "oid",
+        ColumnType::Bit(_) => "bit",
+        ColumnType::Int2Vector => "int2vector",
+        ColumnType::OidVector => "oidvector",
+        ColumnType::Record => "record",
+        ColumnType::Void => "void",
         _ => return None,
     })
 }

@@ -28048,6 +28048,126 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_matching_borrows_large_declared_types_and_checks_arity_first",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_matching.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Match a four MiB declared array type and mismatched parameter counts.",
+      "invariant": "Borrow declared types and reject arity mismatches with zero allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_matching_observes_inferred_arrays_without_building_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_matching.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Match 2048 nested integer lists and reject a changed integer width.",
+      "invariant": "Infer array shape without allocating a parameter container or temporary type boxes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_matching_streams_wide_parameter_lists_and_keeps_declarations_distinct",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_matching.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Match 8192 parameters, declared text and deferred typed errors.",
+      "invariant": "Use zero allocations, preserve declared-versus-inferred identity and never evaluate deferred values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzed_cache_matching_preserves_unknown_arrays_and_empty_tensor_dimensions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests/cache_matching.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Compare unknown and incompatible arrays, empty legacy tensors and packed tensors with retained dimensions.",
+      "invariant": "Preserve unknown and tensor dimension semantics without allocating comparison storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "runtime_observation_preserves_scalar_common_types_and_nested_array_depth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/common/runtime/tests.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Compare 23 builtin runtime carriers in both orders and six scalar/nested-array depth combinations.",
+      "invariant": "Keep the owned SQL common-type operation and runtime observation equivalent, with zero observation allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "runtime_array_carriers_flatten_lists_without_flattening_array_valued_elements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/common/runtime/tests.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Observe nested generic lists, explicit multidimensional arrays and array-valued elements.",
+      "invariant": "Flatten only the carrier-defined dimensions and preserve array-valued scalar leaves without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "runtime_type_construction_admits_only_final_boxes_and_releases_partial_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/common/runtime/tests.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Infer an owned type from 4096 nested lists under exact and insufficient ancestor allowances.",
+      "invariant": "Allocate only the two final type boxes, retain exact bytes and release partial failures, both cancellations and consumer unwind without disturbing siblings.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "mismatched_cached_parameter_types_preserve_analysis_errors_without_copying_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/executable/tests.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Reject cached analysis for a four MiB changed declared parameter type before invalid SQL analysis.",
+      "invariant": "Keep analysis before optimizer inputs and stay below 8 KiB allocation without copying the type name.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_analysis_cache_matches_borrowed_types_before_output_admission",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/analysis_cache.rs",
+      "capability": "Borrowed analysis-cache parameter matching",
+      "workload": "Reuse analysis with a 64 KiB declared type and exhausted output allowance on all four providers.",
+      "invariant": "Reject output admission with 53200 before copying parameter payloads, preserve sibling reservations and recover with the original cache owner.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

@@ -291,31 +291,9 @@ pub(super) fn effective_overload_argument_type_ref_with_params<'a>(
     }
 }
 
-pub(super) fn parameter_type_with_control(
-    parameter: &SQLParam,
-    control: &ProductionControl<'_>,
-) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    control.check()?;
-    let scalar = match parameter {
-        SQLParam::Scalar(value) => return value_type_with_control(value, control),
-        SQLParam::TypedScalar { ty, .. } | SQLParam::DeferredError { ty, .. } => {
-            return Ok(Some(ty.clone_with_control(control)?))
-        }
-        SQLParam::Vector(values) => u32::try_from(values.len()).ok().map(ColumnType::Vector),
-        SQLParam::TypedTensor(value) => Some(ColumnType::Tensor(value.dimensions())),
-        SQLParam::Tensor(values) => values
-            .first()
-            .and_then(|values| u32::try_from(values.len()).ok())
-            .map(ColumnType::Tensor),
-    };
-    scalar
-        .map(|ty| {
-            control
-                .finish(ty, control.empty_reservation())
-                .map_err(Into::into)
-        })
-        .transpose()
-}
+mod runtime;
+use runtime::RuntimeType;
+pub(crate) use runtime::{parameter_type_matches, parameter_type_with_control};
 
 pub(crate) fn value_type(value: &Value) -> Option<ColumnType> {
     value_type_with_control(value, &ProductionControl::uncontrolled())
@@ -356,103 +334,9 @@ pub(crate) fn value_type_with_control(
     value: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    control.check()?;
-    let scalar = match value {
-        // A runtime enum carrier knows only its type OID; declared expression types supply the enum's identity.
-        Value::Null | Value::Map(_) | Value::Enum(_) | Value::Datum(_) => None,
-        Value::Void => Some(ColumnType::Void),
-        Value::Row(_) | Value::Record(_) => Some(ColumnType::Record),
-        Value::Bool(_) => Some(ColumnType::Boolean),
-        Value::Int(value) if i32::try_from(*value).is_ok() => Some(ColumnType::Integer),
-        Value::Int(_) => Some(ColumnType::BigInteger),
-        Value::Float(_) => Some(ColumnType::DoublePrecision),
-        Value::Decimal(_) => Some(numeric_type()),
-        Value::Str(_) => Some(ColumnType::Text),
-        Value::FixedChar(value) => {
-            let mut count = 0_usize;
-            for _ in value.chars() {
-                control.check()?;
-                count += 1;
-            }
-            u32::try_from(count).ok().map(ColumnType::Character)
-        }
-        Value::Bytes(_) => Some(ColumnType::Bytea),
-        Value::BitString(_) => Some(ColumnType::Bit(None)),
-        Value::Temporal(value) => Some(match value {
-            uqa_core::TemporalValue::Date { .. } => ColumnType::Date,
-            uqa_core::TemporalValue::Time { .. } => ColumnType::Time,
-            uqa_core::TemporalValue::TimeTz { .. } => ColumnType::TimeTz,
-            uqa_core::TemporalValue::Timestamp { .. } => ColumnType::Timestamp,
-            uqa_core::TemporalValue::TimestampTz { .. } => ColumnType::TimestampTz,
-            uqa_core::TemporalValue::Interval { .. } => ColumnType::Interval,
-        }),
-        Value::Json(_) => Some(ColumnType::Json),
-        Value::JsonB(_) => Some(ColumnType::JsonB),
-        Value::LegacyVector(vector) => Some(match vector.kind() {
-            uqa_core::LegacyVectorKind::SmallInteger => ColumnType::Int2Vector,
-            uqa_core::LegacyVectorKind::Oid => ColumnType::OidVector,
-        }),
-        Value::Array(array) => {
-            let mut element = None;
-            if !merge_array_element_types(array.elements(), &mut element, control)? {
-                return Ok(None);
-            }
-            return element
-                .map(|element| ColumnType::array_with_control(element, control).map_err(Into::into))
-                .transpose();
-        }
-        Value::List(values) => {
-            let mut element = None;
-            for value in values {
-                let next = value_type_with_control(value, control)?;
-                match merge_value_types(element, next, control) {
-                    Ok(merged) => element = merged,
-                    Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
-                        return Err(error)
-                    }
-                    Err(_) => return Ok(None),
-                }
-            }
-            return element
-                .map(|element| ColumnType::array_with_control(element, control).map_err(Into::into))
-                .transpose();
-        }
-    };
-    scalar
-        .map(|ty| {
-            control
-                .finish(ty, control.empty_reservation())
-                .map_err(Into::into)
-        })
+    RuntimeType::infer(value, control)?
+        .map(|ty| ty.into_produced(control))
         .transpose()
-}
-
-fn merge_array_element_types(
-    values: &[Value],
-    element: &mut Option<Produced<ColumnType>>,
-    control: &ProductionControl<'_>,
-) -> Result<bool, SQLError> {
-    for value in values {
-        control.check()?;
-        if let Value::List(nested) = value {
-            if !merge_array_element_types(nested, element, control)? {
-                return Ok(false);
-            }
-        } else {
-            match merge_value_types(
-                element.take(),
-                value_type_with_control(value, control)?,
-                control,
-            ) {
-                Ok(merged) => *element = merged,
-                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
-                    return Err(error)
-                }
-                Err(_) => return Ok(false),
-            }
-        }
-    }
-    Ok(true)
 }
 
 pub(super) fn merge_value_types(
@@ -666,43 +550,52 @@ fn select_pair_with_control(
     if matches!(left, ColumnType::Domain { .. }) || matches!(right, ColumnType::Domain { .. }) {
         return select_pair_with_control(base_type(left), base_type(right), control);
     }
-    let scalar = if let Some(numeric) = common_numeric_type(left, right) {
-        numeric
-    } else if matches!(left, ColumnType::Oid) && is_integral_type(right)
-        || matches!(right, ColumnType::Oid) && is_integral_type(left)
-    {
-        ColumnType::Oid
-    } else if left.is_character_string() && right.is_character_string() {
-        match left {
-            ColumnType::Bpchar | ColumnType::Character(_) => ColumnType::Bpchar,
-            ColumnType::Varchar(_) => ColumnType::Varchar(None),
-            ColumnType::Name => ColumnType::Name,
-            _ => ColumnType::Text,
-        }
-    } else {
-        match (left, right) {
-            (ColumnType::Date, ColumnType::Timestamp)
-            | (ColumnType::Timestamp, ColumnType::Date) => ColumnType::Timestamp,
-            (ColumnType::Date | ColumnType::Timestamp, ColumnType::TimestampTz)
-            | (ColumnType::TimestampTz, ColumnType::Date | ColumnType::Timestamp) => {
-                ColumnType::TimestampTz
-            }
-            (ColumnType::Array(_), ColumnType::Array(_)) => {
-                // An array type does not fix its number of dimensions: `integer[][]` is `integer[]`, so arrays meet at their element types, and each value keeps its own dimensions.
-                let element = select_pair_with_control(
-                    innermost_array_element(left),
-                    innermost_array_element(right),
-                    control,
-                )?;
-                return ColumnType::array_with_control(element, control)
-                    .map_err(CommonTypeFailure::failed);
-            }
-            _ => same_category_common_type(left, right)?,
-        }
+    if let (ColumnType::Array(_), ColumnType::Array(_)) = (left, right) {
+        // Array dimensions belong to values; unequal array types meet at their scalar elements.
+        let element = select_pair_with_control(
+            innermost_array_element(left),
+            innermost_array_element(right),
+            control,
+        )?;
+        return ColumnType::array_with_control(element, control).map_err(CommonTypeFailure::failed);
+    }
+    let scalar = match common_scalar_type(left, right) {
+        Some(scalar) => scalar,
+        None => same_category_common_type(left, right)?,
     };
     control
         .finish(scalar, control.empty_reservation())
         .map_err(CommonTypeFailure::failed)
+}
+
+/// Scalar promotion shared by owned SQL types and allocation-free runtime type observation. Equal types, domains and temporal modifiers are handled by the caller before promotion.
+fn common_scalar_type(left: &ColumnType, right: &ColumnType) -> Option<ColumnType> {
+    if let Some(numeric) = common_numeric_type(left, right) {
+        return Some(numeric);
+    }
+    if matches!(left, ColumnType::Oid) && is_integral_type(right)
+        || matches!(right, ColumnType::Oid) && is_integral_type(left)
+    {
+        return Some(ColumnType::Oid);
+    }
+    if left.is_character_string() && right.is_character_string() {
+        return Some(match left {
+            ColumnType::Bpchar | ColumnType::Character(_) => ColumnType::Bpchar,
+            ColumnType::Varchar(_) => ColumnType::Varchar(None),
+            ColumnType::Name => ColumnType::Name,
+            _ => ColumnType::Text,
+        });
+    }
+    match (left, right) {
+        (ColumnType::Date, ColumnType::Timestamp) | (ColumnType::Timestamp, ColumnType::Date) => {
+            Some(ColumnType::Timestamp)
+        }
+        (ColumnType::Date | ColumnType::Timestamp, ColumnType::TimestampTz)
+        | (ColumnType::TimestampTz, ColumnType::Date | ColumnType::Timestamp) => {
+            Some(ColumnType::TimestampTz)
+        }
+        _ => None,
+    }
 }
 
 /// `select_common_type` for two types of one category that the rules above do not cover: the first type stays unless it is not its category's preferred type and coerces implicitly to the second, which does not coerce back to it. The other type must then coerce implicitly to the selected one, as `coerce_to_common_type` requires.
@@ -710,33 +603,45 @@ fn same_category_common_type(
     left: &ColumnType,
     right: &ColumnType,
 ) -> Result<ColumnType, CommonTypeFailure> {
-    use super::overload_resolution::{
-        routine_type_accepts_implicit_cast as implicit, routine_type_category,
-        routine_type_is_preferred,
-    };
     let left_name = super::canonical_column_type_name(left);
     let right_name = super::canonical_column_type_name(right);
-    if routine_type_category(&left_name) != routine_type_category(&right_name) {
-        return Err(CommonTypeFailure::Unmatched(Box::new((
+    match category_choice(&left_name, &right_name) {
+        CategoryChoice::Left => Ok(left.clone()),
+        CategoryChoice::Right => Ok(right.clone()),
+        CategoryChoice::Unmatched => Err(CommonTypeFailure::Unmatched(Box::new((
             left.clone(),
             right.clone(),
-        ))));
+        )))),
+        CategoryChoice::Inconvertible => Err(CommonTypeFailure::Inconvertible(Box::new((
+            right.clone(),
+            left.clone(),
+        )))),
     }
-    let switch = !routine_type_is_preferred(&left_name)
-        && implicit(&left_name, &right_name)
-        && !implicit(&right_name, &left_name);
-    let (selected, other, selected_name, other_name) = if switch {
-        (right, left, &right_name, &left_name)
-    } else {
-        (left, right, &left_name, &right_name)
+}
+
+enum CategoryChoice {
+    Left,
+    Right,
+    Unmatched,
+    Inconvertible,
+}
+
+/// Both names are already canonical. Observation needs only the choice, not copied types or a diagnostic that would immediately be discarded.
+fn category_choice(left: &str, right: &str) -> CategoryChoice {
+    use super::overload_resolution::{
+        canonical_type_category, canonical_type_is_preferred,
+        routine_type_accepts_implicit_cast as implicit,
     };
-    if implicit(other_name, selected_name) {
-        Ok(selected.clone())
+    if canonical_type_category(left) != canonical_type_category(right) {
+        return CategoryChoice::Unmatched;
+    }
+    if !canonical_type_is_preferred(left) && implicit(left, right) && !implicit(right, left) {
+        return CategoryChoice::Right;
+    }
+    if implicit(right, left) {
+        CategoryChoice::Left
     } else {
-        Err(CommonTypeFailure::Inconvertible(Box::new((
-            other.clone(),
-            selected.clone(),
-        ))))
+        CategoryChoice::Inconvertible
     }
 }
 

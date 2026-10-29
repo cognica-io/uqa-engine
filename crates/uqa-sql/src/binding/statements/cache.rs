@@ -7,13 +7,10 @@
 //! Reusable SQL analysis keeps parameter types and converted immutable inputs, never invocation values or optimizer choices.
 
 use super::{analyze_reusable_inputs, StatementAnalysisContext};
-use crate::{
-    plan::UnifiedPlan, schema::ColumnTypeSchema, ColumnType, SQLError, SQLParam, ScalarExpr,
-};
+use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam};
 use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
-#[derive(Clone, PartialEq)]
 struct ParameterShape {
     declared: bool,
     resolved: Option<ColumnType>,
@@ -23,16 +20,11 @@ fn parameter_shapes(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Vec<ParameterShape>>>, SQLError> {
-    let schema = ColumnTypeSchema::new(&[]);
     let mut shapes = ProductionVec::new(*control);
     shapes.reserve(params.len())?;
-    for (index, parameter) in params.iter().enumerate() {
-        let resolved = match crate::scalar_type_with_control(
-            &ScalarExpr::Param(index + 1),
-            &schema,
-            params,
-            control,
-        ) {
+    for parameter in params {
+        let resolved = match crate::type_resolution::parameter_type_with_control(parameter, control)
+        {
             Ok(resolved) => resolved,
             Err(error)
                 if error.sqlstate() == Some("53200")
@@ -71,8 +63,18 @@ struct AnalyzedStorage {
 
 impl AnalyzedStatement {
     pub fn plan_for(&self, params: &[SQLParam]) -> Option<&UnifiedPlan> {
-        let shapes = parameter_shapes(params, &ProductionControl::uncontrolled()).ok()??;
-        (*shapes == self.0.parameters).then_some(&self.0.plan)
+        (params.len() == self.0.parameters.len()
+            && params
+                .iter()
+                .zip(&self.0.parameters)
+                .all(|(parameter, shape)| {
+                    parameter.declared_scalar_type().is_some() == shape.declared
+                        && crate::type_resolution::parameter_type_matches(
+                            parameter,
+                            shape.resolved.as_ref(),
+                        )
+                }))
+        .then_some(&self.0.plan)
     }
 
     /// Retain complete analyzed syntax and parameter declarations under the invoking request's allowance. All destinations are admitted before allocation; copying a published handle shares its immutable storage and lease.

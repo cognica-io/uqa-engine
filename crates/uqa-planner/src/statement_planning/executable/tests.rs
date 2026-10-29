@@ -213,6 +213,51 @@ fn failed_cached_analysis_precedes_request_resources_for_new_and_mismatched_entr
 }
 
 #[test]
+fn mismatched_cached_parameter_types_preserve_analysis_errors_without_copying_names() {
+    use uqa_sql::plan::ExecutablePlanOptimizer;
+    let params = [SQLParam::typed_scalar(
+        uqa_core::Value::Null,
+        ColumnType::Named("t".repeat(4 * 1024 * 1024)),
+    )];
+    let seed = UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0));
+    let cached = uqa_sql::binding::statements::AnalyzedStatement::capture_with_control(
+        &seed,
+        &[SQLParam::typed_scalar(
+            uqa_core::Value::Null,
+            ColumnType::Text,
+        )],
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
+    let inputs = Inputs {
+        captured: Cell::new(false),
+        analyzed: false,
+    };
+    let context = StatementPlanningContext {
+        analysis: StatementAnalysisContext {
+            scopes: &inputs,
+            routines: &NoRoutines,
+            aliases: &NoRoutines,
+        },
+        aggregates: &|_: &str| false,
+        optimization: &inputs,
+        constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
+    };
+    let plan = UnifiedPlan::lower(uqa_sql::compile("SELECT missing, 1 / 0").unwrap().remove(0));
+    let allocation = allocation_counter::measure(|| {
+        let error = context
+            .plan_with_cached_analysis(plan, &params, cached)
+            .err()
+            .unwrap();
+        assert!(
+            matches!(error, SQLError::Internal(message) if message == "analysis scope unavailable")
+        );
+    });
+    assert!(inputs.captured.get());
+    assert!(allocation.bytes_total < 8192, "{allocation:?}");
+}
+
+#[test]
 fn analyzed_rule_conditions_discard_dead_inputs_but_retain_reachable_planning_errors() {
     let inputs = Inputs {
         captured: Cell::new(false),

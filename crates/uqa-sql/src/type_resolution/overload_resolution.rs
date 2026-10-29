@@ -160,7 +160,7 @@ pub fn routine_type_category(type_name: &str) -> char {
     canonical_type_category(&canonical_routine_type_name(type_name))
 }
 
-fn canonical_type_category(canonical: &str) -> char {
+pub(super) fn canonical_type_category(canonical: &str) -> char {
     if canonical.ends_with("[]") {
         return 'A';
     }
@@ -191,7 +191,7 @@ pub fn routine_type_is_preferred(type_name: &str) -> bool {
     canonical_type_is_preferred(&canonical_routine_type_name(type_name))
 }
 
-fn canonical_type_is_preferred(type_name: &str) -> bool {
+pub(super) fn canonical_type_is_preferred(type_name: &str) -> bool {
     matches!(
         type_name,
         "bool" | "float8" | "oid" | "text" | "timestamptz" | "interval" | "varbit"
