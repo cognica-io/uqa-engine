@@ -31,6 +31,7 @@ mod function_source;
 mod implicit_fusion;
 mod join_reorder;
 mod output_demand;
+mod owned;
 mod scalar;
 mod source_constants;
 mod source_demand;
@@ -41,20 +42,26 @@ mod union_projection;
 pub use access_path::contains_retrieval;
 pub(crate) use api::ConstantStorageFactory;
 pub use api::{
-    optimize, optimize_scalar_expression, optimize_with_aggregates,
-    optimize_with_aggregates_and_statistics, optimize_with_statistics, ConstantEvaluator,
-    OptimizerConfig, OptimizerError, OptimizerResult, SourceStatistics,
+    optimize, optimize_owned_scalar_expression, optimize_owned_with_aggregates_and_statistics,
+    optimize_scalar_expression, optimize_with_aggregates, optimize_with_aggregates_and_statistics,
+    optimize_with_statistics, ConstantEvaluator, OptimizerConfig, OptimizerError, OptimizerResult,
+    SourceStatistics,
 };
 pub(crate) use derived_projection::expand_local_stars;
-pub use derived_projection::{prune_outputs as prune_query_outputs, OutputPruningContext};
+pub(crate) use derived_projection::owned::expand_stars as expand_local_stars_owned;
+pub use derived_projection::{
+    prune_outputs as prune_query_outputs, prune_owned_outputs as prune_owned_query_outputs,
+    OutputPruningContext,
+};
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 
 use access_path::{choose_access_path, prioritize_access_predicates};
 use command::optimize_command;
 use implicit_fusion::{rewrite_implicit_hybrid_fusion, source_allows_unqualified_signals};
 use join_reorder::reorder_unified_plan_joins;
-pub(crate) use scalar::constants::retain_computed_integer;
+pub(crate) use scalar::constants::{retain_computed_integer, retain_computed_integer_owned};
 pub(crate) use scalar::optimize_qualification;
+pub(crate) use scalar::optimize_qualification_owned;
 use scalar::{optimize_assignments, optimize_projections, optimize_scalar_slot};
 use traversal::{optimize_query, optimize_source, optimize_unified_plan};
 

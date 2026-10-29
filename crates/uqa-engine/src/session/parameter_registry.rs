@@ -26,6 +26,15 @@ impl SessionParameterRegistry {
             .map(String::as_str)
     }
 
+    pub(crate) fn placeholder_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<&str>, uqa_core::ValueRetentionError> {
+        let key = folded_key(name, control)?;
+        Ok(self.placeholders.get(key.as_str()).map(String::as_str))
+    }
+
     pub(crate) fn add_placeholder(&mut self, name: &str) {
         self.placeholders
             .entry(name.to_ascii_lowercase())
@@ -68,8 +77,30 @@ impl SessionParameterRegistry {
             .map(String::as_str)
     }
 
+    pub(crate) fn client_setting_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<&str>, uqa_core::ValueRetentionError> {
+        let key = folded_key(name, control)?;
+        Ok(self.client_settings.get(key.as_str()).map(String::as_str))
+    }
+
     pub(crate) fn set_client_setting(&mut self, name: &str, setting: String) {
         self.client_settings
             .insert(name.to_ascii_lowercase(), setting);
     }
+}
+
+fn folded_key(
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<String>, uqa_core::ValueRetentionError> {
+    let mut key = uqa_core::memory::ProductionString::new(*control);
+    key.reserve(name.len())?;
+    for character in name.chars() {
+        control.check()?;
+        key.push(character.to_ascii_lowercase())?;
+    }
+    key.finish()
 }

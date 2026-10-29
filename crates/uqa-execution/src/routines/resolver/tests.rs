@@ -253,3 +253,75 @@ fn prepared_scalar_parameters_do_not_resolve_the_selected_type_twice() {
     }
     assert_eq!(types.resolutions.get(), 512);
 }
+
+#[test]
+fn native_parameter_reads_admit_before_copying_and_keep_selected_field_ownership() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let types = Types::default();
+    let datums = [PLpgSQLDatum::Rec {
+        name: "record".into(),
+    }];
+    let bindings = HashMap::from([("record".into(), vec![0])]);
+    let schema =
+        RowSchema::with_column_definitions(None, &[ColumnDef::nullable("value", ColumnType::Text)]);
+    let schemas = HashMap::from([(0, schema.into())]);
+    let payload = "x".repeat(4 << 20);
+    let values = [Value::Record(
+        vec![("value".into(), Value::Str(payload))].into(),
+    )];
+    let reference = PLpgSQLVariableReference::Qualified {
+        qualifier: "RECORD".into(),
+        column: "value".into(),
+    };
+    let mut resolver = DatumResolver {
+        descriptions: None,
+        types: &types,
+        datums: &datums,
+        values: &values,
+        record_descriptors: &schemas,
+        bindings: &bindings,
+        error: None,
+        param_count: 0,
+    };
+    for cancelled in 0..3 {
+        let budget = MemoryBudget::new(if cancelled == 0 { 1024 } else { 8 << 20 });
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancelled == 1 {
+            original.cancel();
+        }
+        if cancelled == 2 {
+            invoking.cancel();
+        }
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let measured = allocation_counter::measure(|| {
+            assert_eq!(
+                reference
+                    .read_with_control(&mut resolver, &control)
+                    .err()
+                    .unwrap()
+                    .sqlstate(),
+                Some(if cancelled == 0 { "53200" } else { "57014" })
+            );
+        });
+        assert!(measured.bytes_total < 4096, "{measured:?}");
+        assert_eq!(budget.used(), 0);
+        assert_eq!(types.resolutions.get(), 0);
+    }
+    let budget = MemoryBudget::new(8 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let parameter = reference
+        .read_with_control(&mut resolver, &control)
+        .unwrap();
+    assert_eq!(parameter.declared_scalar_type(), Some(&ColumnType::Text));
+    assert!(matches!(parameter.scalar_value(), Some(Value::Str(value)) if value.len() == 4 << 20));
+    assert!(parameter.reserved_bytes() >= 4 << 20);
+    assert_eq!(parameter.reserved_bytes(), budget.used());
+    drop(parameter);
+    assert_eq!(budget.used(), 0);
+    assert_eq!(types.resolutions.get(), 0);
+}

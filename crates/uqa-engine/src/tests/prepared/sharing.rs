@@ -72,10 +72,18 @@ fn native_prepared_executions_share_cached_plans_until_replacement(#[case] provi
     assert!(!replacement.ptr_eq(&retained));
     assert_eq!(retained.strong_count(), 1);
     let control = engine.query_retention_control().unwrap();
+    // Descriptor owners can outlive their executable and carry separate leases.
+    let uqa_sql::plan::UnifiedPlan::Query(query) = retained.as_ref() else {
+        panic!("prepared query")
+    };
+    let descriptors = (query.analyzed_output.clone(), query.analyzed_source.clone());
     let before = control.memory().used();
     let reserved = retained.reserved_bytes();
     drop(retained);
     assert_eq!(control.memory().used(), before - reserved);
+    let with_descriptors = control.memory().used();
+    drop(descriptors);
+    assert!(control.memory().used() < with_descriptors);
     engine.sql("DEALLOCATE ALL", &[]).unwrap();
     assert_eq!(replacement.strong_count(), 1);
     engine.sql("COMMIT", &[]).unwrap();

@@ -12,45 +12,20 @@ use crate::RowSchema;
 use crate::{SQLError, SQLParam};
 
 use super::{
-    bind_query_plan_schema, projection_columns, BindingContext, QueryFunctionTypeResolver,
-    ScalarExpr, SchemaScope,
+    bind_query_plan_schema, BindingContext, QueryFunctionTypeResolver, ScalarExpr, SchemaScope,
 };
 use crate::routines::RoutineResolution;
-
-type ProjectionStarColumn = (String, Option<ColumnType>, Option<u32>);
 
 #[cfg(test)]
 mod tests;
 
+mod output;
+pub(super) use output::ProjectionOutput;
+
 pub(super) struct ProjectionMetadata {
-    pub ty: Option<ColumnType>,
+    pub ty: Option<uqa_core::memory::Produced<ColumnType>>,
     pub collation: Option<u32>,
     pub record: Option<crate::schema::RecordMetadata>,
-}
-
-/// Keep only selections that differ from their output type's default while the output schema is being assembled.
-#[derive(Default)]
-pub(super) struct OutputCollations(Vec<(usize, u32)>);
-
-impl OutputCollations {
-    pub(super) fn push(&mut self, position: usize, ty: Option<&ColumnType>, oid: Option<u32>) {
-        if let Some((ty, oid)) = ty.zip(oid) {
-            if crate::schema::composites::type_is_collatable(ty)
-                && crate::catalog::type_metadata::pg_type_collation_oid(ty) != i64::from(oid)
-            {
-                self.0.push((position, oid));
-            }
-        }
-    }
-
-    pub(super) fn apply(self, mut schema: RowSchema) -> RowSchema {
-        for (position, oid) in self.0 {
-            schema = schema
-                .with_collation_override(crate::schema::CollationBinding::Column(position), oid)
-                .expect("selected collation belongs to its typed output");
-        }
-        schema
-    }
 }
 
 /// Bind a projection against an already-declared input schema. `star_schema` identifies the relation expanded by bare `*`; `expression_schema` may also contain joined sources and hidden lookup aliases used by scalar expressions.
@@ -104,29 +79,18 @@ fn projection_output_schema(
     subqueries: &[QueryPlan],
     params: &[SQLParam],
 ) -> Result<RowSchema, SQLError> {
-    let labels = projection_columns(projections);
-    let mut columns = Vec::new();
-    let mut types = Vec::new();
-    let mut records = Vec::new();
-    let mut collations = OutputCollations::default();
-    for (position, projection) in projections.iter().enumerate() {
+    let owner = scope.control().capture();
+    let control = owner.control();
+    let labels = crate::semantics::projection_labels_with_control(projections, &[], &control)?;
+    let mut output = ProjectionOutput::new(control);
+    for (label, projection) in labels.iter().zip(projections) {
         let expansion_schema = match projection.expr {
             ScalarExpr::QualifiedStar(_) => expression_schema,
             _ => star_schema,
         };
-        if let Some(star_columns) = projection_star_columns(&projection.expr, expansion_schema)? {
-            records.extend(
-                super::record_fields::star_metadata(&projection.expr, expansion_schema)
-                    .unwrap_or_default(),
-            );
-            for (column, ty, collation) in star_columns {
-                collations.push(types.len(), ty.as_ref(), collation);
-                columns.push(column);
-                types.push(ty);
-            }
+        if output.star(&projection.expr, expansion_schema)? {
             continue;
         }
-        columns.push(labels[position].clone());
         let metadata = scope.bind_projection_metadata(
             routines,
             &projection.expr,
@@ -134,21 +98,12 @@ fn projection_output_schema(
             subqueries,
             params,
         )?;
-        collations.push(types.len(), metadata.ty.as_ref(), metadata.collation);
-        types.push(metadata.ty);
-        records.push(metadata.record);
+        output.push(label, metadata)?;
     }
     for projection in projections {
         scope.collations.validate_expression(&projection.expr)?;
     }
-    Ok(collations
-        .apply(RowSchema::with_types(columns, types))
-        .with_record_metadata(
-            records
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, fields)| fields.map(|fields| (index, fields))),
-        ))
+    output.finish()
 }
 
 /// Validate every scalar expression in a query block while the physical input still carries declared SQL types. This must precede polymorphic rewrites such as `pg_typeof`, because an invalid common type is an error, not an `unknown` result.
@@ -159,11 +114,20 @@ pub fn validate_query_block_expression_types(
     params: &[SQLParam],
     ctes: &BindingContext,
 ) -> Result<(), SQLError> {
-    let scalar_subquery_schemas = statement
-        .subqueries
-        .iter()
-        .map(|plan| bind_query_plan_schema(routines, plan, params, ctes, Some(schema)).map(Some))
-        .collect::<Result<Vec<_>, _>>()?;
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let mut scalar_subquery_schemas = crate::production::Buffer::new(&control);
+    for plan in &statement.subqueries {
+        scalar_subquery_schemas.push(
+            Some(bind_query_plan_schema(
+                routines,
+                plan,
+                params,
+                ctes,
+                Some(schema),
+            )?),
+            &control,
+        )?;
+    }
     let resolver = QueryFunctionTypeResolver {
         routines,
         scalar_subquery_schemas: Some(scalar_subquery_schemas),
@@ -234,56 +198,16 @@ pub fn validate_query_block_references(
         .validate_query_block_clauses(routines, statement, schema, &output, params, outer)
 }
 
-pub(super) fn projection_star_columns(
-    expression: &ScalarExpr,
-    schema: &RowSchema,
-) -> Result<Option<Vec<ProjectionStarColumn>>, SQLError> {
-    projection_star_columns_inner(expression, schema)
-        .map_err(|error| error.at_position(expression.reference_position()))
-}
-
-fn projection_star_columns_inner(
-    expression: &ScalarExpr,
-    schema: &RowSchema,
-) -> Result<Option<Vec<ProjectionStarColumn>>, SQLError> {
-    match expression {
-        ScalarExpr::Star => Ok(Some(
-            schema
-                .columns()
-                .iter()
-                .enumerate()
-                .map(|(position, column)| {
-                    (
-                        schema.public_name(position).unwrap_or(column).to_string(),
-                        schema.column_type(position).cloned(),
-                        schema.column_collation(position),
-                    )
-                })
-                .collect(),
-        )),
-        ScalarExpr::QualifiedStar(qualifier) => {
-            schema.require_lateral_qualifier(qualifier)?;
-            let columns = schema
-                .qualified_star_position_layout(qualifier)
-                .into_iter()
-                .map(|(column, logical, _, ty)| {
-                    let collation = logical.map_or_else(
-                        || schema.qualified_collation(qualifier, &column),
-                        |position| schema.column_collation(position),
-                    );
-                    (column, ty, collation)
-                })
-                .collect::<Vec<_>>();
-            if columns.is_empty() && !schema.has_qualifier(qualifier) {
-                if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
-                    return Err(error);
-                }
-                return Err(SQLError::UnknownTable(qualifier.to_string()));
-            }
-            Ok(Some(columns))
-        }
-        _ => Ok(None),
-    }
+pub(super) fn visit_projection_star_metadata<'a>(
+    expression: &'a ScalarExpr,
+    schema: &'a RowSchema,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    observe: &mut dyn FnMut(crate::semantics::ProjectionStarMetadata<'a>) -> Result<(), SQLError>,
+) -> Result<bool, SQLError> {
+    crate::semantics::visit_bound_projection_star_metadata(
+        expression, schema, schema, control, observe,
+    )
+    .map_err(|error| error.at_position(expression.reference_position()))
 }
 
 pub(super) fn rename_schema(
@@ -291,55 +215,20 @@ pub(super) fn rename_schema(
     aliases: &[String],
     qualifier: Option<&str>,
 ) -> RowSchema {
-    let columns = schema
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(position, column)| {
-            aliases
-                .get(position)
-                .cloned()
-                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
-        })
-        .collect();
-    let renamed = match qualifier {
-        Some(qualifier) => {
-            RowSchema::with_qualified_types(qualifier, columns, schema.column_types().to_vec())
-        }
-        None => RowSchema::with_types(columns, schema.column_types().to_vec()),
-    };
-    let renamed = renamed
-        .with_column_collations((0..schema.len()).map(|position| schema.column_collation(position)))
-        .with_record_fields_from(schema);
-    let renamed = if schema.columns_are_open(None) {
-        RowSchema::with_open_columns(&renamed, qualifier)
-    } else {
-        renamed
-    };
-    let mut hidden = Vec::new();
-    let mut conflicting = Vec::new();
-    for (identity, ty) in schema.typed_virtual_identities() {
-        let conflicts = match identity.qualifier() {
-            Some(source) => schema.qualified_column_is_ambiguous(source, identity.column()),
-            None => schema.column_is_ambiguous(identity.column()),
-        };
-        let mapped = qualifier.map_or_else(
-            || vec![identity.clone()],
-            |qualifier| {
-                vec![
-                    crate::ColumnIdentity::unqualified(identity.column()),
-                    crate::ColumnIdentity::qualified(qualifier, identity.column()),
-                ]
-            },
-        );
-        for identity in mapped {
-            if conflicts {
-                conflicting.push((identity, ty.cloned()));
-            } else {
-                hidden.push((identity, ty.cloned()));
-            }
-        }
-    }
-    let renamed = RowSchema::with_typed_virtual_identities(&renamed, &hidden);
-    RowSchema::with_typed_conflicting_virtual_identities(&renamed, &conflicting)
+    rename_schema_with_control(
+        schema,
+        aliases,
+        qualifier,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary result renaming")
+}
+
+pub(super) fn rename_schema_with_control(
+    schema: &RowSchema,
+    aliases: &[String],
+    qualifier: Option<&str>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    RowSchema::renamed_with_control(schema, aliases, qualifier, control)
 }

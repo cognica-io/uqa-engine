@@ -14,12 +14,26 @@ pub use uqa_core::catalog_role::RoleIdentity;
 use uqa_core::memory::ProductionControl;
 
 /// A selected role keeps its incarnation even if another role later reuses its name or OID.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RoleBinding {
     pub name: String,
     pub oid: u32,
     pub object_id: [u8; 16],
+    #[serde(skip)]
+    memory: Option<uqa_core::memory::MemoryReservation>,
 }
+
+impl Clone for RoleBinding {
+    fn clone(&self) -> Self {
+        Self::new(self.name.clone(), self.oid, self.object_id)
+    }
+}
+impl PartialEq for RoleBinding {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.oid == other.oid && self.object_id == other.object_id
+    }
+}
+impl Eq for RoleBinding {}
 
 /// Explicit SQL names are resolved against the current catalog; captured authority retains its incarnation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +56,45 @@ impl From<&str> for RoleReference {
 }
 
 impl RoleReference {
+    pub fn from_identity_with_control(
+        identity: RoleIdentity,
+        roles: &BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let role = identity
+            .role_definition_with_control(roles, control)?
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "role identity references a missing or replaced incarnation".into(),
+                )
+            })?;
+        let oid = RoleBinding::validated_oid(role)?;
+        let header = control.reserve(std::mem::size_of::<RoleBinding>())?;
+        let (name, memory) = control.copy_text(&role.name)?.into_parts();
+        control.check()?;
+        Ok(Self::Bound(Arc::new(RoleBinding {
+            name,
+            oid,
+            object_id: role.object_id,
+            memory: control.combine(header, memory),
+        })))
+    }
+
+    pub fn clone_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, SQLError> {
+        control.check()?;
+        let (reference, memory) = match self {
+            Self::Named(name) => {
+                let (name, memory) = control.copy_text(name)?.into_parts();
+                (Self::Named(name), memory)
+            }
+            Self::Bound(role) => (Self::Bound(role.clone()), control.empty_reservation()),
+        };
+        Ok(control.finish(reference, memory)?)
+    }
+
     pub fn from_identity(
         identity: RoleIdentity,
         roles: &BTreeMap<String, RoleDefinition>,
@@ -114,6 +167,21 @@ impl RoleSubject for RoleReference {
 }
 
 impl RoleBinding {
+    pub fn new(name: String, oid: u32, object_id: [u8; 16]) -> Self {
+        Self {
+            name,
+            oid,
+            object_id,
+            memory: None,
+        }
+    }
+
+    pub fn reserved_bytes(&self) -> usize {
+        self.memory
+            .as_ref()
+            .map_or(0, uqa_core::memory::MemoryReservation::bytes)
+    }
+
     pub fn identity(&self) -> RoleIdentity {
         RoleIdentity {
             oid: i64::from(self.oid),
@@ -122,18 +190,18 @@ impl RoleBinding {
     }
 
     pub fn from_definition(role: &RoleDefinition) -> Result<Self, SQLError> {
+        let oid = Self::validated_oid(role)?;
+        Ok(Self::new(role.name.clone(), oid, role.object_id))
+    }
+
+    fn validated_oid(role: &RoleDefinition) -> Result<u32, SQLError> {
         if role.oid <= 0 {
             return Err(SQLError::Internal("invalid role OID".into()));
         }
         if role.object_id == [0; 16] {
             return Err(SQLError::Internal("role has no object identity".into()));
         }
-        Ok(Self {
-            name: role.name.clone(),
-            oid: u32::try_from(role.oid)
-                .map_err(|_| SQLError::Internal("invalid role OID".into()))?,
-            object_id: role.object_id,
-        })
+        u32::try_from(role.oid).map_err(|_| SQLError::Internal("invalid role OID".into()))
     }
 
     /// Retain the original incarnation through name changes before publishing a stored role reference.

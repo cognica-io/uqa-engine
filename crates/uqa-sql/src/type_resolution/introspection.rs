@@ -23,7 +23,8 @@ mod enums;
 mod helpers;
 mod membership;
 mod owned;
-pub use owned::bind_type_introspection_owned;
+pub(crate) use owned::bind_stored_inputs_owned;
+pub use owned::{bind_type_introspection_owned, validate_catalog_literals_with_control};
 mod pattern;
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types.
@@ -69,23 +70,13 @@ pub fn validate_catalog_literals(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
-    if !resolver
-        .enum_labels()
-        .is_some_and(crate::expr::enums::EnumLabelCatalog::has_enum_types)
-    {
-        return Ok(());
-    }
-    let control = ProductionControl::uncontrolled();
-    let expression = control.finish(expression.clone(), None)?;
-    bind_owned(
+    validate_catalog_literals_with_control(
         expression,
         schema,
         params,
-        Some(resolver),
-        &control,
-        LiteralBinding::Validate,
+        resolver,
+        &ProductionControl::uncontrolled(),
     )
-    .map(drop)
 }
 
 /// Bind a copy of a stored expression as parse analysis does, so the caller can keep the enum constants that binding coerces from `unknown` literals. Returns `None` when the statement catalog defines no enum type. Input that no label matches stays unconverted for the literal's own validation to report.

@@ -670,7 +670,7 @@ mod tests {
         use uqa_sql::ColumnType;
 
         let fields: uqa_sql::schema::RecordFields =
-            Arc::from([Some(ColumnType::SmallInteger), Some(ColumnType::Text)]);
+            vec![Some(ColumnType::SmallInteger), Some(ColumnType::Text)].into();
         let bound = RowSchema::with_types(
             vec!["first".into(), "second".into(), "record".into()],
             vec![
@@ -680,7 +680,7 @@ mod tests {
             ],
         )
         .with_column_collations([Some(950), Some(951), None])
-        .with_record_fields([(2, Arc::clone(&fields))]);
+        .with_record_fields([(2, fields.clone())]);
         let input = RowSchema::with_types(
             vec!["hidden".into(), "text".into(), "record".into()],
             vec![
@@ -718,9 +718,9 @@ mod tests {
             ));
         }
         assert_eq!(result.lock_origins().len(), 1);
-        assert!(Arc::ptr_eq(
-            batches[0].schema.record_fields(2).unwrap(),
-            &fields
+        assert!(std::ptr::eq(
+            &raw const **batches[0].schema.record_fields(2).unwrap(),
+            &raw const *fields
         ));
     }
 

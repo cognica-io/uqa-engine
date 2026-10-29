@@ -49,6 +49,7 @@ fn repeated_patterns_compile_once_and_release_the_complete_retained_owner() {
     }
     assert_eq!(COMPILES.get() - before, 1);
     assert!(budget.used() > 0);
+    assert_eq!(cache.reserved_bytes(), budget.used());
     drop(scope);
     drop(cache);
     assert_eq!(budget.used(), 0);
@@ -568,4 +569,33 @@ fn completed_compilations_transfer_only_their_live_bytes_to_retention() {
         assert_eq!(scratch.used(), 0);
         assert_eq!(retained.used(), 0);
     }
+}
+
+#[test]
+fn retained_observation_excludes_entries_owned_by_active_calls() {
+    let budget = MemoryBudget::new(1 << 20);
+    let cache = Arc::new(RegexCache::new(budget.clone()));
+    let scope = RegexCacheScope::enter(Some(cache.clone()));
+    predicate(
+        "^(a|ab)+$",
+        REG_ADVANCED,
+        950,
+        "abab",
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
+    let before = budget.used();
+    let observed = allocation_counter::measure(|| assert_eq!(cache.reserved_bytes(), before));
+    assert_eq!(observed.count_total, 0);
+    let active = cache.take("^(a|ab)+$", REG_ADVANCED, 950).unwrap();
+    let active_bytes = active.pattern.capacity() + active.regex.reserved_bytes();
+    assert_eq!(cache.reserved_bytes(), before - active_bytes);
+    assert_eq!(budget.used(), before);
+    drop(active);
+    assert_eq!(budget.used(), cache.reserved_bytes());
+    cache.clear();
+    assert_eq!(cache.reserved_bytes(), 0);
+    drop(scope);
+    drop(cache);
+    assert_eq!(budget.used(), 0);
 }

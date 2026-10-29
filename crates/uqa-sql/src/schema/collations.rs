@@ -13,6 +13,7 @@ use super::{
 use crate::catalog::type_metadata::pg_type_collation_oid;
 use uqa_core::memory::OwnedMap as BTreeMap;
 
+pub(super) mod composition;
 mod production;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -24,7 +25,7 @@ struct Bindings {
     aliases: BTreeMap<ColumnIdentity, u32>,
     internal: BTreeMap<InternalColumnRef, u32>,
     virtual_columns: BTreeMap<ColumnIdentity, u32>,
-    _memory: super::production::lease::SchemaMemory,
+    memory: super::production::lease::SchemaMemory,
 }
 
 /// A selected collation belongs to a logical identity even when its physical value is NULL or shared with another identity.
@@ -367,14 +368,18 @@ impl RowSchema {
 
     pub fn qualified_collation(&self, qualifier: &str, name: &str) -> Option<u32> {
         let identity = ColumnIdentity::qualified(qualifier, name);
-        if self.index.ambiguous_qualified.contains(&identity) {
+        self.qualified_identity_collation(&identity)
+    }
+
+    pub(crate) fn qualified_identity_collation(&self, identity: &ColumnIdentity) -> Option<u32> {
+        if self.index.ambiguous_qualified.contains(identity) {
             return None;
         }
         self.index
             .qualified
-            .get(&identity)
+            .get(identity)
             .and_then(|position| self.column_collation(*position))
-            .or_else(|| self.hidden_collation(&identity))
+            .or_else(|| self.hidden_collation(identity))
     }
 
     fn hidden_collation(&self, identity: &ColumnIdentity) -> Option<u32> {

@@ -48,11 +48,7 @@ pub fn evaluate_with_control(
     let Some(engine) = engine else {
         return control.copy_value(value).map_err(Into::into);
     };
-    let ty = engine
-        .resolve_type_name(ty)
-        .map_err(SQLError::Internal)?
-        .map(|ty| ty.retain_external_with_control(control))
-        .transpose()?;
+    let ty = engine.resolve_type_name_with_control(ty, control)?;
     control.check()?;
     match ty.as_deref() {
         Some(ty) => materialize(value, ty, engine, control),

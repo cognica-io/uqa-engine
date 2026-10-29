@@ -50,7 +50,7 @@ pub fn eval_builtin_function_call_with_control(
         ));
     }
     if let (Some(binding), Some(hook)) = (binding, context.engine) {
-        hook.require_builtin_execute(binding)?;
+        hook.require_builtin_execute_with_control(binding, control)?;
     }
     if crate::semantics::sets::static_setness::builtin_call_returns_set(name, binding) {
         return Err(crate::semantics::sets::placement::set_valued_call_error());

@@ -20,6 +20,75 @@ use uqa_planner::{
 use uqa_sql::{ast::OperatorJoinRelations, SQLError, ScalarExpr};
 
 impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
+    fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        uqa_sql::plan::ExecutablePlanOptimizer::planning_control(&self.statement_planning_context())
+    }
+    fn plan_owned_for_execution(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[uqa_sql::SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_owned_for_execution(
+            &self.statement_planning_context(),
+            plan,
+            params,
+            control,
+        )
+    }
+    fn plan_owned_with_result(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[uqa_sql::SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        (
+            uqa_sql::plan::SharedExecutablePlan,
+            uqa_sql::binding::statements::AnalyzedResult,
+        ),
+        SQLError,
+    > {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_owned_with_result(
+            &self.statement_planning_context(),
+            plan,
+            params,
+            control,
+        )
+    }
+    fn plan_owned_for_statement_cache(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[uqa_sql::SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(uqa_sql::plan::SharedExecutablePlan, bool), SQLError> {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_owned_for_statement_cache(
+            &self.statement_planning_context(),
+            plan,
+            params,
+            control,
+        )
+    }
+    fn plan_owned_with_cached_analysis(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[uqa_sql::SQLParam],
+        cached: Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        (
+            uqa_sql::plan::SharedExecutablePlan,
+            Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        ),
+        SQLError,
+    > {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_owned_with_cached_analysis(
+            &self.statement_planning_context(),
+            plan,
+            params,
+            cached,
+            control,
+        )
+    }
     fn plan_with_cached_analysis(
         &self,
         plan: uqa_sql::plan::UnifiedPlan,
@@ -211,6 +280,14 @@ impl uqa_planner::statement_planning::executable::StatementOptimizationContexts 
             uqa_execution::scalar::RetainedConstants::new(bytes),
         )))
     }
+    fn constant_storage_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Arc<dyn uqa_sql::ir::ConstantValueStorage>>, SQLError> {
+        let bytes =
+            uqa_execution::query::runtime::QueryMemorySettings::work_mem_bytes(&*self.session)?;
+        uqa_execution::scalar::RetainedConstants::shared_with_control(bytes, control).map(Some)
+    }
     fn builtin_permissions(
         &self,
     ) -> Option<Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>>
@@ -219,6 +296,16 @@ impl uqa_planner::statement_planning::executable::StatementOptimizationContexts 
     }
     fn statistics(&self) -> StatementStatisticsContext<'_> {
         self.statement_statistics_context()
+    }
+
+    fn builtin_permissions_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        Option<Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>>,
+        SQLError,
+    > {
+        uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions::shared_with_control(&self.catalog_execution(), control).map(Some)
     }
     fn rule_inputs(&self) -> RuleInputPlanningContext<'_> {
         self.rule_input_planning_context()
@@ -238,9 +325,10 @@ impl uqa_planner::statement_planning::executable::StatementOptimizationContexts 
     }
 }
 
+#[cfg(test)]
 pub(crate) fn estimate_engine_plan(
     engine: &Engine,
-    plan: &uqa_planner::UnifiedPlan,
+    plan: &uqa_sql::plan::UnifiedPlan,
 ) -> Result<uqa_planner::plan_cost::PlanCost, SQLError> {
     uqa_planner::statement_planning::executable::estimate_plan(
         &engine.statement_planning_context(),
@@ -269,6 +357,25 @@ pub(crate) fn optimize_engine_plan(
 }
 
 impl uqa_sql::routines::inlining::RoutinePlanExpressions for Engine {
+    fn evaluate_constant_routine_with_control(
+        &self,
+        expression: &ScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_core::Value>, SQLError> {
+        let scope =
+            crate::capabilities::query_scope::new_for_current_routine_with_control(self, control)?;
+        let hook = crate::capabilities::query_expressions::ScopedEngineHook::new(self, &scope);
+        uqa_execution::query::catalog_expression::evaluate_catalog_scalar_with_control(
+            expression.copy_for_rewrite(control)?,
+            &uqa_sql::ResultRow::new(),
+            &uqa_sql::RowSchema::default(),
+            &[],
+            &hook,
+            control,
+            Ok,
+        )
+    }
+
     fn evaluate_constant_routine(
         &self,
         expression: &ScalarExpr,

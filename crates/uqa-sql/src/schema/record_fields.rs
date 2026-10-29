@@ -9,7 +9,11 @@
 use super::{Arc, ColumnType, RowSchema, SchemaMap};
 
 /// A record's analyzed field types. Runtime values cannot distinguish SQL integer widths or a NULL field's declared type.
-pub type RecordFields = Arc<[Option<ColumnType>]>;
+mod ownership;
+#[cfg(test)]
+mod ownership_tests;
+pub use ownership::RecordFields;
+pub(crate) use ownership::RecordMemory;
 
 /// Comparison field types and a selectable tuple descriptor are independent. A set operation can select fields through its left input even when its rows do not share field types.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +34,7 @@ pub(crate) struct RecordDescriptor {
     pub types: RecordFields,
     pub names: Option<Box<[String]>>,
     pub fields: Box<[RecordFieldMetadata]>,
+    pub(crate) memory: ownership::RecordMemory,
 }
 
 impl RecordDescriptor {
@@ -167,6 +172,7 @@ mod tests {
         let fields: RecordFields =
             vec![Some(ColumnType::Integer), Some(ColumnType::BigInteger)].into();
         let descriptor = Arc::new(RecordDescriptor {
+            memory: RecordMemory::default(),
             types: fields.clone(),
             names: None,
             fields: vec![
@@ -217,7 +223,7 @@ mod tests {
                     .as_ref()
                     .unwrap()
             ));
-            assert!(Arc::ptr_eq(&fields, schema.record_fields(0).unwrap()));
+            assert!(fields.shares_storage(schema.record_fields(0).unwrap()));
         }
         assert!(Arc::ptr_eq(
             &descriptor,

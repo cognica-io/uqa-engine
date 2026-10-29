@@ -112,7 +112,9 @@ pub(crate) fn analyze_routine_body_argument(
         analysis.parameters.coerce_unknown(&mut observed, target)?;
     }
     analysis.parameters.finish()?;
-    Ok(observed.ty)
+    Ok(observed
+        .ty
+        .map(super::ownership::AnalysisType::into_ordinary))
 }
 
 /// Prepare CALL's chosen inputs before publishing a procedural source site.
@@ -187,7 +189,12 @@ pub(crate) fn read_procedure_inputs(
         .collect::<Result<Vec<_>, _>>()?;
     let argument_types = expressions
         .iter()
-        .map(|expression| expression.ty.clone())
+        .map(|expression| {
+            expression
+                .ty
+                .clone()
+                .map(super::ownership::AnalysisType::into_ordinary)
+        })
         .collect::<Vec<_>>();
     let resolved = call.resolve_types(name, overloads, &argument_types)?;
     for (expression, target) in expressions

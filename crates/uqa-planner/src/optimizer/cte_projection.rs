@@ -6,6 +6,8 @@
 
 //! Remove unobserved folded CTE outputs before their constant expressions are evaluated.
 
+pub(super) mod owned;
+
 use crate::{AggregateClassifier, QueryPlan, RelationalPlan};
 use uqa_core::memory::{ProductionControl, ProductionMap, ProductionVec};
 use uqa_sql::{semantics::volatility::VolatilityCatalog, SQLError};
@@ -141,21 +143,70 @@ mod tests {
     #[test]
     fn folded_cte_demand_precedes_constant_evaluation_and_preserves_materialization() {
         for (sql, removed) in [
-            ("WITH q AS (SELECT lower('a') l,upper('a') u) SELECT l FROM q", true),
-            ("WITH q(a,b) AS (SELECT lower('a'),upper('a')) SELECT x FROM q AS r(x,y)", true),
-            ("WITH q AS MATERIALIZED (SELECT lower('a') l,upper('a') u) SELECT l FROM q", false),
-            ("WITH q AS (SELECT lower('a') l,upper('a') u) SELECT a.l FROM q a CROSS JOIN q b", false),
-            ("WITH q AS NOT MATERIALIZED (SELECT lower('a') l,upper('a') u) SELECT a.l FROM q a CROSS JOIN q b", true),
-            ("WITH q AS (SELECT lower('a') l,upper('a') u) SELECT l FROM q WHERE u='A'", false),
-            ("WITH q AS (SELECT lower('a') l,upper('a') u,random() n) SELECT l FROM q", false),
+            (
+                "WITH q AS (SELECT lower('a') l,upper('a') u) SELECT l FROM q",
+                true,
+            ),
+            (
+                "WITH q(a,b) AS (SELECT lower('a'),upper('a')) SELECT x FROM q AS r(x,y)",
+                true,
+            ),
+            (
+                "WITH q AS MATERIALIZED (SELECT lower('a') l,upper('a') u) SELECT l FROM q",
+                false,
+            ),
+            (
+                "WITH q AS (SELECT lower('a') l,upper('a') u) SELECT a.l FROM q a CROSS JOIN q b",
+                false,
+            ),
+            (
+                "WITH q AS NOT MATERIALIZED (SELECT lower('a') l,upper('a') u) SELECT a.l FROM q a CROSS JOIN q b",
+                true,
+            ),
+            (
+                "WITH q AS (SELECT lower('a') l,upper('a') u) SELECT l FROM q WHERE u='A'",
+                false,
+            ),
+            (
+                "WITH q AS (SELECT lower('a') l,upper('a') u,random() n) SELECT l FROM q",
+                false,
+            ),
         ] {
-            let crate::UnifiedPlan::Query(mut query) = crate::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0)) else { panic!("query"); };
+            let crate::UnifiedPlan::Query(mut query) =
+                crate::UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+            else {
+                panic!("query");
+            };
             query.rewrite_scalar_expressions(&mut |expression| {
-                *expression = uqa_sql::bind_type_introspection(expression.clone(), &uqa_sql::RowSchema::default(), &[]);
+                *expression = uqa_sql::bind_type_introspection(
+                    expression.clone(),
+                    &uqa_sql::RowSchema::default(),
+                    &[],
+                );
             });
-            prune(&mut query, &Catalog, &Catalog, None, uqa_core::memory::ProductionControl::uncontrolled()).unwrap();
-            let RelationalPlan::QueryBlock(block) = &query.ctes[0].body.query().unwrap().root else { panic!("block"); };
-            assert_eq!(matches!(block.projections[1].expr, ScalarExpr::TypedLiteral { value: uqa_core::Value::Null, .. }), removed, "{sql}");
+            prune(
+                &mut query,
+                &Catalog,
+                &Catalog,
+                None,
+                uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .unwrap();
+            let RelationalPlan::QueryBlock(block) = &query.ctes[0].body.query().unwrap().root
+            else {
+                panic!("block");
+            };
+            assert_eq!(
+                matches!(
+                    block.projections[1].expr,
+                    ScalarExpr::TypedLiteral {
+                        value: uqa_core::Value::Null,
+                        ..
+                    }
+                ),
+                removed,
+                "{sql}"
+            );
         }
     }
     #[test]

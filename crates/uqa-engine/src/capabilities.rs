@@ -31,10 +31,8 @@ pub(crate) struct CatalogEpochs {
     pub(crate) catalog_registry: u64,
 }
 
-use uqa_execution::catalog::{CatalogDefinitionSnapshot, CatalogReadSnapshot};
-pub(crate) use uqa_execution::catalog::{
-    CatalogReadView, CatalogTableSnapshot, RelationResolution,
-};
+use uqa_execution::catalog::CatalogDefinitionSnapshot;
+pub(crate) use uqa_execution::catalog::{CatalogReadView, RelationResolution};
 
 /// Read-only session values visible to statement execution. Durable registries and storage backends are intentionally absent.
 #[derive(Clone, Copy)]
@@ -236,38 +234,15 @@ impl Engine {
     }
 
     pub(crate) fn catalog_read_view(&self) -> CatalogReadView {
-        if let Some(snapshot) = &self.query_catalog_snapshot {
-            return self.with_sequence_positions(snapshot.read_view.clone());
-        }
-        let mut durable = self.durable.snapshot();
-        durable.graphs = self.visible_graph_handles();
-        let table_sources = self.storage.tables.read().clone();
-        self.with_sequence_positions(self.catalog_read_view_from(&durable, table_sources))
+        self.catalog_read_view_with_control(&uqa_core::memory::ProductionControl::uncontrolled())
+            .expect("ordinary catalog capture")
     }
 
     pub(crate) fn restored_catalog_read_view(&self) -> CatalogReadView {
-        self.with_sequence_positions(
-            self.catalog_read_view_from(
-                &self.durable.snapshot(),
-                self.storage.tables.read().clone(),
-            ),
+        self.restored_catalog_read_view_with_control(
+            &uqa_core::memory::ProductionControl::uncontrolled(),
         )
-    }
-
-    fn with_sequence_positions(&self, view: CatalogReadView) -> CatalogReadView {
-        let Some(positions) = self.shared_sequence_positions() else {
-            return view;
-        };
-        let view = view.with_sequence_positions(positions.clone());
-        // Value records move outside every transaction, so readers of a sequence's state take them from the latest commit.
-        match self.storage.provider.as_ref() {
-            Some(provider) => view.with_latest_sequence_values(Arc::new(
-                uqa_execution::catalog::sequence::latest_values::ProviderSequenceValues::new(
-                    Arc::clone(provider),
-                ),
-            )),
-            None => view,
-        }
+        .expect("ordinary restored catalog capture")
     }
 
     pub(crate) fn catalog_definition_snapshot(
@@ -309,44 +284,15 @@ impl Engine {
     pub(crate) fn catalog_read_view_from(
         &self,
         durable: &DurableCatalogSnapshot,
-        table_sources: BTreeMap<super::RelationIdentity, Arc<super::TableState>>,
+        table_sources: &BTreeMap<super::RelationIdentity, Arc<super::TableState>>,
     ) -> CatalogReadView {
-        #[cfg(test)]
-        tests::record_catalog_capture();
-        let tables = table_sources
-            .into_iter()
-            .map(|(relation, table)| {
-                let snapshot = CatalogTableSnapshot {
-                    dropped_attributes: table.dropped_attributes.snapshot(),
-                    object_id: table.object_id(),
-                    catalog_oids: table.relation_oids(),
-                    row_type_array_name: table.row_type_array_name.read().clone(),
-                    security: table.security.snapshot(),
-                    columns: table.columns.snapshot(),
-                    columns_declared: *table.columns_declared.read(),
-                    checks: table.table_checks.snapshot(),
-                    foreign_keys: table.foreign_keys.snapshot(),
-                    keys: table.key_constraints.snapshot(),
-                    hierarchy: table.hierarchy.snapshot(),
-                    persistence: table.persistence,
-                };
-                (relation, snapshot)
-            })
-            .collect();
-        let view = CatalogReadView::new(CatalogReadSnapshot {
-            tables,
-            definitions: Self::catalog_definition_snapshot(durable),
-            temporary_namespace: self.temporary_namespace_oids().map(|oids| {
-                uqa_sql::catalog::temporary_namespace::TemporaryNamespace {
-                    schema: self.temporary_schema_name(),
-                    oids,
-                }
-            }),
-        });
-        match self.storage.catalog.as_ref() {
-            Some(catalog) => view.with_prepared_catalog(Arc::clone(catalog)),
-            None => view,
-        }
+        self.catalog_read_view_from_with_control(
+            durable,
+            table_sources,
+            None,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary catalog generation capture")
     }
 
     pub(crate) fn session_execution_view(&self) -> SessionExecutionView<'_> {
@@ -595,3 +541,136 @@ mod sequence_restoration;
 mod sequence_values;
 
 mod table_removal;
+
+impl Engine {
+    pub(crate) fn catalog_read_view_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<CatalogReadView, SQLError> {
+        control.check()?;
+        if let Some(snapshot) = &self.query_catalog_snapshot {
+            return self.with_sequence_positions_with_control(snapshot.read_view.clone(), control);
+        }
+        let durable = self.durable.snapshot();
+        let overlay = self
+            .session
+            .state
+            .read()
+            .graph_overlay
+            .as_ref()
+            .map(|overlay| uqa_execution::catalog::GraphCatalogOverlay {
+                names: overlay.names.clone(),
+                store: overlay.store.clone(),
+            });
+        let tables = self.storage.tables.read();
+        let view = self.catalog_read_view_from_with_control(&durable, &tables, overlay, control)?;
+        drop(tables);
+        self.with_sequence_positions_with_control(view, control)
+    }
+
+    pub(crate) fn restored_catalog_read_view_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<CatalogReadView, SQLError> {
+        control.check()?;
+        let durable = self.durable.snapshot();
+        let tables = self.storage.tables.read();
+        let view = self.catalog_read_view_from_with_control(&durable, &tables, None, control)?;
+        drop(tables);
+        self.with_sequence_positions_with_control(view, control)
+    }
+
+    fn with_sequence_positions_with_control(
+        &self,
+        view: CatalogReadView,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<CatalogReadView, SQLError> {
+        let Some(positions) = self.shared_sequence_positions() else {
+            return Ok(view);
+        };
+        let view = view.with_sequence_positions(positions.clone());
+        Ok(match self.storage.provider.as_ref() {
+            Some(provider) => view.with_latest_sequence_values(uqa_execution::catalog::sequence::latest_values::ProviderSequenceValues::shared_with_control(Arc::clone(provider), control)?),
+            None => view,
+        })
+    }
+
+    fn catalog_read_view_from_with_control(
+        &self,
+        durable: &DurableCatalogSnapshot,
+        table_sources: &BTreeMap<uqa_core::RelationIdentity, Arc<crate::TableState>>,
+        graph_overlay: Option<uqa_execution::catalog::GraphCatalogOverlay>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<CatalogReadView, SQLError> {
+        #[cfg(test)]
+        tests::record_catalog_capture();
+        let mut memory = control.empty_reservation();
+        let mut tables = uqa_core::memory::OwnedMap::new();
+        for (relation, table) in table_sources {
+            control.check()?;
+            let reference = uqa_core::RelationReference {
+                schema: Some(uqa_core::RelationName::decoded(&relation.schema)),
+                name: uqa_core::RelationName::decoded(&relation.name),
+            };
+            let (relation, key_memory) = reference
+                .identity_with_control(uqa_core::RelationName::decoded("public"), control)?
+                .into_parts();
+            memory = control.combine(memory, key_memory);
+            let row_type_array_name = table
+                .row_type_array_name
+                .read()
+                .as_ref()
+                .map(|name| control.copy_text(name))
+                .transpose()?;
+            let row_type_array_name = row_type_array_name.map(|name| {
+                let (name, name_memory) = name.into_parts();
+                memory = control.combine(memory.take(), name_memory);
+                name
+            });
+            let table = uqa_execution::catalog::CatalogTableSnapshot {
+                dropped_attributes: table.dropped_attributes.snapshot(),
+                object_id: table.object_id(),
+                catalog_oids: table.relation_oids(),
+                row_type_array_name,
+                security: table.security.snapshot(),
+                columns: table.columns.snapshot(),
+                columns_declared: *table.columns_declared.read(),
+                checks: table.table_checks.snapshot(),
+                foreign_keys: table.foreign_keys.snapshot(),
+                keys: table.key_constraints.snapshot(),
+                hierarchy: table.hierarchy.snapshot(),
+                persistence: table.persistence,
+            };
+            if let Some(budget) = control.budget() {
+                tables.insert_budgeted(relation, table, budget)?;
+            } else {
+                tables.insert(relation, table);
+            }
+        }
+        let temporary_namespace = if let Some(oids) = self.temporary_namespace_oids() {
+            let (schema, schema_memory) = control
+                .format(format_args!("pg_temp_{}", self.session_id))?
+                .into_parts();
+            memory = control.combine(memory, schema_memory);
+            Some(uqa_sql::catalog::temporary_namespace::TemporaryNamespace { schema, oids })
+        } else {
+            None
+        };
+        let view = CatalogReadView::new_with_control(
+            control.finish(
+                uqa_execution::catalog::CatalogReadSnapshot {
+                    tables,
+                    definitions: Self::catalog_definition_snapshot(durable),
+                    graph_overlay,
+                    temporary_namespace,
+                },
+                memory,
+            )?,
+            control,
+        )?;
+        Ok(match self.storage.catalog.as_ref() {
+            Some(catalog) => view.with_prepared_catalog(Arc::clone(catalog)),
+            None => view,
+        })
+    }
+}

@@ -5,7 +5,10 @@
 //
 
 use super::*;
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, RefCell},
+    sync::Arc,
+};
 use uqa_core::Value;
 use uqa_sql::{
     binding::statements::{
@@ -35,16 +38,17 @@ impl Default for Inputs {
         ));
         Self {
             entry: RefCell::new(Some(PreparedStatementPlan {
+                definition_identity: std::sync::Arc::new(()),
                 composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
-                source_plan: logical_plan.clone(),
-                logical_plan,
+                source_plan: logical_plan.clone().into(),
+                logical_plan: logical_plan.into(),
                 needs_analysis: false,
-                effective_search_path: None,
+                effective_search_path: None.into(),
                 dependencies:
-                    uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
-                dependency_snapshot: None,
+                    uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default().into(),
+                dependency_snapshot: None.into(),
                 plan: None,
-                parameter_types: vec![Some(ColumnType::Integer)],
+                parameter_types: vec![Some(ColumnType::Integer)].into(),
                 result_schema: Some(RowSchema::with_types(
                     vec!["value".into()],
                     vec![Some(ColumnType::Integer)],
@@ -102,15 +106,15 @@ impl Inputs {
         .unwrap();
         let mut entry = self.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        entry.source_plan = Arc::new(source);
-        entry.logical_plan = Arc::new(definition.logical_plan);
+        entry.source_plan = source.into();
+        entry.logical_plan = definition.logical_plan.into();
         entry.effective_search_path = definition.effective_search_path;
         entry.parameter_types = definition.parameter_types;
         entry.result_schema = definition.result_schema;
-        entry.source_sql = Some(Arc::from(sql));
+        entry.source_sql = Some(sql.to_owned().into());
         entry.prepared_at_micros = 42;
         entry.from_sql = true;
-        entry.plan = Some(Arc::clone(&entry.logical_plan).into());
+        entry.plan = Some(entry.logical_plan.clone());
         entry.generic_cost = Some(1.0);
         self.events.borrow_mut().clear();
     }
@@ -151,30 +155,36 @@ impl PreparedPlanSession for Inputs {
     fn publish_usage(
         &self,
         name: &str,
-        logical_plan: &Arc<UnifiedPlan>,
+        logical_plan: &uqa_sql::plan::SharedExecutablePlan,
         update: PreparedPlanUpdate,
     ) {
         assert_eq!(name, "saved");
         self.record("publish");
         let mut entry = self.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        assert!(Arc::ptr_eq(&entry.logical_plan, logical_plan));
+        assert!(entry.logical_plan.ptr_eq(logical_plan));
         entry.record_execution(update);
     }
 }
 impl PreparedPlanOptimization for Inputs {
     fn optimize_plan(
         &self,
-        plan: UnifiedPlan,
+        plan: MutableExecutablePlan,
+        control: &ProductionControl<'_>,
     ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
+        let plan = plan.finish(control)?;
         self.record(if has_parameter(&plan) {
             "optimize.generic"
         } else {
             "optimize.custom"
         });
-        Ok(plan.into())
+        plan.into_shared(control)
     }
-    fn estimate_plan(&self, plan: &UnifiedPlan) -> Result<crate::plan_cost::PlanCost, SQLError> {
+    fn estimate_plan(
+        &self,
+        plan: &UnifiedPlan,
+        _control: &ProductionControl<'_>,
+    ) -> Result<crate::plan_cost::PlanCost, SQLError> {
         let generic = has_parameter(plan);
         self.record(if generic {
             "cost.generic"
@@ -376,7 +386,7 @@ fn cached_generic_plan_reuses_its_descriptor_and_only_publishes_usage() {
     {
         let mut entry = inputs.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        entry.plan = Some(Arc::clone(&entry.logical_plan).into());
+        entry.plan = Some(entry.logical_plan.clone());
         entry.generic_cost = Some(1.0);
     }
     assert!(has_parameter(&inputs.select().unwrap().unwrap()));
@@ -402,8 +412,8 @@ fn invalidation_reads_original_inputs_and_only_publishes_successful_analysis() {
     {
         let mut entry = inputs.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        entry.source_plan = Arc::new(source);
-        entry.logical_plan = Arc::new(definition.logical_plan);
+        entry.source_plan = source.into();
+        entry.logical_plan = definition.logical_plan.into();
         entry.effective_search_path = definition.effective_search_path;
         entry.parameter_types = definition.parameter_types;
         entry.result_schema = definition.result_schema;
@@ -438,7 +448,7 @@ fn invalidation_reads_original_inputs_and_only_publishes_successful_analysis() {
     assert_eq!(error.sqlstate(), Some("0A000"));
     let entry = inputs.entry.borrow();
     let entry = entry.as_ref().unwrap();
-    assert!(Arc::ptr_eq(&entry.logical_plan, &identity));
+    assert!(entry.logical_plan.ptr_eq(&identity));
     assert!(entry.needs_analysis);
     assert!(entry.plan.is_none());
     assert_eq!(entry.generic_plans, 3);
@@ -463,9 +473,9 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
         *inputs.events.borrow(),
         ["lookup", "mode", "analysis", "binding", "publish"]
     );
-    assert!(Arc::ptr_eq(
-        &inputs.entry.borrow().as_ref().unwrap().logical_plan,
-        &original.logical_plan,
+    assert!(std::ptr::eq(
+        &raw const *inputs.entry.borrow().as_ref().unwrap().logical_plan,
+        &raw const *original.logical_plan,
     ));
     *inputs.search_path.borrow_mut() = vec!["pg_catalog".into(), "public".into()];
     inputs.events.borrow_mut().clear();
@@ -493,8 +503,8 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
         ]
     );
     let updated = inputs.entry.borrow().as_ref().unwrap().clone();
-    assert!(!Arc::ptr_eq(&updated.logical_plan, &original.logical_plan));
-    assert!(Arc::ptr_eq(&updated.source_plan, &original.source_plan));
+    assert!(!updated.logical_plan.ptr_eq(&original.logical_plan));
+    assert!(updated.source_plan.ptr_eq(&original.source_plan));
     assert_eq!(
         temporal_inputs(updated.plan.as_ref().unwrap()),
         [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
@@ -527,9 +537,9 @@ fn changed_creation_namespace_reanalyzes_inputs_and_replaces_the_cached_plan() {
         temporal_inputs(&inputs.select().unwrap().unwrap()),
         [290_123_456_789 - uqa_core::POSTGRES_EPOCH_MICROS]
     );
-    assert!(Arc::ptr_eq(
-        &inputs.entry.borrow().as_ref().unwrap().logical_plan,
-        &updated.logical_plan,
+    assert!(std::ptr::eq(
+        &raw const *inputs.entry.borrow().as_ref().unwrap().logical_plan,
+        &raw const *updated.logical_plan,
     ));
     assert_eq!(
         *inputs.events.borrow(),
@@ -555,7 +565,7 @@ fn changed_namespace_descriptor_failure_does_not_publish_the_new_analysis() {
     {
         let entry = inputs.entry.borrow();
         let entry = entry.as_ref().unwrap();
-        assert!(Arc::ptr_eq(&entry.logical_plan, &original.logical_plan));
+        assert!(entry.logical_plan.ptr_eq(&original.logical_plan));
         assert_eq!(entry.effective_search_path, original.effective_search_path);
         assert_eq!(
             temporal_inputs(entry.plan.as_ref().unwrap()),
@@ -599,7 +609,7 @@ fn namespace_read_failure_does_not_reuse_or_publish_the_cached_plan() {
     );
     let entry = inputs.entry.borrow();
     let entry = entry.as_ref().unwrap();
-    assert!(Arc::ptr_eq(&entry.logical_plan, &original.logical_plan));
+    assert!(entry.logical_plan.ptr_eq(&original.logical_plan));
     assert_eq!(entry.effective_search_path, original.effective_search_path);
     assert_eq!(
         temporal_inputs(entry.plan.as_ref().unwrap()),
@@ -626,7 +636,7 @@ fn description_reanalysis_preserves_usage_without_building_a_plan() {
         .unwrap()
         .unwrap();
     entry.record_analysis(analysis);
-    assert!(Arc::ptr_eq(&source, &entry.source_plan));
+    assert!(source.ptr_eq(&entry.source_plan));
     assert!(!entry.needs_analysis);
     assert!(entry.plan.is_none());
     assert!(entry.generic_cost.is_none());
@@ -659,7 +669,7 @@ fn description_rejects_changed_shape_before_publication() {
         .err()
         .unwrap();
     assert_eq!(error.sqlstate(), Some("0A000"));
-    assert!(Arc::ptr_eq(&original, &entry.logical_plan));
+    assert!(original.ptr_eq(&entry.logical_plan));
     assert!(entry.needs_analysis);
     assert!(!inputs
         .events

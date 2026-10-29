@@ -12,10 +12,21 @@ use uqa_sql::ast::ColumnType;
 
 use crate::catalog::context::CatalogContext;
 
-use super::super::helpers::type_metadata::{pg_type_array_oid, pg_type_oid};
+use super::super::helpers::type_metadata::pg_type_oid;
 use super::super::schema;
 
-static CATALOG_NAMED_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
+mod oid;
+pub use oid::resolve_catalog_user_type_by_oid_with_control;
+mod production;
+mod resolution;
+pub use production::{
+    catalog_user_type_identity_with_control, catalog_user_type_name_with_control,
+};
+pub use resolution::{
+    resolve_catalog_column_type_name_with_control, resolve_catalog_column_type_with_control,
+};
+
+pub(super) static CATALOG_NAMED_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     let mut domains = schema::information_schema_domains();
     domains.extend(schema::ag_catalog_domains());
     domains.extend([schema::age_graphid(), schema::age_agtype()]);
@@ -68,80 +79,57 @@ pub fn catalog_user_type_identity(
     catalog: &crate::catalog::CatalogReadView,
     identity: uqa_sql::ast::UserTypeIdentity,
 ) -> Option<ColumnType> {
-    let mut resolved = match identity.kind {
-        uqa_sql::ast::UserTypeKind::Range => catalog
-            .ranges()
-            .find(|definition| definition.oid == identity.oid)?
-            .column_type(),
-        uqa_sql::ast::UserTypeKind::Multirange => catalog
-            .ranges()
-            .find(|definition| definition.multirange.oid == identity.oid)?
-            .multirange_type(),
-        uqa_sql::ast::UserTypeKind::Enum => catalog
-            .enums()
-            .find(|definition| definition.oid == identity.oid)?
-            .column_type(),
-        uqa_sql::ast::UserTypeKind::Domain => catalog
-            .domains()
-            .find(|domain| domain.oid == identity.oid)
-            .map(uqa_sql::catalog::domain::StoredDomain::column_type)
-            .or_else(|| uqa_sql::catalog::system_catalog_domain(identity.oid))?,
-        uqa_sql::ast::UserTypeKind::Composite => catalog
-            .composites()
-            .find(|definition| definition.oid == identity.oid)
-            .map(uqa_sql::catalog::composite_type::StoredComposite::column_type)
-            .or_else(|| crate::catalog::composite_type::relations::by_oid(catalog, identity.oid))?,
-    };
-    for _ in 0..identity.dimensions {
-        resolved = ColumnType::Array(Box::new(resolved));
-    }
-    Some(resolved)
+    catalog_user_type_identity_with_control(
+        catalog,
+        identity,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary catalog type projection cannot be cancelled or limited")
+    .map(|ty| {
+        ty.into_uncontrolled()
+            .expect("ordinary catalog type projection")
+    })
 }
 
 /// The `pg_type` OID of a declared routine type. A user-defined type is named by identity; its array type OID is recorded in the catalog.
 pub fn catalog_routine_type_oid(catalog: &crate::catalog::CatalogReadView, type_name: &str) -> i64 {
-    let canonical = uqa_sql::type_resolution::canonical_routine_type_name(type_name);
-    uqa_sql::ast::UserTypeIdentity::parse(&canonical)
-        .and_then(|identity| catalog_user_type_identity(catalog, identity))
-        .map_or_else(
-            || uqa_sql::catalog::type_metadata::routine_type_oid(type_name),
-            |ty| pg_type_oid(&ty),
-        )
+    catalog_routine_type_oid_with_control(
+        catalog,
+        type_name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary catalog routine type identity")
+}
+
+pub fn catalog_routine_type_oid_with_control(
+    catalog: &crate::catalog::CatalogReadView,
+    type_name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<i64, uqa_sql::SQLError> {
+    let canonical =
+        uqa_sql::type_resolution::canonical_routine_type_name_with_control(type_name, control)?;
+    if let Some(identity) = uqa_sql::ast::UserTypeIdentity::parse(&canonical) {
+        if let Some(ty) = catalog_user_type_identity_with_control(catalog, identity, control)? {
+            return Ok(pg_type_oid(&ty));
+        }
+    }
+    uqa_sql::catalog::type_metadata::routine_type_oid_with_control(type_name, control)
 }
 
 pub fn resolve_catalog_user_type_by_oid(
     context: &CatalogContext<'_>,
     oid: u32,
 ) -> Option<ColumnType> {
-    let catalog = context.catalog_read_view();
-    for domain in catalog
-        .domains()
-        .map(uqa_sql::catalog::domain::StoredDomain::column_type)
-        .chain(
-            catalog
-                .enums()
-                .map(uqa_sql::catalog::enum_type::StoredEnum::column_type),
-        )
-        .chain(
-            catalog
-                .composites()
-                .map(uqa_sql::catalog::composite_type::StoredComposite::column_type),
-        )
-        .chain(CATALOG_NAMED_TYPES.iter().cloned())
-        .chain(
-            catalog
-                .ranges()
-                .flat_map(|definition| [definition.column_type(), definition.multirange_type()]),
-        )
-    {
-        if pg_type_oid(&domain) == i64::from(oid) {
-            return Some(domain);
-        }
-        if pg_type_array_oid(&domain) == i64::from(oid) {
-            return Some(ColumnType::Array(Box::new(domain)));
-        }
-    }
-    crate::catalog::composite_type::relations::by_oid(&catalog, oid)
+    resolve_catalog_user_type_by_oid_with_control(
+        context,
+        oid,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary type OID lookup")
+    .map(|ty| {
+        ty.into_uncontrolled()
+            .expect("ordinary type OID descriptor")
+    })
 }
 
 pub fn resolve_catalog_column_type(
@@ -350,3 +338,6 @@ pub(super) fn require_defined(
     }
     Ok(oid)
 }
+
+#[cfg(test)]
+mod tests;

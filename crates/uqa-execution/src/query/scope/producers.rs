@@ -12,20 +12,23 @@ use crate::query::cte::rows::{CteRows, SharedPrefix};
 use crate::{ExecResult, PhysicalOperator};
 use parking_lot::Mutex;
 use std::sync::{Arc, Weak};
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::SQLError;
 
+mod production;
 mod retained;
 
 pub(super) enum CteProducers {
-    Owned(Arc<ProducerList>),
-    Borrowed(Weak<ProducerList>),
+    Owned(Arc<Produced<ProducerList>>),
+    Borrowed(Weak<Produced<ProducerList>>),
 }
 
 pub(super) struct ProducerList(Mutex<Option<Vec<SharedPrefix>>>);
 
 impl Default for CteProducers {
     fn default() -> Self {
-        Self::Owned(Arc::new(ProducerList(Mutex::new(Some(Vec::new())))))
+        Self::with_control(&ProductionControl::uncontrolled())
+            .expect("uncontrolled CTE producer construction")
     }
 }
 
@@ -40,7 +43,7 @@ impl Clone for CteProducers {
 }
 
 impl CteProducers {
-    fn list(&self) -> Result<Arc<ProducerList>, SQLError> {
+    fn list(&self) -> Result<Arc<Produced<ProducerList>>, SQLError> {
         match self {
             Self::Owned(producers) => Some(Arc::clone(producers)),
             Self::Borrowed(producers) => producers.upgrade(),

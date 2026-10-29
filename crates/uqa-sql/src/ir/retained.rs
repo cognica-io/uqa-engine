@@ -6,6 +6,8 @@
 
 //! Immutable evaluated constants share storage without retaining every decoded payload.
 
+pub(crate) mod observation;
+
 use std::{fmt, sync::Arc};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

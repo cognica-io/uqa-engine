@@ -179,6 +179,20 @@ fn merge_owned_vector_thresholds(
     }
 }
 
+pub(super) fn merge_owned(
+    expression: OwnedScalarExpr,
+    storage: &ProductionControl<'_>,
+    scratch: &ProductionControl<'_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    merge_owned_vector_thresholds(
+        expression,
+        MergeControl {
+            storage: *storage,
+            scratch: *scratch,
+        },
+    )
+}
+
 pub(super) fn merge_vector_thresholds(
     expression: ScalarExpr,
     control: &ProductionControl<'_>,
@@ -187,7 +201,11 @@ pub(super) fn merge_vector_thresholds(
         scratch: *control,
         storage: ProductionControl::uncontrolled(),
     };
-    let output = merge_owned_vector_thresholds(OwnedScalarExpr::uncontrolled(expression), control)?;
+    let output = merge_owned(
+        OwnedScalarExpr::uncontrolled(expression),
+        &control.storage,
+        &control.scratch,
+    )?;
     // This entry point consumes an ordinary input and introduces no structural allocation. Controlled plan inputs use the same rewrite with their original storage control.
     let (output, memory) = output.finish(&control.storage)?.into_parts();
     debug_assert!(memory.is_none());

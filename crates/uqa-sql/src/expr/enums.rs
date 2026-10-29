@@ -313,12 +313,27 @@ pub(crate) fn retain_enum_oids(
     catalog: Option<&dyn EnumLabelCatalog>,
     value: &Value,
 ) -> Result<Value> {
-    map_enum_values(value, &mut |label| {
+    retain_enum_oids_with_control(catalog, value, &ProductionControl::uncontrolled()).map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary retained enum value")
+    })
+}
+
+pub(crate) fn retain_enum_oids_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    output::map_with_control(value, control, &mut |label| {
+        control.check()?;
         let oid = match label.label_oid() {
             Some(oid) => oid,
             None => enum_label_oid(catalog, label)?,
         };
-        Ok(Value::Enum(label.clone().with_label_oid(Some(oid))))
+        let memory =
+            control.reserve(EnumValue::retained_header_bytes() + label.key().as_bytes().len())?;
+        Ok(control.finish(Value::Enum(label.clone().with_label_oid(Some(oid))), memory)?)
     })
 }
 

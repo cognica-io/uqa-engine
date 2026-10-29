@@ -89,7 +89,13 @@ fn array_inspection_keeps_concrete_arguments_and_polymorphic_identity() {
             if dimension {
                 types.push(Some(ColumnType::SmallInteger));
             }
-            let targets = selected_argument_targets(name, &types).unwrap();
+            let targets = preparation::selected_argument_targets_with_control(
+                name,
+                &types,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .unwrap()
+            .unwrap();
             assert_eq!(targets[0], Some(ty));
             assert_eq!(budget.used(), actual.reserved_bytes());
             drop(actual);

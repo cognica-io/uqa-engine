@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use crate::{ast::FunctionBinding, ColumnType};
+use uqa_core::Value;
 
 fn literal(ty: ColumnType, value: Value) -> ScalarExpr {
     ScalarExpr::TypedLiteral {
@@ -42,7 +44,7 @@ fn relation_dependencies_distinguish_scalar_oid_inputs_from_arrays_and_parameter
     ]);
     let mut dependencies = PreparedAnalysisDependencies::default();
     dependencies.include_expression(&expression);
-    assert_eq!(dependencies.relations, BTreeSet::from([11, 12, 13]));
+    assert_eq!(dependencies.relations, OwnedSet::from([11, 12, 13]));
     assert!(dependencies.routines.is_empty());
 }
 
@@ -96,10 +98,16 @@ fn builtin_bindings_do_not_become_mutable_routine_dependencies() {
         input_collation: None,
     };
     let mut dependencies = PreparedAnalysisDependencies::default();
-    dependencies.include_routine(&binding);
-    dependencies.include_routine(&binding);
+    dependencies
+        .include_routine_with_control(&binding, &ProductionControl::uncontrolled())
+        .unwrap();
+    dependencies
+        .include_routine_with_control(&binding, &ProductionControl::uncontrolled())
+        .unwrap();
     binding.builtin = true;
     binding.object_id = Some([4; 16]);
-    dependencies.include_routine(&binding);
-    assert_eq!(dependencies.routines, BTreeSet::from([[3; 16]]));
+    dependencies
+        .include_routine_with_control(&binding, &ProductionControl::uncontrolled())
+        .unwrap();
+    assert_eq!(dependencies.routines, OwnedSet::from([[3; 16]]));
 }

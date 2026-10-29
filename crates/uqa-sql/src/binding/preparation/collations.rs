@@ -6,29 +6,44 @@
 
 //! Report collation conflicts only after the containing query has completed type analysis.
 
+use super::ownership::AnalysisMap;
 use crate::catalog::collations::derivation::Derivation;
 use crate::plan::{CommandPlan, QueryPlan, RelationalPlan};
 use crate::{SQLError, ScalarExpr};
-use std::{collections::BTreeMap, ptr::NonNull};
+use std::ptr::NonNull;
 
 /// Only conflicting inputs retain diagnostic metadata. Addresses identify borrowed syntax and are never dereferenced or retained in an executable plan.
 #[derive(Default)]
-pub(in crate::binding) struct PendingCollations(BTreeMap<NonNull<ScalarExpr>, Derivation>);
+pub(in crate::binding) struct PendingCollations(AnalysisMap<NonNull<ScalarExpr>, Derivation>);
 
 impl PendingCollations {
-    pub(in crate::binding) fn append(&mut self, mut other: Self) {
-        self.0.append(&mut other.0);
+    pub(in crate::binding) fn new(control: &uqa_core::memory::ProductionControl<'_>) -> Self {
+        Self(AnalysisMap::new(control))
     }
-    pub(super) fn record(&mut self, expression: &ScalarExpr, selected: Derivation) {
+    pub(in crate::binding) fn append(&mut self, other: Self) {
+        self.0.append(other.0);
+    }
+    pub(super) fn record(
+        &mut self,
+        expression: &ScalarExpr,
+        selected: Derivation,
+    ) -> Result<(), SQLError> {
         if selected.error_only() != Derivation::None {
-            self.0.insert(NonNull::from(expression), selected);
+            self.0.insert(NonNull::from(expression), selected)?;
         }
+        Ok(())
     }
 
-    pub(super) fn record_target(&mut self, expression: &ScalarExpr, selected: Derivation) {
+    pub(super) fn record_target(
+        &mut self,
+        expression: &ScalarExpr,
+        selected: Derivation,
+    ) -> Result<(), SQLError> {
         if matches!(selected, Derivation::Conflict(..)) {
-            self.0.entry(NonNull::from(expression)).or_insert(selected);
+            self.0
+                .insert_if_missing(NonNull::from(expression), || Ok(selected))?;
         }
+        Ok(())
     }
 
     pub(super) fn indeterminate_target(&self, expression: &ScalarExpr) -> bool {
@@ -38,8 +53,12 @@ impl PendingCollations {
         )
     }
 
-    pub(super) fn require_key(&mut self, expression: &ScalarExpr, selected: Derivation) {
-        self.record(expression, selected.key());
+    pub(super) fn require_key(
+        &mut self,
+        expression: &ScalarExpr,
+        selected: Derivation,
+    ) -> Result<(), SQLError> {
+        self.record(expression, selected.key())
     }
 
     pub(super) fn require_key_at(&mut self, expression: NonNull<ScalarExpr>) {

@@ -6,7 +6,7 @@
 
 use super::lease::boxed_text;
 use crate::{
-    schema::{ColumnIdentity, SchemaMap, SchemaSet},
+    schema::{ColumnIdentity, SchemaBuildMetadata, SchemaMap, SchemaSet},
     SQLError,
 };
 use uqa_core::memory::{ProductionControl, ProductionMap};
@@ -22,6 +22,7 @@ pub(super) struct Indexes {
 pub(super) fn produce(
     columns: &[String],
     identities: &[ColumnIdentity],
+    metadata: &SchemaBuildMetadata,
     control: &ProductionControl<'_>,
 ) -> Result<Indexes, SQLError> {
     let exact = SchemaMap::from_produced(
@@ -48,15 +49,33 @@ pub(super) fn produce(
     let ambiguous_unqualified = SchemaSet::from_produced(
         unqualified
             .iter()
-            .filter(|(_, (_, duplicate))| *duplicate)
-            .map(|(name, _)| boxed_text(name, control)),
+            .filter(|(name, (_, duplicate))| {
+                *duplicate
+                    && (!metadata.exact_unqualified_precedence
+                        || !identities.iter().any(|identity| {
+                            identity.qualifier().is_none() && identity.column() == **name
+                        }))
+            })
+            .map(|(name, _)| boxed_text(name, control))
+            .chain(
+                metadata
+                    .extra_ambiguous_unqualified
+                    .iter()
+                    .map(|name| boxed_text(name, control)),
+            ),
         control,
     )?;
     let ambiguous_qualified = SchemaSet::from_produced(
         qualified
             .iter()
             .filter(|(_, (_, duplicate))| *duplicate)
-            .map(|(identity, _)| identity.clone_with_control(control).map_err(Into::into)),
+            .map(|(identity, _)| identity.clone_with_control(control).map_err(Into::into))
+            .chain(
+                metadata
+                    .extra_ambiguous_qualified
+                    .iter()
+                    .map(|identity| identity.clone_with_control(control).map_err(Into::into)),
+            ),
         control,
     )?;
     let unqualified = SchemaMap::from_produced(

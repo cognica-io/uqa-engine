@@ -6,7 +6,7 @@
 
 //! A table-owned namespace for complete occurrence indexes, separate from legacy scalar keys.
 
-use super::codec::{other_error, read_segment, read_str, read_u64};
+use super::codec::{other_error, read_segment, read_str, read_str_ref, read_u64};
 use super::{DocId, StorageBackendResult, TAG_OCCURRENCE_INDEX};
 use crate::TokenTermKey;
 
@@ -114,7 +114,7 @@ fn header(key: &[u8], kind: u8) -> StorageBackendResult<usize> {
         return Err(other_error("invalid occurrence index key"));
     }
     let mut offset = 1;
-    read_str(key, &mut offset)?;
+    read_str_ref(key, &mut offset)?;
     if key.get(offset) != Some(&kind) {
         return Err(other_error("invalid occurrence key kind"));
     }
@@ -149,8 +149,12 @@ pub(super) fn read_document(key: &[u8], kind: u8) -> StorageBackendResult<(DocId
 }
 
 pub(super) fn read_field(key: &[u8]) -> StorageBackendResult<String> {
+    read_field_ref(key).map(str::to_owned)
+}
+
+pub(super) fn read_field_ref(key: &[u8]) -> StorageBackendResult<&str> {
     let mut offset = header(key, FIELD)?;
-    let field = read_str(key, &mut offset)?;
+    let field = read_str_ref(key, &mut offset)?;
     end(key, offset)?;
     Ok(field)
 }

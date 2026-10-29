@@ -100,7 +100,10 @@ impl MutableCommandPlan {
 }
 
 impl CommandQuerySlot {
-    fn query_mut(self, command: &mut CommandPlan) -> Option<&mut QueryPlan> {
+    pub(in crate::plan::mutable) fn query_mut(
+        self,
+        command: &mut CommandPlan,
+    ) -> Option<&mut QueryPlan> {
         match (self, command) {
             (
                 Self::Body,
@@ -125,7 +128,10 @@ impl CommandQuerySlot {
         }
     }
 
-    fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
+    pub(in crate::plan::mutable) fn memory_mut(
+        self,
+        memory: &mut RewriteMemory,
+    ) -> &mut Option<RewriteMemory> {
         let field = match self {
             Self::Body => memory
                 .field_mut("query")
@@ -154,7 +160,9 @@ impl CommandQuerySlot {
     }
 }
 
-fn source_memory(memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
+pub(in crate::plan::mutable) fn source_memory(
+    memory: &mut RewriteMemory,
+) -> &mut Option<RewriteMemory> {
     memory
         .field_mut("value0")
         .as_mut()

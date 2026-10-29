@@ -18,10 +18,11 @@ use super::FunctionTypeResolver;
 
 mod inputs;
 mod signature;
-pub use signature::function_call_argument_signature_with_control;
 pub use inputs::select_common_input_type;
 pub(crate) use inputs::select_common_input_type_in_with_control;
-pub(super) use inputs::{select_common_input_type_with_control, CommonInputType};
+pub(crate) use inputs::select_common_input_type_with_control;
+pub(super) use inputs::CommonInputType;
+pub use signature::function_call_argument_signature_with_control;
 
 /// Inputs whose absent type means `PostgreSQL` `unknown`, rather than an unresolved UQA runtime value.
 pub(super) fn unknown_input(mut expression: &ScalarExpr) -> bool {
@@ -64,8 +65,14 @@ pub fn function_call_argument_signature(
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<FunctionCallArgumentSignature, SQLError> {
     Ok(function_call_argument_signature_with_control(
-        arguments, schema, params, resolver, &ProductionControl::uncontrolled(),
-    )?.into_uncontrolled().expect("ordinary call signature"))
+        arguments,
+        schema,
+        params,
+        resolver,
+        &ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary call signature"))
 }
 
 pub(super) fn local_routine_name(name: &str) -> String {
@@ -190,7 +197,7 @@ pub fn common_context_expression_type(
     })
 }
 
-pub(super) fn common_context_expression_type_with_control(
+pub(crate) fn common_context_expression_type_with_control(
     expression: &ScalarExpr,
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
@@ -256,7 +263,7 @@ pub fn effective_overload_argument_type_with_params(
 }
 
 /// Borrow the same effective argument type before a controlled caller decides whether a payload copy is needed.
-pub(super) fn effective_overload_argument_type_ref_with_params<'a>(
+pub(crate) fn effective_overload_argument_type_ref_with_params<'a>(
     expression: &ScalarExpr,
     resolved: Option<&'a ColumnType>,
     params: &[SQLParam],
@@ -345,14 +352,26 @@ pub(super) fn read_unknown_literals<'a>(
     expressions: impl IntoIterator<Item = &'a ScalarExpr>,
     target: &ColumnType,
 ) -> Result<(), SQLError> {
+    read_unknown_literals_with_control(expressions, target, &ProductionControl::uncontrolled())
+}
+
+pub(super) fn read_unknown_literals_with_control<'a>(
+    expressions: impl IntoIterator<Item = &'a ScalarExpr>,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     if super::catalog_input_type(target) {
         return Ok(());
     }
-    // `coerce_type` hands the literal to the target type's input function, so the diagnostic is the input function's.
-    let target = base_type(target).without_type_modifiers().catalog_name();
+    let target = base_type(target).without_type_modifiers_with_control(control)?;
+    let name = target.catalog_name_with_control(control)?;
     for expression in expressions {
+        control.check()?;
         if let ScalarExpr::Literal(Value::Str(text)) = expression {
-            crate::expr::cast_value_from(&Value::Str(text.clone()), &target, None)?;
+            let (text, memory) = control.copy_text(text)?.into_parts();
+            let input = control.finish(Value::Str(text), memory)?;
+            crate::expr::cast_value_from_with_control(&input, &name, None, control)?;
         }
     }
     Ok(())

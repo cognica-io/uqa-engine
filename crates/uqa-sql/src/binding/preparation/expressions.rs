@@ -7,6 +7,7 @@
 //! Scalar coercion contexts used while preparing a statement.
 
 use super::function_calls::FunctionResult;
+use super::ownership::AnalysisType;
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
 };
@@ -22,26 +23,26 @@ impl Preparation<'_> {
         &mut self,
         context: crate::type_resolution::CommonTypeContext,
         values: &mut [ExpressionType],
-    ) -> Result<Option<ColumnType>, SQLError> {
+    ) -> Result<Option<AnalysisType>, SQLError> {
         if values.iter().all(|value| value.ty.is_none())
             && values.iter().any(ExpressionType::is_deferred)
         {
             return Ok(None);
         }
+        let control_owner = self.scope.control().capture();
+        let control = control_owner.control();
         let common = crate::type_resolution::select_common_input_type_in_with_control(
             context,
             values
                 .iter()
                 .filter(|value| !value.is_deferred())
-                .map(|value| value.ty.as_ref()),
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )?
-        .into_uncontrolled()
-        .expect("preparation common type has no reservation");
+                .map(|value| value.ty.as_deref()),
+            &control,
+        )?;
         for value in values {
             self.parameters.coerce_unknown(value, &common)?;
         }
-        Ok(Some(common))
+        Ok(Some(AnalysisType::from_produced(common, &control)?))
     }
 
     pub(super) fn binary(
@@ -49,7 +50,7 @@ impl Preparation<'_> {
         op: BinaryOp,
         left: &mut ExpressionType,
         right: &mut ExpressionType,
-    ) -> Result<ColumnType, SQLError> {
+    ) -> Result<AnalysisType, SQLError> {
         let [_, _, result] = self.binary_types(op, left, right)?;
         Ok(result)
     }
@@ -59,12 +60,22 @@ impl Preparation<'_> {
         op: BinaryOp,
         left: &mut ExpressionType,
         right: &mut ExpressionType,
-    ) -> Result<[ColumnType; 3], SQLError> {
-        let selected =
-            crate::type_resolution::binary_operator_types(op, left.ty.as_ref(), right.ty.as_ref())?;
+    ) -> Result<[AnalysisType; 3], SQLError> {
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let selected = crate::type_resolution::binary_operator_types_with_control(
+            op,
+            left.ty.as_deref(),
+            right.ty.as_deref(),
+            &control,
+        )?;
         self.parameters.coerce_unknown(left, &selected[0])?;
         self.parameters.coerce_unknown(right, &selected[1])?;
-        Ok(selected)
+        Ok([
+            AnalysisType::from_produced(selected[0].clone_with_control(&control)?, &control)?,
+            AnalysisType::from_produced(selected[1].clone_with_control(&control)?, &control)?,
+            AnalysisType::from_produced(selected[2].clone_with_control(&control)?, &control)?,
+        ])
     }
 
     pub(super) fn expression(
@@ -73,12 +84,56 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
+        if let Some(outer) = self.scope.stored_expression_outer.as_ref() {
+            let identity = match expression {
+                ScalarExpr::Column(column) => Some((None, column.as_str())),
+                ScalarExpr::QualifiedColumn { qualifier, column } => {
+                    Some((Some(qualifier.as_str()), column.as_str()))
+                }
+                _ => None,
+            };
+            if let (Some((qualifier, column)), Some(start)) = (
+                identity,
+                input.physical_width().checked_sub(outer.physical_width()),
+            ) {
+                let identity = crate::ColumnIdentity::from_parts_with_control(
+                    qualifier,
+                    column,
+                    &self.scope.control(),
+                )?;
+                if let Some(slot) = input
+                    .physical_slot_for_identity(&identity)
+                    .filter(|slot| *slot >= start)
+                {
+                    if let Some(column) = outer.unique_internal_column_for_slot(slot - start) {
+                        self.parameters
+                            .retain_stored_reference(expression, column)?;
+                    }
+                }
+            }
+        }
         let value = self.expression_inner(expression, input, subqueries)?;
         self.parameters
             .collations
-            .record(expression, value.derivation);
+            .record(expression, value.derivation)?;
         self.parameters
             .retain_result_metadata_for(expression, &value)?;
+        if self.parameters.retains_composite_inputs()
+            && crate::binding::composite_inputs::owned::selected(expression)
+        {
+            let control_owner = self.scope.control().capture();
+            let control = control_owner.control();
+            let parameters = self.parameters.values()?;
+            let replacement = self.scope.retain_composite_inputs_in_scope_owned(
+                self.routines,
+                expression.copy_for_rewrite(&control)?,
+                input,
+                subqueries,
+                &parameters,
+            )?;
+            self.parameters
+                .retain_composite_input(expression, replacement)?;
+        }
         Ok(value)
     }
 
@@ -92,8 +147,26 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
+        if let Some(sites) = self.scope.variable_sites.as_mut() {
+            if let Some(site) = sites.site(expression) {
+                if super::super::variable_sites::takes(input, &sites.names[site]) {
+                    sites.resolutions.as_mut_slice()[site] =
+                        super::super::VariableSiteResolution::Column;
+                    let owner = self.scope.control().capture();
+                    let control = owner.control();
+                    let name = self
+                        .scope
+                        .variable_sites
+                        .as_ref()
+                        .expect("variable site scope")
+                        .names[site]
+                        .copy_for_rewrite(&control)?;
+                    return self.expression_inner(&name, input, subqueries);
+                }
+            }
+        }
         if let Some(index) = self.scope.routine_parameter_reference(expression, input) {
-            return self.parameters.reference(index);
+            return self.parameters.named_reference(expression, index);
         }
         self.check_schema_subquery(expression)?;
         if let ScalarExpr::Func {
@@ -130,7 +203,7 @@ impl Preparation<'_> {
                     selected.dispatch = Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(
                         access.slice_bounds().expect("slice bounds"),
                     ));
-                    self.parameters.retain_call(expression, &selected);
+                    self.parameters.retain_call(expression, &selected)?;
                 }
                 return self.array_access(access, args, input, subqueries);
             }
@@ -150,11 +223,11 @@ impl Preparation<'_> {
             let oid = crate::catalog::collations::expression::select(
                 clause.name,
                 clause.oid,
-                value.ty.as_ref(),
+                value.ty.as_deref(),
                 Some(self.routines),
             )?;
             self.parameters
-                .retain_collation(expression, &mut value, oid);
+                .retain_collation(expression, &mut value, oid)?;
             return Ok(value);
         }
         if self.schema_expression.is_some() {
@@ -174,9 +247,10 @@ impl Preparation<'_> {
             }
             ScalarExpr::Param(index) => self.parameters.reference(*index),
             ScalarExpr::Literal(Value::Null) => Ok(ExpressionType::unknown()),
-            ScalarExpr::Literal(Value::Str(text)) => {
-                Ok(ExpressionType::unknown_literal(expression, text.clone()))
-            }
+            ScalarExpr::Literal(Value::Str(text)) => Ok(ExpressionType::unknown_literal_produced(
+                expression,
+                self.scope.control().copy_text(text)?,
+            )),
             ScalarExpr::Collated {
                 expr,
                 ty,
@@ -235,7 +309,7 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        if matches!(result.ty, Some(ColumnType::Record)) {
+        if matches!(result.ty.as_deref(), Some(ColumnType::Record)) {
             result.record_variable =
                 crate::type_resolution::field_selection::is_column_reference(expression);
             if let Some(metadata) = input.input_record_metadata(expression) {
@@ -244,7 +318,8 @@ impl Preparation<'_> {
             } else if let Some(qualifier) =
                 crate::type_resolution::field_selection::whole_row_qualifier(expression, input)
             {
-                let descriptor = super::fields::whole_row_descriptor(input, qualifier);
+                let descriptor =
+                    super::fields::whole_row_descriptor(input, qualifier, &self.scope.control())?;
                 result.record_fields = Some(descriptor.types.clone());
                 result.record_descriptor = Some(descriptor);
             } else if result.record_fields.is_none() {
@@ -253,7 +328,7 @@ impl Preparation<'_> {
                     expression,
                     input,
                     subqueries,
-                    &self.parameters.values(),
+                    &self.parameters.values()?,
                 )?;
             }
         }
@@ -267,39 +342,49 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
-        let mut fields = Vec::new();
+        let control_owner = self.scope.control().capture();
+        let control = control_owner.control();
+        let mut fields = super::ownership::AnalysisVec::new(&control);
         let mut expanded = self.parameters.take_row_expansion(expression);
         let mut expansion = 0;
         for (position, item) in items.iter().enumerate() {
             if matches!(item, ScalarExpr::QualifiedStar(_)) {
                 if expansion == expanded.len() {
-                    let columns = crate::semantics::row_star_fields(item, input)?
-                        .expect("qualified row star");
-                    expanded.push((position, columns));
+                    let columns =
+                        crate::semantics::row_star_fields_with_control(item, input, &control)?
+                            .expect("qualified row star");
+                    expanded.push((position, columns), &control)?;
                 }
-                for column in &expanded[expansion].1 {
-                    fields.push(self.expression(column, input, subqueries)?);
+                for column in expanded[expansion].1.iter() {
+                    fields.push(self.expression(column, input, subqueries)?, &control)?;
                 }
                 expansion += 1;
             } else {
-                fields.push(self.expression(item, input, subqueries)?);
+                fields.push(self.expression(item, input, subqueries)?, &control)?;
             }
         }
-        self.parameters.retain_row_expansion(expression, expanded);
+        self.parameters.retain_row_expansion(expression, expanded)?;
         let mut value = ExpressionType::independent(Some(ColumnType::Record), &fields);
-        value.record_fields = Some(fields.iter().map(|field| field.ty.clone()).collect());
-        value.record_descriptor = Some(std::sync::Arc::new(crate::schema::RecordDescriptor {
-            types: value.record_fields.clone().expect("ROW fields"),
-            names: None,
-            fields: fields
-                .iter()
-                .map(|field| crate::schema::RecordFieldMetadata {
-                    collation_oid: u32::try_from(field.derivation.oid())
-                        .expect("ROW field collation OID"),
-                    sql_unknown: field.is_sql_unknown(),
-                })
-                .collect(),
-        }));
+        let record_types = crate::schema::RecordFields::from_types_with_control(
+            fields.iter().map(|field| field.ty.as_deref()),
+            &control,
+        )?;
+        let mut metadata = uqa_core::memory::ProductionVec::new(control);
+        metadata.reserve(fields.len())?;
+        for field in &fields {
+            metadata.push_copy(crate::schema::RecordFieldMetadata {
+                collation_oid: u32::try_from(field.derivation.oid())
+                    .expect("ROW field collation OID"),
+                sql_unknown: field.is_sql_unknown(),
+            })?;
+        }
+        value.record_descriptor = Some(crate::schema::RecordDescriptor::from_parts_with_control(
+            record_types.clone(),
+            None,
+            metadata.finish()?,
+            &control,
+        )?);
+        value.record_fields = Some(record_types);
         value.row_constructor = Some(fields);
         Ok(value)
     }
@@ -392,7 +477,7 @@ impl Preparation<'_> {
                     additional.diagnostics,
                 )
             }
-            _ => ExpressionType::resolved(self.known_type(expression, input, subqueries)?),
+            _ => ExpressionType::resolved_owned(self.known_type(expression, input, subqueries)?),
         })
     }
 
@@ -441,19 +526,7 @@ impl Preparation<'_> {
         } else {
             self.select_function_arguments(name, binding, args, &arguments)?
         };
-        selected.validate_modifiers(
-            name,
-            binding,
-            args,
-            super::super::ordered_calls::Modifiers {
-                direct: super::super::ordered_calls::DirectArguments::from(args.as_slice()),
-                ordered: order_by.len(),
-                within_group,
-                distinct: *distinct,
-                filtered: filter.is_some(),
-            },
-            &arguments,
-        )?;
+        selected.validate_call_modifiers(expression, within_group, &arguments)?;
         // Pure name/signature validation must finish before implicit input
         // conversion: a rejected scalar call cannot run a domain CHECK.
         if within_group && selected.overload.is_none() {
@@ -475,13 +548,21 @@ impl Preparation<'_> {
         let result =
             self.coerce_function_arguments(name, binding, args, &mut arguments, &selected)?;
         let input_collation = arguments.input_collation(args.len(), selected.kind, within_group)?;
-        let mut selected = selected.overload;
-        self.keep_call_selection(expression, &arguments, input_collation, selected.as_mut());
+        let selected =
+            self.keep_call_selection(expression, &arguments, input_collation, selected.overload)?;
         // Keep the result selected from the observed occurrences: a later sibling can determine a parameter's type after an earlier COLLATE operand was admitted as unknown, so retyping that syntax loses its state.
         let (ty, dispatched) = match (result, &selected) {
             (FunctionResult::Bound(ty, binding), _) => (Some(ty), Some(binding)),
             (FunctionResult::Selected(ty), _) => (ty, None),
-            (_, Some(selected)) => (Some(selected.return_type.clone()), None),
+            (_, Some(selected)) => (
+                Some(super::ownership::AnalysisType::from_produced(
+                    selected
+                        .return_type
+                        .clone_with_control(&self.scope.control())?,
+                    &self.scope.control(),
+                )?),
+                None,
+            ),
             (FunctionResult::Unselected, None) => (
                 self.observed_call_type(expression, &arguments, &additional, input, subqueries)?,
                 None,
@@ -492,7 +573,7 @@ impl Preparation<'_> {
             .map(|selected| &selected.binding)
             .or(dispatched.as_deref());
         if let Some(retained) = retained_binding {
-            self.parameters.retain_call(expression, retained);
+            self.parameters.retain_call(expression, retained)?;
         }
         let selected_binding = retained_binding.or(binding);
         self.check_schema_function(expression, selected_binding, input)?;
@@ -515,7 +596,10 @@ impl Preparation<'_> {
         order_by: &[crate::ScalarOrder],
         filtered: bool,
     ) -> Result<(), SQLError> {
-        if !self.routines.is_scalar_function_binding(binding)? {
+        if !self
+            .routines
+            .is_scalar_function_binding_with_control(binding, &self.scope.control())?
+        {
             return Ok(());
         }
         let modifier = if distinct {
@@ -542,15 +626,15 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Option<FunctionBinding>, SQLError> {
+    ) -> Result<Option<uqa_core::memory::Produced<FunctionBinding>>, SQLError> {
         let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
-        let types = arguments.types();
+        let types = arguments.types()?;
         if binding.is_none()
             && crate::type_resolution::function_arguments_have_runtime_types(args, &types)?
         {
             return Ok(None);
         }
-        let mut selected = crate::semantics::resolve_table_function_binding_for_types(
+        let selected = crate::semantics::resolve_table_function_binding_for_types_with_control(
             self.routines,
             name,
             binding,
@@ -559,13 +643,21 @@ impl Preparation<'_> {
                 argument_types: &types,
                 explicit_variadic: arguments.variadic,
             },
+            &self.scope.control(),
         )?;
-        let chosen = selected.as_ref().or(binding);
+        let chosen = selected.as_deref().or(binding);
         let signature = self.select_function_arguments(name, chosen, args, &arguments)?;
         self.coerce_function_arguments(name, chosen, args, &mut arguments, &signature)?;
-        if let Some(selected) = &mut selected {
-            selected.input_collation = arguments.input_collation(args.len(), None, false)?;
-        }
-        Ok(selected)
+        let collation = arguments.input_collation(args.len(), None, false)?;
+        selected
+            .map(|selected| {
+                let (mut selected, memory) = selected.into_parts();
+                selected.input_collation = collation;
+                self.scope
+                    .control()
+                    .finish(selected, memory)
+                    .map_err(Into::into)
+            })
+            .transpose()
     }
 }

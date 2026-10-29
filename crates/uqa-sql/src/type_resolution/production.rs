@@ -61,3 +61,51 @@ impl ResolvedFunctionOverload {
         )?)
     }
 }
+
+impl super::BuiltinFunctionOverload {
+    pub(crate) fn clone_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        let name = control.copy_text(&self.name)?;
+        let mut names = uqa_core::memory::ProductionVec::new(*control);
+        let mut types = uqa_core::memory::ProductionVec::new(*control);
+        names.reserve(self.argument_names.len())?;
+        types.reserve(self.argument_types.len())?;
+        for name in &self.argument_names {
+            let name = name
+                .as_deref()
+                .map(|name| control.copy_text(name))
+                .transpose()?;
+            let (name, memory) = name.map_or((None, control.empty_reservation()), |name| {
+                let (name, memory) = name.into_parts();
+                (Some(name), memory)
+            });
+            names.push_produced(control.finish(name, memory)?)?;
+        }
+        for ty in &self.argument_types {
+            types.push_produced(ty.clone_with_control(control)?)?;
+        }
+        let names = names.finish()?;
+        let types = types.finish()?;
+        let result = self.return_type.clone_with_control(control)?;
+        let (name, name_memory) = name.into_parts();
+        let (argument_names, labels_memory) = names.into_parts();
+        let (argument_types, types_memory) = types.into_parts();
+        let (return_type, result_memory) = result.into_parts();
+        Ok(control.finish(
+            Self {
+                variadic: self.variadic,
+                name,
+                argument_names,
+                argument_types,
+                default_arguments: self.default_arguments,
+                return_type,
+            },
+            control.combine(
+                name_memory,
+                control.combine(labels_memory, control.combine(types_memory, result_memory)),
+            ),
+        )?)
+    }
+}

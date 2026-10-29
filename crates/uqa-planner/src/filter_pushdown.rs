@@ -12,7 +12,7 @@ use uqa_sql::semantics::volatility::{
 };
 use uqa_sql::semantics::{
     expr_contains_subquery, expr_qualifiers, flatten_and_filter_parts, from_qualifier_set,
-    projection_columns, qualify_unqualified_columns, TABLE_OID_COLUMN, XMIN_COLUMN,
+    qualify_unqualified_columns, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 use uqa_sql::{
     plan::{
@@ -24,6 +24,7 @@ use uqa_sql::{
 pub mod context;
 use context::{FilterPushdownContext, FilterPushdownScope};
 mod output_boundary;
+pub(crate) mod owned;
 mod source_columns;
 
 use source_columns::{ColumnOwners, SourceColumns};
@@ -651,50 +652,27 @@ pub(crate) fn derived_output_predicate(
     output_columns_override: Option<&[String]>,
     retain_query_slots: bool,
 ) -> Option<ScalarExpr> {
-    if block.limit.is_some() || block.offset.is_some() || !block.grouping_sets.is_empty() {
-        return None;
-    }
-
-    let mut output_columns = projection_columns(&block.projections);
-    if let Some(aliases) = output_columns_override {
-        if aliases.len() > output_columns.len() {
-            return None;
-        }
-        for (column, alias) in output_columns.iter_mut().zip(aliases) {
-            column.clone_from(alias);
-        }
-    }
-    let mut used = BTreeSet::new();
-    let rewritten = rewrite_output_filter_inputs(
-        filter,
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    owned::derived_output_predicate(
+        owned::PredicateServices {
+            routines,
+            volatility,
+        },
+        block,
         qualifier,
-        &output_columns,
-        &block.projections,
-        &mut used,
+        filter,
+        output_columns_override,
         retain_query_slots,
-    )?;
-    if used.is_empty() {
-        return None;
-    }
-
-    for index in &used {
-        let expression = &block.projections[*index].expr;
-        if matches!(expression, ScalarExpr::Star)
-            || expression.contains_window()
-            || expr_contains_subquery(expression)
-            || expr_contains_volatile_function(volatility, expression)
-            || uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically(
-                routines, expression,
-            )
-        {
-            return None;
-        }
-        if !output_boundary::preserves_groups(block, expression) {
-            return None;
-        }
-    }
-
-    Some(rewritten)
+        &control,
+    )
+    .unwrap_or(None)
+    .map(|expression| {
+        expression
+            .finish(&control)
+            .expect("ordinary scalar completion")
+            .into_uncontrolled()
+            .expect("ordinary scalar ownership")
+    })
 }
 
 pub fn rewrite_output_filter(
@@ -714,10 +692,6 @@ pub fn rewrite_output_filter(
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 fn rewrite_output_filter_inputs(
     expression: &ScalarExpr,
     qualifier: &str,
@@ -726,185 +700,26 @@ fn rewrite_output_filter_inputs(
     used: &mut BTreeSet<usize>,
     retain_query_slots: bool,
 ) -> Option<ScalarExpr> {
-    let map_column = |column: &str, used: &mut BTreeSet<usize>| {
-        let index = output_columns
-            .iter()
-            .position(|candidate| candidate == column)?;
-        used.insert(index);
-        Some(projections[index].expr.clone())
-    };
-    let recur = |expression: &ScalarExpr, used: &mut BTreeSet<usize>| {
-        rewrite_output_filter_inputs(
-            expression,
-            qualifier,
-            output_columns,
-            projections,
-            used,
-            retain_query_slots,
-        )
-    };
-
-    Some(match expression {
-        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } if retain_query_slots => {
-            expression.clone()
-        }
-        ScalarExpr::InSubquery {
-            expr,
-            subquery,
-            negated,
-        } if retain_query_slots => ScalarExpr::InSubquery {
-            expr: Box::new(recur(expr, used)?),
-            subquery: *subquery,
-            negated: *negated,
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    owned::rewrite_output_filter(
+        expression,
+        qualifier,
+        output_columns,
+        projections,
+        &mut |index| {
+            used.insert(index);
+            Ok(())
         },
-        ScalarExpr::Column(column) => map_column(column, used)?,
-        ScalarExpr::QualifiedColumn {
-            qualifier: expression_qualifier,
-            column,
-            ..
-        } if expression_qualifier == qualifier => map_column(column, used)?,
-        ScalarExpr::Default
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::WindowCall { .. }
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. }
-        | ScalarExpr::InSubquery { .. } => return None,
-        ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_) => expression.clone(),
-        ScalarExpr::Array(items) => ScalarExpr::Array(
-            items
-                .iter()
-                .map(|item| recur(item, used))
-                .collect::<Option<Vec<_>>>()?,
-        ),
-        ScalarExpr::Row(items) => ScalarExpr::Row(
-            items
-                .iter()
-                .map(|item| recur(item, used))
-                .collect::<Option<Vec<_>>>()?,
-        ),
-        ScalarExpr::CompositeRow {
-            items,
-            binding,
-            bound_type,
-        } => ScalarExpr::CompositeRow {
-            items: items
-                .iter()
-                .map(|item| recur(item, used))
-                .collect::<Option<Vec<_>>>()?,
-            binding: binding.clone(),
-            bound_type: bound_type.clone(),
-        },
-        ScalarExpr::Func {
-            order_syntax,
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => ScalarExpr::Func {
-            order_syntax: *order_syntax,
-            name: name.clone(),
-            binding: binding.clone(),
-            args: args
-                .iter()
-                .map(|arg| recur(arg, used))
-                .collect::<Option<Vec<_>>>()?,
-            distinct: *distinct,
-            order_by: order_by
-                .iter()
-                .map(|order| {
-                    Some(uqa_sql::ScalarOrder {
-                        expr: recur(&order.expr, used)?,
-                        descending: order.descending,
-                        nulls: order.nulls,
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?,
-            filter: match filter.as_deref() {
-                Some(filter) => Some(Box::new(recur(filter, used)?)),
-                None => None,
-            },
-        },
-        ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
-            op: *op,
-            lhs: Box::new(recur(lhs, used)?),
-            rhs: Box::new(recur(rhs, used)?),
-        },
-        ScalarExpr::Not(inner) => ScalarExpr::Not(Box::new(recur(inner, used)?)),
-        ScalarExpr::UnaryMinus(inner) => ScalarExpr::UnaryMinus(Box::new(recur(inner, used)?)),
-        ScalarExpr::And(items) => ScalarExpr::And(
-            items
-                .iter()
-                .map(|item| recur(item, used))
-                .collect::<Option<Vec<_>>>()?,
-        ),
-        ScalarExpr::Or(items) => ScalarExpr::Or(
-            items
-                .iter()
-                .map(|item| recur(item, used))
-                .collect::<Option<Vec<_>>>()?,
-        ),
-        ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
-            expr: Box::new(recur(expr, used)?),
-            negated: *negated,
-        },
-        ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
-            expr: Box::new(recur(expr, used)?),
-            low: Box::new(recur(low, used)?),
-            high: Box::new(recur(high, used)?),
-        },
-        ScalarExpr::InList {
-            expr,
-            list,
-            negated,
-        } => ScalarExpr::InList {
-            expr: Box::new(recur(expr, used)?),
-            list: list
-                .iter()
-                .map(|item| recur(item, used))
-                .collect::<Option<Vec<_>>>()?,
-            negated: *negated,
-        },
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => ScalarExpr::Case {
-            base: match base.as_deref() {
-                Some(base) => Some(Box::new(recur(base, used)?)),
-                None => None,
-            },
-            when: when
-                .iter()
-                .map(|(condition, result)| Some((recur(condition, used)?, recur(result, used)?)))
-                .collect::<Option<Vec<_>>>()?,
-            else_branch: match else_branch.as_deref() {
-                Some(branch) => Some(Box::new(recur(branch, used)?)),
-                None => None,
-            },
-        },
-        ScalarExpr::Collated {
-            expr,
-            ty,
-            collation,
-        } => ScalarExpr::Collated {
-            expr: Box::new(recur(expr, used)?),
-            ty: ty.clone(),
-            collation: *collation,
-        },
-        ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
-            implicit: *implicit,
-            expr: Box::new(recur(expr, used)?),
-            ty: ty.clone(),
-        },
+        retain_query_slots,
+        &control,
+    )
+    .expect("ordinary output-reference substitution")
+    .map(|expression| {
+        expression
+            .finish(&control)
+            .expect("ordinary scalar completion")
+            .into_uncontrolled()
+            .expect("ordinary scalar ownership")
     })
 }
 

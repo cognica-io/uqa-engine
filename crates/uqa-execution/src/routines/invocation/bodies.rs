@@ -32,7 +32,7 @@ pub trait RoutineBodySession {
 pub(super) struct CompiledRoutine {
     pub(super) version: u64,
     pub(super) body: Arc<CompiledFunctionBody>,
-    pub(super) plpgsql: Vec<super::plpgsql_cache::PreparedBody>,
+    pub(super) plpgsql: uqa_core::memory::OwnedMap<usize, super::plpgsql_cache::PreparedBody>,
 }
 
 /// Compilations of routine source bodies, by routine identity.

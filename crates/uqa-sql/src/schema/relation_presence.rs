@@ -10,11 +10,34 @@ use super::{Arc, ColumnType, RowSchema, SchemaLayoutError, SchemaLayoutResult, S
 use crate::ast::InternalColumnRef;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(super) struct RelationPresence(Option<Arc<SchemaMap<Box<str>, InternalColumnRef>>>);
+pub(super) struct RelationPresence(Option<Arc<PresenceBindings>>);
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct PresenceBindings {
+    bindings: SchemaMap<Box<str>, InternalColumnRef>,
+    _memory: super::production::lease::SchemaMemory,
+}
+
+impl std::ops::Deref for PresenceBindings {
+    type Target = SchemaMap<Box<str>, InternalColumnRef>;
+    fn deref(&self) -> &Self::Target {
+        &self.bindings
+    }
+}
+
+impl std::ops::DerefMut for PresenceBindings {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bindings
+    }
+}
+
+mod production;
 
 impl RelationPresence {
     fn insert(&mut self, qualifier: &str, marker: InternalColumnRef) {
-        let bindings = self.0.get_or_insert_with(|| Arc::new(SchemaMap::default()));
+        let bindings = self
+            .0
+            .get_or_insert_with(|| Arc::new(PresenceBindings::default()));
         Arc::make_mut(bindings).insert(qualifier.into(), marker);
     }
 
@@ -30,7 +53,12 @@ impl RelationPresence {
             .filter(|(_, marker)| keep(**marker))
             .map(|(qualifier, marker)| (qualifier.clone(), *marker))
             .collect();
-        Self((!retained.is_empty()).then(|| Arc::new(retained)))
+        Self((!retained.is_empty()).then(|| {
+            Arc::new(PresenceBindings {
+                bindings: retained,
+                ..PresenceBindings::default()
+            })
+        }))
     }
 
     pub(super) fn joined(left: &RowSchema, right: &RowSchema) -> Self {

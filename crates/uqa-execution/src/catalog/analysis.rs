@@ -64,11 +64,30 @@ impl AnalysisCatalog for CatalogReadView {
             .map(Some)
     }
 
+    fn relation_dependency_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<u32>, SQLError> {
+        super::projection::resolved_relation_dependency_with_control(
+            self, resolution, name, control,
+        )
+    }
+
     fn prepared_dependency_snapshot(
         &self,
         dependencies: &uqa_sql::prepared::dependencies::PreparedAnalysisDependencies,
     ) -> Result<Option<uqa_sql::prepared::dependencies::PreparedDependencySnapshot>, SQLError> {
         super::prepared_dependencies::capture(self, dependencies).map(Some)
+    }
+
+    fn prepared_dependency_snapshot_with_control(
+        &self,
+        dependencies: &uqa_sql::prepared::dependencies::PreparedAnalysisDependencies,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::prepared::dependencies::PreparedDependencySnapshot>, SQLError> {
+        super::prepared_dependencies::capture_with_control(self, dependencies, control).map(Some)
     }
 
     fn effective_search_path(
@@ -82,6 +101,42 @@ impl AnalysisCatalog for CatalogReadView {
         }))
     }
 
+    fn effective_search_path_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        uqa_core::memory::Produced<Option<uqa_sql::catalog::resolution::EffectiveSearchPath>>,
+        SQLError,
+    > {
+        let role = &resolution.current_user;
+        let schemas = super::namespaces::current_schema_names_with_control(
+            self, resolution, role, true, control,
+        )?;
+        let explicit = super::namespaces::current_schema_names_with_control(
+            self, resolution, role, false, control,
+        )?;
+        let creation = explicit
+            .first()
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        let (schemas, schema_memory) = schemas.into_parts();
+        let (creation_namespace, creation_memory) = creation.map_or_else(
+            || (None, control.empty_reservation()),
+            |name| {
+                let (name, memory) = name.into_parts();
+                (Some(name), memory)
+            },
+        );
+        Ok(control.finish(
+            Some(uqa_sql::catalog::resolution::EffectiveSearchPath {
+                schemas,
+                creation_namespace,
+            }),
+            control.combine(schema_memory, creation_memory),
+        )?)
+    }
+
     fn table_resolved(
         &self,
         resolution: &RelationNameResolution,
@@ -93,6 +148,29 @@ impl AnalysisCatalog for CatalogReadView {
                 columns_declared: table.columns_declared,
             })
         })
+    }
+
+    fn table_resolved_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<TableDefinition>, SQLError> {
+        CatalogReadView::table_resolved_with_control(self, resolution, name, control).map(|table| {
+            table.map(|table| TableDefinition {
+                columns: table.columns.clone(),
+                columns_declared: table.columns_declared,
+            })
+        })
+    }
+
+    fn table_name_resolved_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
+        CatalogReadView::table_name_resolved_with_control(self, resolution, name, control)
     }
 
     fn table_name_resolved(

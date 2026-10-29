@@ -75,6 +75,18 @@ impl StorageBackendError {
     }
 }
 
+impl From<uqa_core::ValueRetentionError> for StorageBackendError {
+    fn from(error: uqa_core::ValueRetentionError) -> Self {
+        match error {
+            uqa_core::ValueRetentionError::Memory(error) => Self::Memory(error),
+            uqa_core::ValueRetentionError::Cancelled(error) => Self::Cancelled(error),
+            error @ uqa_core::ValueRetentionError::Malformed { .. } => {
+                Self::backend("value", error)
+            }
+        }
+    }
+}
+
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
 
 /// Process-local identity of one storage transaction context. Clone it for handles sharing that context; allocate a new identity for each independent session. This is not a durable database or transaction ID.

@@ -20,12 +20,48 @@ use uqa_core::{
 
 mod binding;
 mod copy;
+mod lowering;
+pub(in crate::plan) use lowering::lower_scalar_with_arena;
 mod owned;
+pub(in crate::plan) use owned::windows::OwnedWindowSpec;
 pub(crate) use owned::ScalarMemory;
-pub use owned::{OwnedScalarChildren, OwnedScalarExpr};
+pub use owned::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
 mod resources;
 mod source;
 mod window;
+
+/// A scalar's query slots belong to its enclosing query owner. Scalar-only consumers keep the rejection boundary; complete plan lowering supplies an admitted arena.
+pub(in crate::plan) trait QueryLowering {
+    fn parameter(&self, _expression: &Expr) -> Option<usize> {
+        None
+    }
+
+    fn append_owned(
+        &mut self,
+        query: crate::ast::SelectStmt,
+        aggregates: &dyn AggregateClassifier,
+    ) -> Result<usize>;
+
+    fn append_borrowed(
+        &mut self,
+        _query: &crate::ast::SelectStmt,
+        _aggregates: &dyn AggregateClassifier,
+    ) -> Result<usize> {
+        Err(CatalogRetentionError::UnexpectedSubquery)
+    }
+}
+
+impl QueryLowering for Vec<QueryPlan> {
+    fn append_owned(
+        &mut self,
+        query: crate::ast::SelectStmt,
+        aggregates: &dyn AggregateClassifier,
+    ) -> Result<usize> {
+        let index = self.len();
+        self.push(QueryPlan::lower_with(query, aggregates));
+        Ok(index)
+    }
+}
 
 impl super::ExpressionPlan {
     /// Lower a borrowed scalar-only expression with destination admission. A query child is reported before publication so callers can decline scalar-only transformations without constructing an unowned query arena.
@@ -98,13 +134,18 @@ impl Lowering<'_> {
         clippy::too_many_lines,
         reason = "plan lowering preserves exhaustive variants and structural identities"
     )]
-    fn expression(
+    fn expression_node(
         &mut self,
         expression: Source<'_, Expr>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<ScalarExpr> {
         self.check()?;
+        if let Source::Borrowed(expression) = &expression {
+            if let Some(number) = subqueries.parameter(expression) {
+                return Ok(ScalarExpr::Param(number));
+            }
+        }
         Ok(match expression.node() {
             Node::Star => ScalarExpr::Star,
             Node::QualifiedStar(name) => ScalarExpr::QualifiedStar(self.reference_name(name)?),
@@ -274,7 +315,7 @@ impl Lowering<'_> {
         &mut self,
         expression: Source<'_, Box<Expr>>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<Box<ScalarExpr>> {
         self.boxed(|this| this.expression(expression.unbox(), aggregates, subqueries))
     }
@@ -283,15 +324,13 @@ impl Lowering<'_> {
         &self,
         query: Source<'_, Box<crate::ast::SelectStmt>>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<usize> {
         self.check()?;
-        let Source::Owned(query) = query else {
-            return Err(CatalogRetentionError::UnexpectedSubquery);
-        };
-        let id = subqueries.len();
-        subqueries.push(QueryPlan::lower_with(*query, aggregates));
-        Ok(id)
+        match query {
+            Source::Owned(query) => subqueries.append_owned(*query, aggregates),
+            Source::Borrowed(query) => subqueries.append_borrowed(query, aggregates),
+        }
     }
 }
 

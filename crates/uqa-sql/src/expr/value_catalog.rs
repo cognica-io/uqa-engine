@@ -90,6 +90,18 @@ pub trait SQLValueCatalog {
         Ok(None)
     }
 
+    /// Native catalogs project the selected descriptor under the consumer's allowance; external adapters retain their returned metadata.
+    fn value_type_by_oid_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<crate::ColumnType>>> {
+        control.check()?;
+        self.value_type_by_oid(oid)?
+            .map(|ty| ty.retain_external_with_control(control).map_err(Into::into))
+            .transpose()
+    }
+
     /// Whether an admitted physical OID names any current catalog type, including pseudo-types without a value carrier. This lookup does not check input privileges or execute type input.
     fn value_type_exists(&self, oid: u32) -> Result<bool> {
         Ok(self.value_type_by_oid(oid)?.is_some())
@@ -208,6 +220,14 @@ impl SQLValueCatalog for EngineValueCatalog<'_> {
         self.0
             .resolve_type_oid(oid)
             .map_err(crate::SQLError::Internal)
+    }
+
+    fn value_type_by_oid_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<crate::ColumnType>>> {
+        self.0.resolve_type_oid_with_control(oid, control)
     }
 
     fn value_type_exists(&self, oid: u32) -> Result<bool> {

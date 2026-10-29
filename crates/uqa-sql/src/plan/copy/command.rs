@@ -43,7 +43,9 @@ impl Copying<'_> {
             target_qualifier: self.text(&plan.target_qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
-            columns: self.map(plan.columns.iter(), Self::assignment_target)?,
+            columns: self.field("columns", |copying| {
+                copying.map(plan.columns.iter(), Self::assignment_target)
+            })?,
             overriding: plan.overriding,
             ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
             rows: self.field("rows", |copying| copying.rows(&plan.rows))?,
@@ -71,7 +73,9 @@ impl Copying<'_> {
             subqueries: self.field("subqueries", |copying| {
                 copying.map(plan.subqueries.iter(), Self::query)
             })?,
-            view_checks: self.map(plan.view_checks.iter(), Self::view_check)?,
+            view_checks: self.field("view_checks", |copying| {
+                copying.map(plan.view_checks.iter(), Self::view_check)
+            })?,
             view_rule_relations: self.texts(&plan.view_rule_relations)?,
             view_rule_insert_plans: self.map(
                 plan.view_rule_insert_plans.iter(),
@@ -121,7 +125,9 @@ impl Copying<'_> {
             subqueries: self.field("subqueries", |copying| {
                 copying.map(plan.subqueries.iter(), Self::query)
             })?,
-            view_checks: self.map(plan.view_checks.iter(), Self::view_check)?,
+            view_checks: self.field("view_checks", |copying| {
+                copying.map(plan.view_checks.iter(), Self::view_check)
+            })?,
             view_rule_relations: self.texts(&plan.view_rule_relations)?,
             view_rule_update_plans: self.map(
                 plan.view_rule_update_plans.iter(),
@@ -186,7 +192,9 @@ impl Copying<'_> {
             target_qualifier: self.text(&plan.target_qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
-            target_predicate: self.optional_scalar(plan.target_predicate.as_ref())?,
+            target_predicate: self.field("target_predicate", |copying| {
+                copying.optional_scalar(plan.target_predicate.as_ref())
+            })?,
             source: self.field("source", |copying| {
                 copying.boxed(|copying| copying.source(&plan.source))
             })?,
@@ -203,7 +211,9 @@ impl Copying<'_> {
             subqueries: self.field("subqueries", |copying| {
                 copying.map(plan.subqueries.iter(), Self::query)
             })?,
-            view_checks: self.map(plan.view_checks.iter(), Self::view_check)?,
+            view_checks: self.field("view_checks", |copying| {
+                copying.map(plan.view_checks.iter(), Self::view_check)
+            })?,
         })
     }
 
@@ -217,7 +227,7 @@ impl Copying<'_> {
         })
     }
 
-    fn returning_aliases(
+    pub(super) fn returning_aliases(
         &mut self,
         aliases: &crate::ast::ReturningAliases,
     ) -> Result<crate::ast::ReturningAliases> {
@@ -232,7 +242,7 @@ impl Copying<'_> {
     fn view_check(&mut self, check: &ViewCheckPlan) -> Result<ViewCheckPlan> {
         Ok(ViewCheckPlan {
             view: self.text(&check.view)?,
-            predicate: self.scalar(&check.predicate)?,
+            predicate: self.field("predicate", |copying| copying.scalar(&check.predicate))?,
         })
     }
 

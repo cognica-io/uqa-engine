@@ -101,17 +101,7 @@ fn text_statistics(
     control: &ProductionControl<'_>,
 ) -> PlanningResult<()> {
     control.check()?;
-    let document_frequency = if let Some(field) = field {
-        let terms = index.analyze_utf16(field, query)?;
-        let mut frequency = 0_u64;
-        for term in terms {
-            control.check()?;
-            frequency = frequency.saturating_add(index.doc_freq_utf16(field, &term)?);
-        }
-        frequency
-    } else {
-        index.query_doc_freq_any_field(query)?
-    };
+    let document_frequency = index.query_doc_freq_with_control(field, query, control)?;
     stats.set_doc_freq(
         field.unwrap_or("_default"),
         query,

@@ -8,8 +8,8 @@
 
 use uqa_sql::{
     plan::{ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
-    semantics::aggregates::exprs_match,
-    ScalarExpr,
+    semantics::aggregates::exprs_match_with_control,
+    SQLError, ScalarExpr,
 };
 
 pub(super) fn preserves_set_types(
@@ -72,32 +72,48 @@ fn set_member_types_match(
     })
 }
 
-pub(super) fn preserves_groups(block: &QueryBlockPlan, expression: &ScalarExpr) -> bool {
+pub(super) fn preserves_groups_with_control(
+    block: &QueryBlockPlan,
+    expression: &ScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    fn any_match<'a>(
+        keys: impl IntoIterator<Item = &'a ScalarExpr>,
+        expression: &ScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        for key in keys {
+            control.check()?;
+            if exprs_match_with_control(key, expression, control)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    control.check()?;
     if (matches!(block.compute, ComputePlan::Aggregate) || !block.group_by.is_empty())
-        && !block
-            .group_by
-            .iter()
-            .any(|group| exprs_match(group, expression))
+        && !any_match(&block.group_by, expression, control)?
     {
-        return false;
+        return Ok(false);
     }
     if !block.distinct_on.is_empty()
-        && !block.distinct_on.iter().any(|key| {
-            let key = match key {
+        && !any_match(
+            block.distinct_on.iter().map(|key| match key {
                 ScalarExpr::Position(index) => block
                     .projections
                     .get(*index)
                     .map(|p| &p.expr)
                     .unwrap_or(key),
                 _ => key,
-            };
-            exprs_match(key, expression)
-        })
+            }),
+            expression,
+            control,
+        )?
     {
-        return false;
+        return Ok(false);
     }
     if !matches!(block.compute, ComputePlan::Window) {
-        return true;
+        return Ok(true);
     }
     let mut seen = false;
     let mut preserves = true;
@@ -107,15 +123,16 @@ pub(super) fn preserves_groups(block: &QueryBlockPlan, expression: &ScalarExpr) 
         .map(|projection| &projection.expr)
         .chain(block.order_by.iter().map(|order| &order.expr))
     {
-        root.visit(&mut |node| {
+        root.try_visit(&mut |node| {
+            control.check()?;
             if let ScalarExpr::WindowCall { spec, .. } = node {
                 seen = true;
-                preserves &= spec
-                    .partition_by
-                    .iter()
-                    .any(|key| exprs_match(key, expression));
+                if preserves {
+                    preserves = any_match(&spec.partition_by, expression, control)?;
+                }
             }
-        });
+            Ok::<_, SQLError>(true)
+        })?;
     }
-    seen && preserves
+    Ok(seen && preserves)
 }

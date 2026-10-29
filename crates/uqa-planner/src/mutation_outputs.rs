@@ -5,6 +5,9 @@
 //
 
 //! Prune unused, side-effect-free mutation-source output slots without changing row shape.
+mod owned;
+pub(crate) use owned::prune_unused_query_outputs_owned;
+
 use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{
@@ -121,10 +124,13 @@ mod tests {
             vec![Some(uqa_sql::ColumnType::Integer); 2],
         );
         query.analyzed_output = Some(schema.clone());
-        query.analyzed_source = Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
-            schema,
-            children: None,
-        }));
+        query.analyzed_source = Some(
+            std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+                schema,
+                children: None,
+            })
+            .into(),
+        );
         prune_unused_query_outputs(
             &Catalog,
             &Catalog,

@@ -12,6 +12,8 @@ use super::{
 };
 use crate::ast::RuleEvent;
 
+pub mod production;
+
 pub struct RuleInputRequirements {
     pub columns: BTreeSet<String>,
     pub requires_rows: bool,

@@ -14,41 +14,49 @@ use uqa_sql::{scalar_type, FunctionTypeResolver, RowSchema, ScalarExpr};
 use super::Value;
 
 mod composites;
+mod eligibility;
+pub(in crate::optimizer) mod metadata;
+pub(super) mod owned;
+pub(super) use composites::owned::fold_constructor as fold_owned_composite_constructor;
+pub(crate) fn retain_computed_integer_owned(
+    expression: uqa_sql::plan::OwnedScalarExpr,
+    parameter_index: Option<usize>,
+    control: &ProductionControl<'_>,
+) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+    metadata::retain_computed_integer(expression, parameter_index, control)
+}
 pub(super) use composites::fold_composite_constructor;
 
 /// Eliminating a CASE, COALESCE or function call must not turn its record result into ROW comparison syntax.
 pub(super) fn retain_record_result(expression: ScalarExpr, row_syntax: bool) -> ScalarExpr {
-    if !row_syntax && matches!(expression, ScalarExpr::Row(_)) {
-        ScalarExpr::Cast {
-            implicit: true,
-            expr: Box::new(expression),
-            ty: ColumnType::Record.catalog_name(),
-        }
-    } else {
-        expression
-    }
+    let control = ProductionControl::uncontrolled();
+    metadata::retain_record_result(
+        uqa_sql::plan::OwnedScalarExpr::uncontrolled(expression),
+        row_syntax,
+        &control,
+    )
+    .expect("ordinary record result metadata")
+    .finish(&control)
+    .expect("ordinary record result")
+    .into_uncontrolled()
+    .expect("ordinary record owner")
 }
 
 pub(crate) fn retain_computed_integer(
     expression: ScalarExpr,
     parameter_index: Option<usize>,
 ) -> ScalarExpr {
-    let ScalarExpr::Literal(Value::Int(value)) = expression else {
-        return expression;
-    };
-    let ty = match uqa_sql::expr::integer_width_for_literal(value) {
-        uqa_sql::expr::IntegerWidth::SmallInt => ColumnType::SmallInteger,
-        uqa_sql::expr::IntegerWidth::Integer => ColumnType::Integer,
-        uqa_sql::expr::IntegerWidth::BigInt => ColumnType::BigInteger,
-    };
-    ScalarExpr::TypedLiteral {
-        collation_oid: None,
-        composite_source: None,
-        value: Value::Int(value),
-        ty: ty.catalog_name(),
-        bound_type: Some(ty),
+    let control = ProductionControl::uncontrolled();
+    metadata::retain_computed_integer(
+        uqa_sql::plan::OwnedScalarExpr::uncontrolled(expression),
         parameter_index,
-    }
+        &control,
+    )
+    .expect("ordinary computed integer metadata")
+    .finish(&control)
+    .expect("ordinary computed integer result")
+    .into_uncontrolled()
+    .expect("ordinary computed integer owner")
 }
 
 pub(super) enum LiteralValue<'a> {
@@ -164,10 +172,9 @@ fn constant_cast_type(
     name: &str,
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
 ) -> Option<ColumnType> {
-    if let Some(types) = types {
-        return types.resolve_catalog_column_type_name(name).ok();
-    }
-    uqa_sql::type_resolution::pg_catalog_builtin_type(name)
+    eligibility::cast_type(name, types, &ProductionControl::uncontrolled())
+        .expect("ordinary constant type eligibility")
+        .map(|ty| ty.into_uncontrolled().expect("ordinary constant type"))
 }
 
 fn is_constant(
@@ -175,105 +182,13 @@ fn is_constant(
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> bool {
-    // Keep an explicit clause's coercibility; folding its operand must not turn the clause into an implicit constant.
-    if uqa_sql::catalog::collations::expression::scalar_clause(expression)
-        .is_ok_and(|clause| clause.is_some())
-    {
-        return false;
-    }
-    let constant = |expression: &ScalarExpr| is_constant(expression, types, resolver);
-    match expression {
-        ScalarExpr::RetainedLiteral(literal) => immutable_retained_literal(literal, types),
-        ScalarExpr::Collated { expr, .. } => constant(expr),
-        ScalarExpr::Literal(value) => immutable_literal(value),
-        ScalarExpr::TypedLiteral {
-            value,
-            ty,
-            bound_type,
-            ..
-        } => {
-            immutable_literal(value)
-                && (bound_type.is_some() || constant_cast_type(ty, types).is_some())
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items.iter().all(constant),
-        ScalarExpr::Cast { expr, ty, .. } => {
-            constant(expr)
-                && constant_cast_type(ty, types).is_some_and(|target| {
-                    uqa_sql::type_resolution::immutable_cast_type(&target)
-                        && constant_scalar_type(expr, resolver).is_ok_and(|source| {
-                            source.is_none_or(|source| {
-                                uqa_sql::type_resolution::cast_volatility(&source, &target)
-                                    == uqa_sql::ast::FunctionVolatility::Immutable
-                            })
-                        })
-                })
-        }
-        // A named ROW constructor reads its current catalog descriptor even when every argument is a constant.
-        ScalarExpr::CompositeRow { .. } => false,
-        ScalarExpr::Binary { op, lhs, rhs } => {
-            constant(lhs) && constant(rhs) && immutable_binary(*op, lhs, rhs, resolver)
-        }
-        ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Not(inner)
-        | ScalarExpr::IsNull { expr: inner, .. } => constant(inner),
-        ScalarExpr::Between { expr, low, high } => {
-            constant(expr)
-                && constant(low)
-                && constant(high)
-                && immutable_binary(BinaryOp::LessEqual, low, expr, resolver)
-                && immutable_binary(BinaryOp::LessEqual, expr, high, resolver)
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            constant(expr)
-                && list.iter().all(|item| {
-                    constant(item) && immutable_binary(BinaryOp::Equal, expr, item, resolver)
-                })
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_deref().is_none_or(constant)
-                && when
-                    .iter()
-                    .all(|(condition, value)| constant(condition) && constant(value))
-                && else_branch.as_deref().is_none_or(constant)
-        }
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            ..
-        } if is_coalesce(name, binding.as_ref()) => args.iter().all(constant),
-        ScalarExpr::Func {
-            order_syntax: _,
-            name,
-            binding: Some(binding),
-            args,
-            distinct: false,
-            order_by,
-            filter: None,
-        } if binding.builtin
-            && !uqa_sql::semantics::function_has_implicit_row_input(binding)
-            && order_by.is_empty()
-            && !uqa_sql::semantics::is_builtin_aggregate(expression)
-            && !uqa_sql::semantics::sets::validation::builtin_returns_set(
-                &uqa_sql::semantics::builtin_function_dispatch_name(name),
-            )
-            && uqa_sql::semantics::volatility::builtin_function_volatility(
-                name,
-                Some(binding),
-                args.len(),
-            ) == uqa_sql::ast::FunctionVolatility::Immutable =>
-        {
-            args.iter().all(constant)
-        }
-        _ => false,
-    }
+    eligibility::is_constant(
+        expression,
+        types,
+        resolver,
+        &ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary constant eligibility")
 }
 
 fn immutable_literal(value: &Value) -> bool {
@@ -281,43 +196,18 @@ fn immutable_literal(value: &Value) -> bool {
         && !uqa_sql::expr::datums::contains_datum(value)
 }
 
-fn immutable_retained_literal(
-    literal: &uqa_sql::ir::RetainedScalarLiteral,
-    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
-) -> bool {
-    literal.value.resident_value().is_none_or(immutable_literal)
-        && literal
-            .declaration
-            .as_deref()
-            .is_none_or(|name| literal.ty.is_some() || constant_cast_type(name, types).is_some())
-}
-
 fn constant_scalar_type(
     expression: &ScalarExpr,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
-    let schema = RowSchema::default();
-    match resolver {
-        Some(resolver) => uqa_sql::scalar_type_with_resolver(expression, &schema, &[], resolver),
-        None => scalar_type(expression, &schema, &[]),
-    }
-}
-
-fn immutable_binary(
-    op: BinaryOp,
-    left: &ScalarExpr,
-    right: &ScalarExpr,
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> bool {
-    let [Ok(left), Ok(right)] = [left, right].map(|expr| constant_scalar_type(expr, resolver))
-    else {
-        // The ordinary typed fold reports analysis errors before evaluating a constant.
-        return true;
-    };
-    uqa_sql::type_resolution::binary_operator_volatility(op, left.as_ref(), right.as_ref())
-        .map_or(true, |volatility| {
-            volatility == FunctionVolatility::Immutable
-        })
+    Ok(
+        eligibility::scalar_type(expression, resolver, &ProductionControl::uncontrolled())?.map(
+            |ty| {
+                ty.into_uncontrolled()
+                    .expect("ordinary constant result type")
+            },
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -488,10 +378,7 @@ fn retain_produced_literal(
     });
     let value = if let Some(storage) = storage {
         // The spill owner publishes the complete value while its production lease is still live. Only then can the transient decoded payload and its lease be released.
-        let (value, memory) = value.into_parts();
-        let value = storage.retain(value)?;
-        drop(memory);
-        value
+        storage.retain_produced(value, control)?
     } else {
         RetainedConstantValue::from_produced(value, control)?
     };
@@ -584,14 +471,20 @@ fn strict_null_expression(
                 return Ok(true);
             }
             // A strict set-returning call with a NULL input returns no rows, not one NULL value.
-            uqa_sql::expr::bound_scalar_function_strictness(name, binding.as_ref(), args.len())
-                == Some(true)
-                && !uqa_sql::semantics::sets::validation::builtin_returns_set(
-                    &uqa_sql::semantics::builtin_function_dispatch_name(name),
-                )
-                && args.iter().try_fold(false, |found, argument| {
-                    Ok::<_, SQLError>(found || null(argument)?)
-                })?
+            let normalized = eligibility::normalized_name(name, control)?;
+            if uqa_sql::expr::bound_scalar_function_strictness(
+                &normalized,
+                binding.as_ref(),
+                args.len(),
+            ) != Some(true)
+            {
+                return Ok(false);
+            }
+            !uqa_sql::semantics::sets::validation::builtin_returns_set(
+                &uqa_sql::semantics::builtin_function_dispatch_name(&normalized),
+            ) && args.iter().try_fold(false, |found, argument| {
+                Ok::<_, SQLError>(found || null(argument)?)
+            })?
         }
         ScalarExpr::Binary {
             op:
@@ -647,7 +540,9 @@ pub(super) fn check_inlined_similar_substring(
     ) else {
         return Ok(());
     };
-    if strict_null_expression(expression, control)? || is_constant(expression, types, resolver) {
+    if strict_null_expression(expression, control)?
+        || eligibility::is_constant(expression, types, resolver, control)?
+    {
         return Ok(());
     }
     // `inline_function` declines a routine the caller cannot execute; execution then reports the privilege error.

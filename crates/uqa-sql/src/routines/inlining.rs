@@ -7,33 +7,30 @@
 //! Caller-plan expansion of selected SQL routines. Source text is analyzed for
 //! each planning attempt; declining expansion never changes the session body cache.
 
-mod arguments;
 mod operators;
 mod owned;
 mod owned_arguments;
 mod owned_substitution;
+mod preparation;
 mod properties;
+mod selection;
+pub use selection::InlineOwnedRoutineExpression;
 mod table;
-use std::sync::Arc;
-pub use table::InlineRoutineQuery;
+pub use table::{InlineOwnedRoutineQuery, InlineRoutineQuery};
 #[cfg(test)]
 mod tests;
 
 use super::{
-    body_parameters::sql_body_parameter_scope,
-    body_validation::routine_parameter_values,
     compilation::{RoutineCompilationCatalog, RoutineParserCatalog},
     declaration::RoutineTypeCatalog,
-    result_check::{sql_function_result_layout, SQLFunctionResultKind},
-    security::{ensure_routine_execute_privilege, RoutineExecutionAuthority},
-    CompiledFunctionBody, RoutineBody, RoutineResolution,
+    security::RoutineExecutionAuthority,
+    RoutineResolution,
 };
 use crate::{
-    ast::{CreateFunction, FunctionBinding, FunctionBody, FunctionReturns},
-    binding::{bind_routine_parameter_references, prepare_routine_body_inputs},
-    plan::{RelationalPlan, UnifiedPlan},
-    semantics::{sets::placement_scope::SetPlacementScope, volatility::VolatilityCatalog},
-    ColumnType, SQLError, ScalarExpr,
+    ast::{CreateFunction, FunctionBinding},
+    plan::UnifiedPlan,
+    semantics::volatility::VolatilityCatalog,
+    SQLError, ScalarExpr,
 };
 
 /// Metadata and analysis capabilities borrowed for one optimizer invocation.
@@ -45,7 +42,7 @@ pub trait RoutinePlanExpressions {
         expression: &ScalarExpr,
     ) -> Result<uqa_core::Value, SQLError>;
 
-    /// External evaluators may return an independently owned value. Native evaluators override this boundary and admit their result while evaluating it.
+    /// Evaluate a constant call and admit its distinct planning destination before copying the result. Native evaluators also admit their temporary scalar and scope inputs; interpreter rows and results retain their existing execution ownership.
     fn evaluate_constant_routine_with_control(
         &self,
         expression: &ScalarExpr,
@@ -116,217 +113,25 @@ impl RoutineInliningContext<'_> {
         arguments: &[ScalarExpr],
         active: &[[u8; 16]],
     ) -> Result<Option<InlineRoutineExpression>, SQLError> {
-        if binding.builtin || binding.resolution_error.is_some() {
-            return Ok(None);
-        }
-        let Some(identity) = binding.object_id else {
-            return Ok(None);
-        };
-        let Some(function) = self.selected_function(binding) else {
-            return Ok(None);
-        };
-        let Some(invocation) = binding.invocation.as_deref() else {
-            return Ok(None);
-        };
-        let specialized = super::invocation::specialized_definition(&function.def, invocation)?;
-        let definition = specialized.as_ref().unwrap_or(&function.def);
-        let arguments_for_evaluation = arguments;
-        let Some(arguments) = arguments::prepare(self, definition, invocation, arguments)? else {
-            return Ok(None);
-        };
-        if let Some(expression) =
-            self.constant_call(definition, binding, &arguments, arguments_for_evaluation)?
-        {
-            return Ok(Some(InlineRoutineExpression {
-                identity,
-                expression,
-                error_context: None,
-            }));
-        }
-        if !eligible_definition(definition) || active.contains(&identity) {
-            return Ok(None);
-        }
-        match ensure_routine_execute_privilege(self.authority, definition) {
-            Ok(()) => {}
-            Err(error) if error.sqlstate() == Some("42501") => return Ok(None),
-            Err(error) => return Err(error),
-        }
-        let error_context = super::diagnostics::sql_context(
-            definition,
-            super::diagnostics::SQLRoutineStage::Inlining,
-        );
-        let Some((mut expression, parameters)) = self
-            .analyze_body(&function, definition)
-            .map_err(|error| error.with_context(&error_context))?
-        else {
-            return Ok(None);
-        };
-        let properties = properties::inspect(self, &expression, &parameters)?;
-        if !properties.permits(definition) {
-            return Ok(None);
-        }
-        let uses = arguments::use_counts(&expression, arguments.len())?;
-        for (argument, count) in arguments.iter().zip(uses) {
-            if count == 0 && definition.strict {
-                return Ok(None);
-            }
-            if count > 1 && !properties::can_duplicate(self, argument)? {
-                return Ok(None);
-            }
-        }
-        arguments::substitute(&mut expression, &arguments);
-        Ok(Some(InlineRoutineExpression {
-            identity,
-            expression,
-            error_context: Some(error_context),
-        }))
-    }
-
-    fn constant_call(
-        &self,
-        definition: &CreateFunction,
-        binding: &FunctionBinding,
-        arguments: &[ScalarExpr],
-        arguments_for_evaluation: &[ScalarExpr],
-    ) -> Result<Option<ScalarExpr>, SQLError> {
-        if !definition.is_procedure
-            && !definition.returns_set()
-            && definition.output_params().nth(1).is_none()
-            && !super::routine_returns_anonymous_record(definition)
-        {
-            let layout = super::result_check::declared_sql_function_result(self.types, definition)?;
-            if definition.strict && arguments.iter().any(is_null_constant) {
-                return Ok(Some(ScalarExpr::TypedLiteral {
-                    collation_oid: None,
-                    composite_source: None,
-                    value: uqa_core::Value::Null,
-                    ty: layout.declared_type.catalog_name(),
-                    bound_type: Some(layout.declared_type),
-                    parameter_index: None,
-                }));
-            }
-            if definition.volatility == crate::ast::FunctionVolatility::Immutable
-                && arguments.iter().all(is_constant)
-            {
-                let call = ScalarExpr::Func {
-                    name: binding.name.clone(),
-                    binding: Some(binding.clone()),
-                    args: arguments_for_evaluation.to_vec(),
-                    distinct: false,
-                    order_by: Vec::new(),
-                    order_syntax: crate::ast::FunctionCallSyntax::Ordinary,
-                    filter: None,
-                };
-                let value = self.expressions.evaluate_constant_routine(&call)?;
-                return Ok(Some(ScalarExpr::TypedLiteral {
-                    collation_oid: None,
-                    composite_source: None,
-                    value,
-                    ty: layout.declared_type.catalog_name(),
-                    bound_type: Some(layout.declared_type),
-                    parameter_index: None,
-                }));
-            }
-        }
-        Ok(None)
-    }
-
-    fn analyze_body(
-        &self,
-        function: &super::SQLUserFunction,
-        definition: &CreateFunction,
-    ) -> Result<Option<(ScalarExpr, Vec<crate::SQLParam>)>, SQLError> {
-        let Some((plan, result, parameters)) = self.analyze_plan(function, definition)? else {
-            return Ok(None);
-        };
-        let UnifiedPlan::Query(query) = plan else {
-            return Ok(None);
-        };
-        if !query.ctes.is_empty() {
-            return Ok(None);
-        }
-        let RelationalPlan::QueryBlock(mut block) = query.root else {
-            return Ok(None);
-        };
-        if !block.is_single_expression() {
-            return Ok(None);
-        }
-        let layout = sql_function_result_layout(self.types, definition, Some(&result))?;
-        if layout.kind == SQLFunctionResultKind::Tuple {
-            return Ok(None);
-        }
-        let mut expression = block.projections.remove(0).expr;
-        let actual = result
-            .column_types()
-            .and_then(|types| types.first())
-            .and_then(Option::as_ref);
-        if layout.kind == SQLFunctionResultKind::Void && actual != Some(&ColumnType::Void) {
-            return Ok(None);
-        }
-        if actual != Some(&layout.declared_type) {
-            expression = ScalarExpr::Cast {
-                implicit: true,
-                expr: Box::new(expression),
-                ty: layout.declared_type.catalog_name(),
-            };
-        }
-        Ok(Some((expression, parameters)))
-    }
-
-    fn analyze_plan(
-        &self,
-        function: &super::SQLUserFunction,
-        definition: &CreateFunction,
-    ) -> Result<
-        Option<(
-            UnifiedPlan,
-            crate::binding::statements::AnalyzedResult,
-            Vec<crate::SQLParam>,
-        )>,
-        SQLError,
-    > {
-        let Some(mut plan) = self.body_plan(function)? else {
-            return Ok(None);
-        };
-        let parameters = routine_parameter_values(self.types, definition);
-        let names = matches!(definition.body, FunctionBody::Source(_))
-            .then(|| sql_body_parameter_scope(definition, &parameters))
-            .transpose()?;
-        let mut snapshot = self.catalog.binding_snapshot()?;
-        let namespace = self.catalog.stored_query_namespace();
-        // A function body is parsed independently of the caller's WITH names. Trigger transition relations retain their activation scope.
-        snapshot
-            .ctes
-            .retain(|name, _| namespace.transition_relations.contains(name));
-        snapshot.deferred_ctes.clear();
-        snapshot.non_returning_ctes.clear();
-        snapshot.scalar_subqueries = Arc::default();
-        let result = {
-            // A SQL-standard body is inlined as it was stored; a body compiled from source text places its set-returning calls as a new statement does.
-            let _placement = if matches!(definition.body, FunctionBody::Statements(_)) {
-                SetPlacementScope::stored_definition()
-            } else {
-                SetPlacementScope::compiled_source()
-            };
-            prepare_routine_body_inputs(
-                self.routines,
-                &mut plan,
-                &parameters,
-                &snapshot.context(),
-                self.catalog,
-                names.as_ref(),
-            )
-        }?;
-        if let Some(names) = &names {
-            bind_routine_parameter_references(
-                self.routines,
-                &mut plan,
-                &parameters,
-                &snapshot.context(),
-                names,
-            )?;
-        }
-        Ok(Some((plan, result, parameters)))
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        let replacement = self.prepare_owned(binding, arguments, active, &control)?;
+        replacement
+            .map(|replacement| {
+                Ok(InlineRoutineExpression {
+                    identity: replacement.identity,
+                    expression: replacement
+                        .expression
+                        .finish(&control)?
+                        .into_uncontrolled()
+                        .expect("ordinary inline expression"),
+                    error_context: replacement.error_context.map(|frame| {
+                        frame
+                            .into_uncontrolled()
+                            .expect("ordinary inline diagnostic frame")
+                    }),
+                })
+            })
+            .transpose()
     }
 
     /// Expand defaults, named arguments and implicit casts before the planner
@@ -410,48 +215,76 @@ impl RoutineInliningContext<'_> {
         required
     }
 
-    fn body_plan(
+    pub fn requires_replanning_with_control(
         &self,
-        function: &super::SQLUserFunction,
-    ) -> Result<Option<UnifiedPlan>, SQLError> {
-        match &function.body {
-            RoutineBody::Bound(body) => match body.as_ref() {
-                CompiledFunctionBody::SQL(plans) if plans.len() == 1 => Ok(Some(plans[0].clone())),
-                _ => Ok(None),
-            },
-            RoutineBody::Source => {
-                let FunctionBody::Source(source) = &function.def.body else {
-                    return Err(SQLError::Internal(
-                        "source routine has no SQL source".into(),
-                    ));
-                };
-                // Parse the complete message once, then decline a multi-statement
-                // body before semantic compilation. Lexical notices still belong
-                // to every attempted expansion, as in inline_function.
-                super::compilation::with_parser_context(self.parsers, || {
-                    let statements = crate::parse_statements(source)?;
-                    let [statement] = statements.as_slice() else {
-                        return Ok(None);
-                    };
-                    Ok(Some(UnifiedPlan::lower_with(
-                        statement.compile()?,
-                        &|name: &str| self.catalog.has_registered_aggregate_function(name),
-                    )))
-                })
+        plan: crate::plan::PlanRef<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        let mut required = false;
+        let mut status: Result<(), SQLError> = Ok(());
+        plan.visit_scalar_expressions(&mut |root| {
+            if status.is_err() {
+                return;
             }
-        }
+            status = root.try_visit(&mut |expression| {
+                control.check()?;
+                if let ScalarExpr::Func {
+                    binding: Some(binding),
+                    ..
+                } = expression
+                {
+                    if !binding.builtin {
+                        if let Some(function) = super::selected_bound_function_with_control(
+                            self.routines,
+                            binding,
+                            control,
+                        )? {
+                            required |= eligible_definition(&function.def)
+                                || function.def.volatility
+                                    == crate::ast::FunctionVolatility::Immutable;
+                        }
+                    }
+                }
+                Ok::<_, SQLError>(true)
+            });
+        });
+        status?;
+        let mut status: Result<(), SQLError> = Ok(());
+        plan.visit_sources(&mut |source| {
+            if status.is_err() {
+                return;
+            }
+            status = (|| {
+                control.check()?;
+                if let crate::plan::SourcePlan::Function {
+                    binding: Some(binding),
+                    ..
+                } = source
+                {
+                    if let Some(function) = super::selected_bound_function_with_control(
+                        self.routines,
+                        binding,
+                        control,
+                    )? {
+                        required |= eligible_definition(&function.def)
+                            || table::eligible_definition(&function.def)
+                            || function.def.volatility == crate::ast::FunctionVolatility::Immutable;
+                    }
+                }
+                Ok(())
+            })();
+        });
+        status?;
+        Ok(required)
     }
 }
 
 fn eligible_definition(definition: &CreateFunction) -> bool {
-    definition.language == "sql"
-        && !definition.is_procedure
-        && !definition.security.security_definer
-        && !definition.returns_set()
-        && definition.config.is_empty()
-        && definition.output_params().nth(1).is_none()
-        && !matches!(&definition.returns, FunctionReturns::Scalar { type_name }
-            if crate::type_resolution::canonical_routine_type_name(type_name) == "record")
+    selection::eligible_definition_with_control(
+        definition,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine eligibility")
 }
 
 fn is_constant(expression: &ScalarExpr) -> bool {

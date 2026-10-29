@@ -14,7 +14,9 @@ use crate::{
 };
 
 mod anonymous;
+pub(crate) use anonymous::validate_sql_tuple_result_with_control;
 mod production;
+pub(super) use production::declared_sql_function_result_type_with_control;
 pub use production::{
     declared_sql_function_result_with_control, sql_function_composite_columns_with_control,
     sql_function_result_layout_with_control,

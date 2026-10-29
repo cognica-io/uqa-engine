@@ -45,6 +45,7 @@ impl<'a> RetainedRuleInput<'a> {
         let record = crate::schema::RecordMetadata {
             types: Some(types.clone()),
             descriptor: Some(Arc::new(crate::schema::RecordDescriptor {
+                memory: crate::schema::RecordMemory::default(),
                 types,
                 names: Some(ordered.iter().map(|(name, _)| (*name).clone()).collect()),
                 fields: ordered

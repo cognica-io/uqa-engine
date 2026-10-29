@@ -23,6 +23,42 @@ impl uqa_sql::semantics::rules::RuleCatalog for Engine {
     fn resolve_mutation_target(&self, name: &str, bound: bool) -> Result<String, SQLError> {
         self.resolve_mutation_target_name(name, bound)
     }
+    fn resolve_rule_relation_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationIdentity>, SQLError> {
+        self.event_analysis_context()
+            .resolve_rule_relation_with_control(table, control)
+    }
+    fn resolve_mutation_target_with_control(
+        &self,
+        name: &str,
+        bound: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.resolve_mutation_target_name_with_control(name, bound, control)
+    }
+    fn visit_rules_with_control(
+        &self,
+        table: &str,
+        event: RuleEvent,
+        reverse: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        visit: &mut dyn FnMut(&StoredRule) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let relation = self
+            .event_analysis_context()
+            .resolve_rule_relation_with_control(table, control)?;
+        let replica = self.session_replication_role_is_replica_with_control(control)?;
+        let rules = self.query_catalog_snapshot.as_ref().map_or_else(
+            || self.durable.rules.snapshot(),
+            |snapshot| snapshot.rules.clone(),
+        );
+        uqa_sql::catalog::events::selection::visit_active_rules_with_control(
+            &rules, &relation, event, replica, reverse, control, visit,
+        )
+    }
 }
 
 impl uqa_sql::semantics::rules::action_binding::RuleSourceCatalog for Engine {

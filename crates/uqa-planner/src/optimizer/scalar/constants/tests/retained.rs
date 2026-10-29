@@ -140,7 +140,7 @@ fn retained_values_preserve_raw_arrays_declared_names_and_parameter_origin() {
 #[test]
 fn retained_constant_storage_follows_values_inputs_in_commands_and_queries() {
     let calls = std::cell::Cell::new(0);
-    let factory = || {
+    let factory = |_: &uqa_core::memory::ProductionControl<'_>| {
         calls.set(calls.get() + 1);
         Ok(None)
     };
@@ -182,7 +182,7 @@ fn values_queries_bound_folded_payloads_before_cloning_their_native_plans() {
         format!("INSERT INTO target SELECT n FROM (VALUES {values}) AS input(n)"),
     ] {
         let storage = Arc::new(uqa_execution::scalar::RetainedConstants::new(4096));
-        let factory = || {
+        let factory = |_: &uqa_core::memory::ProductionControl<'_>| {
             Ok(Some(
                 storage.clone() as Arc<dyn uqa_sql::ir::ConstantValueStorage>
             ))

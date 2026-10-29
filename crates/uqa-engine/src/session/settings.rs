@@ -253,6 +253,28 @@ impl Engine {
         self.session.setting("session_replication_role") == "replica"
     }
 
+    pub(crate) fn session_replication_role_is_replica_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        if let Some(role) = self
+            .session
+            .state
+            .read()
+            .session_vars
+            .get("session_replication_role")
+        {
+            return Ok(role == "replica");
+        }
+        Ok(self
+            .session
+            .parameters
+            .lock()
+            .client_setting_with_control("session_replication_role", control)?
+            .is_some_and(|role| role == "replica"))
+    }
+
     /// Whether a query may project the values that indexes hold instead of reading documents, as `PostgreSQL`'s `enable_indexonlyscan` does.
     pub(crate) fn index_only_scans_enabled(&self) -> bool {
         self.session.setting("enable_indexonlyscan") == "on"

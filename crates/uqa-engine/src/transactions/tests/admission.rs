@@ -366,9 +366,11 @@ fn sql_cleanup_keeps_the_callback_failure_across_entry_points(#[case] provider: 
                 .detail()
                 .unwrap()
                 .starts_with("original callback detail"));
-            if !matches!(provider, Provider::Memory) {
+            // Statement owners can release enough memory for rollback before
+            // cleanup starts. Any cleanup error must remain secondary to the callback.
+            if let Some((_, cleanup)) = error.cleanup() {
                 assert!(
-                    error.detail().unwrap().contains("memory requires"),
+                    cleanup.to_string().contains("memory requires"),
                     "{entry}: {error:?}"
                 );
             }

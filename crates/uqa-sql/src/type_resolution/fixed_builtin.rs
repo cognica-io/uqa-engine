@@ -9,9 +9,13 @@
 mod binding;
 mod owned;
 pub(super) use owned::bind_owned_call;
+pub(super) mod preparation;
 mod production;
 pub(super) use binding::bind_call_in_place_with_control;
-pub(super) use production::{overloads_with_control, resolve_overload_with_control};
+pub(crate) use preparation::resolve_fixed_builtin_call_with_control;
+pub(crate) use production::overloads_with_control;
+pub(super) use production::resolve_overload_with_control;
+pub(crate) use production::resolve_syntax_binding_with_control;
 mod registry;
 mod regular_expressions;
 mod selected;
@@ -57,49 +61,30 @@ pub fn resolve_fixed_builtin_call(
     explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ResolvedFixedBuiltinCall>, SQLError> {
-    if binding.is_none() && resolver.is_some_and(|resolver| resolver.has_untyped_function(name)) {
-        return Ok(None);
-    }
-    if super::range::function_type(name, binding, argument_types).is_some() {
-        return Ok(None);
-    }
-    let Some(builtins) = overloads(name) else {
-        return Ok(None);
-    };
-    let selected = resolve_overload(
+    resolve_fixed_builtin_call_with_control(
         name,
         binding,
         argument_names,
         argument_types,
         explicit_variadic,
         resolver,
-    )?;
-    let (builtin_argument_positions, builtin_non_immutable) = if selected.binding.builtin {
-        let matched = builtins
-            .iter()
-            .find(|overload| builtin_binding_matches(overload, &selected.binding))
-            .cloned()
-            .and_then(|overload| {
-                match_builtin_function_overload(overload, argument_names, argument_types)
-            })
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved fixed built-in `{}` lost its catalog signature",
-                    selected.binding.name
-                ))
-            })?;
-        (
-            Some(matched.argument_positions),
-            builtin_binding_is_non_immutable(&selected.binding),
-        )
-    } else {
-        (None, false)
-    };
-    Ok(Some(ResolvedFixedBuiltinCall {
-        selected,
-        builtin_argument_positions,
-        builtin_non_immutable,
-    }))
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|call| {
+        Ok(ResolvedFixedBuiltinCall {
+            selected: call
+                .selected
+                .into_uncontrolled()
+                .expect("ordinary selected call"),
+            builtin_argument_positions: call.builtin_argument_positions.map(|positions| {
+                positions
+                    .into_uncontrolled()
+                    .expect("ordinary call positions")
+            }),
+            builtin_non_immutable: call.builtin_non_immutable,
+        })
+    })
+    .transpose()
 }
 
 /// Return the catalog result type encoded by a stable fixed built-in binding.
@@ -224,26 +209,6 @@ pub(super) fn bound_argument_positions(
             .expect("ordinary argument mapping has no reservation")
             .argument_positions,
     ))
-}
-
-pub(super) fn selected_argument_targets(
-    name: &str,
-    argument_types: &[Option<ColumnType>],
-) -> Option<Vec<Option<ColumnType>>> {
-    let argument_names = vec![None; argument_types.len()];
-    let selected =
-        resolve_overload(name, None, &argument_names, argument_types, false, None).ok()?;
-    let declared = selected
-        .binding
-        .argument_types
-        .iter()
-        .zip(argument_types)
-        .map(|(ty, actual)| match ColumnType::from_sql_name(ty).ok() {
-            Some(ColumnType::AnyArray) => actual.clone(),
-            declared => declared,
-        })
-        .collect::<Vec<_>>();
-    (declared.len() == argument_types.len()).then_some(declared)
 }
 
 pub(super) fn bind_call(

@@ -9,7 +9,7 @@
 use uqa_sql::ast::ColumnType;
 use uqa_storage::CatalogFacade;
 
-use crate::{Engine, StorageBackendResult};
+use crate::{Engine, SQLError, StorageBackendResult};
 
 pub(crate) use uqa_sql::catalog::domain::StoredDomain;
 
@@ -76,6 +76,21 @@ impl Engine {
 }
 
 impl uqa_sql::catalog::domain::DomainCatalog for Engine {
+    fn domain_by_oid_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<StoredDomain>>, SQLError> {
+        for domain in self.durable.domains.read().values() {
+            control.check()?;
+            if domain.oid == oid {
+                return domain.clone_with_control(control).map(Some);
+            }
+        }
+        control.check()?;
+        Ok(None)
+    }
+
     fn domain_by_oid(&self, oid: u32) -> Option<StoredDomain> {
         Engine::domain_by_oid(self, oid)
     }

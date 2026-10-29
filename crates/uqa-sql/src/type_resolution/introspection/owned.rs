@@ -39,6 +39,53 @@ pub fn bind_type_introspection_owned(
     .bind(expression)
 }
 
+pub(crate) fn bind_stored_inputs_owned(
+    expression: OwnedScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    OwnedBinder {
+        context: BinderContext {
+            schema,
+            params,
+            resolver: Some(resolver),
+            control: *control,
+            literal_binding: LiteralBinding::Stored,
+        },
+    }
+    .bind(expression)
+}
+
+/// Validate catalog literal coercions through the same owning binder used by execution planning. The temporary rewritten tree releases every constructor before returning.
+pub fn validate_catalog_literals_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    if !resolver
+        .enum_labels()
+        .is_some_and(crate::expr::enums::EnumLabelCatalog::has_enum_types)
+    {
+        return Ok(());
+    }
+    OwnedBinder {
+        context: BinderContext {
+            schema,
+            params,
+            resolver: Some(resolver),
+            control: *control,
+            literal_binding: LiteralBinding::Validate,
+        },
+    }
+    .bind(expression.copy_for_rewrite(control)?)
+    .map(drop)
+}
+
 struct OwnedBinder<'a> {
     context: BinderContext<'a>,
 }

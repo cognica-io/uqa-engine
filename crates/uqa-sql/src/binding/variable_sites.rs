@@ -27,13 +27,13 @@ pub enum VariableSiteResolution {
 /// The variable sites of the statement a scope binds.
 pub(super) struct VariableSites {
     /// The names as written; the site that the positional parameter `n` stands for is at index `n - 1`.
-    names: Vec<ScalarExpr>,
-    resolutions: Vec<VariableSiteResolution>,
+    pub(in crate::binding) names: uqa_core::memory::Produced<Vec<ScalarExpr>>,
+    pub(in crate::binding) resolutions: uqa_core::memory::Produced<Vec<VariableSiteResolution>>,
 }
 
 impl VariableSites {
     /// The site that `expression` stands for.
-    fn site(&self, expression: &ScalarExpr) -> Option<usize> {
+    pub(in crate::binding) fn site(&self, expression: &ScalarExpr) -> Option<usize> {
         match expression {
             ScalarExpr::Param(number) => number
                 .checked_sub(1)
@@ -43,7 +43,7 @@ impl VariableSites {
     }
 
     /// The output name a select list item that is the site takes: the name as written.
-    fn label(&self, site: usize) -> Option<&str> {
+    pub(in crate::binding) fn label(&self, site: usize) -> Option<&str> {
         match &self.names[site] {
             ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. } => {
                 Some(name)
@@ -53,7 +53,7 @@ impl VariableSites {
     }
 
     /// The site's name when it is written without a qualifier.
-    fn bare_name(&self, site: usize) -> Option<&str> {
+    pub(in crate::binding) fn bare_name(&self, site: usize) -> Option<&str> {
         match &self.names[site] {
             ScalarExpr::Column(name) => Some(name),
             _ => None,
@@ -62,7 +62,7 @@ impl VariableSites {
 }
 
 /// Whether a column or relation of `schema` takes `name`.
-fn takes(schema: &RowSchema, name: &ScalarExpr) -> bool {
+pub(in crate::binding) fn takes(schema: &RowSchema, name: &ScalarExpr) -> bool {
     match name {
         ScalarExpr::Column(name) => {
             schema.has_unqualified_column(name)
@@ -89,10 +89,10 @@ impl SchemaScope {
         };
         crate::plan::rewrite_scalar_expression(expression, &mut |node| {
             if let Some(site) = sites.site(node) {
-                if sites.resolutions[site] == VariableSiteResolution::Variable
+                if sites.resolutions.as_mut_slice()[site] == VariableSiteResolution::Variable
                     && takes(schema, &sites.names[site])
                 {
-                    sites.resolutions[site] = VariableSiteResolution::Column;
+                    sites.resolutions.as_mut_slice()[site] = VariableSiteResolution::Column;
                     node.clone_from(&sites.names[site]);
                 }
             }
@@ -136,7 +136,7 @@ impl SchemaScope {
         {
             return false;
         }
-        sites.resolutions[site] = VariableSiteResolution::Output;
+        sites.resolutions.as_mut_slice()[site] = VariableSiteResolution::Output;
         true
     }
 
@@ -167,7 +167,7 @@ impl SchemaScope {
             let Some(position) = output_names.iter().position(|output| output == name) else {
                 continue;
             };
-            sites.resolutions[site] = VariableSiteResolution::Output;
+            sites.resolutions.as_mut_slice()[site] = VariableSiteResolution::Output;
             item.clone_from(&block.projections[position].expr);
         }
     }
@@ -184,14 +184,20 @@ pub fn resolve_variable_sites(
     let mut scope = SchemaScope::for_analysis(ctes)?;
     scope.scalar_binding = super::ScalarBindingMode::References;
     scope.variable_sites = Some(VariableSites {
-        resolutions: vec![VariableSiteResolution::Variable; names.len()],
-        names,
+        resolutions: uqa_core::memory::ProductionControl::uncontrolled()
+            .finish(vec![VariableSiteResolution::Variable; names.len()], None)?,
+        names: uqa_core::memory::ProductionControl::uncontrolled().finish(names, None)?,
     });
     let walked = scope.bind_statement_parameters(routines, plan, params, None);
     let resolutions = scope
         .variable_sites
         .take()
-        .map(|sites| sites.resolutions)
+        .map(|sites| {
+            sites
+                .resolutions
+                .into_uncontrolled()
+                .expect("ordinary variable site analysis")
+        })
         .unwrap_or_default();
     match walked {
         Ok(()) => Ok(resolutions),

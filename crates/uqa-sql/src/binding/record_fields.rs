@@ -26,28 +26,6 @@ pub(super) fn common_fields<'a>(
         .then(|| first.clone())
 }
 
-pub(super) fn star_metadata(
-    expression: &ScalarExpr,
-    schema: &RowSchema,
-) -> Option<Vec<Option<crate::schema::RecordMetadata>>> {
-    match expression {
-        ScalarExpr::Star => Some(
-            (0..schema.len())
-                .filter(|index| schema.wildcard_position_visible(*index))
-                .map(|index| schema.record_metadata(index).cloned())
-                .collect(),
-        ),
-        ScalarExpr::QualifiedStar(qualifier) => Some(
-            schema
-                .qualified_star_layout(qualifier)
-                .iter()
-                .map(|(_, slot, _)| schema.physical_record_metadata(*slot).cloned())
-                .collect(),
-        ),
-        _ => None,
-    }
-}
-
 impl SchemaScope {
     /// Read the descriptor only after ordinary expression validation has succeeded. No value is evaluated, and column references reuse the input descriptor rather than infer fields from runtime values.
     pub(super) fn bind_record_fields(
@@ -58,62 +36,68 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<Option<RecordFields>, SQLError> {
+        let owner = self.control().capture();
+        let control = owner.control();
+        control.check()?;
         if let Some(fields) = input_fields(expression, schema) {
             return Ok(Some(fields));
         }
         match expression {
             ScalarExpr::Row(fields) => {
-                let mut types = Vec::new();
+                let mut types = uqa_core::memory::ProductionVec::new(control);
                 for field in fields {
-                    let expanded = crate::semantics::row_star_fields(field, schema)?;
-                    for field in expanded
-                        .as_deref()
-                        .unwrap_or_else(|| std::slice::from_ref(field))
-                    {
-                        types.push(
-                            if matches!(
-                                field,
-                                ScalarExpr::Literal(
-                                    uqa_core::Value::Str(_) | uqa_core::Value::Null
-                                )
-                            ) {
-                                None
-                            } else {
-                                self.bind_expression_type(
+                    let expanded =
+                        crate::semantics::row_star_fields_with_control(field, schema, &control)?;
+                    if let Some(expanded) = expanded {
+                        for field in expanded.iter() {
+                            push_type(
+                                &mut types,
+                                self.bind_record_field_type(
                                     routines, field, schema, subqueries, params,
-                                )?
-                            },
-                        );
+                                )?,
+                                &control,
+                            )?;
+                        }
+                    } else {
+                        push_type(
+                            &mut types,
+                            self.bind_record_field_type(
+                                routines, field, schema, subqueries, params,
+                            )?,
+                            &control,
+                        )?;
                     }
                 }
-                Ok(Some(types.into()))
+                Ok(Some(RecordFields::from_produced(
+                    types.finish()?,
+                    &control,
+                )?))
             }
-            ScalarExpr::Cast { expr, ty, .. }
-                if matches!(
-                    routines
-                        .resolve_type_name(ty)?
-                        .or_else(|| ColumnType::from_sql_name(ty).ok()),
-                    Some(ColumnType::Record)
-                ) =>
-            {
+            ScalarExpr::Cast { expr, ty, .. } if record_cast(routines, ty, &control)? => {
                 self.bind_record_fields(routines, expr, schema, subqueries, params)
             }
             ScalarExpr::Case {
                 when, else_branch, ..
             } => {
-                let mut fields = Vec::new();
+                let mut first = None;
+                let mut equal = true;
                 for expression in when
                     .iter()
                     .map(|(_, value)| value)
                     .chain(else_branch.iter().map(AsRef::as_ref))
                 {
+                    control.check()?;
                     if !matches!(expression, ScalarExpr::Literal(uqa_core::Value::Null)) {
-                        fields.push(self.bind_record_fields(
-                            routines, expression, schema, subqueries, params,
-                        )?);
+                        let fields = self
+                            .bind_record_fields(routines, expression, schema, subqueries, params)?;
+                        if let Some(first) = &first {
+                            equal &= first == &fields;
+                        } else {
+                            first = Some(fields);
+                        }
                     }
                 }
-                Ok(common_fields(fields.iter().map(Option::as_ref)))
+                Ok(first.filter(|_| equal).flatten())
             }
             ScalarExpr::ScalarSubquery(index) => {
                 let query = subqueries.get(*index).ok_or_else(|| {
@@ -123,9 +107,10 @@ impl SchemaScope {
                 Ok(output.record_fields(0).cloned())
             }
             _ => {
-                let ty =
-                    self.bind_expression_type(routines, expression, schema, subqueries, params)?;
-                let Some(mut ty) = ty.as_ref() else {
+                let ty = self.bind_expression_type_with_control(
+                    routines, expression, schema, subqueries, params,
+                )?;
+                let Some(mut ty) = ty.as_deref() else {
                     return Ok(None);
                 };
                 while let ColumnType::Domain { base, .. } = ty {
@@ -134,18 +119,69 @@ impl SchemaScope {
                 let ColumnType::Composite(reference) = ty else {
                     return Ok(None);
                 };
-                let descriptor =
-                    crate::expr::composites::descriptor(routines.composite_types(), reference.oid)?;
-                Ok(Some(
+                let descriptor = crate::expr::composites::descriptor_with_control(
+                    routines.composite_types(),
+                    reference.oid,
+                    &control,
+                )?;
+                Ok(Some(RecordFields::from_types_with_control(
                     descriptor
                         .attributes
                         .iter()
-                        .map(|attribute| Some(attribute.ty.clone()))
-                        .collect::<Vec<_>>()
-                        .into(),
-                ))
+                        .map(|attribute| Some(&attribute.ty)),
+                    &control,
+                )?))
             }
         }
+    }
+
+    fn bind_record_field_type(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        field: &ScalarExpr,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        if matches!(
+            field,
+            ScalarExpr::Literal(uqa_core::Value::Str(_) | uqa_core::Value::Null)
+        ) {
+            Ok(None)
+        } else {
+            self.bind_expression_type_with_control(routines, field, schema, subqueries, params)
+        }
+    }
+}
+
+fn push_type(
+    types: &mut uqa_core::memory::ProductionVec<'_, Option<ColumnType>>,
+    ty: Option<uqa_core::memory::Produced<ColumnType>>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let (ty, memory) = match ty {
+        Some(ty) => {
+            let (ty, memory) = ty.into_parts();
+            (Some(ty), memory)
+        }
+        None => (None, control.empty_reservation()),
+    };
+    types.push_produced(control.finish(ty, memory)?)?;
+    Ok(())
+}
+
+fn record_cast(
+    routines: &dyn RoutineResolution,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    if let Some(ty) = routines.resolve_type_name_with_control(name, control)? {
+        return Ok(matches!(*ty, ColumnType::Record));
+    }
+    match ColumnType::from_sql_name_with_control(name, control) {
+        Ok(ty) => Ok(matches!(*ty, ColumnType::Record)),
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
+        Err(_) => Ok(false),
     }
 }
 

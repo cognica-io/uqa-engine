@@ -23,6 +23,58 @@ pub enum CommandAssignmentSlot {
 }
 
 impl MutableCommandPlan {
+    /// Rewrite a selected INSERT target's bounds without moving its column name or the other targets.
+    pub fn map_insert_target(
+        mut self,
+        index: usize,
+        control: &ProductionControl<'_>,
+        mut map: impl FnMut(
+            OwnedScalarExpr,
+            &ProductionControl<'_>,
+        ) -> Result<OwnedScalarExpr, SQLError>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let CommandPlan::Insert(insert) = &mut self.command else {
+            return Err(SQLError::Internal("target bounds require INSERT".into()));
+        };
+        let memory = self.memory.as_mut().map(|memory| {
+            item(
+                memory.field_mut("value0").as_mut().expect("insert body"),
+                "columns",
+                index,
+            )
+        });
+        rewrite_target(
+            &mut insert.columns[index],
+            memory,
+            control,
+            &mut |expression| map(expression, control),
+        )?;
+        Ok(self)
+    }
+
+    /// Rewrite only the value of a selected assignment. Target bounds remain with their original execution boundary and are never visited by this operation.
+    pub fn map_assignment_value(
+        mut self,
+        slot: CommandAssignmentSlot,
+        control: &ProductionControl<'_>,
+        mut map: impl FnMut(OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let assignment = slot.assignment_mut(&mut self.command);
+        let memory = self.memory.as_mut().map(|memory| {
+            slot.memory_mut(memory)
+                .field_mut("value")
+                .as_mut()
+                .expect("assignment value")
+                .scalar_mut()
+        });
+        rewrite_scalar(&mut assignment.value, memory, control, &mut map)?;
+        Ok(self)
+    }
+
     /// Rewrite every bound followed by the value of one assignment, preserving grouped-target order and admitting each replacement independently.
     pub fn map_assignment(
         mut self,

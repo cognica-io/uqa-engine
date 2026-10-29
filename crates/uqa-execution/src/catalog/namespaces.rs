@@ -7,6 +7,11 @@
 //! Effective search-path selection over the caller's retained catalog and role.
 
 use super::{CatalogReadView, RelationNameResolution};
+mod production;
+pub use production::{
+    current_schema_names_with_control, namespace_schema_exists,
+    require_schema_privilege_with_control, schema_has_privilege_with_control,
+};
 use uqa_sql::catalog::{
     roles::identity::RoleSubject,
     security::{
@@ -25,9 +30,7 @@ pub(super) fn schema_security(
     }
     match name {
         name if name == temporary_schema => Some(BoundSchemaSecurity::with_public_privileges(true)),
-        name if catalog.snapshot().definitions.graphs.contains_key(name) => {
-            Some(BoundSchemaSecurity::bootstrap(name))
-        }
+        name if catalog.contains_graph(name) => Some(BoundSchemaSecurity::bootstrap(name)),
         _ => BoundSchemaSecurity::builtin(name),
     }
 }

@@ -12,11 +12,19 @@ use crate::plan::{
 use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
 
 impl Copying<'_> {
-    pub(super) fn query(&mut self, query: &QueryPlan) -> Result<QueryPlan> {
+    pub(crate) fn query(&mut self, query: &QueryPlan) -> Result<QueryPlan> {
         self.field("query", |copying| copying.query_fields(query))
     }
 
     pub(in crate::plan) fn query_fields(&mut self, query: &QueryPlan) -> Result<QueryPlan> {
+        self.query_fields_using(query, |copying| copying.relational(&query.root))
+    }
+
+    pub(super) fn query_fields_using(
+        &mut self,
+        query: &QueryPlan,
+        root: impl FnOnce(&mut Self) -> Result<RelationalPlan>,
+    ) -> Result<QueryPlan> {
         self.check()?;
         Ok(QueryPlan {
             analyzed_output: query.analyzed_output.clone(),
@@ -29,9 +37,11 @@ impl Copying<'_> {
                     .transpose()
             })?,
             relations_bound: query.relations_bound,
-            relation_privilege_subject: self.role(query.relation_privilege_subject.as_ref())?,
+            relation_privilege_subject: self.field("relation_privilege_subject", |copying| {
+                copying.role(query.relation_privilege_subject.as_ref())
+            })?,
             ctes: self.field("ctes", |copying| copying.map(query.ctes.iter(), Self::cte))?,
-            root: self.field("root", |copying| copying.relational(&query.root))?,
+            root: self.field("root", root)?,
         })
     }
 
@@ -52,19 +62,23 @@ impl Copying<'_> {
                     })
                 })
                 .transpose()?,
-            cycle: cte
-                .cycle
-                .as_ref()
-                .map(|cycle| {
-                    Ok::<_, crate::SQLError>(CteCyclePlan {
-                        columns: self.texts(&cycle.columns)?,
-                        mark_column: self.text(&cycle.mark_column)?,
-                        mark_value: self.scalar(&cycle.mark_value)?,
-                        mark_default: self.scalar(&cycle.mark_default)?,
-                        path_column: self.text(&cycle.path_column)?,
+            cycle: self.field("cycle", |copying| {
+                cte.cycle
+                    .as_ref()
+                    .map(|cycle| {
+                        Ok::<_, crate::SQLError>(CteCyclePlan {
+                            columns: copying.texts(&cycle.columns)?,
+                            mark_column: copying.text(&cycle.mark_column)?,
+                            mark_value: copying
+                                .field("mark_value", |copying| copying.scalar(&cycle.mark_value))?,
+                            mark_default: copying.field("mark_default", |copying| {
+                                copying.scalar(&cycle.mark_default)
+                            })?,
+                            path_column: copying.text(&cycle.path_column)?,
+                        })
                     })
-                })
-                .transpose()?,
+                    .transpose()
+            })?,
             body: self.field("body", |copying| {
                 Ok(match &cte.body {
                     CtePlanBody::Query(query) => {
@@ -128,16 +142,17 @@ impl Copying<'_> {
         })
     }
 
-    fn block(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
+    pub(super) fn block(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
         self.field("block", |copying| copying.block_fields(block))
     }
 
     fn block_fields(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
         Ok(QueryBlockPlan {
-            deferred_outer_rewrites: self
-                .map(block.deferred_outer_rewrites.iter(), |copying, rewrite| {
+            deferred_outer_rewrites: self.field("deferred_outer_rewrites", |copying| {
+                copying.map(block.deferred_outer_rewrites.iter(), |copying, rewrite| {
                     rewrite.copy_with(copying)
-                })?,
+                })
+            })?,
             windows: self.field("windows", |copying| {
                 copying.map(block.windows.iter(), |copying, window| {
                     Ok(crate::ast::WindowDefinition {
@@ -150,7 +165,9 @@ impl Copying<'_> {
             projections: self.field("projections", |copying| {
                 copying.map(block.projections.iter(), Self::projection)
             })?,
-            privilege_columns: self.set(&block.privilege_columns, Self::identity)?,
+            privilege_columns: self.field("privilege_columns", |copying| {
+                copying.set(&block.privilege_columns, Self::identity)
+            })?,
             from: self.field("from", |copying| {
                 block
                     .from
@@ -190,11 +207,13 @@ impl Copying<'_> {
                 copying.map(block.subqueries.iter(), Self::query)
             })?,
             access: block.access.clone(),
-            locking: self.map(block.locking.iter(), |copying, clause| {
-                Ok(crate::ast::LockingClause {
-                    strength: clause.strength,
-                    wait: clause.wait,
-                    relations: copying.texts(&clause.relations)?,
+            locking: self.field("locking", |copying| {
+                copying.map(block.locking.iter(), |copying, clause| {
+                    Ok(crate::ast::LockingClause {
+                        strength: clause.strength,
+                        wait: clause.wait,
+                        relations: copying.texts(&clause.relations)?,
+                    })
                 })
             })?,
         })

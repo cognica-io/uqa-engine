@@ -727,6 +727,29 @@ impl FunctionBinding {
         }
     }
 
+    /// Admit a dynamically selected built-in name before constructing its retained binding.
+    pub(crate) fn builtin_by_name_with_control(
+        name: &str,
+        input_collation: Option<crate::catalog::collations::CollationSelection>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, crate::SQLError> {
+        let (name, memory) = control.copy_text(name)?.into_parts();
+        Ok(control.finish(
+            Self {
+                object_id: None,
+                name,
+                argument_types: Vec::new(),
+                builtin: true,
+                dispatch: None,
+                invocation: None,
+                value_binding: None,
+                resolution_error: None,
+                input_collation,
+            },
+            memory,
+        )?)
+    }
+
     /// Return whether this binding marks a polymorphic syntax expression whose argument types must be inferred from its operands.
     #[must_use]
     pub fn is_polymorphic_builtin_syntax(&self) -> bool {

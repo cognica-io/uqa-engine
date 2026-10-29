@@ -6,6 +6,8 @@
 
 //! Lift pure derived projections into their consumer before its qualification runs.
 
+pub(super) mod owned;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::{

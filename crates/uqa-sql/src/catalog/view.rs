@@ -4,9 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::semantics::sets::placement_scope::SetPlacementScope;
 use crate::{RowSchema, SQLError};
 
+mod production;
+pub use production::{
+    create_view_output_columns_with_control, materialized_view_schema_with_control,
+    named_view_schema_with_control, ViewRewriteDefinitionRef,
+};
 mod materialized;
 pub use materialized::materialized_view_schema;
 
@@ -29,54 +33,27 @@ pub fn create_view_output_columns(
     schema: &RowSchema,
     declared: &[String],
 ) -> Result<Vec<String>, SQLError> {
-    if declared.len() > schema.len() {
-        return Err(SQLError::Routine {
-            sqlstate: "42601".into(),
-            message: "CREATE VIEW specifies more column names than columns".into(),
-        });
-    }
-    let columns = schema
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(position, column)| {
-            declared
-                .get(position)
-                .cloned()
-                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
-        })
-        .collect::<Vec<_>>();
-    let mut seen = std::collections::BTreeSet::new();
-    for column in &columns {
-        if !seen.insert(column) {
-            return Err(SQLError::Routine {
-                sqlstate: "42701".into(),
-                message: format!("column \"{column}\" specified more than once"),
-            });
-        }
-    }
-    Ok(columns)
+    create_view_output_columns_with_control(
+        schema,
+        declared,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|output| {
+        output
+            .into_uncontrolled()
+            .expect("ordinary view column names")
+    })
 }
 
 pub fn named_view_schema(
     query_schema: &RowSchema,
     output_columns: &[String],
 ) -> Result<RowSchema, SQLError> {
-    if query_schema.len() != output_columns.len() {
-        return Err(SQLError::Internal(format!(
-            "stored view row type has {} columns but its query has {}",
-            output_columns.len(),
-            query_schema.len()
-        )));
-    }
-    Ok(RowSchema::with_types(
-        output_columns.to_vec(),
-        query_schema.column_types().to_vec(),
+    named_view_schema_with_control(
+        query_schema,
+        output_columns,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
     )
-    .with_column_collations(
-        (0..query_schema.len()).map(|index| query_schema.column_collation(index)),
-    )
-    .with_record_fields_from(query_schema))
 }
 
 pub fn validate_view_column_types(
@@ -127,30 +104,16 @@ impl ViewRewriteDefinition {
         catalog: super::analysis::CatalogReadView,
         resolution: super::resolution::RelationNameResolution,
     ) -> Result<crate::RowSchema, crate::SQLError> {
-        use crate::catalog::view::{create_view_output_columns, named_view_schema};
-        if self.kind == StoredViewKind::Materialized {
-            return materialized_view_schema(
-                self.output_columns.as_deref().unwrap_or_default(),
-                &self.materialized_column_types,
-                self.materialized_column_collations.as_deref(),
-            );
-        }
-        // The stored query is analyzed as it was created; its set-returning calls are not placed again.
-        let query_schema = {
-            let _stored = SetPlacementScope::stored_definition();
-            crate::binding::analyze_query_plan_schema_with_catalog(
-                routines,
-                &self.query,
-                &[],
-                catalog,
-                resolution,
-            )
-        }?;
-        let output_columns = match &self.output_columns {
-            Some(columns) => columns.clone(),
-            None => create_view_output_columns(&query_schema, &[])?,
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        let scope = crate::binding::production::ControlledBindingContext {
+            catalog,
+            resolution: resolution.into(),
+            ctes: crate::binding::production::BindingMap::new(),
+            deferred_ctes: crate::binding::production::BindingMap::new(),
+            non_returning_ctes: crate::binding::production::BindingNameSet::new(),
+            scalar_subqueries: &[],
         };
-        named_view_schema(&query_schema, &output_columns)
+        ViewRewriteDefinitionRef::from(self).row_schema_with_control(routines, scope, &control)
     }
 }
 

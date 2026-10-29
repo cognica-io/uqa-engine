@@ -286,7 +286,11 @@ fn common_argument_type(
     });
     let result =
         super::super::common::select_common_input_type_in_with_control(context, inputs, control)?;
-    super::super::common::read_unknown_literals(args.iter().map(named_argument_value), &result)?;
+    super::super::common::read_unknown_literals_with_control(
+        args.iter().map(named_argument_value),
+        &result,
+        control,
+    )?;
     Ok(Some(result))
 }
 

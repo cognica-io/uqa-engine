@@ -296,7 +296,7 @@ fn domain_input_constants_use_the_base_type_without_erasing_parameter_identity()
                 let text = text.clone();
                 let mut observed = ExpressionType::unknown_literal(expression, text);
                 parameters.coerce_unknown(&mut observed, &domain).unwrap();
-                assert_eq!(observed.ty, Some(domain.clone()));
+                assert_eq!(observed.ty.as_deref(), Some(&domain));
             }
         });
         let mut parameter = parameters.reference(1).unwrap();

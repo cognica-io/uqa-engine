@@ -17,6 +17,37 @@ use crate::SQLError;
 use super::privileges::TargetSelectPrivilegeRequest;
 use crate::catalog::security::table::TableAclPrivilege;
 use crate::catalog::stored_view::StoredView;
+use uqa_core::memory::{Produced, ProductionControl};
+
+pub fn next_layer_privilege_subject_with_control(
+    services: &dyn ViewPrivilegeCatalog,
+    name: &str,
+    rewritten_subject: Option<&RoleReference>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<RoleReference>, SQLError> {
+    let mut result = None;
+    services.with_view_definition_with_control(name, control, &mut |view| {
+        let view = view.ok_or_else(|| SQLError::UnknownTable(name.to_owned()))?;
+        if view.output_columns.is_none() {
+            return Err(SQLError::Internal(format!(
+                "loaded view `{name}` has no durable public column metadata"
+            )));
+        }
+        let subject = match rewritten_subject {
+            Some(subject) => subject.clone_with_control(control)?,
+            None => services.current_role_with_control(control)?,
+        };
+        result = Some(if view.security_invoker() {
+            subject
+        } else {
+            services.bound_role_with_control(view.security.role_owner, control)?
+        });
+        Ok(())
+    })?;
+    result.ok_or_else(|| {
+        SQLError::Internal("view privilege catalog did not supply its definition".into())
+    })
+}
 
 fn view_target(
     services: &dyn ViewPrivilegeCatalog,
@@ -438,6 +469,42 @@ pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> 
 
 /// Authorization access to one loaded view and the current statement's SELECT privileges.
 pub trait ViewPrivilegeCatalog {
+    /// External authorization catalogs retain their existing callback boundary; native adapters lend their immutable generation.
+    fn with_view_definition_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(Option<&StoredView>) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let view = self.view_definition(name)?;
+        read(view.as_ref())?;
+        Ok(control.check()?)
+    }
+    fn ensure_query_select_with_control(
+        &self,
+        query: &crate::plan::QueryPlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.ensure_query_select(query)?;
+        Ok(control.check()?)
+    }
+    fn current_role_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<RoleReference>, SQLError> {
+        control.check()?;
+        self.current_role().clone_with_control(control)
+    }
+    fn bound_role_with_control(
+        &self,
+        identity: crate::catalog::roles::RoleIdentity,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<RoleReference>, SQLError> {
+        control.check()?;
+        self.bound_role(identity)?.clone_with_control(control)
+    }
     fn ensure_query_select(&self, query: &crate::plan::QueryPlan) -> Result<(), SQLError>;
     fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
     fn current_role(&self) -> RoleReference;

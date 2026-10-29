@@ -63,24 +63,48 @@ impl VirtualRelation {
         )
     }
 
+    pub fn schema(self) -> Vec<(String, ColumnType)> {
+        let mut columns = Vec::new();
+        self.visit_columns(&mut |name, ty| columns.push((name.to_owned(), ty())));
+        columns
+    }
+
+    pub fn column_names_with_control(
+        self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<String>>, crate::SQLError> {
+        control.check()?;
+        let mut names = uqa_core::memory::ProductionVec::new(*control);
+        let mut status = Ok(());
+        self.visit_columns(&mut |name, _| {
+            if status.is_ok() {
+                status = control
+                    .copy_text(name)
+                    .and_then(|name| names.push_produced(name));
+            }
+        });
+        status?;
+        Ok(names.finish()?)
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "preserves catalog column and OID order"
     )]
-    pub fn schema(self) -> Vec<(String, ColumnType)> {
+    fn visit_columns(self, visit: &mut dyn FnMut(&'static str, fn() -> ColumnType)) {
         // Each relation owns its construction frame, keeping unoptimized WASM locals bounded.
         macro_rules! columns {
             ($($name:literal => $ty:expr),* $(,)?) => {{
-                fn relation_columns() -> Vec<(String, ColumnType)> {
-                    vec![$(($name.to_string(), $ty)),*]
+                fn relation_columns(visit: &mut dyn FnMut(&'static str, fn() -> ColumnType)) {
+                    $(visit($name, || $ty);)*
                 }
-                relation_columns()
+                relation_columns(visit)
             }};
         }
 
         match self {
             Self::PgForeignDataWrapper | Self::PgForeignServer | Self::PgForeignTable => {
-                foreign_relations::schema(self)
+                foreign_relations::visit_columns(self, visit);
             }
             Self::InformationSchemaCatalogName => columns![
                 "catalog_name" => sql_identifier(),
@@ -176,7 +200,7 @@ impl VirtualRelation {
                 "is_trigger_deletable" => yes_or_no(),
                 "is_trigger_insertable_into" => yes_or_no(),
             ],
-            Self::InformationRoutines => information_routines_schema(),
+            Self::InformationRoutines => information_routines_columns(visit),
             Self::InformationSequences => columns![
                 "sequence_catalog" => sql_identifier(),
                 "sequence_schema" => sql_identifier(),
@@ -803,10 +827,10 @@ pub fn information_schema_domains() -> Vec<ColumnType> {
     ]
 }
 
-fn information_routines_schema() -> Vec<(String, ColumnType)> {
+fn information_routines_columns(visit: &mut dyn FnMut(&'static str, fn() -> ColumnType)) {
     macro_rules! columns {
         ($($name:literal => $ty:expr),* $(,)?) => {
-            vec![$(($name.to_string(), $ty)),*]
+            { $(visit($name, || $ty);)* }
         };
     }
 
@@ -893,7 +917,7 @@ fn information_routines_schema() -> Vec<(String, ColumnType)> {
         "result_cast_scope_name" => sql_identifier(),
         "result_cast_maximum_cardinality" => cardinal_number(),
         "result_cast_dtd_identifier" => sql_identifier(),
-    ]
+    ];
 }
 
 #[cfg(test)]

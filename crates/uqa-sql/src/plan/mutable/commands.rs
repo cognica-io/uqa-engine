@@ -17,7 +17,11 @@ use uqa_core::{
 };
 
 mod assignments;
-mod children;
+pub(in crate::plan::mutable) mod children;
+mod executable;
+mod projections;
+pub(in crate::plan) mod rule_inputs;
+pub(in crate::plan::mutable) mod transformation;
 pub use assignments::CommandAssignmentSlot;
 pub use children::CommandQuerySlot;
 
@@ -65,6 +69,13 @@ impl CommandPlan {
 }
 
 impl MutableCommandPlan {
+    pub(in crate::plan) fn from_rewrite_parts(
+        command: CommandPlan,
+        memory: Option<RewriteMemory>,
+    ) -> Self {
+        Self { command, memory }
+    }
+
     pub fn reserved_bytes(&self) -> usize {
         self.memory
             .as_ref()
@@ -122,7 +133,7 @@ impl MutableCommandPlan {
             _ => {
                 return Err(SQLError::Internal(
                     "command has no directly retained query body".into(),
-                ))
+                ));
             }
         };
         let input = MutableQueryPlan {

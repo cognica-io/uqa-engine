@@ -17,15 +17,16 @@ fn plan(sql: &str) -> UnifiedPlan {
 fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
     let source = Arc::new(plan(source));
     PreparedStatementPlan {
+        definition_identity: std::sync::Arc::new(()),
         composite_inputs: crate::prepared::composites::CompositeInputs::default(),
-        source_plan: Arc::clone(&source),
-        logical_plan: source,
+        source_plan: Arc::clone(&source).into(),
+        logical_plan: source.into(),
         needs_analysis: false,
-        effective_search_path: None,
-        dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies::default(),
-        dependency_snapshot: None,
+        effective_search_path: None.into(),
+        dependencies: crate::prepared::dependencies::PreparedAnalysisDependencies::default().into(),
+        dependency_snapshot: None.into(),
         plan: Some(plan(executable).into()),
-        parameter_types: Vec::new(),
+        parameter_types: Vec::new().into(),
         result_schema: Some(RowSchema::with_types(
             vec!["value".into()],
             vec![Some(ColumnType::Text)],
@@ -83,7 +84,7 @@ fn folded_builtin_constants_are_independent_but_unbound_calls_are_not() {
         assert!(entry(source, executable).has_tracked_executable_dependencies());
     }
     let mut live = entry("SELECT lower($1) AS value", "SELECT lower($1) AS value");
-    live.parameter_types = vec![Some(ColumnType::Text)];
+    live.parameter_types = vec![Some(ColumnType::Text)].into();
     assert!(!live.has_tracked_executable_dependencies());
     let mut missing = constant.clone();
     missing.plan = None;
@@ -105,7 +106,7 @@ fn catalog_descriptors_and_input_identities_keep_conservative_invalidation() {
         ColumnType::Named("public.int4".into()),
     ] {
         let mut parameter = entry("SELECT 'hello' AS value", "SELECT 'hello' AS value");
-        parameter.parameter_types = vec![Some(ty.clone())];
+        parameter.parameter_types = vec![Some(ty.clone())].into();
         assert!(!parameter.has_tracked_executable_dependencies(), "{ty:?}");
         let mut result = entry("SELECT 'hello' AS value", "SELECT 'hello' AS value");
         result.result_schema = Some(RowSchema::with_types(vec!["value".into()], vec![Some(ty)]));
@@ -123,7 +124,8 @@ fn catalog_descriptors_and_input_identities_keep_conservative_invalidation() {
         );
     }
     let mut converted = entry("SELECT lower('HELLO') AS value", "SELECT 'hello' AS value");
-    Arc::make_mut(&mut converted.logical_plan).rewrite_scalar_expressions(&mut |expression| {
+    let mut converted_plan = (*converted.logical_plan).clone();
+    converted_plan.rewrite_scalar_expressions(&mut |expression| {
         if matches!(expression, ScalarExpr::Literal(_)) {
             *expression = ScalarExpr::TypedLiteral {
                 collation_oid: None,
@@ -135,6 +137,7 @@ fn catalog_descriptors_and_input_identities_keep_conservative_invalidation() {
             };
         }
     });
+    converted.logical_plan = converted_plan.into();
     assert!(!converted.has_tracked_executable_dependencies());
 }
 
@@ -142,8 +145,10 @@ fn catalog_descriptors_and_input_identities_keep_conservative_invalidation() {
 fn selected_objects_and_relation_structure_are_not_hidden_by_constant_outputs() {
     for (relations, routines) in [(vec![42], vec![]), (vec![], vec![[7; 16]])] {
         let mut value = entry("SELECT 'hello' AS value", "SELECT 'hello' AS value");
-        value.dependencies.relations.extend(relations);
-        value.dependencies.routines.extend(routines);
+        let mut dependencies = (*value.dependencies).clone();
+        dependencies.relations.extend(relations);
+        dependencies.routines.extend(routines);
+        value.dependencies = dependencies.into();
         assert!(!value.has_tracked_executable_dependencies());
     }
     for source in [
@@ -158,10 +163,12 @@ fn selected_objects_and_relation_structure_are_not_hidden_by_constant_outputs() 
         );
     }
     let mut record = entry("SELECT 'hello' AS value", "SELECT 'hello' AS value");
-    record.result_schema = record
-        .result_schema
-        .take()
-        .map(|schema| schema.with_record_fields([(0, Arc::from([Some(ColumnType::Integer)]))]));
+    record.result_schema = record.result_schema.take().map(|schema| {
+        schema.with_record_fields([(
+            0,
+            crate::schema::RecordFields::from(vec![Some(ColumnType::Integer)]),
+        )])
+    });
     assert!(!record.has_tracked_executable_dependencies());
 }
 
@@ -170,7 +177,7 @@ fn mixed_entry() -> PreparedStatementPlan {
         "SELECT lower('HELLO') AS folded, upper($1) AS live",
         "SELECT 'hello' AS folded, upper($1) AS live",
     );
-    mixed.parameter_types = vec![Some(ColumnType::Text)];
+    mixed.parameter_types = vec![Some(ColumnType::Text)].into();
     mixed.result_schema = Some(RowSchema::with_types(
         vec!["folded".into(), "live".into()],
         vec![Some(ColumnType::Text), Some(ColumnType::Text)],
@@ -237,9 +244,13 @@ fn mixed_constants_and_exact_builtin_calls_keep_one_executable() {
 #[test]
 fn missing_and_specialized_descriptors_are_not_catalog_independent() {
     let mut missing = mixed_entry();
-    missing.parameter_types[0] = None;
+    let mut parameters = missing.parameter_types.as_slice().to_vec();
+    parameters[0] = None;
+    missing.parameter_types = parameters.into();
     assert!(!missing.has_tracked_executable_dependencies());
-    missing.parameter_types[0] = Some(ColumnType::Text);
+    let mut parameters = missing.parameter_types.as_slice().to_vec();
+    parameters[0] = Some(ColumnType::Text);
+    missing.parameter_types = parameters.into();
     missing.result_schema = Some(RowSchema::with_types(vec!["value".into()], vec![None]));
     assert!(!missing.has_tracked_executable_dependencies());
     let mut specialized = mixed_entry();
@@ -265,22 +276,26 @@ fn relation_executables_require_complete_exact_analysis_revisions() {
         "SELECT lower('HELLO') AS value FROM source_table",
         "SELECT 'hello' AS value FROM source_table",
     );
-    relation.dependencies.relations.insert(42);
+    let mut dependencies = crate::prepared::dependencies::PreparedAnalysisDependencies::default();
+    dependencies.relations.insert(42);
+    relation.dependencies = dependencies.clone().into();
     assert!(!relation.has_tracked_executable_dependencies());
-    relation.dependency_snapshot = Some(PreparedDependencySnapshot::default());
+    relation.dependency_snapshot = Some(PreparedDependencySnapshot::default()).into();
     assert!(!relation.has_tracked_executable_dependencies());
-    let snapshot = relation.dependency_snapshot.as_mut().unwrap();
-    snapshot.global_catalog = Some(PreparedDependencyRevision::new(1_u64));
+    let mut snapshot = PreparedDependencySnapshot {
+        global_catalog: Some(PreparedDependencyRevision::new(1_u64)),
+        ..PreparedDependencySnapshot::default()
+    };
     snapshot.relations.insert(42, None);
+    relation.dependency_snapshot = Some(snapshot.clone()).into();
     assert!(!relation.has_tracked_executable_dependencies());
-    relation
-        .dependency_snapshot
-        .as_mut()
-        .unwrap()
+    snapshot
         .relations
         .insert(42, Some(PreparedDependencyRevision::new(2_u64)));
+    relation.dependency_snapshot = Some(snapshot).into();
     assert!(relation.has_tracked_executable_dependencies());
-    relation.dependencies.relations.insert(43);
+    dependencies.relations.insert(43);
+    relation.dependencies = dependencies.into();
     assert!(!relation.has_tracked_executable_dependencies());
 }
 

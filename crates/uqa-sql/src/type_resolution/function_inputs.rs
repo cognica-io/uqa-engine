@@ -124,14 +124,14 @@ pub(super) fn call_type_with_control(
 }
 
 /// Infer only the containing call; original child observations retain unknown and selected types.
-pub(crate) fn call_type_from_observations(
+pub(crate) fn call_type_from_observations_with_control(
     expression: &ScalarExpr,
     schema: &CallInputTypes<'_>,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
-) -> Result<Option<ColumnType>, SQLError> {
-    let control = ProductionControl::uncontrolled();
-    let result = call_type_with_control(
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    call_type_with_control(
         expression,
         schema,
         params,
@@ -140,12 +140,11 @@ pub(crate) fn call_type_from_observations(
             let ty = schema.observed_expression_type(expression).ok_or_else(|| {
                 SQLError::Internal("call type analysis requested an unobserved argument".into())
             })?;
-            super::inference::copy_type(ty, &control)
+            super::inference::copy_type(ty, control)
         },
-        &control,
+        control,
         false,
-    )?;
-    Ok(result.map(|ty| ty.into_uncontrolled().expect("ordinary call type")))
+    )
 }
 
 fn window_inputs(

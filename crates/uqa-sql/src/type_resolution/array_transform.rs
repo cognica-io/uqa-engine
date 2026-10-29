@@ -26,7 +26,6 @@ use uqa_core::{
 
 pub(crate) struct ResolvedArrayTransformCall {
     pub(crate) overload: Option<ResolvedFunctionOverload>,
-    pub(crate) builtin_argument_positions: Option<Vec<usize>>,
 }
 
 /// Select the same candidate during preparation and expression binding, before
@@ -40,31 +39,78 @@ pub(crate) fn resolve_array_transform_call(
     explicit_variadic: bool,
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ResolvedArrayTransformCall>, SQLError> {
+    Ok(resolve_array_transform_call_with_control(
+        name,
+        binding,
+        ArrayTransformArguments {
+            expressions: args,
+            types: argument_types,
+            parameters: params,
+            explicit_variadic,
+        },
+        resolver,
+        &ProductionControl::uncontrolled(),
+    )?
+    .map(|call| ResolvedArrayTransformCall {
+        overload: call.overload.map(|selected| {
+            selected
+                .into_uncontrolled()
+                .expect("ordinary array selection")
+        }),
+    }))
+}
+
+pub(crate) struct ControlledArrayTransformCall {
+    pub(crate) overload: Option<Produced<ResolvedFunctionOverload>>,
+    pub(crate) builtin_argument_positions: Option<Produced<Vec<usize>>>,
+}
+
+pub(crate) struct ArrayTransformArguments<'a> {
+    pub expressions: &'a [ScalarExpr],
+    pub types: &'a [Option<ColumnType>],
+    pub parameters: &'a [SQLParam],
+    pub explicit_variadic: bool,
+}
+
+pub(crate) fn resolve_array_transform_call_with_control(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    arguments: ArrayTransformArguments<'_>,
+    resolver: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<Option<ControlledArrayTransformCall>, SQLError> {
+    let ArrayTransformArguments {
+        expressions: args,
+        types: argument_types,
+        parameters: params,
+        explicit_variadic,
+    } = arguments;
+    control.check()?;
     if !is_function(name) {
         return Ok(None);
     }
-    let effective = argument_types_with_parameters(
-        name,
-        args,
-        argument_types,
-        params,
-        &ProductionControl::uncontrolled(),
-    )?;
-    let (overload, positions) = if let Some(overload) = select_overload(
+    let effective = argument_types_with_parameters(name, args, argument_types, params, control)?;
+    let (overload, positions) = match production::select_overload_with_control(
         name,
         binding,
         args,
         &effective,
         explicit_variadic,
         Some(resolver),
+        control,
     )? {
-        (Some(overload), None)
-    } else {
-        let names = args.iter().map(named_argument_name).collect::<Vec<_>>();
-        let positions = crate::expr::array_transform_argument_positions(name, &names)?;
-        (None, positions)
+        production::OwnedSelection::User(selected) => (Some(selected), None),
+        production::OwnedSelection::Builtin(_) => {
+            let names = argument_names_with_control(args, control)?;
+            (
+                None,
+                crate::expr::array_transform_argument_positions_with_control(
+                    name, &names, control,
+                )?,
+            )
+        }
     };
-    Ok(Some(ResolvedArrayTransformCall {
+    Ok(Some(ControlledArrayTransformCall {
         overload,
         builtin_argument_positions: positions,
     }))

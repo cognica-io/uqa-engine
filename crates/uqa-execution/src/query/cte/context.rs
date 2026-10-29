@@ -67,8 +67,19 @@ pub trait QueryOutputRewriter: Sync {
     /// Consume the private catalog-query destination before assembling its streaming or materialized execution path. The caller has already restored layouts and applied its output demand.
     fn optimize_retained_query(
         &self,
-        query: QueryPlan,
+        query: uqa_sql::plan::MutableQueryPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError>;
+
+    fn prune_owned_query_outputs(
+        &self,
+        query: uqa_sql::plan::MutableQueryPlan,
+        aliases: &[String],
+        projection: &uqa_sql::plan::source_projection::SourceProjection,
+        schema: &crate::RowSchema,
+        visible_ctes: &dyn Fn(&str) -> bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::MutableQueryPlan, SQLError>;
 
     /// Return a plan that applies the complete output predicate, or `None` when the caller must retain it.
     fn push_output_filter(

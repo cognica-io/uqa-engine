@@ -6,14 +6,19 @@
 
 //! Retain membership analysis at the input-preparation boundary, before planning can duplicate or fold expressions. Each copied left-side subquery receives its own query-arena slot and therefore its own initialization cache.
 
+use super::ownership::{AnalysisType, AnalysisVec};
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::catalog::collations::derivation::Derivation;
-use crate::{ast::BinaryOp, type_resolution::membership::MembershipShape};
+use crate::{
+    ast::BinaryOp,
+    plan::{OwnedScalarExpr, ScalarQueryArena},
+};
+use uqa_core::memory::ProductionControl;
 
 pub(super) struct MembershipAnalysis {
-    pub shape: MembershipShape,
-    pub array_coercions: Vec<(usize, ColumnType)>,
-    pub left_constants: Vec<Option<super::parameters::ConvertedInput>>,
+    pub array_items: AnalysisVec<usize>,
+    pub array_coercions: AnalysisVec<(usize, AnalysisType)>,
+    pub left_constants: AnalysisVec<Option<super::parameters::ConvertedInput>>,
 }
 
 impl Preparation<'_> {
@@ -31,43 +36,33 @@ impl Preparation<'_> {
         else {
             unreachable!()
         };
+        let owner = self.scope.control().capture();
+        let control = owner.control();
         let needle = self.expression(expr, input, subqueries)?;
-        let mut values = list
-            .iter()
-            .map(|item| self.expression(item, input, subqueries))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut values = AnalysisVec::new(&control);
+        values.reserve(list.len(), &control)?;
+        for item in list {
+            values.push(self.expression(item, input, subqueries)?, &control)?;
+        }
         if needle.is_deferred() || values.iter().any(ExpressionType::is_deferred) {
             let mut output = ExpressionType::independent(Some(ColumnType::Boolean), &values);
             output.derivation = needle.derivation.error_only().combine(output.derivation);
             return Ok(output);
         }
-        let mut shape = MembershipShape::default();
+        let mut array_items = AnalysisVec::new(&control);
         for (index, item) in list.iter().enumerate() {
             if !self.membership_item_references_row(item, input, subqueries)? {
-                shape.array_items.push(index);
+                array_items.push(index, &control)?;
             }
         }
-        let common = if shape.array_items.len() > 1 {
-            let types = std::iter::once(needle.ty.as_ref())
-                .chain(
-                    shape
-                        .array_items
-                        .iter()
-                        .map(|index| values[*index].ty.as_ref()),
-                )
-                .collect::<Vec<_>>();
-            crate::type_resolution::select_common_input_type(&types)?
-                .filter(|ty| !matches!(ty, ColumnType::Array(_) | ColumnType::Record))
-        } else {
-            None
-        };
+        let common = membership_array_type(&needle, &values, &array_items, &control)?;
         if common.is_none() {
-            shape.array_items.clear();
+            array_items.clear();
         }
         let mut analysis = MembershipAnalysis {
-            shape,
-            array_coercions: Vec::new(),
-            left_constants: Vec::new(),
+            array_items,
+            array_coercions: AnalysisVec::new(&control),
+            left_constants: AnalysisVec::new(&control),
         };
         let op = if *negated {
             BinaryOp::NotEqual
@@ -76,18 +71,19 @@ impl Preparation<'_> {
         };
         let mut selected = Derivation::None;
         if let Some(common) = common {
-            for index in &analysis.shape.array_items {
+            for index in &analysis.array_items {
                 let item = &mut values[*index];
-                if item.ty.as_ref().is_some_and(|ty| *ty != common)
+                if item.ty.as_deref().is_some_and(|ty| *ty != *common)
                     || matches!(list[*index], ScalarExpr::Literal(uqa_core::Value::Null))
                 {
-                    analysis.array_coercions.push((*index, common.clone()));
+                    analysis
+                        .array_coercions
+                        .push((*index, common.clone()), &control)?;
                 }
                 self.parameters.coerce_unknown(item, &common)?;
             }
-            let mut left = needle.clone();
+            let mut left = needle.copy_with_control(&self.scope.control())?;
             let array = analysis
-                .shape
                 .array_items
                 .iter()
                 .fold(Derivation::None, |state, index| {
@@ -96,25 +92,29 @@ impl Preparation<'_> {
                 .result(crate::catalog::type_metadata::pg_type_collation_oid(
                     &common,
                 ));
-            self.binary(op, &mut left, &mut ExpressionType::resolved(Some(common)))?;
+            self.binary(
+                op,
+                &mut left,
+                &mut ExpressionType::resolved_owned(Some(common)),
+            )?;
             selected = selected.combine(left.derivation.combine(array).error_only());
             analysis
                 .left_constants
-                .push(self.parameters.take_literal(expr));
+                .push(self.parameters.take_literal(expr)?, &control)?;
         }
         for (index, item) in values.iter_mut().enumerate() {
-            if analysis.shape.array_items.contains(&index) {
+            if analysis.array_items.contains(&index) {
                 continue;
             }
-            let mut left = needle.clone();
+            let mut left = needle.copy_with_control(&self.scope.control())?;
             self.binary(op, &mut left, item)?;
             selected = selected.combine(ExpressionType::comparison(&left, item));
             self.validate_membership_operands(expr, &list[index], input)?;
             analysis
                 .left_constants
-                .push(self.parameters.take_literal(expr));
+                .push(self.parameters.take_literal(expr)?, &control)?;
         }
-        self.parameters.retain_membership(expression, analysis);
+        self.parameters.retain_membership(expression, analysis)?;
         let mut output = ExpressionType::resolved(Some(ColumnType::Boolean));
         output.derivation = selected;
         Ok(output)
@@ -130,14 +130,15 @@ impl Preparation<'_> {
         if !crate::semantics::sets::placement_scope::placing_set_calls() {
             return Ok(());
         }
-        let params = self.parameters.values();
+        let params = self.parameters.values()?;
         for operand in [left, right] {
-            if crate::semantics::sets::validation::expression_may_return_set(
+            if crate::semantics::sets::validation::expression_may_return_set_with_control(
                 self.routines,
                 self.routines,
                 operand,
                 input,
                 &params,
+                &self.scope.control(),
             )? {
                 return Err(crate::semantics::sets::placement::set_argument_error("IN"));
             }
@@ -193,54 +194,118 @@ impl MembershipAnalysis {
         expression: &mut ScalarExpr,
         arena: &mut Vec<QueryPlan>,
     ) -> Result<(), SQLError> {
-        let ScalarExpr::InList {
-            expr,
-            mut list,
-            negated,
-        } = std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null))
-        else {
+        let control = ProductionControl::uncontrolled();
+        let original = std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null));
+        *expression = self
+            .apply_with(
+                OwnedScalarExpr::uncontrolled(original),
+                &control,
+                &mut |left| {
+                    let mut left = left
+                        .finish(&control)?
+                        .into_uncontrolled()
+                        .expect("ordinary membership left operand");
+                    crate::plan::subqueries::copy_occurrences(&mut left, arena)?;
+                    Ok(OwnedScalarExpr::uncontrolled(left))
+                },
+            )?
+            .finish(&control)?
+            .into_uncontrolled()
+            .expect("ordinary membership input");
+        Ok(())
+    }
+
+    pub(super) fn apply_owned(
+        self,
+        expression: OwnedScalarExpr,
+        arena: &mut ScalarQueryArena,
+        control: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        self.apply_with(expression, control, &mut |left| {
+            arena.copy_subquery_occurrences(left, control)
+        })
+    }
+
+    fn apply_with(
+        self,
+        mut expression: OwnedScalarExpr,
+        control: &ProductionControl<'_>,
+        copy_queries: &mut impl FnMut(OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        control.check()?;
+        if !matches!(&*expression, ScalarExpr::InList { .. }) {
             return Err(SQLError::Internal(
                 "retained membership no longer matches its syntax".into(),
             ));
-        };
+        }
         for (index, target) in self.array_coercions {
-            let item =
-                std::mem::replace(&mut list[index], ScalarExpr::Literal(uqa_core::Value::Null));
-            list[index] = ScalarExpr::Cast {
-                implicit: true,
-                expr: Box::new(item),
-                ty: target.catalog_name(),
-            };
+            expression = expression.map_child(index + 1, control, |item| {
+                OwnedScalarExpr::cast(
+                    item,
+                    target.catalog_name_with_control(control)?,
+                    true,
+                    control,
+                )
+            })?;
         }
-        *expression = crate::type_resolution::membership::rewrite(
-            expr,
-            list,
-            negated,
-            &self.shape,
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )?
-        .into_uncontrolled()
-        .expect("ordinary input preparation");
-        let comparisons = match expression {
-            ScalarExpr::And(items) | ScalarExpr::Or(items) => items.as_mut_slice(),
-            node => std::slice::from_mut(node),
+        expression = crate::type_resolution::membership::rewrite_owned(
+            expression,
+            &self.array_items,
+            control,
+        )?;
+        if self.left_constants.is_empty() {
+            return Ok(expression);
+        }
+        let multiple = matches!(&*expression, ScalarExpr::And(_) | ScalarExpr::Or(_));
+        let count = if multiple {
+            expression.child_count()
+        } else {
+            1
         };
-        let last = comparisons.len().saturating_sub(1);
-        for (index, (comparison, constant)) in
-            comparisons.iter_mut().zip(self.left_constants).enumerate()
-        {
-            let left = match comparison {
-                ScalarExpr::Func { args, .. } => &mut args[0],
-                ScalarExpr::Binary { lhs, .. } => lhs.as_mut(),
-                _ => unreachable!("analyzed comparison"),
-            };
-            if let Some(constant) = constant {
-                *left = constant.expression;
-            }
-            if index < last {
-                crate::plan::subqueries::copy_occurrences(left, arena)?;
-            }
+        if count != self.left_constants.len() {
+            return Err(SQLError::Internal(
+                "analyzed membership comparison count changed".into(),
+            ));
         }
-        Ok(())
+        let last = count.saturating_sub(1);
+        for (index, constant) in self.left_constants.into_iter().enumerate() {
+            let apply = |comparison: OwnedScalarExpr| {
+                comparison.map_child(0, control, |left| {
+                    let left = constant.map_or(left, |constant| constant.expression);
+                    if index < last {
+                        copy_queries(left)
+                    } else {
+                        Ok(left)
+                    }
+                })
+            };
+            expression = if multiple {
+                expression.map_child(index, control, apply)?
+            } else {
+                apply(expression)?
+            };
+        }
+        Ok(expression)
     }
+}
+
+fn membership_array_type(
+    needle: &ExpressionType,
+    values: &[ExpressionType],
+    array_items: &[usize],
+    control: &ProductionControl<'_>,
+) -> Result<Option<AnalysisType>, SQLError> {
+    if array_items.len() <= 1 {
+        return Ok(None);
+    }
+    let mut types = AnalysisVec::new(control);
+    types.reserve(1 + array_items.len(), control)?;
+    types.push(needle.ty.as_deref(), control)?;
+    for index in array_items {
+        types.push(values[*index].ty.as_deref(), control)?;
+    }
+    crate::type_resolution::select_common_input_type_with_control(&types, control)?
+        .filter(|ty| !matches!(**ty, ColumnType::Array(_) | ColumnType::Record))
+        .map(|ty| AnalysisType::from_produced(ty, control))
+        .transpose()
 }

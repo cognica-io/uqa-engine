@@ -85,6 +85,57 @@ fn domain_array_input_preserves_multidimensional_bounds_and_checks_each_element_
 }
 
 #[test]
+fn controlled_domain_array_input_retains_bounds_and_one_constraint_read_per_element() {
+    let inputs = Inputs::default();
+    let target = ColumnType::Array(Box::new(domain()));
+    let budget = MemoryBudget::new(128 << 10);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let output =
+        read_catalog_input_with_control("[0:1][3:4]={{1,2},{3,4}}", &target, &inputs, &control)
+            .unwrap();
+    let Value::Array(array) = &*output else {
+        panic!("array input")
+    };
+    assert_eq!(array.lower_bounds(), [0, 3]);
+    assert_eq!(inputs.elements.get(), 4);
+    assert_eq!(budget.used(), output.reserved_bytes());
+    drop(output);
+    assert_eq!(budget.used(), 0);
+    invoking.cancel();
+    let error = read_catalog_input_with_control("{1}", &target, &inputs, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("57014"));
+    assert_eq!(inputs.elements.get(), 4);
+}
+
+#[test]
+fn catalog_input_admits_large_text_before_constructing_a_native_datum() {
+    let text = format!("<root>{}</root>", "x".repeat(4 << 20));
+    let target = ColumnType::Xml;
+    let budget = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let input = Inputs::default();
+    let allocation = allocation_counter::measure(|| {
+        let error = read_catalog_input_with_control(&text, &target, &input, &control).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("53200"));
+    });
+    assert!(allocation.bytes_max < 4096, "{allocation:?}");
+    assert_eq!(allocation.bytes_current, 0);
+    assert_eq!(budget.used(), 0);
+    original.cancel();
+    assert!(control.check().is_err());
+    let allocation = allocation_counter::measure(|| {
+        let error = read_catalog_input_with_control(&text, &target, &input, &control).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+    });
+    assert_eq!(allocation.count_total, 0);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn domain_array_input_stops_at_the_first_element_failure() {
     let target = ColumnType::Array(Box::new(domain()));
     for (text, state) in [("{1,0,not_read}", "23514"), ("{1,NULL,not_read}", "23502")] {

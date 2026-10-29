@@ -12,12 +12,15 @@ use crate::{
     FunctionTypeResolver, ResolvedFunctionOverload, SQLError, SQLParam,
 };
 
-pub struct BindingTypeResolver<'a> {
+mod scope;
+pub use scope::BindingTypeScope;
+
+pub struct BindingTypeResolver<'a, Scope = BindingSnapshot> {
     pub routines: &'a dyn RoutineResolution,
-    pub scope: &'a BindingSnapshot,
+    pub scope: &'a Scope,
 }
 
-impl FunctionTypeResolver for BindingTypeResolver<'_> {
+impl<Scope: BindingTypeScope> FunctionTypeResolver for BindingTypeResolver<'_, Scope> {
     fn resolve_collation_name_with_control(
         &self,
         name: &str,
@@ -208,18 +211,43 @@ impl FunctionTypeResolver for BindingTypeResolver<'_> {
         outer_schema: &crate::RowSchema,
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
-        let plan = self.scope.scalar_subqueries.get(subquery).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "physical scalar subquery slot {subquery} is out of bounds"
-            ))
-        })?;
-        let output = crate::binding::bind_query_plan_schema(
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        Ok(self
+            .resolve_scalar_subquery_type_with_control(subquery, outer_schema, params, &control)?
+            .map(|ty| {
+                ty.into_uncontrolled()
+                    .unwrap_or_else(|_| panic!("ordinary scoped type"))
+            }))
+    }
+
+    fn resolve_scalar_subquery_type_with_control(
+        &self,
+        subquery: crate::SubqueryId,
+        outer_schema: &crate::RowSchema,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        control.check()?;
+        let plan = self
+            .scope
+            .scalar_subqueries()
+            .get(subquery)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "physical scalar subquery slot {subquery} is out of bounds"
+                ))
+            })?;
+        let output = crate::binding::bind_query_plan_schema_with_control(
             self.routines,
             plan,
             params,
-            &self.scope.context(),
+            self.scope.type_context(control)?,
             Some(outer_schema),
+            control,
         )?;
-        Ok(output.column_type(0).cloned())
+        output
+            .column_type(0)
+            .map(|ty| ty.clone_with_control(control).map_err(Into::into))
+            .transpose()
     }
 }

@@ -10,7 +10,8 @@ mod catalog;
 pub use catalog::{RoutineOverloadCatalog, RoutineTypeSnapshot};
 mod combined_overloads;
 mod production;
-pub use production::search_path_precedes_pg_catalog;
+pub(crate) use production::selected_binding;
+pub use production::{search_path_precedes_pg_catalog, OwnedStaticFunctionMatch};
 
 use super::{
     declaration::RoutineTypeCatalog, routine_signature_types, SQLUserFunction, StaticFunctionMatch,
@@ -27,6 +28,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
 
+#[derive(Clone, Copy)]
 pub struct RoutineOverloadContext<'a> {
     pub catalog: &'a dyn RoutineOverloadCatalog,
 }

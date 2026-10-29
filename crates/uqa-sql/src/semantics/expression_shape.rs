@@ -246,6 +246,24 @@ pub fn expr_is_null_free(expr: &ScalarExpr) -> bool {
     }
 }
 
+/// Visit the existing conjunction partitions in source order without allocating a flattened vector.
+pub fn visit_filter_parts_with_control<'a>(
+    expression: &'a ScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), crate::SQLError>,
+) -> Result<(), crate::SQLError> {
+    control.check()?;
+    match expression {
+        ScalarExpr::And(items) => {
+            for item in items {
+                visit_filter_parts_with_control(item, control, visit)?;
+            }
+            Ok(())
+        }
+        expression => visit(expression),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{expr_contains_function, expr_has_unqualified_column, expr_qualifiers, ScalarExpr};

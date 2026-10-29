@@ -136,7 +136,7 @@ fn analyzed_join_sources_share_input_layouts_without_persisting_namespaces() {
         let UnifiedPlan::Query(cloned) = plan.clone() else {
             panic!("cloned query");
         };
-        assert!(std::sync::Arc::ptr_eq(
+        assert!(crate::plan::SharedAnalyzedSource::shares_storage(
             source,
             cloned.analyzed_source.as_ref().unwrap()
         ));

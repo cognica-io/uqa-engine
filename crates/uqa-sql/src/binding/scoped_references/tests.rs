@@ -58,19 +58,22 @@ fn lateral_query() -> QueryPlan {
         vec!["w".into()],
         vec![Some(crate::ColumnType::Integer)],
     );
-    query.analyzed_source = Some(std::sync::Arc::new(AnalyzedSource {
-        schema: RowSchema::join(&left, &right, std::iter::empty()),
-        children: Some(Box::new((
-            AnalyzedSource {
-                schema: left,
-                children: None,
-            },
-            AnalyzedSource {
-                schema: right,
-                children: None,
-            },
-        ))),
-    }));
+    query.analyzed_source = Some(
+        std::sync::Arc::new(AnalyzedSource {
+            schema: RowSchema::join(&left, &right, std::iter::empty()),
+            children: Some(Box::new((
+                AnalyzedSource {
+                    schema: left,
+                    children: None,
+                },
+                AnalyzedSource {
+                    schema: right,
+                    children: None,
+                },
+            ))),
+        })
+        .into(),
+    );
     query
 }
 

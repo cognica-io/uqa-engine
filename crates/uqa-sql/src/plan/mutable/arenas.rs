@@ -10,6 +10,12 @@ use super::{memory::RewriteMemory, MutableCommandPlan, MutableQueryPlan};
 use crate::SQLError;
 use uqa_core::memory::ProductionControl;
 
+mod nodes;
+mod owner;
+mod transfer;
+pub use nodes::ScalarArenaTransform;
+pub use owner::ScalarQueryArena;
+
 impl MutableQueryPlan {
     /// Compact the local scalar-query arena through SQL's existing namespace-aware remapping. Unreachable child payloads release before their constructor records, while the original arena capacity remains owned by the parent.
     pub fn prune_subqueries(mut self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {

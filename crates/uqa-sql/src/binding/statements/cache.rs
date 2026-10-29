@@ -83,6 +83,14 @@ impl AnalyzedStatement {
         params: &[SQLParam],
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, SQLError> {
+        Self::capture_ref_with_control(plan.into(), params, control)
+    }
+
+    pub fn capture_ref_with_control(
+        plan: crate::plan::PlanRef<'_>,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Self>, SQLError> {
         let Some(parameters) = parameter_shapes(params, control)? else {
             return Ok(None);
         };

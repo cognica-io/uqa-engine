@@ -7,7 +7,7 @@
 //! Coerce already analyzed ROW inputs without observing their expressions a second time.
 
 use super::{ColumnType, ExpressionType, Preparation, SQLError};
-use crate::type_resolution::composite_rows::{row_cast_error, validate_field_cast, validate_width};
+use crate::type_resolution::composite_rows::{row_cast_error, validate_width};
 
 impl Preparation<'_> {
     pub(super) fn coerce_row_comparison(
@@ -58,8 +58,11 @@ impl Preparation<'_> {
         let ColumnType::Composite(reference) = base else {
             return Ok(());
         };
-        let descriptor =
-            crate::expr::composites::descriptor(self.routines.composite_types(), reference.oid)?;
+        let descriptor = crate::expr::composites::descriptor_with_control(
+            self.routines.composite_types(),
+            reference.oid,
+            &self.scope.control(),
+        )?;
         for (index, attribute) in descriptor.attributes.iter().enumerate() {
             let Some(field) = fields.get_mut(index) else {
                 return Err(row_cast_error(
@@ -68,12 +71,13 @@ impl Preparation<'_> {
                     Some(self.routines),
                 ));
             };
-            validate_field_cast(
+            crate::type_resolution::composite_rows::validate_field_cast_with_control(
                 target,
-                field.ty.as_ref(),
+                field.ty.as_deref(),
                 &attribute.ty,
                 index + 1,
-                Some(self.routines),
+                self.routines,
+                &self.scope.control(),
             )?;
             if let Some(nested) = &mut field.row_constructor {
                 self.coerce_row_constructor(nested, &attribute.ty)?;

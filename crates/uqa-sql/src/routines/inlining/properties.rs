@@ -40,31 +40,6 @@ const fn rank(volatility: FunctionVolatility) -> u8 {
 mod production;
 pub(super) use production::{can_duplicate_with_control, inspect_with_control};
 
-pub(super) fn can_duplicate(
-    context: &RoutineInliningContext<'_>,
-    expression: &ScalarExpr,
-) -> Result<bool, SQLError> {
-    can_duplicate_with_control(
-        context,
-        expression,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
-}
-
-pub(super) fn inspect(
-    context: &RoutineInliningContext<'_>,
-    expression: &ScalarExpr,
-    parameters: &[SQLParam],
-) -> Result<Properties, SQLError> {
-    inspect_with_control(
-        context,
-        expression,
-        parameters,
-        &RowSchema::default(),
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
-}
-
 pub(super) fn volatility(
     context: &RoutineInliningContext<'_>,
     expression: &ScalarExpr,

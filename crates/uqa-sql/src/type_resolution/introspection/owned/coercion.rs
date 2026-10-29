@@ -96,21 +96,40 @@ impl OwnedBinder<'_> {
         expression: &ScalarExpr,
         target: &ColumnType,
     ) -> Result<Option<OwnedScalarExpr>, SQLError> {
-        let ScalarExpr::Literal(value @ Value::Str(_)) = expression else {
+        let ScalarExpr::Literal(value @ Value::Str(text)) = expression else {
             return Ok(None);
         };
-        if crate::type_resolution::catalog_input_type(target) {
+        let stored = self.context.literal_binding == super::super::LiteralBinding::Stored;
+        if crate::type_resolution::catalog_input_type(target)
+            && !(stored && crate::expr::requires_catalog_constant_input(target))
+        {
             return Ok(None);
         }
         let control = &self.context.control;
-        let value = crate::assignment::conversion::convert_value_to_column_type_with_control(
-            control.copy_value(value)?,
-            target,
-            control,
-        );
+        let value = if stored && crate::expr::requires_catalog_constant_input(target) {
+            let Some(catalog) = self
+                .context
+                .resolver
+                .and_then(crate::FunctionTypeResolver::catalog_input_functions)
+            else {
+                return Ok(None);
+            };
+            catalog.read_unknown_input_with_control(text, target, control)
+        } else {
+            crate::assignment::conversion::convert_value_to_column_type_with_control(
+                control.copy_value(value)?,
+                target,
+                control,
+            )
+        };
         let value = match value {
             Ok(value) => value,
-            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            Err(error)
+                if self.context.literal_binding != super::super::LiteralBinding::Ordinary
+                    || matches!(error.sqlstate(), Some("53200" | "57014")) =>
+            {
+                return Err(error)
+            }
             Err(_) => return Ok(None),
         };
         Ok(Some(OwnedScalarExpr::typed_literal(
@@ -150,7 +169,12 @@ impl OwnedBinder<'_> {
         ) {
             Ok(Some(value)) => value,
             Ok(None) => return Ok(None),
-            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            Err(error)
+                if self.context.literal_binding != super::super::LiteralBinding::Ordinary
+                    || matches!(error.sqlstate(), Some("53200" | "57014")) =>
+            {
+                return Err(error)
+            }
             Err(_) => return Ok(None),
         };
         Ok(Some(OwnedScalarExpr::typed_literal(

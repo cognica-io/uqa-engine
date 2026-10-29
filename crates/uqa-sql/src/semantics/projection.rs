@@ -12,11 +12,20 @@ use crate::plan::ProjectionPlan;
 use crate::{ColumnIdentity, RowSchema, SQLError, ScalarExpr};
 
 mod labels;
+mod mutation;
+mod stars;
 pub(crate) use labels::field_selection_label;
 pub use labels::{
     function_projection_label, projection_label_at, projection_labels_with_control,
     visit_query_output_columns, with_projection_label, ProjectionLabels,
 };
+pub use mutation::{mutation_clause_schema_with_control, returning_expression_schema_with_control};
+pub(crate) use stars::row_star_fields_with_control;
+pub use stars::{
+    bound_projection_expression_with_control, visit_bound_projection_star_fields,
+    ProjectionFieldVisitor,
+};
+pub(crate) use stars::{visit_bound_projection_star_metadata, ProjectionStarMetadata};
 
 pub fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
     projections.iter().map(projection_label_at).collect()
@@ -86,17 +95,13 @@ pub fn expand_from_star_columns(
 }
 
 pub fn bound_projection_expression(schema: &RowSchema, position: usize) -> ScalarExpr {
-    let Some(identity) = schema.identity(position) else {
-        return ScalarExpr::Position(position);
-    };
-    if let Some(qualifier) = identity.qualifier() {
-        if schema.qualified_position(qualifier, identity.column()) == Some(position) {
-            return ScalarExpr::qualified_column(qualifier, identity.column());
-        }
-    } else if schema.unqualified_position(identity.column()) == Some(position) {
-        return ScalarExpr::Column(identity.column().to_string().into());
-    }
-    ScalarExpr::Position(position)
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    bound_projection_expression_with_control(schema, position, &control)
+        .expect("ordinary projection reference")
+        .finish(&control)
+        .expect("ordinary reference completion")
+        .into_uncontrolled()
+        .expect("ordinary reference ownership")
 }
 
 pub fn expand_bound_projection_stars(
@@ -104,24 +109,6 @@ pub fn expand_bound_projection_stars(
     schema: &RowSchema,
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
     expand_bound_projection_stars_in_scope(projections, schema, schema)
-}
-
-/// A qualified star in a ROW constructor expands its source fields; an ordinary whole-row reference remains one nested value.
-pub(crate) fn row_star_fields(
-    expression: &ScalarExpr,
-    schema: &RowSchema,
-) -> Result<Option<Vec<ScalarExpr>>, SQLError> {
-    if !matches!(expression, ScalarExpr::QualifiedStar(_)) {
-        return Ok(None);
-    }
-    expand_bound_projection_stars(
-        &[ProjectionPlan {
-            expr: expression.clone(),
-            alias: None,
-        }],
-        schema,
-    )
-    .map(|fields| Some(fields.into_iter().map(|field| field.expr).collect()))
 }
 
 /// Bare stars expand the local FROM output, while qualified stars can select an admitted enclosing namespace.
@@ -132,44 +119,34 @@ pub fn expand_bound_projection_stars_in_scope(
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
     let mut expanded = Vec::new();
     for projection in projections {
-        match &projection.expr {
-            ScalarExpr::Star => {
-                for (position, column) in schema.columns().iter().enumerate() {
-                    if !visible_projection_source_position(schema, position) {
-                        continue;
-                    }
-                    expanded.push(ProjectionPlan {
-                        expr: bound_projection_expression(schema, position),
-                        alias: Some(schema.public_name(position).unwrap_or(column).to_string()),
-                    });
-                }
-            }
-            ScalarExpr::QualifiedStar(qualifier) => {
-                let schema = expression_schema;
-                schema.require_lateral_qualifier(qualifier)?;
-                let layout = schema.qualified_star_position_layout(qualifier);
-                if layout.is_empty() && !schema.has_qualifier(qualifier) {
-                    if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
-                        return Err(error);
-                    }
-                    return Err(SQLError::UnknownTable(qualifier.to_string()));
-                }
-                for (column, logical, _, _) in layout {
-                    if logical.is_some_and(|position| {
-                        !visible_projection_source_position(schema, position)
-                    }) {
-                        continue;
-                    }
-                    expanded.push(ProjectionPlan {
-                        expr: logical.map_or_else(
-                            || ScalarExpr::qualified_column(qualifier, &column),
-                            |position| bound_projection_expression(schema, position),
-                        ),
-                        alias: Some(column),
-                    });
-                }
-            }
-            _ => expanded.push(projection.clone()),
+        let star = visit_bound_projection_star_fields(
+            &projection.expr,
+            schema,
+            expression_schema,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut |column, position, qualifier| {
+                let selected = if qualifier.is_some() {
+                    expression_schema
+                } else {
+                    schema
+                };
+                expanded.push(ProjectionPlan {
+                    expr: position.map_or_else(
+                        || {
+                            ScalarExpr::qualified_column(
+                                qualifier.expect("hidden qualified field"),
+                                column,
+                            )
+                        },
+                        |position| bound_projection_expression(selected, position),
+                    ),
+                    alias: Some(column.to_string()),
+                });
+                Ok(())
+            },
+        )?;
+        if !star {
+            expanded.push(projection.clone());
         }
     }
     Ok(expanded)

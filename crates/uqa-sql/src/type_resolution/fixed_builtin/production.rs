@@ -13,7 +13,20 @@ use crate::type_resolution::{
 use crate::{ast::FunctionBinding, ColumnType, SQLError};
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
-pub(in crate::type_resolution) fn overloads_with_control(
+/// Dedicated SQL value syntax has no supplied arguments and keeps only the selected catalog binding. Descriptor and result-type scratch are retired before publishing that independent binding owner.
+pub(crate) fn resolve_syntax_binding_with_control(
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<FunctionBinding>>, SQLError> {
+    control.check()?;
+    if registry::lookup(name).is_none() {
+        return Ok(None);
+    }
+    let selected = resolve_overload_with_control(name, None, &[], &[], false, None, control)?;
+    Ok(Some(selected.binding.clone_with_control(control)?))
+}
+
+pub(crate) fn overloads_with_control(
     name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Vec<BuiltinFunctionOverload>>>, SQLError> {

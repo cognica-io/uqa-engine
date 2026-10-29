@@ -8,6 +8,7 @@ use super::*;
 use crate::plan::CommandPlan;
 
 mod fixtures;
+mod lowering;
 mod metadata;
 
 fn assert_copy(source: &UnifiedPlan) {

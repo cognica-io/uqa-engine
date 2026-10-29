@@ -133,7 +133,9 @@ impl SyntaxCopy for crate::plan::UnifiedPlan {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
         Ok(match self {
             Self::Query(query) => Self::Query(copying.boxed(|copying| copying.query(query))?),
-            Self::Command(command) => Self::Command(command.copy_syntax(copying)?),
+            Self::Command(command) => Self::Command(copying.boxed(|copying| {
+                copying.field("command", |copying| command.as_ref().copy_syntax(copying))
+            })?),
         })
     }
 }

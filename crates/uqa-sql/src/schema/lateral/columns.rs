@@ -16,6 +16,7 @@ fn namespace(schema: &RowSchema, name: &str) -> DiagnosticNamespace {
             .into_iter()
             .map(|(name, ..)| name.into())
             .collect(),
+        _memory: crate::schema::production::lease::SchemaMemory::default(),
     }
 }
 
@@ -68,8 +69,12 @@ impl RowSchema {
         }
         let detail = match matches.exact {
             0 => None,
-            1 => Some(format!("There is a column named \"{column}\" in table \"{qualifier}\", but it cannot be referenced from this part of the query.")),
-            _ => Some(format!("There are columns named \"{column}\", but they are in tables that cannot be referenced from this part of the query.")),
+            1 => Some(format!(
+                "There is a column named \"{column}\" in table \"{qualifier}\", but it cannot be referenced from this part of the query."
+            )),
+            _ => Some(format!(
+                "There are columns named \"{column}\", but they are in tables that cannot be referenced from this part of the query."
+            )),
         };
         let hint = if detail.is_some() {
             None
@@ -118,8 +123,12 @@ impl Matches {
 
     fn hint(&self) -> Option<String> {
         match self.candidates.as_slice() {
-            [(qualifier, column)] => Some(format!("Perhaps you meant to reference the column \"{qualifier}.{column}\".")),
-            [(q, c), (q2, c2)] => Some(format!("Perhaps you meant to reference the column \"{q}.{c}\" or the column \"{q2}.{c2}\".")),
+            [(qualifier, column)] => Some(format!(
+                "Perhaps you meant to reference the column \"{qualifier}.{column}\"."
+            )),
+            [(q, c), (q2, c2)] => Some(format!(
+                "Perhaps you meant to reference the column \"{q}.{c}\" or the column \"{q2}.{c2}\"."
+            )),
             _ => None,
         }
     }

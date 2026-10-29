@@ -14,13 +14,12 @@ use crate::{
     ast::FunctionBinding,
     routines::resolution::{RoutineCallKind, RoutineOverloadContext},
     type_resolution::{
-        canonical_routine_type_name_with_control, rank_function_matches_with_control,
-        FunctionBindingParts, ResolvedFunctionOverload, RoutineCallDescriptor,
+        rank_function_matches_with_control, ResolvedFunctionOverload, RoutineCallDescriptor,
         RoutineSignatureMatchError, RoutineSignatureProductionError,
     },
     SQLError,
 };
-use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+use uqa_core::memory::{Produced, ProductionControl};
 
 pub(in crate::routines::resolution) fn resolve(
     resolver: &RoutineOverloadContext<'_>,
@@ -68,20 +67,42 @@ pub(in crate::routines::resolution) fn resolve(
         })?;
         return resolved(resolver, name, call, matched, control).map(Some);
     }
+    let Some(selected) = select_unbound(resolver, name, call, control)? else {
+        return Ok(None);
+    };
+    resolved(resolver, name, call, selected, control).map(Some)
+}
+
+pub(super) fn select_unbound(
+    resolver: &RoutineOverloadContext<'_>,
+    name: &str,
+    call: RoutineCallDescriptor<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<RoutineMatch>, SQLError> {
+    select_unbound_kind(resolver, name, call, RoutineCallKind::Function, control)
+}
+
+pub(super) fn select_unbound_kind(
+    resolver: &RoutineOverloadContext<'_>,
+    name: &str,
+    call: RoutineCallDescriptor<'_>,
+    kind: RoutineCallKind,
+    control: &ProductionControl<'_>,
+) -> Result<Option<RoutineMatch>, SQLError> {
     let Some(overloads) = resolver
         .catalog
         .lookup_sql_routine_candidates_with_control(name, control)?
     else {
         return Ok(None);
     };
-    let (mut candidates, match_error) = collect(resolver, &overloads, call, control)?;
+    let (mut candidates, match_error) = collect_kind(resolver, &overloads, call, kind, control)?;
     drop(overloads);
     if candidates.values.is_empty() {
         if let Some(error) = match_error {
             return Err(diagnostics::signature(&error, control)?);
         }
         return Err(diagnostics::resolution(
-            RoutineCallKind::Function,
+            kind,
             "42883",
             name,
             RoutineCallDescriptor {
@@ -97,7 +118,7 @@ pub(in crate::routines::resolution) fn resolve(
         || candidates.values.len() != 1
     {
         return Err(diagnostics::resolution(
-            RoutineCallKind::Function,
+            kind,
             "42725",
             name,
             RoutineCallDescriptor {
@@ -110,7 +131,7 @@ pub(in crate::routines::resolution) fn resolve(
     }
     let selected = candidates.values.pop().expect("one selected routine");
     drop(candidates);
-    resolved(resolver, name, call, selected, control).map(Some)
+    Ok(Some(selected))
 }
 
 pub(super) fn signature_error(
@@ -137,6 +158,28 @@ pub(super) fn collect(
     ),
     SQLError,
 > {
+    collect_kind(
+        resolver,
+        overloads,
+        call,
+        RoutineCallKind::Function,
+        control,
+    )
+}
+
+fn collect_kind(
+    resolver: &RoutineOverloadContext<'_>,
+    overloads: &[std::sync::Arc<crate::routines::SQLUserFunction>],
+    call: RoutineCallDescriptor<'_>,
+    kind: RoutineCallKind,
+    control: &ProductionControl<'_>,
+) -> Result<
+    (
+        crate::type_resolution::RankingCandidates<RoutineMatch>,
+        Option<Produced<RoutineSignatureMatchError>>,
+    ),
+    SQLError,
+> {
     let snapshot = resolver.catalog.routine_type_snapshot();
     let mut candidates = crate::type_resolution::Candidates::new(control);
     let mut match_error = None;
@@ -146,7 +189,7 @@ pub(super) fn collect(
             &snapshot,
             std::sync::Arc::clone(function),
             call,
-            RoutineCallKind::Function,
+            kind,
             control,
         ) {
             Ok(Some(matched)) => candidates.push(matched)?,
@@ -189,26 +232,7 @@ pub(super) fn resolved(
     )?;
     let precedes_pg_catalog = resolver
         .user_function_precedes_pg_catalog_with_control(&matched.function.def.name, control)?;
-    let mut argument_types = ProductionVec::new(*control);
-    for parameter in matched.function.def.identity_params() {
-        control.check()?;
-        argument_types.push_produced(canonical_routine_type_name_with_control(
-            &parameter.type_name,
-            control,
-        )?)?;
-    }
-    let binding = FunctionBindingParts {
-        object_id: matched.function.def.object_id,
-        name: control.copy_text(&matched.function.def.name)?,
-        argument_types: argument_types.finish()?,
-        builtin: false,
-        dispatch: None,
-        invocation: Some(matched.invocation),
-        value_binding: None,
-        resolution_error: None,
-        input_collation: None,
-    }
-    .finish(control)?;
+    let binding = super::selected_binding(&matched.function, matched.invocation, control)?;
     let (binding, binding_memory) = binding.into_parts();
     let (return_type, return_memory) = result.into_parts();
     Ok(control.finish(

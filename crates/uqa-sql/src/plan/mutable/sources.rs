@@ -13,8 +13,13 @@ use crate::{
 };
 use uqa_core::{memory::ProductionControl, Value};
 
+mod functions;
+mod generated;
+mod joins;
 mod metadata;
 mod parents;
+mod references;
+pub use joins::{MutableJoinParts, MutableJoinShell};
 
 /// A source whose child and scalar constructor records follow consuming edits.
 #[derive(Debug)]
@@ -97,7 +102,7 @@ impl MutableSourcePlan {
             _ => {
                 return Err(SQLError::Internal(
                     "source has no directly retained query".into(),
-                ))
+                ));
             }
         };
         let input = MutableQueryPlan {
@@ -232,7 +237,7 @@ impl SourceChildSlot {
         }
     }
 
-    fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
+    pub(super) fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
         memory
             .field_mut(if matches!(self, Self::Left) {
                 "left"
@@ -246,7 +251,7 @@ impl SourceChildSlot {
 }
 
 impl SourceScalarSlot {
-    fn expression_mut(self, source: &mut SourcePlan) -> Option<&mut ScalarExpr> {
+    pub(super) fn expression_mut(self, source: &mut SourcePlan) -> Option<&mut ScalarExpr> {
         match (self, source) {
             (Self::JoinOn, SourcePlan::Join { on, .. }) => on.as_mut(),
             (Self::Value { row, column }, SourcePlan::Values { rows, .. }) => {
@@ -261,7 +266,7 @@ impl SourceScalarSlot {
         }
     }
 
-    fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
+    pub(super) fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
         match self {
             Self::JoinOn => memory
                 .field_mut("on")

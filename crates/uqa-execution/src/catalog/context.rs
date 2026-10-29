@@ -6,6 +6,8 @@
 
 //! Catalog projection inputs assembled at a statement boundary.
 
+mod view_schema;
+
 use super::cache::RegtypeOutputCache;
 use super::security::{
     schema::{role_has_schema_privilege, SchemaAclPrivilege},
@@ -83,9 +85,11 @@ impl CatalogContext<'_> {
         &self,
         name: &str,
     ) -> Result<Option<(String, &'static str)>, SQLError> {
+        let mut resolution = self.session.relation_name_resolution();
+        resolution.set_lookup_mode(RelationLookupMode::Dynamic);
         self.catalog
             .refreshed_catalog_snapshot()?
-            .relation_kind_resolution(&self.session.relation_name_resolution(), name)
+            .relation_kind_resolution(&resolution, name)
             .map(RelationResolution::into_found)
     }
     pub fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, SQLError> {
@@ -110,57 +114,17 @@ impl CatalogContext<'_> {
         let names = uqa_sql::compiler::parse_regobject_name(name)?;
         let catalog = self.catalog_read_view();
         let in_schema = |schema: &str, local: &str| {
-            let definitions = &catalog.snapshot().definitions;
-            definitions
-                .ranges
-                .values()
-                .find_map(|definition| definition.named_type(schema, local))
-                .or_else(|| {
-                    definitions
-                        .domains
-                        .values()
-                        .filter(|domain| domain.identity.schema == schema)
-                        .find_map(|domain| {
-                            if domain.identity.name == local {
-                                Some(domain.column_type())
-                            } else if domain.array_type_name() == local {
-                                Some(ColumnType::Array(Box::new(domain.column_type())))
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .or_else(|| {
-                    definitions
-                        .enums
-                        .values()
-                        .filter(|definition| definition.identity.schema == schema)
-                        .find_map(|definition| {
-                            if definition.identity.name == local {
-                                Some(definition.column_type())
-                            } else if definition.array_name == local {
-                                Some(ColumnType::Array(Box::new(definition.column_type())))
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .or_else(|| {
-                    definitions
-                        .composites
-                        .values()
-                        .filter(|definition| definition.identity.schema == schema)
-                        .find_map(|definition| {
-                            if definition.identity.name == local {
-                                Some(definition.column_type())
-                            } else if definition.array_name == local {
-                                Some(ColumnType::Array(Box::new(definition.column_type())))
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .or_else(|| super::composite_type::relations::by_name(&catalog, schema, local))
+            super::projection::catalog_user_type_name_with_control(
+                &catalog,
+                schema,
+                local,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .expect("ordinary user type projection cannot be cancelled or limited")
+            .map(|ty| {
+                ty.into_uncontrolled()
+                    .expect("ordinary user type projection")
+            })
         };
         if let [schema, local] = names.as_slice() {
             return in_schema(schema, local);

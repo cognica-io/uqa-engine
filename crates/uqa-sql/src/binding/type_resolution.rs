@@ -14,6 +14,7 @@ use crate::routines::RoutineResolution;
 
 use super::{QueryPlan, ScalarExpr, SchemaScope};
 
+mod production;
 #[cfg(test)]
 mod production_tests;
 mod query_results;
@@ -21,7 +22,7 @@ pub(super) use query_results::ValidatedSubqueries;
 
 pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,
-    pub(super) scalar_subquery_schemas: Option<Vec<Option<RowSchema>>>,
+    pub(super) scalar_subquery_schemas: Option<crate::production::Buffer<Option<RowSchema>>>,
     pub(super) defer_routine_namespace_errors: bool,
 }
 

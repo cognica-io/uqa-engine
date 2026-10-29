@@ -53,7 +53,7 @@ fn regex_compilation_preserves_native_admission_and_recovers(#[case] provider: P
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open_with_retention(&directory.path().join("regex-limit.db"), 64 << 20);
     let retained = engine.query_retention_control().unwrap();
-    let baseline = retained.memory().used();
+    assert_eq!(retained.memory().used(), 0);
     let error = engine
         .sql(
             "SELECT regexp_match('ab', '((((a{1,100}){1,100}){1,100}){1,100})')",
@@ -61,11 +61,17 @@ fn regex_compilation_preserves_native_admission_and_recovers(#[case] provider: P
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"), "{provider:?}: {error}");
-    assert_eq!(retained.memory().used(), baseline);
+    // Failed compilation releases its scratch; parsed/logical SQL still belongs
+    // to the session cache. Retain that exact owner across recovery and teardown.
+    let cached = engine.session.state.read().sql_statement_cache.clone();
+    let cached_bytes = retained.memory().used();
+    assert!(cached_bytes > 0);
     assert_eq!(engine.transaction_depth(), 0);
     assert_eq!(engine.sql("SELECT 1 AS value", &[]).unwrap().rows.len(), 1);
     engine.close().unwrap();
     drop(engine);
+    assert_eq!(retained.memory().used(), cached_bytes);
+    drop(cached);
     assert_eq!(retained.memory().used(), 0);
 }
 

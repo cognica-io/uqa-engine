@@ -32,6 +32,30 @@ fn registry() -> RoutineRegistry {
 }
 
 #[test]
+fn set_returning_observation_applies_visible_signature_shadowing() {
+    let registry = RoutineRegistry::from([
+        ("first.f".into(), vec![function("CREATE FUNCTION first.f(integer) RETURNS integer LANGUAGE sql AS 'SELECT $1'", 1)]),
+        ("second.f".into(), vec![function("CREATE FUNCTION second.f(integer) RETURNS SETOF integer LANGUAGE sql AS 'SELECT $1'", 2)]),
+    ]);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    assert!(!visible_function_returns_set_by_keys_with_control(
+        &registry,
+        ["first.f", "second.f"],
+        &control
+    )
+    .unwrap());
+    assert!(visible_function_returns_set_by_keys_with_control(
+        &registry,
+        ["second.f", "first.f"],
+        &control
+    )
+    .unwrap());
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn visible_routine_observation_preserves_first_schema_signatures_and_releases_admitted_scratch() {
     let registry = registry();
     let memory = MemoryBudget::new(1 << 20);

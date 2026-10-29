@@ -88,7 +88,21 @@ fn captured_input_pruning_keeps_identity_cardinality_and_volatile_outputs() {
         if pruned {
             expected_block.projections[1].expr = ScalarExpr::Literal(Value::Null);
         }
+        let token = uqa_core::CancellationToken::new();
+        let budget = uqa_core::memory::MemoryBudget::new(1 << 20);
+        let control = uqa_core::memory::ProductionControl::new(&budget, &token, &token);
+        let owned = plan.copy_for_rewrite(&control).unwrap();
+        let owned = prune_captured_inputs_owned(&Catalog, &Catalog, owned, &control)
+            .unwrap()
+            .finish(&control)
+            .unwrap();
         prune_captured_inputs(&Catalog, &Catalog, &mut plan).unwrap();
+        assert_eq!(
+            serde_json::to_value(&*owned).unwrap(),
+            serde_json::to_value(&plan).unwrap()
+        );
+        drop(owned);
+        assert_eq!(budget.used(), 0);
         let UnifiedPlan::Query(query) = &plan else {
             panic!("query")
         };
@@ -133,7 +147,21 @@ fn captured_rule_projections_use_the_enclosing_cte_namespace() {
             unreachable!()
         };
         *captured_output = Some(relation);
+        let token = uqa_core::CancellationToken::new();
+        let budget = uqa_core::memory::MemoryBudget::new(1 << 20);
+        let control = uqa_core::memory::ProductionControl::new(&budget, &token, &token);
+        let owned = plan.copy_for_rewrite(&control).unwrap();
+        let owned = prune_captured_inputs_owned(&Catalog, &Catalog, owned, &control)
+            .unwrap()
+            .finish(&control)
+            .unwrap();
         prune_captured_inputs(&Catalog, &Catalog, &mut plan).unwrap();
+        assert_eq!(
+            serde_json::to_value(&*owned).unwrap(),
+            serde_json::to_value(&plan).unwrap()
+        );
+        drop(owned);
+        assert_eq!(budget.used(), 0);
         let UnifiedPlan::Query(query) = &plan else {
             unreachable!()
         };

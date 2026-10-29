@@ -8,13 +8,14 @@
 //! and the independently captured `routine_parser_lifetime` oracle.
 
 use super::*;
-use crate::{ast::Statement, FunctionTypeResolver};
+use crate::{ast::Statement, plan::RelationalPlan, ColumnType, FunctionTypeResolver};
 use std::sync::{atomic::Ordering, Arc};
 use uqa_core::Value;
 mod concatenation;
 mod fixture;
 mod ownership;
 mod production;
+mod selection;
 mod table;
 use fixture::Catalog;
 

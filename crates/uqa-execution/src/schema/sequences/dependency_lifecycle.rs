@@ -5,6 +5,8 @@
 //
 
 //! Inspect sequence dependents and publish ordered schema removals using native owners.
+mod columns;
+
 use crate::{
     catalog::{
         foreign::reads::ForeignTablesRead, sequence_introspection::SequenceIntrospectionCatalog,

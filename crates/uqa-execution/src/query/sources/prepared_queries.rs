@@ -359,6 +359,12 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
     if executable_query.is_some() {
         return Ok(());
     }
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
     let qualifier = alias.as_deref().unwrap_or(qualifier);
     let mut scope = parent.clone();
     let (mut query, aliases, optimize) = if let Some(cte) = parent.deferred_reference(name) {
@@ -368,8 +374,12 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
         let Some(query) = cte.body.query() else {
             return Ok(());
         };
-        let query = query.clone();
-        let aliases = super::table_source::output_aliases(&cte.columns, column_aliases);
+        let query = query.copy_for_rewrite(&control)?;
+        let aliases = super::table_source::production::output_aliases(
+            &cte.columns,
+            column_aliases,
+            &control,
+        )?;
         scope = parent.definition_scope(name).expect("declared CTE scope");
         (query, aliases, false)
     } else {
@@ -377,10 +387,8 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
             return Ok(());
         }
         let catalog = scope.catalog_read_view()?;
-        let Some(view) = catalog
-            .view_resolved(&scope.relation_name_resolution()?, name)?
-            .cloned()
-        else {
+        let resolution = scope.relation_name_resolution_with_control(&control)?;
+        let Some(view) = catalog.view_resolved_with_control(&resolution, name, &control)? else {
             return Ok(());
         };
         if view.kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
@@ -389,51 +397,66 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
         let subject = if view.security_invoker() {
             scope.privilege_subject()?.clone()
         } else {
-            catalog.view_owner(&view)?
+            catalog.view_owner(view)?
         };
         scope = {
             let scoped = scope.enter_privilege_subject(subject);
             (*scoped).clone()
         };
         (
-            view.query.clone(),
-            super::table_source::output_aliases(
+            view.query.copy_for_rewrite(&control)?,
+            super::table_source::production::output_aliases(
                 view.output_columns.as_deref().unwrap_or_default(),
                 column_aliases,
-            ),
+                &control,
+            )?,
             true,
         )
     };
     let _stored = optimize
         .then(uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition);
     if optimize {
-        crate::query::binding::restore_query_layouts(
-            context.ctes.routines,
-            &mut query,
-            params,
-            &scope,
-            outer,
+        query = super::table_source::production::restore_layouts(
+            context, query, params, &scope, outer, &control,
         )?;
     }
     if let Some(projection) = prune.and_then(|prune| prune.get(qualifier)) {
-        super::table_source::prune_query_outputs(
-            context, &mut query, &aliases, projection, params, &scope, outer,
+        query = super::table_source::production::prune_outputs(
+            context,
+            query,
+            &aliases,
+            projection,
+            super::table_source::production::QueryBinding {
+                params,
+                scope: &scope,
+                outer,
+            },
+            &control,
         )?;
     }
-    let query = if optimize {
-        context.ctes.rewrites.optimize_retained_query(query)?
-    } else {
-        let retained = context.ctes.queries.read_control()?;
-        let control = uqa_core::memory::ProductionControl::new(
-            retained.memory(),
-            retained.cancellation(),
-            context.ctes.runtime.cancellation,
-        );
-        OwnedQueryPlan::from_query(query, &control)?
-    };
-    let query = prepare_owned(context, query, params, &scope, outer)?;
+    let query = finish_named_source(context, query, optimize, params, &scope, outer, &control)?;
     let (query, attached) = query.into_parts();
     *executable_query = Some(query);
     memory.absorb(attached);
     Ok(())
+}
+
+fn finish_named_source<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    query: uqa_sql::plan::MutableQueryPlan,
+    optimize: bool,
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+    outer: Option<&RowSchema>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<OwnedQueryPlan, SQLError> {
+    let query = if optimize {
+        context
+            .ctes
+            .rewrites
+            .optimize_retained_query(query, control)?
+    } else {
+        OwnedQueryPlan::from_produced(query.finish(control)?, control)?
+    };
+    prepare_owned(context, query, params, scope, outer)
 }

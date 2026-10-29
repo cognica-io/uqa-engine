@@ -288,9 +288,12 @@ pub(super) fn read_segment<'a>(
 }
 
 pub(super) fn read_str(key: &[u8], offset: &mut usize) -> StorageBackendResult<String> {
+    read_str_ref(key, offset).map(str::to_owned)
+}
+
+pub(super) fn read_str_ref<'a>(key: &'a [u8], offset: &mut usize) -> StorageBackendResult<&'a str> {
     let segment = read_segment(key, offset)?;
     std::str::from_utf8(segment)
-        .map(str::to_string)
         .map_err(|err| other_error(format!("invalid utf-8 key segment: {err}")))
 }
 
@@ -317,6 +320,21 @@ pub(super) fn single_str_key(tag: u8, name: &str) -> StorageBackendResult<Vec<u8
     let mut key = key_with_tag(tag);
     push_str(&mut key, name)?;
     Ok(key)
+}
+
+pub(super) fn string_key_with_control<'a>(
+    tag: u8,
+    segments: impl IntoIterator<Item = &'a str>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> StorageBackendResult<uqa_core::memory::Produced<Vec<u8>>> {
+    let mut output = uqa_core::memory::ProductionVec::new(*control);
+    output.push_copy(tag)?;
+    for segment in segments {
+        let len = key_segment_length(segment.len())?;
+        output.extend_from_slice(&len.to_be_bytes())?;
+        output.extend_from_slice(segment.as_bytes())?;
+    }
+    Ok(output.finish()?)
 }
 
 pub(super) fn u64_value(value: u64) -> Vec<u8> {

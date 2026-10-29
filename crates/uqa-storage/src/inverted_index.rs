@@ -36,6 +36,8 @@ mod metadata;
 mod read_cursor;
 mod retained;
 mod snapshot;
+pub(crate) mod statistics;
+pub use statistics::{query_document_frequency, query_term_count};
 mod source;
 mod source_rebuild;
 

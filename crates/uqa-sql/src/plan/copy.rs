@@ -12,6 +12,8 @@ use crate::{catalog::roles::RoleReference, SQLError, ScalarExpr};
 use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, ProductionControl};
 
 mod command;
+mod generated_sources;
+mod lowering;
 mod query;
 mod source;
 mod specialization;
@@ -92,6 +94,26 @@ impl UnifiedPlan {
 }
 
 impl PlanRef<'_> {
+    /// Copy the complete borrowed plan, including utility syntax, into admitted storage.
+    pub fn clone_with_control(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<UnifiedPlan>> {
+        control.check()?;
+        let Some(mut copying) = Copying::new(*control) else {
+            return Ok(control.finish(self.to_owned(), None)?);
+        };
+        let plan = match self {
+            Self::Query(query) => {
+                UnifiedPlan::Query(copying.boxed(|copying| copying.query(query))?)
+            }
+            Self::Command(command) => {
+                UnifiedPlan::Command(copying.boxed(|copying| copying.command_syntax(command))?)
+            }
+        };
+        copying.finish(plan)
+    }
+
     /// Copy a borrowed query or mutation directly into its admitted executable owner, without first constructing a temporary statement wrapper.
     pub fn clone_executable_with_control(
         self,
@@ -132,12 +154,20 @@ fn require_mutation(command: &CommandPlan) -> Result<()> {
     }
 }
 
+type ParameterLookup<'a> = dyn Fn(&crate::ast::Expr) -> Option<usize> + 'a;
+
 pub(crate) struct Copying<'a> {
     control: ProductionControl<'a>,
     memory: MemoryReservation,
     fields: Option<BudgetedVec<RewriteField>>,
+    parameters: Option<&'a ParameterLookup<'a>>,
 }
 
+mod owned_assignments;
+pub(crate) use owned_assignments::{assignment_vector, null_assignment};
+mod owned_deferred;
+mod owned_projection;
+mod owned_query;
 mod owned_scalar;
 
 impl<'a> Copying<'a> {
@@ -146,6 +176,7 @@ impl<'a> Copying<'a> {
             control,
             memory,
             fields: None,
+            parameters: None,
         })
     }
 
@@ -175,6 +206,7 @@ impl<'a> Copying<'a> {
         self.control.check()?;
         fields.reserve(1)?;
         let mut child = Self::for_rewrite(self.control).expect("controlled rewrite");
+        child.parameters = self.parameters;
         let value = copy(&mut child)?;
         self.fields
             .as_mut()
@@ -252,7 +284,7 @@ impl<'a> Copying<'a> {
         value.map(|value| self.text(value)).transpose()
     }
 
-    fn texts(&mut self, values: &[String]) -> Result<Vec<String>> {
+    pub(in crate::plan) fn texts(&mut self, values: &[String]) -> Result<Vec<String>> {
         self.map(values.iter(), |copying, value| copying.text(value))
     }
 

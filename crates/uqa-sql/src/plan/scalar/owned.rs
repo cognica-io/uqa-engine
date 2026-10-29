@@ -15,14 +15,22 @@ use uqa_core::{
 
 mod call;
 mod children;
+mod composite;
+mod composites;
 mod construction;
 mod constructors;
 mod edit;
 mod generated;
 mod iteration;
 mod literals;
+mod metadata;
+mod query_ids;
+mod references;
+mod replacement;
 mod selection;
+pub(in crate::plan) mod windows;
 pub use iteration::OwnedScalarChildren;
+pub use replacement::ScalarNodeTransform;
 
 /// A scalar expression whose child allocations can be transferred or discarded independently. The expression is read-only outside this owner's consuming operations; replacing raw IR through a mutable dereference would separate allocations from their reservations.
 #[derive(Debug)]

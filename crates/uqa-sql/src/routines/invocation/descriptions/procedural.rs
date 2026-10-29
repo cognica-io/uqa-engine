@@ -149,6 +149,39 @@ impl ProceduralRoutineDescription<'_> {
         Ok(ty)
     }
 
+    /// Produce the selected declaration in the invoking request while retaining the existing scope validation and advisory description cache.
+    pub fn datum_type_with_control(
+        &self,
+        index: usize,
+        name: &str,
+        environment: RoutineConversionEnvironment<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+        let environment = RoutineConversionEnvironment {
+            control: *control,
+            ..environment
+        };
+        let saved = self.named(self.slots.datums.get(index), name, environment)?;
+        if let Some(ty) = saved.and_then(|saved| saved.ty.get()) {
+            return Ok(Some(ty.clone_with_control(control)?));
+        }
+        let ty = environment
+            .values
+            .catalog_column_type_with_control(name, control)?;
+        if self.call.is_current((environment.scope)().as_ref()) {
+            if let (Some(saved), Some(ty)) = (saved, &ty) {
+                match ty.clone_with_control(control) {
+                    Ok(copied) => {
+                        let _ = saved.ty.set(copied);
+                    }
+                    Err(ValueRetentionError::Memory(_)) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        Ok(ty)
+    }
+
     /// Declaration initialization and assignment share the original per-value
     /// conversion kernel; each callback and domain predicate still executes.
     pub fn coerce_datum(

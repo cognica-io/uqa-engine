@@ -44,16 +44,18 @@ impl Iterator for ArgumentIterator {
 impl ExactSizeIterator for ArgumentIterator {}
 
 impl OwnedArguments {
-    pub(super) fn into_uncontrolled(self) -> Result<Vec<ScalarExpr>, SQLError> {
-        let control = ProductionControl::uncontrolled();
-        self.into_iter()
-            .map(|argument| {
-                Ok(argument
-                    .finish(&control)?
-                    .into_uncontrolled()
-                    .expect("ordinary routine arguments"))
-            })
-            .collect()
+    pub(super) fn copy_from(
+        arguments: &[ScalarExpr],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let mut output = ProductionVec::new(*control);
+        output.reserve(arguments.len())?;
+        for argument in arguments {
+            let expression = argument.copy_for_rewrite(control)?;
+            output.push_produced(control.finish(expression, control.empty_reservation())?)?;
+        }
+        let (values, memory) = output.finish()?.into_parts();
+        Ok(Self { values, memory })
     }
 
     pub(super) fn into_iter(self) -> ArgumentIterator {
@@ -169,7 +171,7 @@ pub(super) fn prepare(
                     "required routine argument disappeared during expansion".into(),
                 ));
             };
-            let plan = match ExpressionPlan::lower_scalar_with_control(default, control) {
+            let plan = match ExpressionPlan::lower_scalar_for_rewrite(default, control) {
                 Ok(plan) => plan,
                 Err(crate::schema::retention::CatalogRetentionError::UnexpectedSubquery) => {
                     return Ok(None)
@@ -184,16 +186,14 @@ pub(super) fn prepare(
             }
             let source = crate::type_resolution::scalar_type_with_resolver_and_control(
                 &plan,
-                &crate::RowSchema::default(),
+                &crate::RowSchema::empty_with_control(control)?,
                 &[],
                 Some(context.routines),
                 control,
             )?;
-            let expression = plan.copy_for_rewrite(control)?;
-            drop(plan);
             coerce(
                 context,
-                expression,
+                plan,
                 source.as_deref(),
                 &invocation.parameter_types[position],
                 control,

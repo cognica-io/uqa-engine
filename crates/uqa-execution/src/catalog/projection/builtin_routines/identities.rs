@@ -22,17 +22,15 @@ pub fn builtin_routine_identities() -> impl Iterator<Item = BuiltinRoutineIdenti
             kind: routine.kind.chars().next().expect("builtin routine kind"),
             argument_types: routine.argument_types,
         })
-        .chain(
-            uqa_sql::registry::registered_names()
-                .into_iter()
-                .map(|name| BuiltinRoutineIdentity {
-                    oid: u32::try_from(uqa_sql::catalog::oids::stable_oid("proc", name))
-                        .expect("registered routine OID"),
-                    name,
-                    kind: 'f',
-                    argument_types: &[],
-                }),
-        )
+        .chain(uqa_sql::registry::registered_names_iter().map(|name| {
+            BuiltinRoutineIdentity {
+                oid: u32::try_from(uqa_sql::catalog::oids::stable_oid("proc", name))
+                    .expect("registered routine OID"),
+                name,
+                kind: 'f',
+                argument_types: &[],
+            }
+        }))
 }
 
 pub fn builtin_routine_identity(oid: u32) -> Option<BuiltinRoutineIdentity> {

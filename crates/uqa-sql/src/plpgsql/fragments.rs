@@ -105,6 +105,21 @@ pub fn is_simple_expression_plan(
         )
 }
 
+pub fn is_simple_expression_plan_with_control(
+    catalog: &dyn crate::routines::RoutineResolution,
+    plan: &crate::plan::UnifiedPlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    control.check()?;
+    let crate::plan::UnifiedPlan::Query(query) = plan else {
+        return Ok(false);
+    };
+    let crate::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+        return Ok(false);
+    };
+    Ok(query.ctes.is_empty() && block.is_single_expression() && !crate::semantics::sets::static_setness::expression_may_return_set_statically_with_control(catalog, &block.projections[0].expr, control)?)
+}
+
 impl PLpgSQLExpression {
     pub fn parse_statement(&self) -> Result<Statement, SQLError> {
         self.parse()

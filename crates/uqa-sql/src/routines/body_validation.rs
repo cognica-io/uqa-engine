@@ -28,6 +28,9 @@ use crate::{
 use uqa_core::Value;
 mod production;
 pub use production::routine_parameter_values_with_control;
+pub use production::{
+    reject_output_argument_call_with_control, reject_undefined_parameters_with_control,
+};
 
 /// The catalog `CREATE FUNCTION` validates a SQL body against.
 pub struct SQLBodyValidationContext<'a> {

@@ -9,7 +9,7 @@
 mod substitution;
 #[cfg(test)]
 mod tests;
-pub use substitution::substitute_outer_columns;
+pub use substitution::{substitute_outer_columns, substitute_outer_columns_owned};
 
 use crate::plan::{AnalyzedSource, ProjectionPlan, QueryBlockPlan, QueryPlan, SourcePlan};
 use crate::{RowSchema, SQLError, ScalarExpr};

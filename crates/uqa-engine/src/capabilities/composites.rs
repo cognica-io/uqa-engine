@@ -94,6 +94,25 @@ impl Engine {
 }
 
 impl CompositeTypeCatalog for Engine {
+    fn composite_type_with_control(
+        &self,
+        type_oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::expr::composites::OwnedCompositeTypeDescriptor>, SQLError> {
+        if let Some(descriptor) = self
+            .runtime
+            .composite_descriptor_cache
+            .descriptor_with_control(&self.composite_registry_snapshot(), type_oid, control)?
+        {
+            return Ok(Some(descriptor));
+        }
+        uqa_execution::catalog::composite_type::relations::descriptor_with_control(
+            &self.catalog_execution(),
+            type_oid,
+            control,
+        )
+    }
+
     fn composite_type(
         &self,
         type_oid: u32,

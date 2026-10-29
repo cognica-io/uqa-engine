@@ -77,6 +77,15 @@ pub fn declared_sql_function_result_with_control(
     declared_fields(types, definition, control)?.finish(control)
 }
 
+/// Retain only the declared value type after the ordinary return-layout checks. Other independently admitted layout fields are destroyed before publication.
+pub(in crate::routines) fn declared_sql_function_result_type_with_control(
+    types: &dyn RoutineTypeCatalog,
+    definition: &CreateFunction,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    Ok(declared_fields(types, definition, control)?.declared_type)
+}
+
 fn declared_fields(
     types: &dyn RoutineTypeCatalog,
     definition: &CreateFunction,

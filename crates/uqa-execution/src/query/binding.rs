@@ -13,7 +13,9 @@ use uqa_sql::plan::{
 };
 use uqa_sql::routines::RoutineResolution;
 use uqa_sql::{ColumnType, SQLError, SQLParam};
+mod capture;
 mod context;
+pub use capture::{binding_context_with_control, binding_snapshot_with_control};
 pub(crate) mod sources;
 pub use context::binding_context;
 mod subqueries;
@@ -201,16 +203,6 @@ pub fn bind_expression_plan_routines_for_storage<S: Clone>(
     )
 }
 
-pub(crate) fn restore_query_layouts<S: Clone>(
-    routines: &dyn RoutineResolution,
-    plan: &mut QueryPlan,
-    params: &[SQLParam],
-    ctes: &CteScope<S>,
-    outer: Option<&RowSchema>,
-) -> Result<(), SQLError> {
-    uqa_sql::binding::restore_query_layouts(routines, plan, params, &binding_context(ctes)?, outer)
-}
-
 pub fn bind_query_plan_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     plan: &QueryPlan,
@@ -371,6 +363,13 @@ pub fn analyze_command_parameters<S: Clone>(
 }
 
 impl<S: Clone> uqa_sql::binding::statements::StatementBindingScope for CteScope<S> {
+    fn binding_context_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::ControlledBindingContext<'_>, SQLError> {
+        binding_context_with_control(self, control)
+    }
+
     fn binding_context(&self) -> Result<uqa_sql::binding::BindingContext<'_>, SQLError> {
         binding_context(self)
     }

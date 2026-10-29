@@ -10,6 +10,15 @@ use super::{
     CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
 };
 
+impl super::PlanRef<'_> {
+    pub fn visit_sources(&self, visit: &mut dyn FnMut(&SourcePlan)) {
+        match self {
+            Self::Query(query) => query.visit_sources(visit),
+            Self::Command(command) => visit_command(command, visit),
+        }
+    }
+}
+
 impl UnifiedPlan {
     pub fn visit_sources(&self, visit: &mut dyn FnMut(&SourcePlan)) {
         match self {

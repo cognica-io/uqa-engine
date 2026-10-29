@@ -14,7 +14,9 @@ use super::{
     SQLiteError, SQLiteInvertedIndex, SqlValue, StorageBackendResult,
 };
 use super::{IndexedFieldMetadata, TokenTermKey};
-use uqa_storage::clustered_postings::{cluster_id, decode_all_scores, OccurrencePosting};
+use uqa_storage::clustered_postings::{
+    cluster_id, decode_all_scores, OccurrencePosting, PostingReadCursor,
+};
 use uqa_storage::inverted_index::TextIndexSource;
 
 impl InvertedIndex for SQLiteInvertedIndex {
@@ -410,6 +412,19 @@ impl InvertedIndex for SQLiteInvertedIndex {
         Ok(self.posting_cursor_key(field, term)?.doc_freq())
     }
 
+    fn doc_freq_key_budgeted(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.doc_freq_key_budgeted(field, term, control);
+        }
+        let cursor = self.posting_read_cursor_key_budgeted(field, term, control)?;
+        Ok(cursor.doc_freq())
+    }
+
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
         if let Some(index) = self.native_index() {
             return index.get_doc_length(doc_id, field);
@@ -737,6 +752,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
             }
             Ok(fields)
         })?)
+    }
+
+    fn field_names_budgeted(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<uqa_core::memory::BudgetedString>> {
+        if let Some(index) = self.native_index() {
+            return index.field_names_budgeted(control);
+        }
+        Ok(SQLiteInvertedIndex::field_names_budgeted(self, control)?)
     }
 
     fn set_field_analyzer(

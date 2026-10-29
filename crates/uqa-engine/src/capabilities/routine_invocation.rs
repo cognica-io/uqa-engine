@@ -35,15 +35,20 @@ impl RoutineInvocationSession for Engine {
         definition: &uqa_sql::ast::CreateFunction,
         relation: Option<i64>,
     ) -> Result<std::sync::Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
-        self.session
-            .routine_bodies
-            .plpgsql_body(function, definition, relation, |definition| {
+        let owner = uqa_sql::plan::ExecutablePlanOptimizer::planning_control(self)?;
+        self.session.routine_bodies.plpgsql_body(
+            function,
+            definition,
+            relation,
+            &owner.control(),
+            |definition| {
                 uqa_execution::routines::invocation::bodies::compile_session_body(
                     self,
                     &self.routine_definition_context().compilation.analysis,
                     definition,
                 )
-            })
+            },
+        )
     }
     fn depth_limit(&self) -> usize {
         self.sql_function_depth_limit()

@@ -358,6 +358,23 @@ impl InvertedIndex for MemoryInvertedIndex {
             })
     }
 
+    fn doc_freq_key_budgeted(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
+        let postings = super::read_cursor::controlled_postings(self, field, term, control)?;
+        let count = usize_to_u64(
+            postings.map_or(0, uqa_core::memory::OwnedMap::len),
+            "document frequency",
+        )?;
+        self.check_retained_read()?;
+        control.check()?;
+        Ok(count)
+    }
+
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
         self.check_retained_read()?;
         Ok(self
@@ -519,6 +536,22 @@ impl InvertedIndex for MemoryInvertedIndex {
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
         self.check_retained_read()?;
         Ok(self.state.field_counters.keys().cloned().collect())
+    }
+
+    fn field_names_budgeted(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<uqa_core::memory::BudgetedString>> {
+        self.check_retained_read()?;
+        control.check()?;
+        let mut fields = uqa_core::memory::BudgetedVec::new(control.memory());
+        fields.reserve(self.state.field_counters.len())?;
+        for field in self.state.field_counters.keys() {
+            fields.push(super::statistics::field_name(field, control)?)?;
+        }
+        self.check_retained_read()?;
+        control.check()?;
+        Ok(fields)
     }
 
     fn set_field_analyzer(

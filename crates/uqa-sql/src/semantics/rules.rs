@@ -11,6 +11,7 @@ use crate::{
     catalog::events::StoredRule,
     SQLError,
 };
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::RelationIdentity;
 
 /// Resolve stored rule definitions and a mutation's canonical target.
@@ -19,55 +20,76 @@ pub trait RuleCatalog {
     fn resolve_rule_relation(&self, table: &str) -> Result<RelationIdentity, SQLError>;
     fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError>;
     fn resolve_mutation_target(&self, name: &str, bound: bool) -> Result<String, SQLError>;
+
+    /// External catalogs may supply owned metadata. Native catalogs override this observation to lend the selected immutable rule declarations directly.
+    fn visit_rules_with_control(
+        &self,
+        table: &str,
+        event: RuleEvent,
+        reverse: bool,
+        control: &ProductionControl<'_>,
+        visit: &mut dyn FnMut(&StoredRule) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let rules = self.rules_for(table, event)?;
+        if reverse {
+            for rule in rules.iter().rev() {
+                control.check()?;
+                visit(rule)?;
+            }
+        } else {
+            for rule in &rules {
+                control.check()?;
+                visit(rule)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn resolve_rule_relation_with_control(
+        &self,
+        table: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<RelationIdentity>, SQLError> {
+        control.check()?;
+        let relation = self.resolve_rule_relation(table)?;
+        production::copy_relation(&relation, control)
+    }
+
+    fn resolve_mutation_target_with_control(
+        &self,
+        name: &str,
+        bound: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        control.check()?;
+        Ok(control.copy_text(&self.resolve_mutation_target(name, bound)?)?)
+    }
 }
 
 pub mod binding;
 mod ctes;
 mod input_contract;
+mod production;
 pub use ctes::validate_rule_cte_contract;
 pub use input_contract::validate_insert_rule_query_contract;
+pub use production::{
+    validate_insert_rule_query_contract_with_control, validate_rule_cte_contract_with_control,
+    validate_rule_returning_contract_with_control,
+};
 pub fn validate_rule_returning_contract(
     catalog: &dyn RuleCatalog,
     table: &str,
     event: RuleEvent,
     requested: bool,
 ) -> Result<(), SQLError> {
-    if !requested {
-        return Ok(());
-    }
-    let table = catalog.resolve_rule_relation(table)?.qualified_name();
-    let rules = catalog.rules_for(&table, event)?;
-    if rules.is_empty() || !rules.iter().any(|rule| rule.definition.instead) {
-        return Ok(());
-    }
-    let providers = rules
-        .iter()
-        .flat_map(|rule| &rule.definition.actions)
-        .filter(|action| statement_has_returning(action))
-        .count();
-    if providers > 1 {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "cannot have RETURNING lists in multiple rules".into(),
-        });
-    }
-    if providers == 1 {
-        return Ok(());
-    }
-    let relation = RelationIdentity::from_legacy_name(&table)
-        .map_err(|error| SQLError::Internal(format!("decode rule relation `{table}`: {error}")))?;
-    let event = rule_event_name(event);
-    Err(SQLError::Diagnostic {
-        sqlstate: "0A000".into(),
-        message: format!(
-            "cannot perform {event} RETURNING on relation \"{}\"",
-            relation.name
-        ),
-        detail: None,
-        hint: Some(format!(
-            "You need an unconditional ON {event} DO INSTEAD rule with a RETURNING clause."
-        )),
-    })
+    validate_rule_returning_contract_with_control(
+        catalog,
+        table,
+        event,
+        requested,
+        &ProductionControl::uncontrolled(),
+    )
 }
 
 const fn rule_event_name(event: RuleEvent) -> &'static str {

@@ -16,7 +16,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_sql::{
     ast::TransactionStmt,
-    plan::{AggregateClassifier, ExecutablePlanOptimizer, UnifiedPlan},
+    plan::{AggregateClassifier, ExecutablePlanOptimizer},
     SQLError, SQLParam, Statement,
 };
 
@@ -36,7 +36,7 @@ pub fn statement_deadline<S: Clone + 'static>(
 /// Owned cache contents after the session has validated its catalog epochs.
 pub struct CachedStatement {
     pub statement: Arc<Statement>,
-    pub logical_plan: Arc<UnifiedPlan>,
+    pub logical_plan: uqa_sql::plan::SharedExecutablePlan,
     pub optimized_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub parser: uqa_sql::parser::ParserMetadata,
 }
@@ -67,22 +67,26 @@ pub trait StatementCache {
         &self,
         _sql: &str,
         _analysis: Option<uqa_sql::binding::statements::AnalyzedStatement>,
-    ) {
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        Ok(())
     }
 
     fn cached_sql_statement(&self, sql: &str) -> Option<CachedStatement>;
     fn cache_sql_statement(
         &self,
-        sql: String,
+        sql: &str,
         statement: Arc<Statement>,
-        logical_plan: Arc<UnifiedPlan>,
+        logical_plan: uqa_sql::plan::SharedExecutablePlan,
         parser: uqa_sql::parser::ParserMetadata,
-    );
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError>;
     fn cache_optimized_sql_plan(
         &self,
         sql: &str,
         optimized_plan: uqa_sql::plan::SharedExecutablePlan,
-    );
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError>;
 }
 
 /// Transaction state changes requested at the native scheduler's boundaries.

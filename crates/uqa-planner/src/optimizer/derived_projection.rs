@@ -8,10 +8,16 @@
 
 use crate::{AggregateClassifier, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use uqa_core::{
-    memory::{ProductionControl, ProductionMap, ProductionVec},
+    memory::{ProductionControl, ProductionVec},
     Value,
 };
-use uqa_sql::{ast::FunctionVolatility, RowSchema, SQLError, ScalarExpr};
+use uqa_sql::{RowSchema, SQLError, ScalarExpr};
+
+mod demand;
+mod observations;
+pub(super) mod owned;
+use observations::{needed_by_grouping, needed_by_ordering, removable};
+pub use owned::prune_outputs as prune_owned_outputs;
 
 /// Catalog and lexical inputs for removing an unobserved output without losing its effects.
 #[derive(Clone, Copy)]
@@ -39,67 +45,11 @@ pub(super) fn prune(
     block: &mut QueryBlockPlan,
     context: OutputPruningContext<'_>,
 ) -> Result<(), SQLError> {
-    let Some(SourcePlan::Subquery {
-        body,
-        alias,
-        column_aliases,
-        ..
-    }) = &block.from
-    else {
-        return Ok(());
-    };
-    if !block.subqueries.is_empty() {
-        return Ok(());
-    }
-    let control = &context.production;
-    let mut required = ProductionMap::new(*control);
-    let mut all = false;
-    block.try_visit_expressions(&mut |expression| {
-        control.check()?;
-        super::output_demand::try_visit(expression, control, &mut |part| {
-            match part {
-                ScalarExpr::Column(name) => {
-                    if alias.as_deref() == Some(name.as_str())
-                        && !has_named_output(body, column_aliases, name.as_str(), control)?
-                    {
-                        all = true;
-                    } else {
-                        required.insert_copy(name.as_str(), ())?;
-                    }
-                }
-                ScalarExpr::QualifiedColumn { qualifier, column }
-                    if alias.as_deref() == Some(qualifier.as_str()) =>
-                {
-                    required.insert_copy(column.as_str(), ())?;
-                }
-                ScalarExpr::QualifiedStar(qualifier)
-                    if alias.as_deref() == Some(qualifier.as_str()) =>
-                {
-                    all = true;
-                }
-                ScalarExpr::Star | ScalarExpr::Position(_) => all = true,
-                _ => {}
-            }
-            Ok::<_, SQLError>(())
-        })?;
-        Ok::<_, SQLError>(true)
-    })?;
-    if all {
-        return Ok(());
-    }
-    let demanded = output_demand(
-        body,
-        column_aliases,
-        &|name| required.get(name).is_some(),
-        None,
-        *control,
-    )?;
-    drop(required);
-    let Some(demanded) = demanded else {
+    let Some(demanded) = demand::consumer_outputs(block, context.production)? else {
         return Ok(());
     };
     let Some(SourcePlan::Subquery { body, .. }) = &mut block.from else {
-        unreachable!()
+        unreachable!("selected derived source");
     };
     prune_positions(
         body,
@@ -226,8 +176,13 @@ pub(super) fn prune_positions(
     let mut replacements = Vec::new();
     for (index, projection) in inner.projections.iter().enumerate() {
         if required(index)
-            || needed_by_ordering(inner, index)
-            || needed_by_grouping(inner, index, query.analyzed_source.as_deref())
+            || needed_by_ordering(inner, index, &context.production)?
+            || needed_by_grouping(
+                inner,
+                index,
+                query.analyzed_source.as_deref(),
+                &context.production,
+            )?
             || !removable(&projection.expr, &inner.subqueries, context, &visible_ctes)?
         {
             continue;
@@ -323,104 +278,10 @@ pub(crate) fn expand_local_stars(
     true
 }
 
-fn needed_by_grouping(
-    block: &QueryBlockPlan,
-    index: usize,
-    source: Option<&uqa_sql::plan::AnalyzedSource>,
-) -> bool {
-    let name = uqa_sql::semantics::projection_label_at(&block.projections[index]);
-    block
-        .group_by
-        .iter()
-        .chain(block.grouping_sets.iter().flatten())
-        .any(|expression| match expression {
-            ScalarExpr::Column(column) if *column == name => source.is_none_or(|source| {
-                uqa_sql::semantics::grouping_sets::grouping_output_name(
-                    expression,
-                    &source.schema,
-                    None,
-                )
-                .is_some()
-            }),
-            ScalarExpr::Position(position) => *position == index,
-            _ => false,
-        })
-}
-
-fn needed_by_ordering(block: &QueryBlockPlan, index: usize) -> bool {
-    let projection = &block.projections[index];
-    let name = uqa_sql::semantics::projection_label_at(projection);
-    block.order_by.iter().any(|order| {
-        matches!(&order.expr, ScalarExpr::Column(column) if *column == name)
-            || matches!(order.expr, ScalarExpr::Position(position) if position == index)
-            || matches!(order.expr, ScalarExpr::Literal(Value::Int(position)) if uqa_sql::semantics::query_output_position(position, block.projections.len(), "ORDER BY").is_ok_and(|position| position == index))
-            || uqa_sql::semantics::aggregates::exprs_match(&order.expr, &projection.expr)
-    })
-}
-
-fn removable(
-    expression: &ScalarExpr,
-    subqueries: &[QueryPlan],
-    context: OutputPruningContext<'_>,
-    visible_ctes: &dyn Fn(&str) -> bool,
-) -> Result<bool, SQLError> {
-    let mut removable = true;
-    let mut contains_subquery = false;
-    expression.visit(&mut |part| match part {
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            ..
-        } => {
-            if uqa_sql::semantics::aggregates::is_builtin_aggregate(part) {
-                // The aggregate's arguments are still visited for volatile effects; its row cardinality belongs to the block's compute phase.
-                return;
-            }
-            let name = uqa_sql::semantics::builtin_function_dispatch_name(name);
-            if context.aggregates.is_registered_aggregate(&name)
-                || uqa_sql::semantics::sets::validation::builtin_returns_set(&name)
-                || binding.as_ref().is_none_or(|binding| !binding.builtin)
-                || uqa_sql::semantics::volatility::builtin_function_volatility(
-                    &name,
-                    binding.as_ref(),
-                    args.len(),
-                ) == FunctionVolatility::Volatile
-            {
-                removable = false;
-            }
-        }
-        ScalarExpr::Cast { ty, .. }
-            if !uqa_sql::ColumnType::from_sql_name(ty)
-                .is_ok_and(|ty| uqa_sql::type_resolution::immutable_cast_type(&ty)) =>
-        {
-            removable = false;
-        }
-        ScalarExpr::WindowCall { .. } | ScalarExpr::CompositeRow { .. } => removable = false,
-        ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. }
-        | ScalarExpr::InSubquery { .. } => contains_subquery = true,
-        _ => {}
-    });
-    if !removable || !contains_subquery {
-        return Ok(removable);
-    }
-    match context.volatility {
-        Some(catalog) => Ok(
-            !uqa_sql::semantics::volatility::scalar_in_scope_contains_volatile_function(
-                catalog,
-                expression,
-                subqueries,
-                visible_ctes,
-            )?,
-        ),
-        None => Ok(false),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_sql::ast::FunctionVolatility;
     mod demand;
     mod required;
 
@@ -553,13 +414,16 @@ mod tests {
             ) else {
                 panic!("query");
             };
-            query.analyzed_source = Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
-                schema: RowSchema::with_types(
-                    vec![input.into()],
-                    vec![Some(uqa_sql::ColumnType::Integer)],
-                ),
-                children: None,
-            }));
+            query.analyzed_source = Some(
+                std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+                    schema: RowSchema::with_types(
+                        vec![input.into()],
+                        vec![Some(uqa_sql::ColumnType::Integer)],
+                    ),
+                    children: None,
+                })
+                .into(),
+            );
             let output =
                 RowSchema::with_types(vec!["x".into()], vec![Some(uqa_sql::ColumnType::Integer)]);
             prune_positions(

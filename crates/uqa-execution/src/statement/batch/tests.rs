@@ -33,13 +33,15 @@ struct Inputs {
     depth: Cell<usize>,
     guarded: Cell<bool>,
     snapshot: Cell<bool>,
-    cached: Option<(Arc<Statement>, Arc<UnifiedPlan>)>,
+    cached: Option<(Arc<Statement>, uqa_sql::plan::SharedExecutablePlan)>,
     cancel_after_cache_lookup: bool,
     reject_snapshot: bool,
     transaction_error: Option<SQLError>,
     requires_subscriptions: bool,
     transaction_clock: Cell<Option<i64>>,
     date_order: Cell<Option<uqa_core::TemporalDateOrder>>,
+    planning_requests: Cell<usize>,
+    planning_budget: Option<uqa_core::memory::MemoryBudget>,
     planning_clocks: RefCell<Vec<Option<i64>>>,
     planning_cancellation: RefCell<Vec<bool>>,
 }
@@ -119,7 +121,7 @@ fn cached_notification_admission_aborts_the_original_open_transaction() {
         let plan = Arc::new(UnifiedPlan::lower(statement.as_ref().clone()));
         let inputs = Inputs {
             requires_subscriptions: true,
-            cached: Some((statement, plan)),
+            cached: Some((statement, plan.into())),
             ..Inputs::default()
         };
         inputs.depth.set(1);
@@ -141,6 +143,21 @@ impl AggregateClassifier for Inputs {
     }
 }
 impl ExecutablePlanOptimizer for Inputs {
+    fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        self.planning_requests.set(self.planning_requests.get() + 1);
+        Ok(self.planning_budget.as_ref().map_or_else(
+            || uqa_core::memory::ProductionControl::uncontrolled().capture(),
+            |budget| {
+                uqa_core::memory::ProductionControl::new(
+                    budget,
+                    &self.cancellation,
+                    &self.cancellation,
+                )
+                .capture()
+            },
+        ))
+    }
+
     fn plan_for_execution(
         &self,
         plan: UnifiedPlan,
@@ -185,18 +202,19 @@ impl StatementCache for Inputs {
             .as_ref()
             .map(|(statement, logical_plan)| CachedStatement {
                 statement: Arc::clone(statement),
-                logical_plan: Arc::clone(logical_plan),
+                logical_plan: logical_plan.clone(),
                 optimized_plan: None,
                 parser: uqa_sql::parser::ParserMetadata::default(),
             })
     }
     fn cache_sql_statement(
         &self,
-        _: String,
+        _: &str,
         statement: Arc<Statement>,
-        _: Arc<UnifiedPlan>,
+        _: uqa_sql::plan::SharedExecutablePlan,
         _: uqa_sql::parser::ParserMetadata,
-    ) {
+        _: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         if let Some((cached, _)) = &self.cached {
             assert!(
                 Arc::ptr_eq(cached, &statement),
@@ -204,8 +222,14 @@ impl StatementCache for Inputs {
             );
         }
         self.record(format!("cache.write.{}", self.snapshot.get()));
+        Ok(())
     }
-    fn cache_optimized_sql_plan(&self, _: &str, _: uqa_sql::plan::SharedExecutablePlan) {
+    fn cache_optimized_sql_plan(
+        &self,
+        _: &str,
+        _: uqa_sql::plan::SharedExecutablePlan,
+        _: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         panic!("a rejected plan cannot enter the optimized cache")
     }
 }
@@ -352,7 +376,6 @@ fn rejected_transaction_never_starts_prepared_snapshot_or_execution() {
         uqa_sql::Statement::Empty,
         uqa_sql::compile("DELETE FROM items").unwrap().remove(0),
     ] {
-        let empty = matches!(statement, uqa_sql::Statement::Empty);
         let inputs = Inputs {
             transaction_error: Some(SQLError::Routine {
                 sqlstate: "25P02".into(),
@@ -371,11 +394,8 @@ fn rejected_transaction_never_starts_prepared_snapshot_or_execution() {
         )
         .unwrap_err();
         assert_eq!(error.sqlstate(), Some("25P02"));
-        inputs.assert_events(if empty {
-            &["transaction.enter"]
-        } else {
-            &["guard.enter", "transaction.enter", "guard.drop"]
-        });
+        inputs.assert_events(&["transaction.enter"]);
+        assert_eq!(inputs.planning_requests.get(), 0);
     }
 }
 
@@ -603,7 +623,7 @@ fn cached_statement_relowers_under_the_snapshot_and_retains_guard_through_abort(
     let statement = Arc::new(uqa_sql::compile("DELETE FROM items").unwrap().remove(0));
     let plan = Arc::new(UnifiedPlan::lower(statement.as_ref().clone()));
     let inputs = Inputs {
-        cached: Some((statement, plan)),
+        cached: Some((statement, plan.into())),
         ..Inputs::default()
     };
     inputs.depth.set(1);
@@ -611,8 +631,8 @@ fn cached_statement_relowers_under_the_snapshot_and_retains_guard_through_abort(
     assert!(error.to_string().contains("injected planning failure"));
     inputs.assert_events(&[
         "cache.lookup",
-        "guard.enter",
         "transaction.enter",
+        "guard.enter",
         "snapshot.true",
         "cache.write.true",
         "optimize.true",
@@ -677,8 +697,8 @@ fn implicit_batch_failure_aborts_then_releases_guard_before_segment_rollback() {
     inputs.assert_events(&[
         "cache.lookup",
         "begin.segment",
-        "guard.enter",
         "transaction.enter",
+        "guard.enter",
         "snapshot.true",
         "optimize.true",
         "abort.true",
@@ -687,4 +707,46 @@ fn implicit_batch_failure_aborts_then_releases_guard_before_segment_rollback() {
     ]);
     assert_eq!(inputs.depth.get(), 0);
     assert!(!inputs.guarded.get());
+}
+
+#[test]
+fn rejected_transaction_precedes_planning_admission_on_all_batch_entry_points() {
+    for entry in 0..4 {
+        let statement = Arc::new(uqa_sql::compile("DELETE FROM items").unwrap().remove(0));
+        let cached = (entry == 1).then(|| {
+            (
+                statement.clone(),
+                UnifiedPlan::lower(statement.as_ref().clone()).into(),
+            )
+        });
+        let inputs = Inputs {
+            transaction_error: Some(SQLError::Routine {
+                sqlstate: "25P02".into(),
+                message: "current transaction is aborted".into(),
+            }),
+            planning_budget: Some(uqa_core::memory::MemoryBudget::new(0)),
+            cached,
+            ..Inputs::default()
+        };
+        inputs.depth.set(1);
+        let error = match entry {
+            0 | 1 => execute(&inputs.context(), "DELETE FROM items", &[]).map(drop),
+            2 => execute_simple_query(
+                &inputs.context(),
+                "DELETE FROM items; SELECT 1",
+                &[],
+                false,
+                &mut |_| panic!("rejected operation"),
+            ),
+            _ => {
+                execute_prepared_statement(&inputs.context(), statement, "saved", None, &[], false)
+                    .map(drop)
+            }
+        }
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("25P02"));
+        assert_eq!(inputs.planning_requests.get(), 0);
+        assert!(!inputs.guarded.get());
+        assert!(!inputs.snapshot.get());
+    }
 }

@@ -12,7 +12,7 @@ use crate::{AggregateClassifier, ConstantEvaluator, QueryPlan, UnifiedPlan};
 use std::borrow::Cow;
 use uqa_core::memory::ProductionControl;
 use uqa_sql::{
-    binding::statements::{analyze_executable_plan, AnalyzedResult, StatementAnalysisContext},
+    binding::statements::{AnalyzedResult, StatementAnalysisContext},
     plan::{OwnedExecutablePlan, OwnedQueryPlan, SharedExecutablePlan},
     SQLError, SQLParam,
 };
@@ -29,6 +29,16 @@ pub trait StatementOptimizationContexts {
     ) -> Result<Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>, SQLError> {
         Ok(None)
     }
+    /// Native storage constructors admit retained metadata before allocation. External adapters may keep their existing factory and are checked at the callback boundary.
+    fn constant_storage_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>, SQLError> {
+        control.check()?;
+        let storage = self.constant_storage()?;
+        control.check()?;
+        Ok(storage)
+    }
     fn statistics(&self) -> StatementStatisticsContext<'_>;
     fn rule_inputs(&self) -> RuleInputPlanningContext<'_>;
     fn builtin_permissions(
@@ -37,6 +47,23 @@ pub trait StatementOptimizationContexts {
         std::sync::Arc<dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution>,
     > {
         None
+    }
+    /// Native permission owners admit their shared state before allocation. External factories retain their established callback boundary.
+    fn builtin_permissions_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<
+        Option<
+            std::sync::Arc<
+                dyn uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution,
+            >,
+        >,
+        SQLError,
+    > {
+        control.check()?;
+        let permissions = self.builtin_permissions();
+        control.check()?;
+        Ok(permissions)
     }
     fn routine_inlining(&self) -> Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>> {
         None
@@ -51,6 +78,119 @@ pub struct StatementPlanningContext<'a> {
 }
 
 impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
+    fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        self.analysis.scopes.planning_control()
+    }
+
+    fn plan_owned_for_execution(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExecutablePlan, SQLError> {
+        self.plan_owned_with_result(plan, params, control)
+            .map(|(plan, _)| plan)
+    }
+
+    fn plan_owned_with_result(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<(SharedExecutablePlan, AnalyzedResult), SQLError> {
+        let (plan, result, _) = uqa_sql::binding::statements::analyze_reusable_inputs_owned(
+            &self.analysis,
+            plan,
+            params,
+            control,
+        )?;
+        with_optimizer_resources(self, plan, control, |plan, control| {
+            Ok((
+                optimize_owned_with_control(self, plan, control)?.into_shared(control)?,
+                result,
+            ))
+        })
+    }
+
+    fn plan_owned_for_statement_cache(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<(SharedExecutablePlan, bool), SQLError> {
+        let (plan, _, reusable) = uqa_sql::binding::statements::analyze_reusable_inputs_owned(
+            &self.analysis,
+            plan,
+            params,
+            control,
+        )?;
+        with_optimizer_resources(self, plan, control, |plan, control| {
+            let reusable = reusable
+                && params.is_empty()
+                && !match self.optimization.routine_inlining() {
+                    Some(routines) => {
+                        routines.requires_replanning_with_control(plan.as_plan_ref(), control)?
+                    }
+                    None => false,
+                };
+            Ok((
+                optimize_owned_with_control(self, plan, control)?.into_shared(control)?,
+                reusable,
+            ))
+        })
+    }
+
+    fn plan_owned_with_cached_analysis(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        params: &[SQLParam],
+        cached: Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        control: &ProductionControl<'_>,
+    ) -> Result<
+        (
+            SharedExecutablePlan,
+            Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        ),
+        SQLError,
+    > {
+        let (plan, retained, capture) = if let Some(cached) =
+            cached.filter(|cached| cached.plan_for(params).is_some())
+        {
+            drop(plan);
+            (
+                cached
+                    .plan_for(params)
+                    .expect("matching analysis")
+                    .copy_for_rewrite(control)?,
+                Some(cached),
+                false,
+            )
+        } else {
+            let (plan, _, reusable) = uqa_sql::binding::statements::analyze_reusable_inputs_owned(
+                &self.analysis,
+                plan,
+                params,
+                control,
+            )?;
+            (plan, None, reusable)
+        };
+        with_optimizer_resources(self, plan, control, |plan, control| {
+            let retained = if capture {
+                uqa_sql::binding::statements::AnalyzedStatement::capture_ref_with_control(
+                    plan.as_plan_ref(),
+                    params,
+                    control,
+                )?
+            } else {
+                retained
+            };
+            Ok((
+                optimize_owned_with_control(self, plan, control)?.into_shared(control)?,
+                retained,
+            ))
+        })
+    }
+
     fn plan_with_cached_analysis(
         &self,
         plan: UnifiedPlan,
@@ -63,52 +203,24 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
         ),
         SQLError,
     > {
-        let (plan, retained, reusable) = if let Some((plan, cached)) =
-            cached.and_then(|cached| cached.plan_for(params).cloned().map(|plan| (plan, cached)))
-        {
-            (plan, Some(cached), false)
-        } else {
-            let mut plan = plan;
-            let (_, reusable) = uqa_sql::binding::statements::analyze_reusable_inputs(
-                &self.analysis,
-                &mut plan,
-                params,
-            )?;
-            (plan, None, reusable)
-        };
-        let resources = self.optimization.production_resources()?;
-        let control = resources
-            .as_ref()
-            .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
-        let retained = if reusable {
-            uqa_sql::binding::statements::AnalyzedStatement::capture_with_control(
-                &plan, params, &control,
-            )?
-        } else {
-            retained
-        };
-        Ok((
-            optimize_with_control(self, plan, control)?.into_shared(&control)?,
-            retained,
-        ))
+        let owner = self.planning_control()?;
+        let control = owner.control();
+        self.plan_owned_with_cached_analysis(
+            plan.copy_for_rewrite(&control)?,
+            params,
+            cached,
+            &control,
+        )
     }
 
     fn plan_for_statement_cache(
         &self,
-        mut plan: UnifiedPlan,
+        plan: UnifiedPlan,
         params: &[SQLParam],
     ) -> Result<(SharedExecutablePlan, bool), SQLError> {
-        let (_, reusable) = uqa_sql::binding::statements::analyze_executable_plan_for_cache(
-            &self.analysis,
-            &mut plan,
-            params,
-        )?;
-        let reusable = reusable
-            && !self
-                .optimization
-                .routine_inlining()
-                .is_some_and(|routines| routines.requires_replanning(&plan));
-        Ok((optimize_shared_plan(self, plan)?, reusable))
+        let owner = self.planning_control()?;
+        let control = owner.control();
+        self.plan_owned_for_statement_cache(plan.copy_for_rewrite(&control)?, params, &control)
     }
 
     fn plan_for_execution(
@@ -121,21 +233,48 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
 
     fn plan_with_result(
         &self,
-        mut plan: UnifiedPlan,
+        plan: UnifiedPlan,
         params: &[SQLParam],
     ) -> Result<(SharedExecutablePlan, AnalyzedResult), SQLError> {
-        let result = analyze_executable_plan(&self.analysis, &mut plan, params)?;
-        Ok((optimize_shared_plan(self, plan)?, result))
+        let owner = self.planning_control()?;
+        let control = owner.control();
+        self.plan_owned_with_result(plan.copy_for_rewrite(&control)?, params, &control)
     }
+}
+
+/// Native analysis already owns its request. Standalone analysis may use ordinary inputs and acquire its independently configured optimizer allowance only after successful analysis.
+fn with_optimizer_resources<T>(
+    context: &StatementPlanningContext<'_>,
+    plan: uqa_sql::plan::MutableExecutablePlan,
+    control: &ProductionControl<'_>,
+    optimize: impl FnOnce(
+        uqa_sql::plan::MutableExecutablePlan,
+        &ProductionControl<'_>,
+    ) -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
+    control.check()?;
+    if control.budget().is_some() {
+        return optimize(plan, control);
+    }
+    let resources = context.optimization.production_resources()?;
+    let Some(resources) = resources else {
+        return optimize(plan, control);
+    };
+    let selected = resources.control();
+    let owned = plan.as_plan_ref().copy_for_rewrite(&selected)?;
+    drop(plan);
+    optimize(owned, &selected)
 }
 
 pub fn plan_for_execution(
     context: &StatementPlanningContext<'_>,
-    mut plan: UnifiedPlan,
+    plan: UnifiedPlan,
     params: &[SQLParam],
 ) -> Result<SharedExecutablePlan, SQLError> {
-    analyze_executable_plan(&context.analysis, &mut plan, params)?;
-    optimize_shared_plan(context, plan)
+    use uqa_sql::plan::ExecutablePlanOptimizer;
+    let owner = context.planning_control()?;
+    let control = owner.control();
+    context.plan_owned_for_execution(plan.copy_for_rewrite(&control)?, params, &control)
 }
 /// Move an owned query through optimization; a borrowed catalog or utility query still receives its independent destination.
 pub fn optimize_query(
@@ -146,14 +285,22 @@ pub fn optimize_query(
     let control = resources
         .as_ref()
         .map_or_else(ProductionControl::uncontrolled, PlanningResources::control);
-    let (query, mut memory) =
-        OwnedQueryPlan::from_query(query.into_owned(), &control)?.into_parts();
-    let (plan, output) =
-        optimize_with_control(context, UnifiedPlan::Query(query), control)?.into_parts();
-    memory.absorb(output);
-    OwnedExecutablePlan::from_parts(plan, memory)
-        .into_query()
-        .map_err(|_| SQLError::Internal("query optimization produced a command".into()))
+    optimize_retained_query(context, query.copy_for_rewrite(&control)?, &control)
+}
+
+/// Consume a private query and its constructor records without another tree copy.
+pub fn optimize_retained_query(
+    context: &StatementPlanningContext<'_>,
+    query: uqa_sql::plan::MutableQueryPlan,
+    control: &ProductionControl<'_>,
+) -> Result<OwnedQueryPlan, SQLError> {
+    optimize_owned_with_control(
+        context,
+        uqa_sql::plan::MutableExecutablePlan::Query(query),
+        control,
+    )?
+    .into_query()
+    .map_err(|_| SQLError::Internal("query optimization produced a command".into()))
 }
 
 /// Cost a selected native executable with the same request resources used by its optimizer.
@@ -184,13 +331,25 @@ fn optimize_with_control(
     plan: UnifiedPlan,
     control: ProductionControl<'_>,
 ) -> Result<OwnedExecutablePlan, SQLError> {
+    optimize_owned_with_control(context, plan.copy_for_rewrite(&control)?, &control)
+}
+
+pub fn optimize_owned_with_control(
+    context: &StatementPlanningContext<'_>,
+    plan: uqa_sql::plan::MutableExecutablePlan,
+    control: &ProductionControl<'_>,
+) -> Result<OwnedExecutablePlan, SQLError> {
     let mut config = crate::optimizer::OptimizerConfig::new(context.constant_evaluator);
-    config.production = control;
-    config.builtin_permissions = context.optimization.builtin_permissions();
+    config.production = *control;
+    config.builtin_permissions = context
+        .optimization
+        .builtin_permissions_with_control(control)?;
     config.routine_inlining = context.optimization.routine_inlining();
-    let storage = || context.optimization.constant_storage();
+    let storage = |control: &ProductionControl<'_>| {
+        context.optimization.constant_storage_with_control(control)
+    };
     config.constant_storage_factory = Some(crate::optimizer::ConstantStorageFactory(&storage));
-    super::optimize_plan_authorized(
+    super::optimize_owned_plan_authorized(
         context.optimization.statistics(),
         &context.optimization.rule_inputs(),
         context.aggregates,

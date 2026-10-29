@@ -92,16 +92,16 @@ impl RangeValueDescriptor {
             return Ok(ty.clone_with_control(control)?);
         }
         let ty = catalog
-            .map(|catalog| catalog.value_type_by_oid(self.range_oid))
+            .map(|catalog| catalog.value_type_by_oid_with_control(self.range_oid, control))
             .transpose()?
             .flatten()
             .ok_or_else(|| missing(self.range_oid))?;
-        if !matches!(ty, ColumnType::DeclaredRange(_)) {
+        if !matches!(*ty, ColumnType::DeclaredRange(_)) {
             return Err(SQLError::Internal(
                 "inconsistent associated range type".into(),
             ));
         }
-        Ok(ty.retain_external_with_control(control)?)
+        Ok(ty)
     }
 }
 

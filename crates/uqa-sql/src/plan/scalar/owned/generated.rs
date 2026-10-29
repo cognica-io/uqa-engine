@@ -69,6 +69,17 @@ impl OwnedScalarExpr {
         finish(ScalarExpr::Array(items), lowering, control)
     }
 
+    /// Construct a ROW from independently owned fields, admitting its vector and ownership slots before moving children.
+    pub fn row(
+        children: impl ExactSizeIterator<Item = Self>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        control.check()?;
+        let mut lowering = owned_lowering(control);
+        let items = lowering.map(children, Self::attach_child)?;
+        finish(ScalarExpr::Row(items), lowering, control)
+    }
+
     /// Construct a binary operator without copying either operand. The two boxes and mutable child slots are admitted before allocation.
     pub fn binary(
         op: BinaryOp,
@@ -123,14 +134,14 @@ impl OwnedScalarExpr {
     }
 }
 
-fn owned_lowering<'a>(control: &ProductionControl<'a>) -> Lowering<'a> {
+pub(super) fn owned_lowering<'a>(control: &ProductionControl<'a>) -> Lowering<'a> {
     Lowering {
         control: control.budget().map(|_| Control::from_production(*control)),
         owned_children: control.budget().map(BudgetedVec::new),
     }
 }
 
-fn finish(
+pub(super) fn finish(
     expression: ScalarExpr,
     lowering: Lowering<'_>,
     control: &ProductionControl<'_>,

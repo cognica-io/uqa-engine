@@ -26,7 +26,7 @@ pub use call_arguments::{
 pub(crate) use context::RetrievalPredicate;
 pub use context::ScalarEvalContext;
 pub(crate) use evaluator::scalar_integer_binary_width;
-pub use evaluator::{eval_generated_scalar_with_control, eval_scalar};
+pub use evaluator::{eval_generated_scalar_with_control, eval_scalar, eval_scalar_with_control};
 pub use state::FunctionCallStates;
 pub(crate) use state::PreparedExpressions;
 pub(crate) use subquery::single_row_cardinality_error;

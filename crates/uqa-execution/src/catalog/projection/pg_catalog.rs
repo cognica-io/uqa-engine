@@ -50,8 +50,8 @@ pub use roles::{build_pg_auth_members, build_pg_authid, build_pg_roles, build_pg
 pub use sequences::build_pg_sequences;
 pub use types::build_pg_range_with_catalog;
 pub(crate) use types::build_requested_pg_type;
-pub(super) use types::builtin_type_oid_in_use;
 pub use types::{build_pg_enum, build_pg_type_without_defaults};
+pub(super) use types::{builtin_type_identity_by_name, builtin_type_oid_in_use};
 
 #[cfg(test)]
 pub(crate) use types::TYPE_PROJECTION_BUILDS;

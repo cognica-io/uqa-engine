@@ -6,47 +6,59 @@
 
 //! Retain input collations and type-observer selections on already bound calls without rereading constants or changing routine identities.
 
-use super::{BTreeMap, NonNull, SQLError, ScalarExpr};
+use super::{AnalysisMap, NonNull, SQLError, ScalarExpr};
 use crate::ast::FunctionBinding;
 use crate::catalog::collations::CollationSelection;
+use uqa_core::memory::{Produced, ProductionControl};
 
 /// The selections are applied at the analyzed expression's original addresses; nothing else rewrites the expression between analysis and application.
 #[derive(Default)]
 pub(in crate::binding::preparation) struct CallCollations {
-    selections: BTreeMap<NonNull<ScalarExpr>, Option<CollationSelection>>,
-    builtins: BTreeMap<NonNull<ScalarExpr>, FunctionBinding>,
-    observers: BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionDispatch>,
+    selections: AnalysisMap<NonNull<ScalarExpr>, Option<CollationSelection>>,
+    builtins: AnalysisMap<NonNull<ScalarExpr>, Produced<FunctionBinding>>,
+    observers: AnalysisMap<NonNull<ScalarExpr>, crate::ast::FunctionDispatch>,
 }
 
 impl CallCollations {
+    pub(in crate::binding::preparation) fn new(control: &ProductionControl<'_>) -> Self {
+        Self {
+            selections: AnalysisMap::new(control),
+            builtins: AnalysisMap::new(control),
+            observers: AnalysisMap::new(control),
+        }
+    }
     pub(in crate::binding::preparation) fn record_observer(
         &mut self,
         expression: &ScalarExpr,
         selected: &FunctionBinding,
-    ) {
+    ) -> Result<(), SQLError> {
         if let Some(
             dispatch @ (crate::ast::FunctionDispatch::CollationFor { .. }
             | crate::ast::FunctionDispatch::TypeOf { .. }),
         ) = selected.dispatch
         {
-            self.observers.insert(NonNull::from(expression), dispatch);
+            self.observers.insert(NonNull::from(expression), dispatch)?;
         }
+        Ok(())
     }
 
     pub(in crate::binding::preparation) fn record(
         &mut self,
         expression: &ScalarExpr,
         selection: Option<CollationSelection>,
-    ) {
-        self.selections.insert(NonNull::from(expression), selection);
+    ) -> Result<(), SQLError> {
+        self.selections
+            .insert(NonNull::from(expression), selection)?;
+        Ok(())
     }
 
     pub(in crate::binding::preparation) fn record_builtin(
         &mut self,
         expression: &ScalarExpr,
-        selected: FunctionBinding,
-    ) {
-        self.builtins.insert(NonNull::from(expression), selected);
+        selected: Produced<FunctionBinding>,
+    ) -> Result<(), SQLError> {
+        self.builtins.insert(NonNull::from(expression), selected)?;
+        Ok(())
     }
 
     pub(in crate::binding::preparation) fn apply(
@@ -82,7 +94,11 @@ impl CallCollations {
         };
         if let Some(selected) = self.builtins.remove(&identity) {
             if binding.is_none() {
-                *binding = Some(selected);
+                *binding = Some(
+                    selected
+                        .into_uncontrolled()
+                        .expect("ordinary stored call application"),
+                );
             }
         }
         if let (Some(selection), Some(binding)) =

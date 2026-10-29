@@ -205,15 +205,22 @@ fn schema_resolver_adapters_forward_the_original_producer_allowance() {
 #[test]
 fn cached_subquery_type_copies_only_the_selected_type_with_its_lease() {
     let name = "selected".repeat(16 * 1024);
-    let resolver = QueryFunctionTypeResolver {
-        routines: &ControlledOnly,
-        scalar_subquery_schemas: Some(vec![
+    let mut schemas = crate::production::Buffer::new(&ProductionControl::uncontrolled());
+    schemas
+        .push(
             Some(RowSchema::with_types(
                 vec!["field".into()],
                 vec![Some(ColumnType::Named(name.clone()))],
             )),
-            None,
-        ]),
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap();
+    schemas
+        .push(None, &ProductionControl::uncontrolled())
+        .unwrap();
+    let resolver = QueryFunctionTypeResolver {
+        routines: &ControlledOnly,
+        scalar_subquery_schemas: Some(schemas),
         defer_routine_namespace_errors: false,
     };
     let input = RowSchema::default();

@@ -27,6 +27,11 @@ pub mod legacy_patterns;
 mod merge_scopes;
 mod ordered_calls;
 mod preparation;
+pub mod production;
+pub use production::{
+    analyze_query_plan_schema_with_control, analyze_source_plan_schema_with_control,
+    bind_query_plan_schema_with_control,
+};
 mod projection;
 mod record_fields;
 mod routine_binding;
@@ -40,14 +45,19 @@ pub mod statements;
 mod type_resolution;
 mod variable_sites;
 
-pub use commands::analyze_prepared_command_schema;
+pub use commands::{analyze_prepared_command_schema, analyze_prepared_command_schema_with_control};
 pub use execution::{
     bind_query_block_for_execution, bind_query_block_with_sources, BoundExecutionBlock,
     ExecutionSourceBindings,
 };
+pub use preparation::bind_expression_plan_routines_for_storage_owned;
 pub use preparation::{
     analyze_column_type_transform, assign_stored_query_input_collations,
-    infer_prepared_parameter_types, restore_query_layouts,
+    bind_routine_parameter_references_owned, infer_prepared_parameter_types,
+    parameter_input_types_with_control, prepare_routine_body_inputs_owned,
+    read_prepared_inputs_owned, read_procedural_inputs_owned, read_procedure_inputs_owned,
+    restore_query_layouts, restore_query_layouts_owned, retain_prepared_input_metadata_owned,
+    PreparedOwnedInputs, PreparedOwnedRoutineBody, ProceduralOwnedInputs,
 };
 pub(crate) use preparation::{
     analyze_default_inputs, analyze_routine_body_argument, analyze_routine_body_inputs,
@@ -62,6 +72,7 @@ pub(crate) use preparation::{
 mod tests;
 
 pub use cte_controls::{analyze_recursive_control_step, extend_cte_generated_schema};
+pub use preparation::resolve_variable_sites_owned;
 pub use projection::{
     analyze_projection_output_schema, bind_projection_output_schema,
     validate_query_block_expression_types, validate_query_block_references,
@@ -76,22 +87,26 @@ pub use scope::{
     analyze_expression_plan_type, analyze_query_plan_schema,
     analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
 };
-pub use scope::{overlay_outer_schema, values_schema_in_scope, values_types_in_scope};
+pub use scope::{
+    overlay_outer_schema, overlay_outer_schema_with_control, values_schema_in_scope,
+    values_types_in_scope,
+};
 pub use sources::{
     analyze_source_plan_schema, bind_source_input_schema, bind_source_plan_schema,
-    bind_source_plan_schema_for_execution, with_query_table_pseudo_columns, SourceBindingInput,
+    bind_source_plan_schema_for_execution, with_query_table_pseudo_columns,
+    with_query_table_pseudo_columns_with_control, SourceBindingInput,
 };
 pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 
 use catalog_sources::operator_join_relation_schemas;
 use cte_controls::extend_recursive_cte_binding_schema;
 pub use cte_controls::hide_recursive_generated_schema;
-use projection::{projection_star_columns, rename_schema};
+use projection::rename_schema;
 use sources::{alias_table_schema, table_function_member_source, JoinSchemaBinding};
 use type_resolution::QueryFunctionTypeResolver;
 
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
-use crate::semantics::{cte_references_own_name, expr_contains_subquery, projection_columns};
+use crate::semantics::{cte_references_own_name, projection_columns};
 use crate::{SQLError, SQLParam, ScalarExpr};
 use catalog_sources::user_function_output_columns;
 pub use context::BindingContext;
@@ -127,10 +142,11 @@ struct SchemaScope {
     execution_sources: Option<execution::CapturedSources>,
     collations: preparation::PendingCollations,
     catalog: CatalogReadView,
-    resolution: RelationNameResolution,
-    ctes: BTreeMap<String, RowSchema>,
-    deferred_ctes: BTreeMap<String, crate::plan::RetainedCtePlan>,
-    non_returning_ctes: BTreeSet<String>,
+    resolution: production::BindingResolution,
+    ctes: production::BindingMap<RowSchema>,
+    deferred_ctes: production::BindingMap<crate::plan::RetainedCtePlan>,
+    non_returning_ctes: production::BindingNameSet,
+    production: uqa_core::memory::OwnedProductionControl,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
@@ -162,61 +178,29 @@ fn non_returning_cte_error(name: &str) -> SQLError {
 
 impl SchemaScope {
     fn from_context(ctes: &BindingContext) -> Result<Self, SQLError> {
-        Ok(Self {
-            execution_sources: None,
-            collations: preparation::PendingCollations::default(),
-            catalog: ctes.catalog.clone(),
-            resolution: ctes.resolution.clone(),
-            ctes: ctes.ctes.clone(),
-            deferred_ctes: ctes.deferred_ctes.clone(),
-            non_returning_ctes: ctes.non_returning_ctes.clone(),
-            visiting_views: BTreeSet::new(),
-            validate_references: false,
-            stored_expression_outer: None,
-            rule_condition_event: None,
-            merge_returning: false,
-            set_placement: crate::semantics::sets::placement::SetPlacement::Expanding,
-            set_calls: 0,
-            stored_whole_rows: BTreeMap::new(),
-            routine_parameters: None,
-            scalar_binding: ScalarBindingMode::Stored,
-            variable_sites: None,
-            preserve_syntax_shape: false,
-            prepared_dependencies: None,
-            composite_dependencies: None,
-        })
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        Self::from_context_with_control(ctes.copy_with_control(&control)?, &control)
     }
 
     fn for_analysis(ctes: &BindingContext) -> Result<Self, SQLError> {
-        let mut scope = Self::from_context(ctes)?;
-        scope.validate_references = true;
-        Ok(scope)
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        Self::for_analysis_with_control(ctes.copy_with_control(&control)?, &control)
     }
 
     fn for_catalog_analysis(catalog: CatalogReadView, resolution: RelationNameResolution) -> Self {
-        Self {
-            execution_sources: None,
-            collations: preparation::PendingCollations::default(),
-            catalog,
-            resolution,
-            ctes: BTreeMap::new(),
-            deferred_ctes: BTreeMap::new(),
-            non_returning_ctes: BTreeSet::new(),
-            visiting_views: BTreeSet::new(),
-            validate_references: true,
-            stored_expression_outer: None,
-            rule_condition_event: None,
-            merge_returning: false,
-            set_placement: crate::semantics::sets::placement::SetPlacement::Expanding,
-            set_calls: 0,
-            stored_whole_rows: BTreeMap::new(),
-            routine_parameters: None,
-            scalar_binding: ScalarBindingMode::Stored,
-            variable_sites: None,
-            preserve_syntax_shape: false,
-            prepared_dependencies: None,
-            composite_dependencies: None,
-        }
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        Self::for_analysis_with_control(
+            production::ControlledBindingContext {
+                catalog,
+                resolution: resolution.into(),
+                ctes: production::BindingMap::new(),
+                deferred_ctes: production::BindingMap::new(),
+                non_returning_ctes: production::BindingNameSet::new(),
+                scalar_subqueries: &[],
+            },
+            &control,
+        )
+        .expect("ordinary catalog scope construction")
     }
 
     fn bind_query(
@@ -293,31 +277,77 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        let production = self.production.clone();
+        let control = production.control();
         let captured_outer = outer
-            .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+            .map(|schema| {
+                crate::semantics::view_rewrite::bind_outer_rewrite_scope_with_control(
+                    block, schema, &control,
+                )
+            })
+            .transpose()?;
         let outer = captured_outer.as_deref();
-        let source_rewrites = crate::semantics::view_rewrite::resolve_outer_sources(
-            block,
-            outer,
-            &mut |source, subqueries, scope| {
-                self.bind_source_input(routines, source, subqueries, params, scope)
-            },
-        )?;
-        let block = source_rewrites.as_ref();
-        let source = block.from.as_ref().map_or_else(
-            || Ok(RowSchema::default()),
-            |source| self.bind_source(routines, source, &block.subqueries, params, outer),
-        )?;
+        let source_rewrites = if block.deferred_outer_rewrites.is_empty() || block.from.is_none() {
+            None
+        } else {
+            Some(crate::semantics::view_rewrite::resolve_outer_sources_owned(
+                block.copy_for_rewrite(&control)?,
+                outer,
+                &mut |source, subqueries, scope| {
+                    self.bind_source_input(routines, source, subqueries, params, scope)
+                },
+                &control,
+            )?)
+        };
+        let block = match &source_rewrites {
+            Some(query) => {
+                let RelationalPlan::QueryBlock(block) = &query.root else {
+                    unreachable!("retained query block")
+                };
+                block.as_ref()
+            }
+            None => block,
+        };
+        let source = match block.from.as_ref() {
+            Some(source) => self.bind_source(routines, source, &block.subqueries, params, outer)?,
+            None => RowSchema::new_with_control(
+                control.finish(Vec::new(), control.empty_reservation())?,
+                &control,
+            )?,
+        };
         if let Some(sources) = &mut self.execution_sources {
             sources.record(block, &source, outer);
         }
         // Query-owned metadata types belong to both analysis and metadata-only binding.
-        let source = analysis::with_query_source_columns(&source, block);
-        let rewritten = crate::semantics::view_rewrite::resolve_outer_rewrites(block, &source);
-        let block = rewritten.as_ref();
-        let expression_schema = overlay_outer_schema(&source, outer);
+        let source = analysis::with_query_source_columns_with_control(&source, block, &control)?;
+        let rewritten = if block.deferred_outer_rewrites.is_empty() {
+            None
+        } else {
+            Some(
+                crate::semantics::view_rewrite::resolve_outer_rewrites_owned(
+                    block.copy_for_rewrite(&control)?,
+                    &source,
+                    &control,
+                )?,
+            )
+        };
+        let block = match &rewritten {
+            Some(query) => {
+                let RelationalPlan::QueryBlock(block) = &query.root else {
+                    unreachable!("retained query block")
+                };
+                block.as_ref()
+            }
+            None => block,
+        };
+        let expression_schema = overlay_outer_schema_with_control(&source, outer, &control)?;
         let output = preparation::block_metadata(self, routines, block, &source, outer, params)?;
-        let output = analysis::with_projected_open_columns(&output, &block.projections, &source);
+        let output = analysis::with_projected_open_columns_with_control(
+            &output,
+            &block.projections,
+            &source,
+            &control,
+        )?;
         if self.validate_references {
             self.validate_query_block_clauses(
                 routines,
@@ -348,7 +378,7 @@ impl SchemaScope {
             let output = self.bind_query(routines, plan, params, subquery_outer)?;
             return Ok(output.column_type(0).cloned());
         }
-        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = self.with_stored_outer_internal_aliases(schema)?;
         let schema = &schema;
         let resolver =
             self.query_function_type_resolver(routines, expression, schema, subqueries, params)?;
@@ -375,7 +405,7 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<projection::ProjectionMetadata, SQLError> {
-        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = self.with_stored_outer_internal_aliases(schema)?;
         preparation::projection_metadata(self, routines, expression, &schema, subqueries, params)
     }
 
@@ -394,7 +424,8 @@ impl SchemaScope {
         #[cfg(test)]
         SOURCE_BINDINGS.with(|count| count.set(count.get() + 1));
         let input = (!matches!(source, SourcePlan::Join { .. }))
-            .then(|| scope.input(source))
+            .then(|| scope.input_with_control(source, &self.control()))
+            .transpose()?
             .flatten();
         let outer = input.as_ref();
         match source {
@@ -411,7 +442,7 @@ impl SchemaScope {
                 if let Some(schema) = cte_name.as_ref().and_then(|name| self.ctes.get(name)) {
                     if let Some(name) = cte_name
                         .as_ref()
-                        .filter(|name| self.non_returning_ctes.contains(*name))
+                        .filter(|name| self.non_returning_ctes.contains(name))
                     {
                         return Err(non_returning_cte_error(name));
                     }
@@ -486,7 +517,7 @@ impl SchemaScope {
                             "view `{name}` has a recursive schema dependency"
                         )));
                     }
-                    self.record_stored_query_dependencies(&view.query);
+                    self.record_stored_query_dependencies(&view.query)?;
                     // A view's stored query is bound as it was created; its set-returning calls are not placed again.
                     let result = {
                         let _stored = SetPlacementScope::stored_definition();
@@ -659,7 +690,7 @@ impl SchemaScope {
                     &type_resolver,
                 )?;
                 if let Some(function) = &user_function {
-                    self.record_routine_dependency(&function.binding);
+                    self.record_routine_dependency(&function.binding)?;
                 }
                 let registered_columns = user_function
                     .is_none()
@@ -833,7 +864,12 @@ impl SchemaScope {
                     params,
                     scope.with_names(),
                 )?;
-                let preceding = scope.right_namespace(left, &left_schema, *kind);
+                let preceding = scope.right_namespace_with_control(
+                    left,
+                    &left_schema,
+                    *kind,
+                    &self.control(),
+                )?;
                 let right_schema = self.bind_source_in_scope(
                     routines,
                     right,
@@ -846,7 +882,7 @@ impl SchemaScope {
                         retain_names: true,
                     },
                 )?;
-                let condition = scope.condition();
+                let condition = scope.condition_with_control(&self.control())?;
                 self.bind_join_output_schema(JoinSchemaBinding {
                     routines,
                     kind: *kind,

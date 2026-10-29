@@ -113,15 +113,51 @@ fn validate_record_fields(
     target: &[SQLFunctionResultColumn],
     context: RecordResultContext,
 ) -> Result<(), SQLError> {
+    validate_record_fields_with_control(
+        types,
+        source,
+        target,
+        context,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(crate) fn validate_sql_tuple_result_with_control(
+    types: &dyn RoutineTypeCatalog,
+    source: &[Option<ColumnType>],
+    target: &[SQLFunctionResultColumn],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    validate_record_fields_with_control(
+        types,
+        source,
+        target,
+        RecordResultContext::SQLTuple,
+        control,
+    )
+}
+
+fn validate_record_fields_with_control(
+    types: &dyn RoutineTypeCatalog,
+    source: &[Option<ColumnType>],
+    target: &[SQLFunctionResultColumn],
+    context: RecordResultContext,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     let tuple = context == RecordResultContext::SQLTuple;
     validate_width(source.len(), target.len(), context)?;
     for (index, (source, target)) in source.iter().zip(target).enumerate() {
-        if tuple
-            && source
-                .as_ref()
-                .is_none_or(|source| crate::assignment_type_compatible(source, &target.ty))
-        {
-            continue;
+        if tuple {
+            let compatible = match source {
+                Some(source) => {
+                    crate::assignment_type_compatible_with_control(source, &target.ty, control)?
+                }
+                None => true,
+            };
+            if compatible {
+                continue;
+            }
         }
         if !tuple
             && source
@@ -130,23 +166,26 @@ fn validate_record_fields(
         {
             continue;
         }
-        let source = source
-            .as_ref()
-            .map_or_else(|| Ok("unknown".into()), |source| types.format_type(source))?;
-        let expected = types.format_type(&target.ty)?;
+        let source = source.as_ref().map_or_else(
+            || control.copy_text("unknown").map_err(SQLError::from),
+            |source| types.format_type_with_control(source, control),
+        )?;
+        let expected = types.format_type_with_control(&target.ty, control)?;
+        let source = source.as_str();
+        let expected = expected.as_str();
         let detail = if tuple {
-            format!(
+            control.format(format_args!(
                 "Final statement returns {source} instead of {expected} at column {}.",
                 index + 1
-            )
+            ))?
         } else {
-            format!(
+            control.format(format_args!(
                 "Returned type {source} does not match expected type {expected} in column \"{}\" (position {}).",
                 target.name,
                 index + 1
-            )
+            ))?
         };
-        return Err(mismatch(context, detail));
+        return Err(mismatch(context, detail.into_parts().0));
     }
     Ok(())
 }

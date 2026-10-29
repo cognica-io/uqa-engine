@@ -6,13 +6,14 @@
 //! Physical assembly for tables, CTEs, views, catalogs, and foreign tables.
 
 use super::{
-    apply_propagated_view_lock, attach_qualifier_filter,
-    execute_view_plan_output_with_parent_cache, qualifier_filter, qualifier_for,
-    qualify_source_operator_with_columns, query_cte_names, query_output_shared,
+    attach_qualifier_filter, execute_view_plan_output_with_parent_cache, qualifier_filter,
+    qualifier_for, qualify_source_operator_with_columns, query_cte_names, query_output_shared,
     try_build_streaming_subquery_operator, ColumnPrune, CteScope, PhysicalOperator,
     QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan, Value,
 };
 use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
+
+pub(super) mod production;
 
 fn table_source_aliases(
     source_columns: &[String],
@@ -323,12 +324,15 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
                 let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
                 let ctes: &mut CteScope<S> = &mut recheck_scope;
+                let retained = context.ctes.queries.read_control()?;
+                let control = uqa_core::memory::ProductionControl::new(
+                    retained.memory(),
+                    retained.cancellation(),
+                    context.ctes.runtime.cancellation,
+                );
+                let aliases = production::output_aliases(output_columns, column_aliases, &control)?;
                 let specialized_plan = super::output_filter::specialize_source_filter(
-                    context,
-                    plan,
-                    &qualifier,
-                    &output_aliases(output_columns, column_aliases),
-                    filters,
+                    context, plan, &qualifier, &aliases, filters,
                 )?;
                 // Successful specialization applies this complete predicate inside the view; retrieval leaves cannot be evaluated again as scalar functions.
                 let filters = if specialized_plan.is_some() {
@@ -336,50 +340,56 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 } else {
                     filters
                 };
-                let propagated_plan = inherited_lock.as_ref().map(|target| {
-                    let mut plan = specialized_plan.as_deref().unwrap_or(plan).clone();
-                    apply_propagated_view_lock(&mut plan, target);
-                    plan
-                });
-                let execution_plan = propagated_plan
-                    .as_ref()
-                    .or(specialized_plan.as_deref())
-                    .unwrap_or(plan);
-                let mut execution_plan = execution_plan.clone();
+                let mut execution_plan = specialized_plan
+                    .as_deref()
+                    .unwrap_or(plan)
+                    .copy_for_rewrite(&control)?;
+                if let Some(target) = &inherited_lock {
+                    execution_plan = uqa_sql::semantics::locking::apply_propagated_view_lock_owned(
+                        execution_plan,
+                        target,
+                        &control,
+                    )?;
+                }
                 if executable_query.is_none() {
-                    crate::query::binding::restore_query_layouts(
-                        context.ctes.routines,
-                        &mut execution_plan,
+                    execution_plan = production::restore_layouts(
+                        context,
+                        execution_plan,
                         params,
                         ctes,
                         ctes.row_lock_outer_row().map(|row| &row.schema),
+                        &control,
                     )?;
                 }
                 if let Some(projection) = prune
                     .and_then(|prune| prune.get(&qualifier))
                     .filter(|_| executable_query.is_none())
                 {
-                    let aliases = output_aliases(output_columns, column_aliases);
-                    prune_query_outputs(
+                    execution_plan = production::prune_outputs(
                         context,
-                        &mut execution_plan,
+                        execution_plan,
                         &aliases,
                         projection,
-                        params,
-                        ctes,
-                        ctes.row_lock_outer_row().map(|row| &row.schema),
+                        production::QueryBinding {
+                            params,
+                            scope: ctes,
+                            outer: ctes.row_lock_outer_row().map(|row| &row.schema),
+                        },
+                        &control,
                     )?;
                 }
-                let optimized;
-                let execution_plan = if executable_query.is_some() {
-                    &execution_plan
+                let optimized = if executable_query.is_some() {
+                    uqa_sql::plan::OwnedQueryPlan::from_produced(
+                        execution_plan.finish(&control)?,
+                        &control,
+                    )?
                 } else {
-                    optimized = context
+                    context
                         .ctes
                         .rewrites
-                        .optimize_retained_query(execution_plan)?;
-                    optimized.as_ref()
+                        .optimize_retained_query(execution_plan, &control)?
                 };
+                let execution_plan = optimized.as_ref();
                 let streamed = match try_build_streaming_subquery_operator(
                     context,
                     execution_plan,
@@ -413,7 +423,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     context.volatility,
                     execution_plan,
                 )?;
-                let output = if is_volatile || propagated_plan.is_some() {
+                let output = if is_volatile || inherited_lock.is_some() {
                     let mut scoped = ctes.clone();
                     context
                         .ctes

@@ -6,8 +6,8 @@
 
 //! Prepared-plan selection contract and identity-checked cache updates.
 
-use crate::{plan::UnifiedPlan, SQLError, SQLParam};
-use std::sync::Arc;
+use super::ownership::SharedPreparedInput;
+use crate::{SQLError, SQLParam};
 
 pub trait PreparedPlanProvider {
     fn plan_for_execution(
@@ -19,10 +19,12 @@ pub trait PreparedPlanProvider {
 
 /// A successful replacement analysis and the namespace it used, published together against the original definition identity.
 pub struct PreparedPlanAnalysis {
-    pub logical_plan: Arc<UnifiedPlan>,
-    pub effective_search_path: Option<crate::catalog::resolution::EffectiveSearchPath>,
-    pub dependencies: super::dependencies::PreparedAnalysisDependencies,
-    pub dependency_snapshot: Option<super::dependencies::PreparedDependencySnapshot>,
+    pub logical_plan: crate::plan::SharedExecutablePlan,
+    pub effective_search_path:
+        SharedPreparedInput<Option<crate::catalog::resolution::EffectiveSearchPath>>,
+    pub dependencies: SharedPreparedInput<super::dependencies::PreparedAnalysisDependencies>,
+    pub dependency_snapshot:
+        SharedPreparedInput<Option<super::dependencies::PreparedDependencySnapshot>>,
 }
 
 pub struct PreparedPlanUpdate {

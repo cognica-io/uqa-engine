@@ -16,6 +16,9 @@ use uqa_core::Value;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::{plan::ExpressionPlan, ResultRow, SQLError, SQLParam};
 
+mod production;
+pub use production::evaluate_catalog_scalar_with_control;
+
 /// Lower an AST expression that belongs to a schema or procedural boundary,
 /// then execute the resulting physical scalar IR. Runtime consumers never
 /// invoke the AST evaluator or dispatch an AST subquery directly.

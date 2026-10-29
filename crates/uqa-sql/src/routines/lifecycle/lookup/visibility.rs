@@ -110,6 +110,43 @@ pub fn routine_volatility_by_keys_with_control<'a>(
     Ok(result)
 }
 
+/// Observe the visible function set after identical-signature shadowing, without allocating a candidate snapshot.
+pub fn visible_function_returns_set_by_keys_with_control<'a>(
+    registry: &RoutineRegistry,
+    keys: impl IntoIterator<Item = &'a str>,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let mut returns_set = false;
+    visit_visible(registry, keys, control, |function| {
+        returns_set |= !function.def.is_procedure && function.def.returns_set();
+        Ok(())
+    })?;
+    Ok(returns_set)
+}
+
+pub fn visible_function_setness_by_keys_with_control<'a>(
+    registry: &RoutineRegistry,
+    keys: impl IntoIterator<Item = &'a str>,
+    control: &ProductionControl<'_>,
+) -> Result<crate::routines::VisibleFunctionSetness, SQLError> {
+    let mut result = crate::routines::VisibleFunctionSetness::default();
+    let mut first = None;
+    let mut mixed = false;
+    visit_visible(registry, keys, control, |function| {
+        result.found = true;
+        if !function.def.is_procedure {
+            let set = function.def.returns_set();
+            match first {
+                None => first = Some(set),
+                Some(first) => mixed |= first != set,
+            }
+        }
+        Ok(())
+    })?;
+    result.uniform = first.filter(|_| !mixed);
+    Ok(result)
+}
+
 pub fn bound_routine_volatility_with_control(
     registry: &RoutineRegistry,
     binding: &FunctionBinding,

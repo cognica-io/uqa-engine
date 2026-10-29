@@ -36,6 +36,24 @@ pub fn declaration(
 pub fn index_definition(definition: Option<&str>) -> Result<IndexDefinition, serde_json::Error> {
     definition.map_or_else(|| Ok(IndexDefinition::default()), serde_json::from_str)
 }
+
+/// Observe an index's durable address without decoding predicates, key types or included-column payloads. Full definition validation remains at catalog restoration and publication.
+pub fn catalog_object_identity(
+    definition: Option<&str>,
+) -> Result<Option<uqa_core::catalog_identity::CatalogObjectIdentity>, serde_json::Error> {
+    #[derive(serde::Deserialize)]
+    struct Definition {
+        catalog: Option<Identity>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Identity {
+        identity: uqa_core::catalog_identity::CatalogObjectIdentity,
+    }
+    definition.map_or(Ok(None), |text| {
+        serde_json::from_str::<Definition>(text)
+            .map(|definition| definition.catalog.map(|catalog| catalog.identity))
+    })
+}
 pub fn references_column(
     keys: &str,
     definition: Option<&str>,

@@ -110,6 +110,18 @@ pub fn routine_volatility_lookup_keys_with_control(
     }
 }
 
+/// Recursive argument analysis defers exactly the same namespace errors as ordinary binding; admission and cancellation remain observable.
+pub fn routine_lookup_keys_for_analysis_with_control(
+    catalog: &dyn RoutineNameCatalog,
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<String>>>, SQLError> {
+    match routine_lookup_keys_with_control(catalog, name, control) {
+        Err(error) if crate::routines::is_routine_namespace_lookup_error(&error) => Ok(None),
+        result => result.map(Some),
+    }
+}
+
 pub fn require_routine_schema_usage_with_control(
     catalog: &dyn RoutineNameCatalog,
     schema: &str,

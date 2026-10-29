@@ -10,10 +10,7 @@ use crate::catalog::{
     resolution::RelationNameResolution,
 };
 use crate::prepared::dependencies::PreparedDependencyRevision;
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 struct Catalog {
     revision: Mutex<Option<u64>>,
@@ -137,16 +134,23 @@ fn prepared_definition_keeps_converted_oid_and_matching_catalog_revisions_togeth
     )
     .unwrap();
     assert_eq!(
-        definition.dependencies.relations,
+        definition
+            .dependencies
+            .relations
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
         [41].into_iter().collect()
     );
     assert_eq!(
         catalog.requests.lock().unwrap().as_slice(),
-        std::slice::from_ref(&definition.dependencies)
+        std::slice::from_ref(&*definition.dependencies)
     );
     assert_eq!(
         definition.dependency_snapshot.as_ref().unwrap().relations,
-        BTreeMap::from([(41, Some(PreparedDependencyRevision::new(7_u64)))])
+        [(41, Some(PreparedDependencyRevision::new(7_u64)))]
+            .into_iter()
+            .collect()
     );
     let mut values = vec![];
     definition
@@ -187,12 +191,12 @@ fn prepared_definition_keeps_converted_oid_and_matching_catalog_revisions_togeth
 fn dependency_freshness_distinguishes_unsupported_catalogs_and_restored_search_paths() {
     let retained = PreparedDependencySnapshot {
         global_catalog: None,
-        relations: BTreeMap::from([(41, None)]),
-        routines: BTreeMap::new(),
+        relations: [(41, None)].into_iter().collect(),
+        routines: uqa_core::memory::OwnedMap::default(),
     };
     let dependencies = PreparedAnalysisDependencies {
         relations: [41].into_iter().collect(),
-        routines: std::collections::BTreeSet::default(),
+        routines: uqa_core::memory::OwnedSet::default(),
     };
     let mut scopes = Scopes::default();
     assert!(!analysis_is_current(&context(&scopes), None, &dependencies, Some(&retained)).unwrap());

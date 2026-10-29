@@ -241,6 +241,18 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         self.0.doc_freq_key(field, term)
     }
 
+    fn doc_freq_key_budgeted(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
+        let frequency = self.0.doc_freq_key_budgeted(field, term, control)?;
+        self.check_inverted_read()?;
+        Ok(frequency)
+    }
+
     fn get_term_freq_key(
         &self,
         doc_id: DocId,
@@ -468,6 +480,16 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
         self.check_inverted_read()?;
         self.0.field_names()
+    }
+
+    fn field_names_budgeted(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<uqa_core::memory::BudgetedString>> {
+        self.check_inverted_read()?;
+        let fields = self.0.field_names_budgeted(control)?;
+        self.check_inverted_read()?;
+        Ok(fields)
     }
 
     fn get_posting_list_any_field(&self, term: &str) -> StorageBackendResult<PostingList> {

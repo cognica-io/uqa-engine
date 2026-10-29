@@ -32,6 +32,44 @@ impl RowSchema {
             Option<&'a ColumnType>,
         ) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
+        self.visit_qualified_star_entries(qualifier, control, |entry| {
+            visit(entry.identity.column(), entry.logical, entry.slot, entry.ty)
+        })
+    }
+
+    pub(crate) fn visit_qualified_star_metadata<'a>(
+        &'a self,
+        qualifier: &str,
+        control: &ProductionControl<'_>,
+        mut visit: impl FnMut(
+            &'a str,
+            Option<usize>,
+            Option<&'a ColumnType>,
+            Option<u32>,
+            Option<&'a crate::schema::RecordMetadata>,
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.visit_qualified_star_entries(qualifier, control, |entry| {
+            let collation = entry.logical.map_or_else(
+                || self.qualified_identity_collation(entry.identity),
+                |logical| self.column_collation(logical),
+            );
+            visit(
+                entry.identity.column(),
+                entry.logical,
+                entry.ty,
+                collation,
+                self.physical_record_metadata(entry.slot),
+            )
+        })
+    }
+
+    fn visit_qualified_star_entries<'a>(
+        &'a self,
+        qualifier: &str,
+        control: &ProductionControl<'_>,
+        mut visit: impl FnMut(Entry<'a>) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
         control.check()?;
         let mut entries = ProductionVec::new(*control);
         let mut visible = ProductionMap::new(*control);
@@ -74,7 +112,7 @@ impl RowSchema {
         )?;
         for entry in &*entries {
             control.check()?;
-            visit(entry.identity.column(), entry.logical, entry.slot, entry.ty)?;
+            visit(*entry)?;
         }
         Ok(())
     }

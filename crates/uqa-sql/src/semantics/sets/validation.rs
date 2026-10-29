@@ -6,6 +6,12 @@
 
 //! Set-returning expression detection and SQL context validation.
 
+mod production;
+pub use production::{
+    expression_may_return_set_with_control, function_may_return_set_with_control,
+    SetFunctionAnalysis,
+};
+
 use crate::ast::FunctionBinding;
 use crate::plan::{ProjectionPlan, QueryBlockPlan, SourcePlan};
 use crate::{FunctionTypeResolver, RowSchema, ScalarExpr, ScalarFrameBound};
@@ -52,99 +58,18 @@ pub fn function_may_return_set(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
-    if binding.and_then(|binding| binding.dispatch).is_some() {
-        return Ok(false);
-    }
-    if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
-        return Ok(false);
-    }
-    if binding.is_some_and(|binding| !binding.builtin) {
-        let (argument_names, argument_types, explicit_variadic) =
-            crate::function_call_argument_signature(args, schema, params, Some(resolver))?;
-        let function = engine.resolve_static_sql_function(
-            name,
-            binding,
-            &argument_names,
-            &argument_types,
-            explicit_variadic,
-        )?;
-        return Ok(function.is_some_and(|function| function.def.returns_set()));
-    }
-    let identity = name.to_ascii_lowercase();
-    let builtin = crate::semantics::builtin_function_dispatch_name(&identity);
-    let builtin_returns_set =
-        builtin_returns_set(&builtin) || engine.has_registered_table_function(&identity);
-    // An unbound call of a set-returning built-in's name returns a set unless overload resolution selects a SQL routine of that name.
-    if builtin_returns_set
-        && (binding.is_some()
-            || engine
-                .lookup_visible_sql_functions_for_analysis(name)?
-                .is_none())
-    {
-        return Ok(true);
-    }
-    let (argument_names, argument_types, explicit_variadic) =
-        crate::function_call_argument_signature(args, schema, params, Some(resolver))?;
-    let Some(overloads) = engine.lookup_visible_sql_functions_for_analysis(name)? else {
-        return Ok(false);
-    };
-    if !builtin_returns_set && !crate::is_fixed_builtin(name) {
-        let mut setness = overloads
-            .iter()
-            .filter(|function| !function.def.is_procedure)
-            .map(|function| function.def.returns_set());
-        if let Some(first) = setness.next() {
-            if setness.all(|returns_set| returns_set == first) {
-                return Ok(first);
-            }
-        }
-    }
-    if let Some(resolved) = crate::resolve_fixed_builtin_call(
+    function_may_return_set_with_control(
+        SetFunctionAnalysis {
+            routines: engine,
+            types: resolver,
+        },
         name,
         binding,
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-        Some(resolver),
-    )? {
-        if resolved.selected.binding.builtin {
-            return Ok(builtin_returns_set);
-        }
-        let function = engine.resolve_static_sql_function(
-            name,
-            Some(&resolved.selected.binding),
-            &argument_names,
-            &argument_types,
-            explicit_variadic,
-        )?;
-        return Ok(function.is_some_and(|function| function.def.returns_set()));
-    }
-    match engine.resolve_static_sql_function(
-        name,
-        binding,
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-    ) {
-        Ok(Some(function)) => Ok(function.def.returns_set()),
-        Ok(None) => Ok(builtin_returns_set),
-        // No SQL routine of a set-returning built-in's name accepts the arguments, so the built-in does.
-        Err(error) if builtin_returns_set && error.sqlstate() == Some("42883") => Ok(true),
-        Err(error) if binding.is_none() && error.sqlstate() == Some("42883") => {
-            match crate::type_resolution::builtin_function_type_with_resolver(
-                &builtin,
-                args,
-                &[],
-                schema,
-                params,
-                resolver,
-            ) {
-                Ok(Some(_)) => Ok(false),
-                Ok(None) | Err(_) => Err(error),
-            }
-        }
-        Err(error) => Err(error),
-    }
+        args,
+        schema,
+        params,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 pub fn resolve_set_function_binding(
@@ -205,10 +130,6 @@ pub fn projections_may_return_set(
     Ok(false)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 pub fn expression_may_return_set(
     engine: &dyn crate::routines::RoutineResolution,
     resolver: &dyn FunctionTypeResolver,
@@ -216,112 +137,14 @@ pub fn expression_may_return_set(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
-    match expression {
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            if function_may_return_set(
-                engine,
-                resolver,
-                name,
-                binding.as_ref(),
-                args,
-                schema,
-                params,
-            )? || expressions_may_return_set(engine, resolver, args, schema, params)?
-                || expressions_may_return_set(
-                    engine,
-                    resolver,
-                    order_by.iter().map(|order| &order.expr),
-                    schema,
-                    params,
-                )?
-            {
-                return Ok(true);
-            }
-            filter.as_deref().map_or(Ok(false), |filter| {
-                expression_may_return_set(engine, resolver, filter, schema, params)
-            })
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => {
-            expressions_may_return_set(engine, resolver, items, schema, params)
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => Ok(expression_may_return_set(
-            engine, resolver, lhs, schema, params,
-        )? || expression_may_return_set(
-            engine, resolver, rhs, schema, params,
-        )?),
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => {
-            expression_may_return_set(engine, resolver, inner, schema, params)
-        }
-        ScalarExpr::Between { expr, low, high } => {
-            Ok(
-                expression_may_return_set(engine, resolver, expr, schema, params)?
-                    || expression_may_return_set(engine, resolver, low, schema, params)?
-                    || expression_may_return_set(engine, resolver, high, schema, params)?,
-            )
-        }
-        ScalarExpr::InList { expr, list, .. } => Ok(expression_may_return_set(
-            engine, resolver, expr, schema, params,
-        )? || expressions_may_return_set(
-            engine, resolver, list, schema, params,
-        )?),
-        // A window call returns one value per row: its arguments, FILTER and frame admit no set-returning call, and its partition and ordering keys expand the rows below the window, as `expression_returns_set` treats `WindowFunc`.
-        ScalarExpr::WindowCall { .. } => Ok(false),
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base {
-                if expression_may_return_set(engine, resolver, base, schema, params)? {
-                    return Ok(true);
-                }
-            }
-            for (condition, result) in when {
-                if expression_may_return_set(engine, resolver, condition, schema, params)?
-                    || expression_may_return_set(engine, resolver, result, schema, params)?
-                {
-                    return Ok(true);
-                }
-            }
-            if let Some(branch) = else_branch {
-                if expression_may_return_set(engine, resolver, branch, schema, params)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        ScalarExpr::InSubquery { expr, .. } => {
-            expression_may_return_set(engine, resolver, expr, schema, params)
-        }
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => Ok(false),
-    }
+    expression_may_return_set_with_control(
+        engine,
+        resolver,
+        expression,
+        schema,
+        params,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 fn expressions_may_return_set<'a>(

@@ -6,9 +6,12 @@
 
 //! Retain selected clause identities and apply unknown-input coercions at their original plan addresses.
 
-use super::{BTreeMap, ColumnType, ConvertedInput, NonNull, SQLError, ScalarExpr};
+use super::{
+    AnalysisMap, ColumnType, ConvertedInput, NonNull, OwnedScalarExpr, SQLError, ScalarExpr,
+};
 use crate::ast::{FunctionBinding, FunctionDispatch};
-use crate::catalog::collations::expression::{discard_scalar_clause, scalar_clause};
+use crate::catalog::collations::expression::scalar_clause;
+use uqa_core::memory::ProductionControl;
 
 struct ClauseInput {
     inner: Option<NonNull<ScalarExpr>>,
@@ -17,9 +20,12 @@ struct ClauseInput {
 }
 
 #[derive(Default)]
-pub(super) struct CollationInputs(BTreeMap<NonNull<ScalarExpr>, ClauseInput>);
+pub(super) struct CollationInputs(AnalysisMap<NonNull<ScalarExpr>, ClauseInput>);
 
 impl CollationInputs {
+    pub(super) fn new(control: &uqa_core::memory::ProductionControl<'_>) -> Self {
+        Self(AnalysisMap::new(control))
+    }
     pub(super) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -29,12 +35,14 @@ impl CollationInputs {
         origin: NonNull<ScalarExpr>,
         inner: Option<NonNull<ScalarExpr>>,
         oid: u32,
-    ) {
-        self.0.entry(origin).or_insert(ClauseInput {
-            inner,
-            oid,
-            retain: true,
-        });
+    ) -> Result<(), SQLError> {
+        self.0.insert_if_missing(origin, || {
+            Ok(ClauseInput {
+                inner,
+                oid,
+                retain: true,
+            })
+        })
     }
 
     pub(super) fn coerce(
@@ -54,81 +62,75 @@ impl CollationInputs {
         Ok(())
     }
 
-    pub(super) fn apply(
+    pub(super) fn apply_owned(
         &mut self,
         identity: NonNull<ScalarExpr>,
-        expression: &mut ScalarExpr,
-    ) -> Result<(), SQLError> {
+        expression: OwnedScalarExpr,
+        control: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
         let Some(clause) = self.0.remove(&identity) else {
-            return Ok(());
+            return Ok(expression);
         };
-        if scalar_clause(expression)?.is_none() {
+        if scalar_clause(&expression)?.is_none() {
             return Err(SQLError::Internal(
                 "retained collation no longer matches its syntax".into(),
             ));
         }
         if clause.retain {
-            let ScalarExpr::Func { binding, .. } = expression else {
-                unreachable!("validated collation clause");
-            };
-            *binding = Some(FunctionBinding::dispatched(FunctionDispatch::Collate {
-                oid: Some(clause.oid),
-            }));
+            let binding = FunctionBinding::dispatched_with_control(
+                FunctionDispatch::Collate {
+                    oid: Some(clause.oid),
+                },
+                control,
+            )?;
+            Ok(expression.replace_call_binding(Some(binding), control)?)
         } else {
-            discard_scalar_clause(expression)?;
+            Ok(expression.select_child(0))
         }
-        Ok(())
     }
 
-    /// Membership comparisons can select different input types for the same unknown literal. Capture each converted value with its selected outer clause before the next comparison reads that input again.
+    /// Membership comparisons may select different input types for one unknown literal; each comparison keeps its selected outer clause and value owner.
     pub(super) fn take_literal(
         &self,
         expression: &ScalarExpr,
-        literals: &mut BTreeMap<NonNull<ScalarExpr>, ConvertedInput>,
-    ) -> Option<ConvertedInput> {
+        literals: &mut AnalysisMap<NonNull<ScalarExpr>, ConvertedInput>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<ConvertedInput>, SQLError> {
         let mut bare = expression;
-        while let Some(clause) = scalar_clause(bare).ok()? {
+        while let Some(clause) = scalar_clause(bare)? {
             bare = clause.argument;
         }
-        let ConvertedInput {
+        let Some(ConvertedInput {
             expression: literal,
             session_dependent,
-        } = literals.remove(&NonNull::from(bare))?;
+        }) = literals.remove(&NonNull::from(bare))
+        else {
+            return Ok(None);
+        };
         let Some(clause) = self
             .0
             .get(&NonNull::from(expression))
             .filter(|clause| clause.retain)
         else {
-            return Some(ConvertedInput {
+            return Ok(Some(ConvertedInput {
                 expression: literal,
                 session_dependent,
-            });
+            }));
         };
-        let ScalarExpr::Func {
-            name,
-            args,
-            distinct,
-            order_by,
-            order_syntax,
-            filter,
-            ..
-        } = expression
-        else {
-            return None;
-        };
-        Some(ConvertedInput {
-            expression: ScalarExpr::Func {
-                name: name.clone(),
-                binding: Some(FunctionBinding::dispatched(FunctionDispatch::Collate {
-                    oid: Some(clause.oid),
-                })),
-                args: vec![literal, args[1].clone()],
-                distinct: *distinct,
-                order_by: order_by.clone(),
-                order_syntax: *order_syntax,
-                filter: filter.clone(),
+        if !matches!(expression, ScalarExpr::Func { .. }) {
+            return Ok(None);
+        }
+        let copied = expression.copy_for_rewrite(control)?;
+        let copied = copied.map_child(0, control, |_| Ok::<_, SQLError>(literal))?;
+        let binding = FunctionBinding::dispatched_with_control(
+            FunctionDispatch::Collate {
+                oid: Some(clause.oid),
             },
+            control,
+        )?;
+        Ok(Some(ConvertedInput {
+            expression: copied.replace_call_binding(Some(binding), control)?,
             session_dependent,
-        })
+        }))
     }
 }

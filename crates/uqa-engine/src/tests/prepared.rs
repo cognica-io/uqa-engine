@@ -143,7 +143,7 @@ fn prepared_inputs_survive_local_and_sibling_data_only_refreshes() {
             );
             assert_eq!(result.rows[0]["row_count"], Value::Int(count));
             let current = &engine.session.prepared.read()["saved_clock"];
-            assert!(std::sync::Arc::ptr_eq(&original, &current.logical_plan));
+            assert!(original.ptr_eq(&current.logical_plan));
             assert!(!current.needs_analysis);
         };
         verify_rows(0);

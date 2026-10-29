@@ -61,6 +61,10 @@ fn native_inferred_join_conditions_recover_and_preserve_postgresql_rows(
         expected,
         "{provider:?}"
     );
+    // Capture the executable inside its snapshot and before another statement can refresh the catalog and retire the cache entry.
+    engine
+        .sql("BEGIN ISOLATION LEVEL REPEATABLE READ", &[])
+        .unwrap();
     engine
         .sql(&format!("PREPARE inferred_join AS {INFERRED}"), &[])
         .unwrap();
@@ -69,17 +73,17 @@ fn native_inferred_join_conditions_recover_and_preserve_postgresql_rows(
         expected,
         "{provider:?}"
     );
+    let selected = engine.lookup_prepared("inferred_join").unwrap();
+    assert!(
+        selected.reserved_bytes() > 0,
+        "{provider:?}: prepared output has no lease"
+    );
     engine
         .sql(
             &format!("EXPLAIN (ANALYZE, MEMORY, FORMAT JSON) {INFERRED}"),
             &[],
         )
         .unwrap();
-    let selected = engine.lookup_prepared("inferred_join").unwrap();
-    assert!(
-        selected.reserved_bytes() > 0,
-        "{provider:?}: prepared output has no lease"
-    );
     let mut copies = std::array::from_fn::<_, 64, _>(|_| None);
     let before = memory.used();
     let allocation = allocation_counter::measure(|| {
@@ -92,10 +96,20 @@ fn native_inferred_join_conditions_recover_and_preserve_postgresql_rows(
     drop(copies);
     engine.sql("DEALLOCATE inferred_join", &[]).unwrap();
     assert_eq!(selected.strong_count(), 1);
+    // Shared analysis descriptors have their own constructor leases. Keep their
+    // last handles while checking the executable's independently owned storage.
+    let UnifiedPlan::Query(query) = selected.as_ref() else {
+        panic!("query")
+    };
+    let descriptors = (query.analyzed_output.clone(), query.analyzed_source.clone());
     let before = memory.used();
     let reserved = selected.reserved_bytes();
     drop(selected);
     assert_eq!(memory.used(), before - reserved);
+    let descriptor_bytes = memory.used();
+    drop(descriptors);
+    assert!(memory.used() < descriptor_bytes);
+    engine.sql("COMMIT", &[]).unwrap();
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);

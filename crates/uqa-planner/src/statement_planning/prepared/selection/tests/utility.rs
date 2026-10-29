@@ -16,14 +16,15 @@ fn session_utilities_keep_generic_plans_and_original_descriptors() {
         inputs.fail_binding.set(true);
         let mut entry = inputs.entry.borrow().as_ref().unwrap().clone();
         let source = Arc::new(UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0)));
-        entry.source_plan = source.clone();
-        entry.logical_plan = source;
+        entry.source_plan = source.clone().into();
+        entry.logical_plan = source.into();
         entry.custom_plans = 0;
         entry.total_custom_cost = 0.0;
         entry.effective_search_path = Some(uqa_sql::catalog::resolution::EffectiveSearchPath {
             schemas: vec!["obsolete".into()],
             creation_namespace: Some("obsolete".into()),
-        });
+        })
+        .into();
         let original_schema = entry.result_schema.clone();
         for iteration in 0..2 {
             let selected = select_entry(&inputs.context(), &entry, &[]).unwrap();

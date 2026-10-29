@@ -8,7 +8,7 @@ use super::*;
 use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinition;
 
-fn catalog() -> CatalogReadView {
+pub(super) fn catalog() -> CatalogReadView {
     let mut snapshot = crate::catalog::test_support::empty_catalog()
         .snapshot()
         .clone();
@@ -39,7 +39,7 @@ fn catalog() -> CatalogReadView {
     CatalogReadView::new(snapshot)
 }
 
-fn resolution(path: &[&str]) -> RelationNameResolution {
+pub(super) fn resolution(path: &[&str]) -> RelationNameResolution {
     RelationNameResolution {
         search_path: path.iter().map(|name| (*name).into()).collect(),
         temporary_schema: "pg_temp_1".into(),

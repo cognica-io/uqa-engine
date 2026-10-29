@@ -37,17 +37,6 @@ impl<'a> CallInputTypes<'a> {
             memory,
         )?)
     }
-
-    pub(crate) fn new(
-        schema: &'a dyn ScalarTypeSchema,
-        mut observations: Vec<(&'a ScalarExpr, Option<&'a ColumnType>)>,
-    ) -> Self {
-        observations.sort_unstable_by_key(|(expression, _)| identity(expression));
-        Self {
-            schema,
-            observations,
-        }
-    }
 }
 
 fn identity(expression: &ScalarExpr) -> usize {

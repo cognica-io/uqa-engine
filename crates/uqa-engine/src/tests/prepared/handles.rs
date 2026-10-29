@@ -38,7 +38,7 @@ fn host_handles_keep_native_descriptors_and_custom_generic_selection() {
         .unwrap()
         .clone();
     assert_eq!(
-        entry.source_sql.as_deref(),
+        entry.source_sql.as_ref().map(|sql| sql.as_str()),
         Some("SELECT $1::integer AS x, $1 + 1 AS x")
     );
     assert!(!entry.from_sql);
@@ -64,7 +64,7 @@ fn host_handle_cannot_rebind_a_recreated_name_or_another_session() {
         .keys()
         .next()
         .unwrap()
-        .clone();
+        .to_string();
     let sibling = engine.new_session().unwrap();
     assert_eq!(
         sibling

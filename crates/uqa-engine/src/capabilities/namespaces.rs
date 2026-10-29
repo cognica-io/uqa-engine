@@ -266,6 +266,23 @@ impl EmptySchemaRemovalPersistence for Engine {
 }
 
 impl uqa_sql::catalog::resolution::candidates::RelationCandidateState for Engine {
+    fn temporary_schema_name_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, uqa_sql::SQLError> {
+        Ok(control.format(format_args!("pg_temp_{}", self.session_id))?)
+    }
+    fn with_search_path_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(
+            &dyn uqa_sql::catalog::resolution::candidates::SearchPathView,
+        ) -> Result<(), uqa_sql::SQLError>,
+    ) -> Result<(), uqa_sql::SQLError> {
+        control.check()?;
+        let state = self.session.state.read();
+        read(&crate::session::BorrowedSearchPath(&state))
+    }
     fn temporary_schema_name(&self) -> String {
         Engine::temporary_schema_name(self)
     }

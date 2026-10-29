@@ -226,7 +226,12 @@ pub fn is_operator_join_table_function(name: &str) -> bool {
 /// documentation generators should consume this instead of duplicating
 /// function names.
 pub fn registered_names() -> Vec<&'static str> {
-    registry().keys().copied().collect()
+    registered_names_iter().collect()
+}
+
+/// Borrow registered names in the same lexical order without constructing a name buffer.
+pub fn registered_names_iter() -> impl ExactSizeIterator<Item = &'static str> {
+    registry().keys().copied()
 }
 
 #[cfg(test)]

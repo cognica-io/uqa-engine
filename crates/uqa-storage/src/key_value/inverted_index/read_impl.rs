@@ -151,6 +151,27 @@ impl OccurrenceRead<'_> {
             })
     }
 
+    pub(super) fn doc_freq_key_budgeted(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        let mut frequency = 0_u64;
+        self.visit_clusters_budgeted(field, term, None, usize::MAX, control, &mut |cluster| {
+            require_score_version(cluster.bytes)?;
+            let count = crate::clustered_postings::score_count_with_control(cluster.bytes, || {
+                control.check()
+            })?;
+            frequency = frequency
+                .checked_add(count)
+                .ok_or_else(|| other_error("document frequency overflow"))?;
+            Ok(())
+        })?;
+        control.check()?;
+        Ok(frequency)
+    }
+
     pub(super) fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
         self.document_length(doc_id, field)
     }

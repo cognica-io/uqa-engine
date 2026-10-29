@@ -14,29 +14,12 @@ use super::{
 impl RowSchema {
     /// Capture positional outputs through opaque identities without retaining their SQL names or copying values. Existing internal score and record metadata remain attached to their physical slots. An implicit NULL output owns one appended NULL slot, which the physical selector must materialize.
     pub fn capture_output(input: &Self, relation: crate::ast::InternalRelationId) -> Self {
-        let mut has_null = false;
-        let attributes = (0..input.len())
-            .map(|position| {
-                (
-                    relation.column(position),
-                    input.column_type(position).cloned(),
-                    input.physical_slot(position).map_or_else(
-                        || {
-                            has_null = true;
-                            ProjectedSlot::Computed {
-                                position: 0,
-                                collation: input.column_collation(position),
-                            }
-                        },
-                        |physical| ProjectedSlot::BoundInput {
-                            physical: Some(physical),
-                            collation: input.column_collation(position),
-                        },
-                    ),
-                )
-            })
-            .collect();
-        Self::project_with_sources(input, Vec::new(), attributes, usize::from(has_null), false)
+        Self::capture_output_with_control(
+            input,
+            relation,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary positional output capture")
     }
 
     /// Remove selected executor-only identities after their consumer has run.
@@ -636,11 +619,10 @@ impl RowSchema {
 mod capture_tests {
     use super::*;
     use crate::ast::InternalRelationId;
-    use std::sync::Arc;
 
     #[test]
     fn output_capture_keeps_positional_metadata_without_sql_aliases() {
-        let fields: crate::schema::RecordFields = Arc::from([Some(ColumnType::SmallInteger)]);
+        let fields: crate::schema::RecordFields = vec![Some(ColumnType::SmallInteger)].into();
         let input = RowSchema::with_qualified_types(
             "source",
             vec!["unused".into(), "text".into(), "record".into()],
@@ -651,7 +633,7 @@ mod capture_tests {
             ],
         )
         .with_column_collations([None, Some(950), None])
-        .with_record_fields([(2, Arc::clone(&fields))]);
+        .with_record_fields([(2, fields.clone())]);
         let selected =
             RowSchema::remap_positions(&input, &[("same".into(), 2), ("same".into(), 1)], &[]);
         let relation = InternalRelationId::allocate();
@@ -665,7 +647,7 @@ mod capture_tests {
             Some(&ColumnType::Record)
         );
         assert_eq!(captured.internal_collation(relation.column(1)), Some(950));
-        assert!(Arc::ptr_eq(
+        assert!(crate::schema::RecordFields::shares_storage(
             captured.physical_record_fields(2).unwrap(),
             &fields
         ));

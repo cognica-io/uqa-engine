@@ -17,9 +17,13 @@ fn interval_input_applies_fields_before_parameter_type_modifiers_are_removed() {
     let mut parameters = ParameterTypes::with_input_constants(&[], None, None, None);
     let mut inferred = ExpressionType::unknown_literal(&expression, "1-2".into());
     parameters.coerce_unknown(&mut inferred, &target).unwrap();
-    assert_eq!(inferred.ty, Some(ColumnType::Interval));
+    assert_eq!(inferred.ty.as_deref(), Some(&ColumnType::Interval));
     assert!(matches!(
-        parameters.take_literal(&expression).unwrap().expression,
+        &*parameters
+            .take_literal(&expression)
+            .unwrap()
+            .unwrap()
+            .expression,
         ScalarExpr::TypedLiteral {
             value: Value::Temporal(uqa_core::TemporalValue::Interval {
                 months: 12,
@@ -62,18 +66,24 @@ fn copied_membership_constants_keep_input_cache_volatility() {
                 .map_or(&expression, |clause| clause.argument);
             let mut inferred = ExpressionType::unknown_literal(argument, text.into());
             if collated {
-                parameters.retain_collation(&expression, &mut inferred, 950);
+                parameters
+                    .retain_collation(&expression, &mut inferred, 950)
+                    .unwrap();
             }
             parameters.coerce_unknown(&mut inferred, &target).unwrap();
-            let constant = parameters.take_literal(&expression).unwrap();
-            parameters.retain_membership(
-                &expression,
-                super::super::membership::MembershipAnalysis {
-                    shape: crate::type_resolution::membership::MembershipShape::default(),
-                    array_coercions: Vec::new(),
-                    left_constants: vec![Some(constant)],
-                },
-            );
+            let constant = parameters.take_literal(&expression).unwrap().unwrap();
+            parameters
+                .retain_membership(
+                    &expression,
+                    super::super::membership::MembershipAnalysis {
+                        array_items: super::super::ownership::AnalysisVec::Ordinary(Vec::new()),
+                        array_coercions: super::super::ownership::AnalysisVec::Ordinary(Vec::new()),
+                        left_constants: super::super::ownership::AnalysisVec::Ordinary(vec![Some(
+                            constant,
+                        )]),
+                    },
+                )
+                .unwrap();
             let constants = parameters.take_input_constants();
             assert!(constants.0.is_empty());
             assert_eq!(
@@ -200,7 +210,7 @@ fn domain_array_input_is_read_once_and_retains_element_identity_and_bounds() {
             parameters
                 .coerce_unknown(&mut inferred, &domain_array())
                 .unwrap();
-            assert_eq!(inferred.ty, Some(domain_array()));
+            assert_eq!(inferred.ty.as_deref(), Some(&domain_array()));
         }
     });
     assert_eq!(inputs.0.get(), 1);
@@ -233,7 +243,7 @@ fn domain_array_metadata_inference_does_not_invoke_or_require_input_functions() 
     parameters
         .coerce_unknown(&mut inferred, &domain_array())
         .unwrap();
-    assert_eq!(inferred.ty, Some(domain_array()));
+    assert_eq!(inferred.ty.as_deref(), Some(&domain_array()));
     assert_eq!(inputs.0.get(), 0);
     assert!(parameters.take_input_constants().0.is_empty());
 }
@@ -262,7 +272,7 @@ fn scalar_domain_base_input_and_explicit_text_do_not_invoke_array_input() {
     };
     let mut inferred = ExpressionType::unknown_literal(&expression, "0".into());
     parameters.coerce_unknown(&mut inferred, &domain).unwrap();
-    assert_eq!(inferred.ty.as_ref(), Some(domain.as_ref()));
+    assert_eq!(inferred.ty.as_deref(), Some(domain.as_ref()));
     parameters
         .take_input_constants()
         .apply_expression(&mut expression)
@@ -279,6 +289,6 @@ fn scalar_domain_base_input_and_explicit_text_do_not_invoke_array_input() {
     parameters
         .coerce_unknown(&mut typed_text, &domain_array())
         .unwrap();
-    assert_eq!(typed_text.ty, Some(ColumnType::Text));
+    assert_eq!(typed_text.ty.as_deref(), Some(&ColumnType::Text));
     assert_eq!(inputs.0.get(), 0);
 }

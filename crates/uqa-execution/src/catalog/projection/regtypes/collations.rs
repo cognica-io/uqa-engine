@@ -9,6 +9,8 @@
 use super::{parse_dash_or_oid, CatalogContext, OutputVisibility, SQLError};
 use crate::catalog::security::schema::SchemaAclPrivilege;
 use uqa_sql::catalog::collations::{builtin_collation_name, builtin_collation_oid};
+mod production;
+pub use production::resolve_expression_collation_oid_with_control;
 
 fn input_error(sqlstate: &str, message: String) -> SQLError {
     SQLError::Routine {
@@ -33,8 +35,19 @@ pub fn resolve_expression_collation_oid(
     context: &CatalogContext<'_>,
     input: &str,
 ) -> Result<u32, SQLError> {
-    let oid = resolve_named_collation(context, input, false)?;
-    u32::try_from(oid).map_err(|_| SQLError::Internal("invalid collation identity".into()))
+    resolve_expression_collation_oid_with_control(
+        context,
+        input,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(super) fn resolve_regcollation_name_with_control(
+    context: &CatalogContext<'_>,
+    input: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<i64, SQLError> {
+    production::resolve_named_collation(context, input, true, control)
 }
 
 fn resolve_named_collation(
@@ -42,66 +55,12 @@ fn resolve_named_collation(
     input: &str,
     missing_schema_ok: bool,
 ) -> Result<i64, SQLError> {
-    let names = uqa_sql::parse_regobject_name(input)
-        .ok_or_else(|| input_error("42602", "invalid name syntax".into()))?;
-    let (schema, local) = match names.as_slice() {
-        [local] => (None, local),
-        [schema, local] => (Some(schema.as_str()), local),
-        [database, schema, local] if database == "uqa" => (Some(schema.as_str()), local),
-        [_, _, _] => return Err(super::cross_database_reference(&names.join("."))),
-        _ => {
-            return Err(input_error(
-                "42601",
-                format!(
-                    "improper qualified name (too many dotted names): {}",
-                    names.join(".")
-                ),
-            ))
-        }
-    };
-    let visible = match schema {
-        Some(schema) => visible_in_schema(context, schema, missing_schema_ok)?,
-        None => context
-            .current_schema_names(true)?
-            .iter()
-            .any(|schema| schema == "pg_catalog"),
-    };
-    if let Some(oid) = visible.then(|| builtin_collation_oid(local)).flatten() {
-        return Ok(oid);
-    }
-    Err(input_error(
-        "42704",
-        format!(
-            "collation \"{}\" for encoding \"UTF8\" does not exist",
-            names.join(".")
-        ),
-    ))
-}
-
-fn visible_in_schema(
-    context: &CatalogContext<'_>,
-    schema: &str,
-    missing_ok: bool,
-) -> Result<bool, SQLError> {
-    let resolution = context.session.relation_name_resolution();
-    if schema == "pg_temp" && resolution.temporary_namespace_allocated {
-        return Ok(false);
-    }
-    let allocated =
-        schema != resolution.temporary_schema || resolution.temporary_namespace_allocated;
-    if allocated && context.schema_security_for_privilege(schema).is_some() {
-        context.require_schema_privilege(
-            schema,
-            &context.current_role(),
-            SchemaAclPrivilege::Usage,
-        )?;
-    } else if !missing_ok {
-        return Err(input_error(
-            "3F000",
-            format!("schema \"{schema}\" does not exist"),
-        ));
-    }
-    Ok(schema == "pg_catalog")
+    production::resolve_named_collation(
+        context,
+        input,
+        missing_schema_ok,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 pub(super) fn lookup_regcollation_oid(

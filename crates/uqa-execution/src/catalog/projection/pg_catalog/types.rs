@@ -7,6 +7,8 @@
 //! Static `pg_type` and `pg_range` projection.
 
 mod builtins;
+mod identities;
+pub(in crate::catalog::projection) use identities::builtin_type_identity_by_name;
 mod polymorphic;
 mod ranges;
 mod shells;
@@ -363,7 +365,7 @@ pub fn build_pg_range() -> Vec<ResultRow> {
 
 struct PgTypeCatalogMetadata<'a> {
     oid: i64,
-    name: String,
+    name: std::borrow::Cow<'a, str>,
     namespace_oid: i64,
     len: i64,
     by_value: bool,
@@ -393,7 +395,7 @@ pub(super) fn pg_type_catalog_row(
 ) -> ResultRow {
     special_pg_type_catalog_row(PgTypeCatalogMetadata {
         oid: pg_type_oid(ty),
-        name: super::super::helpers::information_schema_types::info_udt_name(ty),
+        name: super::super::helpers::information_schema_types::info_udt_name(ty).into(),
         namespace_oid,
         len: pg_type_len(ty),
         by_value: pg_type_by_value(ty),
@@ -416,7 +418,7 @@ pub(super) fn pg_type_catalog_row(
 fn special_pg_type_catalog_row(metadata: PgTypeCatalogMetadata<'_>) -> ResultRow {
     row([
         ("oid", int_value(metadata.oid)),
-        ("typname", str_value(metadata.name)),
+        ("typname", str_value(metadata.name.into_owned())),
         ("typnamespace", int_value(metadata.namespace_oid)),
         ("typowner", int_value(current_user_oid())),
         ("typlen", int_value(metadata.len)),

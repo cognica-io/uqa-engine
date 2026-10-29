@@ -134,7 +134,9 @@ impl Copying<'_> {
                 condition: self.field("condition", |copying| {
                     copying.optional_scalar(condition.as_ref())
                 })?,
-                columns: self.map(columns.iter(), Self::assignment_target)?,
+                columns: self.field("columns", |copying| {
+                    copying.map(columns.iter(), Self::assignment_target)
+                })?,
                 overriding: *overriding,
                 values: self.field("values", |copying| copying.map(values.iter(), Self::scalar))?,
             },

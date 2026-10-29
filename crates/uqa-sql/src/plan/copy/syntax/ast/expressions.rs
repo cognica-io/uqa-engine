@@ -19,7 +19,22 @@ syntax_enum!(crate::ast::BinaryOp {
     Divide
 });
 
-syntax_enum!(crate::ast::Expr {
+macro_rules! syntax_expression {
+    ($($variant:ident $(($($item:ident),+))? $({$($field:ident),*})?),* $(,)?) => {
+        impl SyntaxCopy for crate::ast::Expr {
+            fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+                copying.check()?;
+                if let Some(number) = copying.parameters.and_then(|parameters| parameters(self)) { return Ok(Self::Param(number)); }
+                Ok(match self {
+                    $(Self::$variant $(($($item),+))? $({$($field),*})? =>
+                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| $field.copy_syntax(copying))?),*})?),*
+                })
+            }
+        }
+    };
+}
+
+syntax_expression! {
     Star,
     QualifiedStar(value0),
     Default,
@@ -48,7 +63,7 @@ syntax_enum!(crate::ast::Expr {
     Exists { body, negated },
     InSubquery { expr, body, negated },
     RetainedLiteral(value0)
-});
+}
 
 syntax_enum!(crate::ast::FrameBound {
     UnboundedPreceding,
@@ -105,11 +120,23 @@ syntax_struct!(crate::ast::WindowReference { name, kind });
 
 syntax_enum!(crate::ast::WindowReferenceKind { Direct, Copy });
 
-syntax_struct!(crate::ast::WindowSpec {
-    raw_definition,
-    definition,
-    reference,
-    partition_by,
-    order_by,
-    frame
-});
+impl SyntaxCopy for crate::ast::WindowSpec {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        Ok(Self {
+            raw_definition: copying.field("raw_definition", |copying| {
+                if copying.parameters.is_some() {
+                    Ok(None)
+                } else {
+                    self.raw_definition.copy_syntax(copying)
+                }
+            })?,
+            definition: self.definition,
+            reference: copying.field("reference", |copying| self.reference.copy_syntax(copying))?,
+            partition_by: copying.field("partition_by", |copying| {
+                self.partition_by.copy_syntax(copying)
+            })?,
+            order_by: copying.field("order_by", |copying| self.order_by.copy_syntax(copying))?,
+            frame: copying.field("frame", |copying| self.frame.copy_syntax(copying))?,
+        })
+    }
+}

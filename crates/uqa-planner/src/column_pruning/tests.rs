@@ -261,15 +261,17 @@ fn a_subquery_local_metadata_alias_does_not_request_outer_metadata() {
     let RelationalPlan::QueryBlock(block) = &mut query.root else {
         panic!("block")
     };
-    block.subqueries[0].analyzed_source =
-        Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+    block.subqueries[0].analyzed_source = Some(
+        std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
             schema: uqa_sql::RowSchema::with_qualified_types(
                 "_meta",
                 vec!["doc_id".into(), "score".into()],
                 vec![Some(uqa_sql::ColumnType::Integer); 2],
             ),
             children: None,
-        }));
+        })
+        .into(),
+    );
     let projection = column_prune_for_stmt(catalog.context(), block, block.from.as_ref().unwrap())
         .unwrap()
         .unwrap();

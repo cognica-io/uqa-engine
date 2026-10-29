@@ -127,6 +127,21 @@ pub fn prune_expression_with_control(
     plan: &mut ExpressionPlan,
     control: ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    prune_expression_with_retention(plan, control, |arena, keep| {
+        let mut index = 0;
+        arena.retain(|_| {
+            let retained = keep(index);
+            index += 1;
+            retained
+        });
+    })
+}
+
+pub(crate) fn prune_expression_with_retention(
+    plan: &mut ExpressionPlan,
+    control: ProductionControl<'_>,
+    retain: impl FnOnce(&mut Vec<QueryPlan>, &dyn Fn(usize) -> bool),
+) -> Result<(), SQLError> {
     control.check()?;
     if plan.subqueries.is_empty() {
         return Ok(());
@@ -135,7 +150,9 @@ pub fn prune_expression_with_control(
     remap.expression(&plan.scalar)?;
     if remap.prepare()? {
         crate::plan::rewrite_scalar_expression(&mut plan.scalar, &mut |node| remap.rewrite(node));
-        remap.retain(&mut plan.subqueries);
+        retain(&mut plan.subqueries, &|index| {
+            remap.slots.get(&index).is_some()
+        });
     }
     Ok(())
 }
@@ -197,15 +214,6 @@ impl<'a> Remapping<'a> {
         if let Some(id) = subquery_id(expression) {
             *id = *self.slots.get(id).expect("collected local subquery");
         }
-    }
-
-    fn retain(&self, arena: &mut Vec<QueryPlan>) {
-        let mut id = 0;
-        arena.retain(|_| {
-            let keep = self.slots.get(&id).is_some();
-            id += 1;
-            keep
-        });
     }
 }
 

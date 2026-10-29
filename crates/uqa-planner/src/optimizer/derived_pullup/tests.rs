@@ -60,19 +60,25 @@ fn analyzed(body: &str, predicate: &str) -> QueryPlan {
     let columns = uqa_sql::semantics::projection_columns(&inner.projections);
     let types = vec![Some(ColumnType::Integer); columns.len()];
     body.analyzed_output = Some(RowSchema::with_types(columns.clone(), types.clone()));
-    body.analyzed_source = Some(std::sync::Arc::new(AnalyzedSource {
-        schema: RowSchema::with_qualified_types(
-            "v",
-            vec!["x".into()],
-            vec![Some(ColumnType::Integer)],
-        ),
-        children: None,
-    }));
+    body.analyzed_source = Some(
+        std::sync::Arc::new(AnalyzedSource {
+            schema: RowSchema::with_qualified_types(
+                "v",
+                vec!["x".into()],
+                vec![Some(ColumnType::Integer)],
+            ),
+            children: None,
+        })
+        .into(),
+    );
     query.analyzed_output = Some(RowSchema::with_types(columns.clone(), types.clone()));
-    query.analyzed_source = Some(std::sync::Arc::new(AnalyzedSource {
-        schema: RowSchema::with_qualified_types("s", columns, types),
-        children: None,
-    }));
+    query.analyzed_source = Some(
+        std::sync::Arc::new(AnalyzedSource {
+            schema: RowSchema::with_qualified_types("s", columns, types),
+            children: None,
+        })
+        .into(),
+    );
     *query
 }
 
@@ -300,14 +306,17 @@ fn input_capture_reads_only_demanded_values_and_keeps_producer_filter() {
     let Some(SourcePlan::Subquery { body, .. }) = &mut block.from else {
         panic!("derived")
     };
-    body.analyzed_source = Some(std::sync::Arc::new(AnalyzedSource {
-        schema: RowSchema::with_qualified_types(
-            "v",
-            vec!["x".into(), "unused".into()],
-            vec![Some(ColumnType::Integer); 2],
-        ),
-        children: None,
-    }));
+    body.analyzed_source = Some(
+        std::sync::Arc::new(AnalyzedSource {
+            schema: RowSchema::with_qualified_types(
+                "v",
+                vec!["x".into(), "unused".into()],
+                vec![Some(ColumnType::Integer); 2],
+            ),
+            children: None,
+        })
+        .into(),
+    );
     lift(&mut query);
     let RelationalPlan::QueryBlock(block) = &query.root else {
         panic!("block")

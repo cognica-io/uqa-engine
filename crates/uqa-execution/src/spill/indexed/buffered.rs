@@ -6,6 +6,8 @@
 
 //! Bounded positional rows switch atomically to the existing encrypted spill owner.
 
+mod production;
+
 use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation, Produced, ProductionControl};
 
 use super::{

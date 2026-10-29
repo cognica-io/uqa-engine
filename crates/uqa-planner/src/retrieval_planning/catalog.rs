@@ -16,6 +16,26 @@ pub trait TextStatisticsRead {
     fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, SQLError>;
     fn doc_freq(&self, field: &str, term: &str) -> Result<u64, SQLError>;
     fn doc_freq_any_field(&self, term: &str) -> Result<u64, SQLError>;
+    /// Observe one query while the native adapter retains analyzer output and provider workspace under its captured request allowance. Ordinary catalog adapters preserve their existing projection methods.
+    fn query_doc_freq_with_control(
+        &self,
+        field: Option<&str>,
+        query: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<u64, SQLError> {
+        control.check()?;
+        let Some(field) = field else {
+            return self.query_doc_freq_any_field(query);
+        };
+        let terms = self.analyze_utf16(field, query)?;
+        let mut frequency = 0_u64;
+        for term in terms {
+            control.check()?;
+            frequency = frequency.saturating_add(self.doc_freq_utf16(field, &term)?);
+        }
+        control.check()?;
+        Ok(frequency)
+    }
     /// Field inventory for analyzed all-field queries. Legacy scalar adapters may omit it.
     fn field_names(&self) -> Result<Option<Vec<String>>, SQLError> {
         Ok(None)

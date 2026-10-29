@@ -21,6 +21,21 @@ impl RoutineExecutionAuthority for Engine {
     ) -> bool {
         Engine::current_user_has_role_privileges(self, &role)
     }
+
+    fn current_user_has_role_identity_privileges_with_control(
+        &self,
+        role: uqa_sql::catalog::roles::RoleIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        let current = self.current_role();
+        uqa_sql::catalog::roles::memberships::role_inherits_with_control(
+            &self.durable.roles.read(),
+            &self.durable.role_memberships.read(),
+            &current,
+            &role,
+            control,
+        )
+    }
 }
 impl RoutinePrivilegeNotices for Engine {
     fn routine_privilege_notice(&self, notice: uqa_sql::SQLNotice) {

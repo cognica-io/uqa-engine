@@ -25,10 +25,7 @@ impl ColumnIdentity {
         )?)
     }
 
-    pub(crate) fn clone_with_control(
-        &self,
-        control: &ProductionControl<'_>,
-    ) -> Result<Produced<Self>> {
+    pub fn clone_with_control(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>> {
         let column = control.reserve(self.column.len())?;
         let qualifier = control.reserve(self.qualifier.as_ref().map_or(0, |name| name.len()))?;
         Ok(control.finish(

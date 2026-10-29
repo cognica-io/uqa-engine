@@ -35,6 +35,9 @@ use super::{
 };
 use pg_query::protobuf::SelectStmt;
 
+mod production;
+pub use production::parse_statements_with_control;
+
 /// A syntactically valid statement retaining its exact source slice. Compilation is separate so an execution boundary can analyze statements in order after preceding commands have completed.
 #[derive(Debug, Clone)]
 pub struct ParsedStatement<'sql> {
@@ -83,38 +86,13 @@ impl<'sql> ParsedStatement<'sql> {
 
 /// Parse an entire SQL message before exposing any statement for execution. `PostgreSQL` syntax errors reject the whole message; semantic compilation errors can be surfaced later, at the affected statement's boundary.
 pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement<'_>>> {
-    let parsed = crate::parser::parse(sql)?;
-    let mut out = Vec::with_capacity(parsed.protobuf.stmts.len());
-    let positions = std::sync::Arc::new(super::source_positions::SourcePositions::new(sql));
-    for raw in parsed.protobuf.stmts {
-        let node = raw
-            .stmt
-            .ok_or_else(|| SQLError::Internal("parser returned an empty statement".into()))?;
-        let start = usize::try_from(raw.stmt_location).map_err(|_| {
-            SQLError::Internal("parser returned a negative statement offset".into())
-        })?;
-        let end = if raw.stmt_len == 0 {
-            sql.len()
-        } else {
-            let len = usize::try_from(raw.stmt_len).map_err(|_| {
-                SQLError::Internal("parser returned a negative statement length".into())
-            })?;
-            start
-                .checked_add(len)
-                .ok_or_else(|| SQLError::Internal("parser statement offset overflow".into()))?
-        };
-        let source = sql.get(start..end).ok_or_else(|| {
-            SQLError::Internal("parser statement bounds do not match SQL text".into())
-        })?;
-        out.push(ParsedStatement {
-            sql: source,
-            message: sql,
-            positions: std::sync::Arc::clone(&positions),
-            node,
-            settings: crate::parser::settings(),
-        });
-    }
-    Ok(out)
+    parse_statements_with_control(sql, &uqa_core::memory::ProductionControl::uncontrolled()).map(
+        |statements| {
+            statements
+                .into_uncontrolled()
+                .expect("ordinary parsed statements")
+        },
+    )
 }
 
 pub fn compile(sql: &str) -> Result<Vec<Statement>> {

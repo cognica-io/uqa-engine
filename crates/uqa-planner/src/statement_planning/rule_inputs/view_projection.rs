@@ -9,6 +9,8 @@
 use super::{prune_captured_inputs, RuleInputPlanningContext};
 use crate::{optimizer::OptimizerConfig, CommandPlan, RelationalPlan, SourcePlan, UnifiedPlan};
 use uqa_sql::SQLError;
+mod owned;
+pub(super) use owned::rewrite_owned;
 
 pub(super) fn rewrite(
     context: &RuleInputPlanningContext<'_>,

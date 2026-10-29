@@ -7,10 +7,13 @@
 //! First-use SQL analysis and executable variants, retained by their routine owner.
 
 use parking_lot::Mutex;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
+use uqa_core::memory::{MemoryReservation, OwnedMap, Produced, ProductionControl, ProductionVec};
 use uqa_sql::{
     prepared::{
-        definition::{analysis_is_current, PreparedDefinition, PreparedDefinitionContext},
+        definition::{
+            analysis_is_current_with_control, PreparedDefinition, PreparedDefinitionContext,
+        },
         entry::PreparedStatementPlan,
     },
     routines::SQLUserFunction,
@@ -37,19 +40,19 @@ impl SQLBodyIdentity {
 
 struct StatementInputs {
     position: usize,
-    parameter_types: Vec<ColumnType>,
+    parameter_types: Produced<Vec<ColumnType>>,
     statement: Arc<SQLRoutineStatement>,
 }
 
 struct RoutineInputs {
     version: u64,
-    statements: Vec<StatementInputs>,
+    statements: OwnedMap<usize, StatementInputs>,
 }
 
 /// Session-local analysis by routine revision, statement position and concrete input types.
 #[derive(Default)]
 pub struct SQLRoutineInputs {
-    routines: Mutex<BTreeMap<[u8; 16], RoutineInputs>>,
+    routines: Mutex<OwnedMap<[u8; 16], RoutineInputs>>,
 }
 
 pub struct SQLRoutineInputContext<'a> {
@@ -60,17 +63,23 @@ pub struct SQLRoutineInputContext<'a> {
 /// One successful input analysis owns its custom/generic history. Replacement
 /// analysis starts a new owner, so an older activation cannot republish its plan.
 pub struct SQLRoutineStatement {
-    pub definition: PreparedDefinition,
+    pub definition: PreparedDefinition<uqa_sql::plan::SharedExecutablePlan>,
     variants: super::super::plans::RoutinePlanVariants,
+    _memory: Option<MemoryReservation>,
 }
 
 impl SQLRoutineStatement {
-    fn new(definition: PreparedDefinition) -> Self {
+    fn new(
+        definition: PreparedDefinition<uqa_sql::plan::SharedExecutablePlan>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Arc<Self>, SQLError> {
+        let memory = control.reserve(size_of::<Self>())?;
         let variants = super::super::plans::RoutinePlanVariants::new(&definition);
-        Self {
+        Ok(Arc::new(Self {
             definition,
             variants,
-        }
+            _memory: memory,
+        }))
     }
 
     pub(super) fn select(
@@ -87,7 +96,7 @@ impl SQLRoutineStatement {
 impl SQLRoutineInputs {
     pub(crate) fn invalidate_execution_plans(&self) {
         for routine in self.routines.lock().values() {
-            for statement in &routine.statements {
+            for statement in routine.statements.values() {
                 statement.statement.variants.invalidate();
             }
         }
@@ -98,12 +107,12 @@ impl SQLRoutineInputs {
         affects: impl Fn(&uqa_sql::prepared::dependencies::PreparedAnalysisDependencies) -> bool,
     ) {
         let mut routines = self.routines.lock();
-        for routine in routines.values_mut() {
+        routines.retain(|_, routine| {
             routine
                 .statements
-                .retain(|statement| !affects(&statement.statement.definition.dependencies));
-        }
-        routines.retain(|_, routine| !routine.statements.is_empty());
+                .retain(|_, statement| !affects(&statement.statement.definition.dependencies));
+            !routine.statements.is_empty()
+        });
     }
 
     /// Publish only successful analysis and result validation, before execution.
@@ -116,50 +125,124 @@ impl SQLRoutineInputs {
         context: &PreparedDefinitionContext<'_>,
         prepare: impl FnOnce() -> Result<PreparedDefinition, SQLError>,
     ) -> Result<Arc<SQLRoutineStatement>, SQLError> {
+        self.statement_with_control(
+            identity,
+            position,
+            parameter_types,
+            context,
+            &ProductionControl::uncontrolled(),
+            || prepare().map(PreparedDefinition::into_shared),
+        )
+    }
+
+    pub fn statement_with_control(
+        &self,
+        identity: SQLBodyIdentity,
+        position: usize,
+        parameter_types: &[ColumnType],
+        context: &PreparedDefinitionContext<'_>,
+        control: &ProductionControl<'_>,
+        prepare: impl FnOnce() -> Result<
+            PreparedDefinition<uqa_sql::plan::SharedExecutablePlan>,
+            SQLError,
+        >,
+    ) -> Result<Arc<SQLRoutineStatement>, SQLError> {
+        control.check()?;
         let retained = self
             .routines
             .lock()
             .get(&identity.object)
             .filter(|routine| routine.version == identity.version)
             .and_then(|routine| {
-                routine.statements.iter().find(|statement| {
-                    statement.position == position && statement.parameter_types == parameter_types
+                routine.statements.values().find(|statement| {
+                    statement.position == position
+                        && statement.parameter_types.as_slice() == parameter_types
                 })
             })
             .map(|statement| Arc::clone(&statement.statement));
         if let Some(statement) = retained {
             let definition = &statement.definition;
-            if analysis_is_current(
+            if analysis_is_current_with_control(
                 context,
                 definition.effective_search_path.as_ref(),
                 &definition.dependencies,
                 definition.dependency_snapshot.as_ref(),
+                control,
             )? {
                 return Ok(statement);
             }
         }
-        let statement = Arc::new(SQLRoutineStatement::new(prepare()?));
-        let mut routines = self.routines.lock();
-        let routine = routines
-            .entry(identity.object)
-            .or_insert_with(|| RoutineInputs {
-                version: identity.version,
-                statements: Vec::new(),
-            });
-        if routine.version != identity.version {
-            routine.version = identity.version;
-            routine.statements.clear();
+        let statement = SQLRoutineStatement::new(prepare()?, control)?;
+        let mut types = ProductionVec::new(*control);
+        types.reserve(parameter_types.len())?;
+        for ty in parameter_types {
+            types.push_produced(ty.clone_with_control(control)?)?;
         }
-        routine.statements.retain(|statement| {
-            statement.position != position || statement.parameter_types != parameter_types
-        });
-        routine.statements.push(StatementInputs {
+        let input = StatementInputs {
             position,
-            parameter_types: parameter_types.to_vec(),
+            parameter_types: types.finish()?,
             statement: Arc::clone(&statement),
-        });
+        };
+        let mut routines = self.routines.lock();
+        if let Some(routine) = routines
+            .get_mut(&identity.object)
+            .filter(|routine| routine.version == identity.version)
+        {
+            let slot = routine
+                .statements
+                .iter()
+                .find(|(_, input)| {
+                    input.position == position
+                        && input.parameter_types.as_slice() == parameter_types
+                })
+                .map(|(slot, _)| *slot);
+            let slot = match slot {
+                Some(slot) => slot,
+                None => routine
+                    .statements
+                    .keys()
+                    .copied()
+                    .max()
+                    .map_or(Ok(0), |last| {
+                        last.checked_add(1).ok_or_else(|| {
+                            SQLError::Internal("SQL routine statement cache is full".into())
+                        })
+                    })?,
+            };
+            insert(&mut routine.statements, slot, input, control)?;
+        } else {
+            let mut selected = OwnedMap::new();
+            insert(&mut selected, 0, input, control)?;
+            insert(
+                &mut routines,
+                identity.object,
+                RoutineInputs {
+                    version: identity.version,
+                    statements: selected,
+                },
+                control,
+            )?;
+        }
         Ok(statement)
     }
+}
+
+fn insert<K: Ord, V>(
+    map: &mut OwnedMap<K, V>,
+    key: K,
+    value: V,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    match control.budget() {
+        Some(budget) => {
+            map.insert_budgeted(key, value, budget)?;
+        }
+        None => {
+            map.insert(key, value);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

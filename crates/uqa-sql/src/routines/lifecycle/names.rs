@@ -11,8 +11,8 @@ use crate::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_core::RelationIdentity;
 mod production;
 pub use production::{
-    require_routine_schema_usage_with_control, routine_lookup_keys_with_control,
-    routine_volatility_lookup_keys_with_control,
+    require_routine_schema_usage_with_control, routine_lookup_keys_for_analysis_with_control,
+    routine_lookup_keys_with_control, routine_volatility_lookup_keys_with_control,
 };
 
 /// Immutable routine address and declared input types, independent of invocation coercions.

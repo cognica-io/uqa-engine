@@ -116,3 +116,76 @@ fn default_returning_images_need_no_selected_collation_metadata() {
         assert_eq!(schema.qualified_collation(image, "number"), Some(0));
     }
 }
+
+#[test]
+fn owned_mutation_namespaces_keep_image_slots_collations_and_admission() {
+    use crate::semantics::{
+        mutation_clause_schema_with_control, returning_expression_schema_with_control,
+    };
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let target = returning_target_schema(&catalog(), "t").unwrap();
+    let aliases = ReturningAliases {
+        old: "prior".into(),
+        new: "next".into(),
+        old_explicit: true,
+        new_explicit: true,
+    };
+    let expected = returning_expression_schema(&target, "q", &aliases, None);
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(1 << 20);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let observed =
+        returning_expression_schema_with_control(&target, "q", &aliases, None, &control).unwrap();
+    assert_eq!(observed.columns(), expected.columns());
+    assert_eq!(observed.physical_width(), expected.physical_width());
+    for name in observed.columns() {
+        for qualifier in ["q", "prior", "next", "old", "new"] {
+            assert_eq!(
+                observed.qualified_slot(qualifier, name),
+                expected.qualified_slot(qualifier, name)
+            );
+            assert_eq!(
+                observed.qualified_type(qualifier, name),
+                expected.qualified_type(qualifier, name)
+            );
+            assert_eq!(
+                observed.qualified_collation(qualifier, name),
+                expected.qualified_collation(qualifier, name)
+            );
+        }
+    }
+    let clauses = mutation_clause_schema_with_control(&target, "q", None, &control).unwrap();
+    assert_eq!(clauses.qualified_collation("q", "p"), Some(951));
+    assert!(clauses.qualified_slot("new", "p").is_none());
+    assert!(clauses.qualified_slot("old", "p").is_none());
+    for position in target.len()..clauses.len() {
+        assert!(!clauses.wildcard_position_visible(position));
+    }
+    assert!(budget.used() > 0);
+    drop(observed);
+    drop(clauses);
+    assert_eq!(budget.used(), 0);
+    for cancel in 0..3 {
+        let budget = MemoryBudget::new(if cancel == 0 { 0 } else { 1 << 20 });
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel == 1 {
+            original.cancel();
+        }
+        if cancel == 2 {
+            invoking.cancel();
+        }
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        assert_eq!(
+            returning_expression_schema_with_control(&target, "q", &aliases, None, &control)
+                .err()
+                .unwrap()
+                .sqlstate(),
+            Some(if cancel == 0 { "53200" } else { "57014" })
+        );
+        assert_eq!(budget.used(), 0);
+    }
+}

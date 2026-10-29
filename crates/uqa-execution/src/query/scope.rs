@@ -12,6 +12,7 @@ use crate::row_locks::recheck::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{atomic::AtomicU64, Arc};
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::plan::QueryPlan;
@@ -21,6 +22,8 @@ pub(crate) mod binding;
 mod cte;
 mod definitions;
 mod producers;
+mod production;
+pub use production::{CteRowsIter, CteRowsMap};
 #[cfg(test)]
 mod retained_plans;
 mod row_locks;
@@ -31,10 +34,12 @@ pub use row_locks::{LockIdentityOptions, ResolvedRowLock};
 pub use statement_commands::StatementCommands;
 use subqueries::ScalarSubqueryCacheEntry;
 
+type ScalarSubqueryCache = parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>;
+
 #[derive(Clone)]
 pub struct CteScope<S: Clone = ()> {
     producers: producers::CteProducers,
-    pub rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
+    pub rows: CteRowsMap,
     deferred_ctes: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
     definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
     folded_ctes: BTreeSet<String>,
@@ -50,12 +55,11 @@ pub struct CteScope<S: Clone = ()> {
     read_command_overlay: bool,
     stream_command_progress: bool,
     scan_backwards: bool,
-    next_scalar_subquery_arena: Arc<AtomicU64>,
-    scalar_subquery_cache:
-        Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
+    next_scalar_subquery_arena: Arc<Produced<AtomicU64>>,
+    scalar_subquery_cache: Arc<Produced<ScalarSubqueryCache>>,
     catalog: Option<CatalogReadView>,
     catalog_revision: Option<(u64, u64)>,
-    catalog_resolution: Option<RelationNameResolution>,
+    catalog_resolution: Option<production::resolution::ScopeResolution>,
     privilege_subject: Option<RoleReference>,
     command_cte_snapshot: Option<Arc<S>>,
     /// The commands of the statement this scope belongs to, shared by every scope of the statement.
@@ -64,32 +68,8 @@ pub struct CteScope<S: Clone = ()> {
 
 impl<S: Clone> Default for CteScope<S> {
     fn default() -> Self {
-        Self {
-            producers: producers::CteProducers::default(),
-            rows: BTreeMap::new(),
-            deferred_ctes: BTreeMap::new(),
-            definition_scopes: BTreeMap::new(),
-            folded_ctes: BTreeSet::new(),
-            non_returning_ctes: BTreeSet::new(),
-            scalar_subqueries: Arc::default(),
-            source_outer_rewrites: None,
-            lock_identities: LockIdentityOptions::default(),
-            row_lock: None,
-            visible_cte_names: BTreeSet::new(),
-            recursive_control_widths: BTreeMap::new(),
-            scalar_subquery_arena: 0,
-            read_command_overlay: true,
-            stream_command_progress: false,
-            scan_backwards: false,
-            next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
-            scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
-            catalog: None,
-            catalog_revision: None,
-            catalog_resolution: None,
-            privilege_subject: None,
-            command_cte_snapshot: None,
-            statement_commands: None,
-        }
+        Self::empty_with_control(&ProductionControl::uncontrolled())
+            .expect("uncontrolled query scope construction")
     }
 }
 
@@ -102,7 +82,7 @@ impl<S: Clone> CteScope<S> {
     ) -> Self {
         Self {
             catalog: Some(catalog),
-            catalog_resolution: Some(resolution),
+            catalog_resolution: Some(resolution.into()),
             privilege_subject,
             ..Self::default()
         }
@@ -157,11 +137,14 @@ impl<S: Clone> CteScope<S> {
     }
 
     pub fn relation_name_resolution(&self) -> Result<RelationNameResolution, SQLError> {
-        self.catalog_resolution.clone().ok_or_else(|| {
-            SQLError::Internal(
-                "query execution scope has no statement name-resolution snapshot".into(),
-            )
-        })
+        self.catalog_resolution
+            .as_ref()
+            .map(production::resolution::ScopeResolution::snapshot)
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "query execution scope has no statement name-resolution snapshot".into(),
+                )
+            })
     }
 
     pub(crate) fn relation_lookup_mode(
@@ -169,7 +152,7 @@ impl<S: Clone> CteScope<S> {
     ) -> Option<uqa_sql::catalog::resolution::RelationLookupMode> {
         self.catalog_resolution
             .as_ref()
-            .map(|resolution| resolution.lookup_mode)
+            .map(production::resolution::ScopeResolution::lookup_mode)
     }
 
     pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
@@ -178,7 +161,7 @@ impl<S: Clone> CteScope<S> {
         }
         self.catalog_resolution
             .as_ref()
-            .map(RelationNameResolution::current_user)
+            .map(|resolution| resolution.current_user())
             .ok_or_else(|| {
                 SQLError::Internal(
                     "query execution scope has no statement authorization subject".into(),
@@ -207,13 +190,16 @@ mod tests {
         query.relation_privilege_subject = Some("caller".into());
         let mut scope = CteScope::<()>::new();
         scope.privilege_subject = Some("action_owner".into());
-        scope.catalog_resolution = Some(RelationNameResolution {
-            search_path: vec!["public".into()],
-            temporary_schema: "pg_temp_1".into(),
-            temporary_namespace_allocated: false,
-            current_user: "caller".into(),
-            lookup_mode: RelationLookupMode::Bound,
-        });
+        scope.catalog_resolution = Some(
+            RelationNameResolution {
+                search_path: vec!["public".into()],
+                temporary_schema: "pg_temp_1".into(),
+                temporary_namespace_allocated: false,
+                current_user: "caller".into(),
+                lookup_mode: RelationLookupMode::Bound,
+            }
+            .into(),
+        );
         let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let current = scope.enter_query_plan_scope(&query).unwrap();
             assert_eq!(current.privilege_subject().unwrap(), &"caller".into());

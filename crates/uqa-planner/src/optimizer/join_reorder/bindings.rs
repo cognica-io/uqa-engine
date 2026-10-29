@@ -65,19 +65,6 @@ impl PredicateAttachments {
         output: &super::Output,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
-        fn destination(tree: &crate::JoinPlan, relations: u64) -> u64 {
-            if relations != 0 {
-                for child in [tree.left.as_deref(), tree.right.as_deref()]
-                    .into_iter()
-                    .flatten()
-                {
-                    if child.left.is_some() && relations & !child.relations == 0 {
-                        return destination(child, relations);
-                    }
-                }
-            }
-            tree.relations
-        }
         for predicate in predicates.iter_mut() {
             predicate.relations = destination(selected, predicate.relations);
         }
@@ -176,4 +163,18 @@ impl PredicateAttachments {
             *on = Some(conjunction.publish(output));
         }
     }
+}
+
+pub(super) fn destination(tree: &crate::JoinPlan, relations: u64) -> u64 {
+    if relations != 0 {
+        for child in [tree.left.as_deref(), tree.right.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            if child.left.is_some() && relations & !child.relations == 0 {
+                return destination(child, relations);
+            }
+        }
+    }
+    tree.relations
 }

@@ -13,6 +13,9 @@ use uqa_core::{
     Value,
 };
 
+mod owned;
+pub(crate) use owned::rewrite_owned;
+
 /// Positions combined into the scalar-array comparison. An empty list selects only individual comparisons.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MembershipShape {

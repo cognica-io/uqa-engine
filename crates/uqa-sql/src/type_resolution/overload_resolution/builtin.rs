@@ -66,11 +66,11 @@ pub fn builtin_binding_matches(
     builtin: &BuiltinFunctionOverload,
     binding: &FunctionBinding,
 ) -> bool {
-    binding_matches(builtin, binding, &ProductionControl::uncontrolled())
+    builtin_binding_matches_with_control(builtin, binding, &ProductionControl::uncontrolled())
         .expect("ordinary binding matching cannot be cancelled or limited")
 }
 
-fn binding_matches(
+pub(crate) fn builtin_binding_matches_with_control(
     builtin: &BuiltinFunctionOverload,
     binding: &FunctionBinding,
     control: &ProductionControl<'_>,
@@ -232,7 +232,7 @@ fn select_call_with_control<'a>(
             return Err(bound_function_resolution_error(binding));
         }
         for builtin in builtins {
-            if binding_matches(builtin, binding, control)? {
+            if builtin_binding_matches_with_control(builtin, binding, control)? {
                 let matched = match_builtin(builtin, call, control)?
                     .ok_or_else(|| bound_function_resolution_error(binding))?;
                 return Ok(BorrowedMatch {

@@ -71,7 +71,12 @@ fn prune_members(
     required: &dyn Fn(usize) -> bool,
     context: OutputPruningContext<'_>,
 ) -> Result<(), SQLError> {
-    let pulled_up = pulled_up_member(query, context.routines, context.volatility);
+    let pulled_up = observation::pulled_up_member(
+        query,
+        context.routines,
+        context.volatility,
+        &context.production,
+    )?;
     match &mut query.root {
         RelationalPlan::SetOp { left, right, .. } => {
             prune_members(left, required, context)?;
@@ -85,98 +90,8 @@ fn prune_members(
     Ok(())
 }
 
-fn pulled_up_member(
-    query: &QueryPlan,
-    routines: Option<&dyn RoutineResolution>,
-    volatility: Option<&dyn VolatilityCatalog>,
-) -> Option<bool> {
-    let RelationalPlan::QueryBlock(block) = &query.root else {
-        return Some(false);
-    };
-    if !query.ctes.is_empty()
-        || block.r#where.is_some()
-        || matches!(block.from, Some(SourcePlan::Join { .. }))
-        || !matches!(block.compute, ComputePlan::Project)
-        || !block.group_by.is_empty()
-        || !block.grouping_sets.is_empty()
-        || block.having.is_some()
-        || !block.windows.is_empty()
-        || !block.order_by.is_empty()
-        || block.limit.is_some()
-        || block.offset.is_some()
-        || block.distinct
-        || !block.distinct_on.is_empty()
-        || !block.locking.is_empty()
-    {
-        return Some(false);
-    }
-    let mut effect = false;
-    let mut unknown = false;
-    for projection in &block.projections {
-        projection.expr.visit(&mut |part| {
-            let ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                ..
-            } = part
-            else {
-                return;
-            };
-            let builtin = uqa_sql::semantics::builtin_function_dispatch_name(name);
-            if let Some(function) = binding.as_ref().and_then(|binding| {
-                routines.and_then(|catalog| {
-                    uqa_sql::routines::selected_bound_function(catalog, binding)
-                })
-            }) {
-                effect |= function.def.returns_set()
-                    || function.def.volatility == FunctionVolatility::Volatile;
-            } else if routines.is_some_and(|catalog| {
-                catalog.has_registered_table_function(name)
-                    || catalog.has_registered_scalar_function(name)
-            }) {
-                effect |=
-                    routines.is_some_and(|catalog| catalog.has_registered_table_function(name));
-                if let Some(catalog) = volatility {
-                    effect |= uqa_sql::semantics::volatility::function_binding_is_volatile(
-                        catalog,
-                        name,
-                        binding.as_ref(),
-                        args.len(),
-                    );
-                } else {
-                    unknown = true;
-                }
-            } else if binding.as_ref().is_some_and(|binding| binding.builtin)
-                || (binding.is_none() && uqa_sql::is_fixed_builtin(&builtin))
-            {
-                effect |= uqa_sql::semantics::sets::validation::builtin_returns_set(&builtin)
-                    || uqa_sql::semantics::volatility::builtin_function_volatility(
-                        &builtin,
-                        binding.as_ref(),
-                        args.len(),
-                    ) == FunctionVolatility::Volatile;
-            } else {
-                unknown = true;
-            }
-        });
-    }
-    for query in &block.subqueries {
-        match volatility.map(|catalog| {
-            uqa_sql::semantics::volatility::query_contains_volatile_function(catalog, query)
-        }) {
-            Some(Ok(volatile)) => effect |= volatile,
-            _ => unknown = true,
-        }
-    }
-    if effect {
-        Some(false)
-    } else if unknown {
-        None
-    } else {
-        Some(true)
-    }
-}
+mod observation;
+pub(super) mod owned;
 
 #[cfg(test)]
 mod tests {
@@ -211,13 +126,16 @@ mod tests {
             vec!["count".into()],
             vec![Some(ColumnType::BigInteger)],
         ));
-        query.analyzed_source = Some(std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
-            schema: RowSchema::with_relation_qualifier(
-                &RowSchema::with_types(vec!["z".into()], vec![Some(ColumnType::BigInteger)]),
-                "q",
-            ),
-            children: None,
-        }));
+        query.analyzed_source = Some(
+            std::sync::Arc::new(uqa_sql::plan::AnalyzedSource {
+                schema: RowSchema::with_relation_qualifier(
+                    &RowSchema::with_types(vec!["z".into()], vec![Some(ColumnType::BigInteger)]),
+                    "q",
+                ),
+                children: None,
+            })
+            .into(),
+        );
         let crate::UnifiedPlan::Query(query) = super::super::optimize(
             plan,
             &super::super::OptimizerConfig::new(

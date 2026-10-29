@@ -14,6 +14,8 @@ pub use production::lookup_sql_routine_candidates_by_keys_with_control;
 use std::sync::Arc;
 pub use visibility::{
     bound_routine_volatility_with_control, routine_volatility_by_keys_with_control,
+    visible_function_returns_set_by_keys_with_control,
+    visible_function_setness_by_keys_with_control,
 };
 
 pub fn lookup_sql_functions_by_keys(

@@ -6,6 +6,7 @@
 
 //! Relation definition identity is independent of representation-only stored expression rewrites.
 
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,10 +17,20 @@ pub enum TablePublicationKind {
 }
 
 pub fn table_key(object: [u8; 16]) -> String {
-    format!(
+    table_key_with_control(object, &ProductionControl::uncontrolled())
+        .expect("ordinary definition key")
+        .into_uncontrolled()
+        .expect("ordinary definition key owner")
+}
+
+pub(super) fn table_key_with_control(
+    object: [u8; 16],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, uqa_core::ValueRetentionError> {
+    control.format(format_args!(
         "__uqa_prepared_table_definition_{:032x}",
         u128::from_be_bytes(object)
-    )
+    ))
 }
 
 /// Every definition publication gets a fresh record identity, even when its payload equals the previous definition. Missing legacy markers are a stable initial identity until the first real definition change.
@@ -37,10 +48,20 @@ pub fn remove_table(catalog: &dyn CatalogFacade, object: [u8; 16]) -> StorageBac
 }
 
 pub fn view_key(object: [u8; 16]) -> String {
-    format!(
+    view_key_with_control(object, &ProductionControl::uncontrolled())
+        .expect("ordinary definition key")
+        .into_uncontrolled()
+        .expect("ordinary definition key owner")
+}
+
+pub(super) fn view_key_with_control(
+    object: [u8; 16],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, uqa_core::ValueRetentionError> {
+    control.format(format_args!(
         "__uqa_prepared_view_definition_{:032x}",
         u128::from_be_bytes(object)
-    )
+    ))
 }
 
 pub fn publish_view(

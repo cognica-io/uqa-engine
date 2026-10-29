@@ -7,9 +7,10 @@
 use super::*;
 use crate::ast::{CompositeTypeReference, FunctionBinding};
 use crate::expr::composites::{CompositeAttribute, CompositeTypeCatalog, CompositeTypeDescriptor};
+use crate::ScalarExpr;
 use std::collections::BTreeMap;
-use std::sync::RwLock;
-use uqa_core::{ArrayValue, TemporalValue};
+use std::sync::{Arc, RwLock};
+use uqa_core::{ArrayValue, TemporalValue, Value};
 
 fn ty() -> ColumnType {
     ColumnType::Composite(CompositeTypeReference {
@@ -351,3 +352,5 @@ fn executable_field_projection_keeps_original_type_and_can_undo_descriptor_chang
     *types.0.write().unwrap() = original;
     assert!(inputs.project_logical(&plan, &types).unwrap().is_none());
 }
+
+mod ownership;

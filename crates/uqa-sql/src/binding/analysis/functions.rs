@@ -101,16 +101,6 @@ pub(super) fn validate_qualified_column(
     })
 }
 
-pub(super) fn single_pseudo_column_qualifier(schema: &RowSchema) -> Option<String> {
-    let mut qualifiers = schema_qualifiers(schema).into_iter().filter(|qualifier| {
-        schema.has_qualified_column(qualifier, "_doc_id")
-            && schema.has_qualified_column(qualifier, "_score")
-            && schema.has_qualified_column(qualifier, "tableoid")
-    });
-    let qualifier = qualifiers.next()?;
-    qualifiers.next().is_none().then_some(qualifier)
-}
-
 fn pseudo_column_qualifiers(schema: &RowSchema, column: &str) -> BTreeSet<String> {
     schema_qualifiers(schema)
         .into_iter()

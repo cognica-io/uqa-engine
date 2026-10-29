@@ -272,11 +272,11 @@ impl ViewPrivilegeCatalog for Catalog {
     ) -> Result<RoleReference, SQLError> {
         assert_eq!(identity.oid, 42);
         Ok(RoleReference::Bound(Arc::new(
-            crate::catalog::roles::identity::RoleBinding {
-                name: "owner".into(),
-                oid: 42,
-                object_id: identity.object_id,
-            },
+            crate::catalog::roles::identity::RoleBinding::new(
+                "owner".into(),
+                42,
+                identity.object_id,
+            ),
         )))
     }
     fn view_definition(&self, _: &str) -> Result<Option<StoredView>, SQLError> {

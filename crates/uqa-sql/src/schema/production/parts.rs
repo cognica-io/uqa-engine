@@ -30,7 +30,7 @@ pub(super) fn produce(
     debug_assert_eq!(columns.len(), identities.len());
     debug_assert_eq!(columns.len(), types.len());
     debug_assert_eq!(columns.len(), slots.len());
-    let indexes = indexes::produce(&columns, &identities, control)?;
+    let indexes = indexes::produce(&columns, &identities, &metadata, control)?;
     let identity_layout = physical_width == columns.len()
         && slots
             .iter()
@@ -66,15 +66,13 @@ pub(super) fn produce(
         wildcard_hidden,
         binding_only,
         open_qualifiers,
-        exact_unqualified_precedence,
-        extra_ambiguous_unqualified,
-        extra_ambiguous_qualified,
+        exact_unqualified_precedence: _,
+        extra_ambiguous_unqualified: _,
+        extra_ambiguous_qualified: _,
         local_width,
         lateral_restrictions,
+        memory: metadata_memory,
     } = metadata;
-    debug_assert!(!exact_unqualified_precedence);
-    debug_assert!(extra_ambiguous_unqualified.is_empty());
-    debug_assert!(extra_ambiguous_qualified.is_empty());
     let index = SchemaIndex {
         columns,
         identities,
@@ -103,7 +101,7 @@ pub(super) fn produce(
             local_width,
             lateral_restrictions,
         }),
-        _memory: SchemaMemory::new(memory),
+        _memory: SchemaMemory::new(control.combine(memory, metadata_memory.into_reservation())),
     };
     let schema = RowSchema {
         index: Arc::new(index),

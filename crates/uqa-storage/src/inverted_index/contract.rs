@@ -9,7 +9,7 @@ use super::{
     PostingList, StorageBackendError, StorageBackendResult,
 };
 use super::{IndexedFieldMetadata, TextIndexSource};
-use crate::clustered_postings::BudgetedPostingReadCursor;
+use crate::clustered_postings::{BudgetedPostingReadCursor, PostingReadCursor};
 use crate::clustered_postings::{
     MaterializedPostingCursor, OccurrencePosting, PostingCursor, PostingScore,
 };
@@ -244,6 +244,20 @@ pub trait InvertedIndex: Send + Sync {
 
     fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
         self.doc_freq(field, &term.to_term().into_string()?)
+    }
+
+    /// Count exact-term support through the provider's admitted cursor, retaining bounded encoded reads instead of a complete posting collection.
+    fn doc_freq_key_budgeted(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        control.check()?;
+        let cursor = self.posting_read_cursor_key_budgeted(field, term, control)?;
+        let frequency = cursor.doc_freq();
+        control.check()?;
+        Ok(frequency)
     }
 
     fn get_term_freq_key(
@@ -575,6 +589,17 @@ pub trait InvertedIndex: Send + Sync {
     /// total-length map. Backends with a richer schema can override.
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
         Ok(Vec::new())
+    }
+
+    /// Retain the complete field inventory and each copied name under the caller's allowance. Providers preserve the order of their ordinary field inventory and must not allocate it before admission.
+    fn field_names_budgeted(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<uqa_core::memory::BudgetedString>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled field inventory is not supported by this backend".into(),
+        ))
     }
 
     /// Posting list for `term` across every indexed field, unioned

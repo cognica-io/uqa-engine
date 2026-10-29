@@ -8,9 +8,10 @@
 
 mod binding;
 mod owned;
-pub(super) use owned::bind_owned_call;
 pub(super) use binding::bind_call;
 pub(crate) use binding::normalize_retained;
+pub(super) use owned::bind_owned_call;
+pub(crate) use owned::normalize_retained_owned;
 
 use super::{
     BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload, RoutineCallDescriptor,

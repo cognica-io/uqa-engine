@@ -22,13 +22,14 @@ use uqa_sql::{
 };
 
 pub(super) struct SQLStatements<'a> {
+    pub control: uqa_core::memory::ProductionControl<'a>,
     pub context: RoutineContext<'a>,
     pub types: &'a dyn RoutineTypeCatalog,
     pub overloads: &'a RoutineOverloadContext<'a>,
     pub params: &'a [SQLParam],
     pub parameters: Option<RoutineParameterScope>,
     pub identity: SQLBodyIdentity,
-    pub parameter_types: Vec<ColumnType>,
+    pub parameter_types: &'a [ColumnType],
     pub inputs: Option<SQLRoutineInputContext<'a>>,
 }
 
@@ -70,29 +71,31 @@ impl SQLStatements<'_> {
         let Some(inputs) = &self.inputs else {
             return self.bind(plan).map(SQLBodyPlan::Uncached);
         };
-        let analyzed = inputs.cache.statement(
+        let analyzed = inputs.cache.statement_with_control(
             self.identity,
             position,
-            &self.parameter_types,
+            self.parameter_types,
             &inputs.analysis,
+            &self.control,
             || {
-                let mut definition = uqa_sql::prepared::definition::analyze_definition(
+                uqa_sql::prepared::definition::analyze_routine_definition_owned(
                     &inputs.analysis,
-                    self.bind(plan)?,
-                    &self.parameter_types,
-                )?;
-                if let Some(check) = check {
-                    let result = definition
-                        .result_schema
-                        .clone()
-                        .map_or(AnalyzedResult::Command, AnalyzedResult::Schema);
-                    check(&result)?;
-                }
-                uqa_sql::routines::compilation::bind_analyzed_sql_body_types(
                     self.types,
-                    &mut definition.logical_plan,
-                )?;
-                Ok(definition)
+                    self.bind_owned(plan)?,
+                    self.parameter_types,
+                    &|schema| {
+                        if let Some(check) = check {
+                            check(
+                                &schema
+                                    .cloned()
+                                    .map_or(AnalyzedResult::Command, AnalyzedResult::Schema),
+                            )?;
+                        }
+                        Ok(())
+                    },
+                    &self.control,
+                )?
+                .into_shared_with_control(&self.control)
             },
         )?;
         if let Some(check) = check {
@@ -105,8 +108,63 @@ impl SQLStatements<'_> {
             )?;
         }
         analyzed
-            .select(|entry| self.context.statements.select_body_plan(entry, self.params))
+            .select(|entry| {
+                self.context
+                    .statements
+                    .select_body_plan(entry, self.params, &self.control)
+            })
             .map(SQLBodyPlan::Selected)
+    }
+
+    fn bind_owned(
+        &self,
+        plan: &UnifiedPlan,
+    ) -> Result<uqa_sql::plan::MutableExecutablePlan, SQLError> {
+        let mut statement = Some(plan.copy_for_rewrite(&self.control)?);
+        if let Some(parameters) = &self.parameters {
+            self.context.statements.with_statement_scope_with_control(
+                &self.control,
+                &mut |routines, binding| {
+                    let plan = statement.take().ok_or_else(|| {
+                        SQLError::Internal("routine binding scope ran twice".into())
+                    })?;
+                    statement = Some(uqa_sql::binding::bind_routine_parameter_references_owned(
+                        routines,
+                        plan,
+                        self.params,
+                        binding,
+                        parameters,
+                        &self.control,
+                    )?);
+                    Ok(())
+                },
+            )?;
+        }
+        let statement = statement.expect("routine parameter binding preserves its statement");
+        uqa_sql::routines::body_validation::reject_undefined_parameters_with_control(
+            statement.as_plan_ref(),
+            self.params.len(),
+            &self.control,
+        )?;
+        if let uqa_sql::plan::PlanRef::Command(CommandPlan::Call { name, args }) =
+            statement.as_plan_ref()
+        {
+            uqa_sql::routines::body_validation::reject_output_argument_call_with_control(
+                self.overloads,
+                self.types,
+                name,
+                args,
+                &mut |argument| {
+                    self.context.expressions.expression_type_with_control(
+                        argument,
+                        self.params,
+                        &self.control,
+                    )
+                },
+                &self.control,
+            )?;
+        }
+        Ok(statement)
     }
 
     fn bind(&self, plan: &UnifiedPlan) -> Result<UnifiedPlan, SQLError> {

@@ -37,40 +37,33 @@ pub const FOREIGN_CATALOGS: &[ForeignCatalogDescriptor] = &[
     },
 ];
 
-pub(super) fn schema(relation: VirtualRelation) -> Vec<(String, ColumnType)> {
+pub(super) fn visit_columns(
+    relation: VirtualRelation,
+    visit: &mut dyn FnMut(&'static str, fn() -> ColumnType),
+) {
     use ColumnType::{AclItem, Name, Oid, Text};
-    let array = |ty| ColumnType::Array(Box::new(ty));
-    let columns = match relation {
-        VirtualRelation::PgForeignDataWrapper => vec![
-            ("oid", Oid),
-            ("fdwname", Name),
-            ("fdwowner", Oid),
-            ("fdwhandler", Oid),
-            ("fdwvalidator", Oid),
-            ("fdwacl", array(AclItem)),
-            ("fdwoptions", array(Text)),
+    fn array(ty: ColumnType) -> ColumnType {
+        ColumnType::Array(Box::new(ty))
+    }
+    macro_rules! columns {
+        ($($name:literal => $ty:expr),* $(,)?) => {{ $(visit($name, || $ty);)* }};
+    }
+    match relation {
+        VirtualRelation::PgForeignDataWrapper => columns![
+            "oid" => Oid, "fdwname" => Name, "fdwowner" => Oid,
+            "fdwhandler" => Oid, "fdwvalidator" => Oid,
+            "fdwacl" => array(AclItem), "fdwoptions" => array(Text),
         ],
-        VirtualRelation::PgForeignServer => vec![
-            ("oid", Oid),
-            ("srvname", Name),
-            ("srvowner", Oid),
-            ("srvfdw", Oid),
-            ("srvtype", Text),
-            ("srvversion", Text),
-            ("srvacl", array(AclItem)),
-            ("srvoptions", array(Text)),
+        VirtualRelation::PgForeignServer => columns![
+            "oid" => Oid, "srvname" => Name, "srvowner" => Oid,
+            "srvfdw" => Oid, "srvtype" => Text, "srvversion" => Text,
+            "srvacl" => array(AclItem), "srvoptions" => array(Text),
         ],
-        VirtualRelation::PgForeignTable => vec![
-            ("ftrelid", Oid),
-            ("ftserver", Oid),
-            ("ftoptions", array(Text)),
+        VirtualRelation::PgForeignTable => columns![
+            "ftrelid" => Oid, "ftserver" => Oid, "ftoptions" => array(Text),
         ],
         _ => unreachable!("foreign catalog descriptor"),
-    };
-    columns
-        .into_iter()
-        .map(|(name, ty)| (name.into(), ty))
-        .collect()
+    }
 }
 
 #[cfg(test)]

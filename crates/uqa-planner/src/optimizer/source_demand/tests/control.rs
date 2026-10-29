@@ -30,10 +30,17 @@ fn wide_query(width: usize) -> UnifiedPlan {
     for (projection, name) in inner.projections.iter_mut().zip(&names) {
         projection.alias = Some(name.clone());
     }
-    query.analyzed_source = Some(Arc::new(AnalyzedSource {
-        schema: RowSchema::with_qualified_types("q", names, vec![Some(ColumnType::Integer); width]),
-        children: None,
-    }));
+    query.analyzed_source = Some(
+        Arc::new(AnalyzedSource {
+            schema: RowSchema::with_qualified_types(
+                "q",
+                names,
+                vec![Some(ColumnType::Integer); width],
+            ),
+            children: None,
+        })
+        .into(),
+    );
     UnifiedPlan::Query(query)
 }
 

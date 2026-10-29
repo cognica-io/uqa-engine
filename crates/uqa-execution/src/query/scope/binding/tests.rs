@@ -25,6 +25,7 @@ fn source_metadata_requires_the_same_catalog_and_namespace() {
         .catalog_resolution
         .as_mut()
         .unwrap()
+        .ordinary_mut()
         .search_path
         .insert(0, "other".into());
     assert!(!inputs.matches(&changed));
@@ -33,6 +34,7 @@ fn source_metadata_requires_the_same_catalog_and_namespace() {
         .catalog_resolution
         .as_mut()
         .unwrap()
+        .ordinary_mut()
         .temporary_namespace_allocated = true;
     assert!(!inputs.matches(&changed));
     let mut changed = scope.clone();
@@ -40,6 +42,7 @@ fn source_metadata_requires_the_same_catalog_and_namespace() {
         .catalog_resolution
         .as_mut()
         .unwrap()
+        .ordinary_mut()
         .temporary_schema
         .push_str("_other");
     assert!(!inputs.matches(&changed));

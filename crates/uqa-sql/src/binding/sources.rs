@@ -12,8 +12,8 @@ use crate::RowSchema;
 use crate::{SQLError, SQLParam};
 
 use super::{
-    analysis, operator_join_relation_schemas, projection::rename_schema, BindingContext,
-    ScalarExpr, SchemaScope, SourceScope,
+    operator_join_relation_schemas, projection::rename_schema, BindingContext, ScalarExpr,
+    SchemaScope, SourceScope,
 };
 use crate::routines::RoutineResolution;
 
@@ -152,9 +152,16 @@ pub fn bind_source_input_schema(
     )
 }
 
+mod pseudo_columns;
+pub use pseudo_columns::with_query_table_pseudo_columns_with_control;
+
 /// Add query-block pseudo columns after the complete source scope is known, so `_meta` is exposed only for one unambiguous local-table source and never shadows a real relation alias.
 pub fn with_query_table_pseudo_columns(schema: &RowSchema) -> RowSchema {
-    analysis::with_unqualified_table_pseudo_columns(schema)
+    with_query_table_pseudo_columns_with_control(
+        schema,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary pseudo-column schema")
 }
 
 /// Derive and validate one FROM source's exact row type without executing it.
@@ -220,7 +227,7 @@ impl SchemaScope {
         else {
             unreachable!("join inputs belong to a join source")
         };
-        let condition = scope.condition();
+        let condition = scope.condition_with_control(&self.control())?;
         let schema = self.bind_join_output_schema(JoinSchemaBinding {
             routines,
             kind: *kind,
@@ -236,7 +243,7 @@ impl SchemaScope {
             outer: condition.as_ref(),
         })?;
         Ok(if scope.retain_names {
-            SourceScope::describe_output(source, schema)
+            SourceScope::describe_output_with_control(source, schema, &self.control())?
         } else {
             schema
         })
@@ -282,11 +289,11 @@ impl SchemaScope {
         if let Some(previous) = previous {
             self.resolution.set_lookup_mode(previous);
         }
-        result.map(|schema| {
+        result.and_then(|schema| {
             if scope.retain_names {
-                SourceScope::describe_output(source, schema)
+                SourceScope::describe_output_with_control(source, schema, &self.control())
             } else {
-                schema
+                Ok(schema)
             }
         })
     }
@@ -322,7 +329,7 @@ impl SchemaScope {
             routines, source, subqueries, params, scope,
         )?;
         Ok(if scope.retain_names {
-            SourceScope::describe_output(source, schema)
+            SourceScope::describe_output_with_control(source, schema, &self.control())?
         } else {
             schema
         })
@@ -337,7 +344,8 @@ impl SchemaScope {
         scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
         let input = (!matches!(source, SourcePlan::Join { .. }))
-            .then(|| scope.input(source))
+            .then(|| scope.input_with_control(source, &self.control()))
+            .transpose()?
             .flatten();
         let outer = input.as_ref();
         match source {
@@ -361,7 +369,12 @@ impl SchemaScope {
                     params,
                     scope.with_names(),
                 )?;
-                let preceding = scope.right_namespace(left, &left_schema, *kind);
+                let preceding = scope.right_namespace_with_control(
+                    left,
+                    &left_schema,
+                    *kind,
+                    &self.control(),
+                )?;
                 let right_schema = self.bind_source_for_execution_in_scope(
                     routines,
                     right,
@@ -374,7 +387,7 @@ impl SchemaScope {
                         retain_names: true,
                     },
                 )?;
-                let condition = scope.condition();
+                let condition = scope.condition_with_control(&self.control())?;
                 return self.bind_join_output_schema(JoinSchemaBinding {
                     routines,
                     kind: *kind,

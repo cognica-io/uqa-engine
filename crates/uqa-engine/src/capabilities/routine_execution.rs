@@ -32,10 +32,23 @@ impl Engine {
             portals: self,
             session: self.routine_session_id(),
             runtime: self.query_runtime_view(),
+            planning: None,
         }
     }
 }
 impl RoutineValueContext for Engine {
+    fn catalog_column_type_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        uqa_execution::catalog::projection::resolve_catalog_column_type_with_control(
+            &self.catalog_execution(),
+            name,
+            control,
+        )
+    }
+
     fn catalog_column_type(&self, name: &str) -> Option<ColumnType> {
         uqa_execution::catalog::projection::resolve_catalog_column_type(
             &self.catalog_execution(),
@@ -44,6 +57,29 @@ impl RoutineValueContext for Engine {
     }
 }
 impl RoutineExpressions for Engine {
+    fn expression_type_with_control(
+        &self,
+        plan: &ExpressionPlan,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        let scope = super::query_scope::new_for_current_routine_with_control(self, control)?;
+        let mut binding =
+            uqa_execution::query::binding::binding_context_with_control(&scope, control)?;
+        binding.scalar_subqueries = &plan.subqueries;
+        let resolver = uqa_sql::binding::scoped_types::BindingTypeResolver {
+            routines: self,
+            scope: &binding,
+        };
+        let empty = uqa_sql::RowSchema::empty_with_control(control)?;
+        uqa_sql::type_resolution::scalar_type_with_resolver_and_control(
+            &plan.scalar,
+            &empty,
+            params,
+            Some(&resolver),
+            control,
+        )
+    }
     fn column_type_name(&self, name: &str) -> Result<ColumnType, SQLError> {
         uqa_execution::catalog::projection::resolve_catalog_column_type_name(
             &self.catalog_execution(),
@@ -83,6 +119,27 @@ impl RoutineExpressions for Engine {
     }
 }
 impl RoutineStatements for Engine {
+    fn with_statement_scope_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        analyze: uqa_execution::routines::context::ControlledStatementScopeOperation<'_>,
+    ) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_current_routine_with_control(self, control)?;
+        analyze(
+            self,
+            uqa_execution::query::binding::binding_context_with_control(&scope, control)?,
+        )
+    }
+    fn planning_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        let retained = self.query_retention_control()?;
+        Ok(uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            &self.runtime.cancellation,
+        )
+        .capture())
+    }
+
     fn body_input_context(
         &self,
     ) -> Option<uqa_execution::routines::sql_body::inputs::SQLRoutineInputContext<'_>> {
@@ -98,10 +155,12 @@ impl RoutineStatements for Engine {
         &self,
         definition: &uqa_sql::ast::CreateFunction,
         parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
-    ) -> std::sync::Arc<uqa_execution::routines::preparation::PLpgSQLPreparations> {
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<std::sync::Arc<uqa_execution::routines::preparation::PLpgSQLPreparations>, SQLError>
+    {
         self.session
             .routine_bodies
-            .plpgsql_preparations(definition, parsed)
+            .plpgsql_preparations(definition, parsed, control)
     }
     fn analyze_static_plan(
         &self,
@@ -114,6 +173,21 @@ impl RoutineStatements for Engine {
             self,
             plan,
             parameters,
+        )
+    }
+    fn analyze_static_plan_owned(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        parameters: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::statements::OwnedProceduralPlanAnalysis, SQLError> {
+        uqa_sql::binding::statements::analyze_procedural_plan_owned(
+            &self.statement_planning_context().analysis,
+            &uqa_sql::routines::resolution::RoutineOverloadContext { catalog: self },
+            self,
+            plan,
+            parameters,
+            control,
         )
     }
     fn parser_settings(&self) -> uqa_sql::parser::ParserSettings {
@@ -138,9 +212,10 @@ impl RoutineStatements for Engine {
         &self,
         entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
         params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError> {
         let _statement_thread = self.statement_thread_context().enter();
-        uqa_planner::statement_planning::prepared::selection::select_analyzed_entry(
+        uqa_planner::statement_planning::prepared::selection::select_analyzed_entry_with_control(
             &uqa_planner::statement_planning::prepared::selection::PreparedPlanningContext {
                 session: self,
                 analysis: self.prepared_definition_context(),
@@ -148,15 +223,17 @@ impl RoutineStatements for Engine {
             },
             entry,
             params,
+            control,
         )
     }
     fn select_simple_expression_plan(
         &self,
         entry: &uqa_sql::prepared::entry::PreparedStatementPlan,
         params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<uqa_sql::prepared::planning::PreparedPlanSelection, SQLError> {
         let _statement_thread = self.statement_thread_context().enter();
-        uqa_planner::statement_planning::prepared::selection::select_simple_expression_entry(
+        uqa_planner::statement_planning::prepared::selection::select_simple_expression_entry_with_control(
             &uqa_planner::statement_planning::prepared::selection::PreparedPlanningContext {
                 session: self,
                 analysis: self.prepared_definition_context(),
@@ -164,6 +241,7 @@ impl RoutineStatements for Engine {
             },
             entry,
             params,
+            control,
         )
     }
     fn execute_selected_body_plan(
@@ -203,6 +281,18 @@ impl RoutineStatements for Engine {
             &self.statement_planning_context(),
             plan,
         )
+    }
+    fn optimize_owned_plan(
+        &self,
+        plan: uqa_sql::plan::MutableExecutablePlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
+        uqa_planner::statement_planning::executable::optimize_owned_with_control(
+            &self.statement_planning_context(),
+            plan,
+            control,
+        )?
+        .into_shared(control)
     }
     fn assertions_enabled(&self) -> bool {
         self.plpgsql_asserts_enabled()

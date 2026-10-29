@@ -63,10 +63,13 @@ fn payload_query(size: usize) -> QueryPlan {
         vec!["value".into()],
         vec![Some(crate::ColumnType::Text)],
     ));
-    query.analyzed_source = Some(Arc::new(AnalyzedSource {
-        schema: RowSchema::default(),
-        children: None,
-    }));
+    query.analyzed_source = Some(
+        Arc::new(AnalyzedSource {
+            schema: RowSchema::default(),
+            children: None,
+        })
+        .into(),
+    );
     *query
 }
 
@@ -103,7 +106,7 @@ fn borrowed_query_copy_admits_one_executable_destination() {
         serde_json::to_value(destination.as_ref()).unwrap(),
         serde_json::to_value(&query).unwrap()
     );
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(crate::plan::SharedAnalyzedSource::shares_storage(
         destination.analyzed_source.as_ref().unwrap(),
         query.analyzed_source.as_ref().unwrap()
     ));
@@ -131,7 +134,7 @@ fn executable_payload_copies_admit_actual_destinations_and_release_every_failure
         let required = copied.reserved_bytes();
         assert!(required >= size);
         assert_eq!(budget.used(), required);
-        assert!(Arc::ptr_eq(
+        assert!(crate::plan::SharedAnalyzedSource::shares_storage(
             source.analyzed_source.as_ref().unwrap(),
             copied.analyzed_source.as_ref().unwrap()
         ));

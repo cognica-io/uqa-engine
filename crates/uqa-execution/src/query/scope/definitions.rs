@@ -13,7 +13,7 @@ use uqa_sql::plan::CtePlan;
 
 #[derive(Default)]
 pub(super) struct DefinitionBindings {
-    rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
+    rows: super::CteRowsMap,
     deferred: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
     definitions: BTreeMap<String, Arc<Self>>,
     non_returning: BTreeSet<String>,

@@ -6,21 +6,24 @@
 
 //! Keep call selection separate from input coercion so modifiers precede input effects.
 
+use super::ownership::{AnalysisType, AnalysisVec};
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionBinding};
 use crate::catalog::collations::{derivation::Derivation, CollationSelection};
 use crate::semantics::sets::placement::SetPlacement;
 use crate::type_resolution::ResolvedFunctionOverload;
+use uqa_core::memory::{OwnedProductionControl, Produced, ProductionVec};
 
 pub(super) struct ObservedFunctionArguments {
-    pub(super) values: Vec<ExpressionType>,
-    pub(super) names: Vec<Option<String>>,
+    pub(super) values: AnalysisVec<ExpressionType>,
+    pub(super) names: Produced<Vec<Option<String>>>,
     pub(super) variadic: bool,
+    control: OwnedProductionControl,
 }
 
 pub(super) struct ObservedFunctionModifiers {
     pub(super) diagnostics: Derivation,
-    order_types: Vec<Option<ColumnType>>,
+    order_types: AnalysisVec<Option<AnalysisType>>,
 }
 
 impl ObservedFunctionArguments {
@@ -28,12 +31,12 @@ impl ObservedFunctionArguments {
         if !binding.builtin {
             return;
         }
-        let [argument] = self.values.as_slice() else {
+        let [argument] = &self.values[..] else {
             return;
         };
         if binding.name == "pg_catalog.pg_typeof" {
             binding.dispatch = Some(crate::ast::FunctionDispatch::TypeOf {
-                type_oid: argument.ty.as_ref().map_or(705, |ty| {
+                type_oid: argument.ty.as_deref().map_or(705, |ty| {
                     u32::try_from(crate::catalog::type_metadata::pg_type_oid(ty))
                         .expect("catalog type identity")
                 }),
@@ -43,7 +46,7 @@ impl ObservedFunctionArguments {
         if binding.name != "pg_catalog.pg_collation_for" {
             return;
         }
-        let noncollatable_type_oid = argument.ty.as_ref().and_then(|ty| {
+        let noncollatable_type_oid = argument.ty.as_deref().and_then(|ty| {
             (crate::catalog::type_metadata::pg_type_collation_oid(ty) == 0).then(|| {
                 u32::try_from(crate::catalog::type_metadata::pg_type_oid(ty))
                     .expect("catalog type identity")
@@ -55,8 +58,21 @@ impl ObservedFunctionArguments {
         });
     }
 
-    pub(super) fn types(&self) -> Vec<Option<ColumnType>> {
-        self.values.iter().map(|value| value.ty.clone()).collect()
+    pub(super) fn types(&self) -> Result<Produced<Vec<Option<ColumnType>>>, SQLError> {
+        let control = self.control.control();
+        let mut output = ProductionVec::new(control);
+        output.reserve(self.values.len())?;
+        for value in &self.values {
+            let (ty, memory) = match value.ty.as_deref() {
+                Some(ty) => {
+                    let (ty, memory) = ty.clone_with_control(&control)?.into_parts();
+                    (Some(ty), memory)
+                }
+                None => (None, control.empty_reservation()),
+            };
+            output.push_produced(control.finish(ty, memory)?)?;
+        }
+        Ok(output.finish()?)
     }
 
     /// `PostgreSQL`'s `inputcollid` for these coerced arguments, as `assign_collations_walker` merges the call's children: an explicit collation wins, a non-default implicit collation beats the default, and conflicting implicit collations leave zero. A collatable argument without a collation also leaves zero. A WITHIN GROUP call merges its direct arguments, and its aggregated argument only when it is the only one; a hypothetical-set call merges none of its paired arguments. `None` records that no argument is collatable.
@@ -90,7 +106,7 @@ impl ObservedFunctionArguments {
             .any(|value| {
                 value
                     .ty
-                    .as_ref()
+                    .as_deref()
                     .is_some_and(crate::schema::composites::type_is_collatable)
             })
             .then_some(CollationSelection::INDETERMINATE))
@@ -98,7 +114,7 @@ impl ObservedFunctionArguments {
 
     pub(super) fn into_collated_result(
         mut self,
-        ty: Option<ColumnType>,
+        ty: Option<AnalysisType>,
         binding: Option<&FunctionBinding>,
         additional: Derivation,
         distinct: bool,
@@ -114,12 +130,45 @@ impl ObservedFunctionArguments {
 }
 
 pub(super) struct SelectedFunctionArguments {
-    pub(super) overload: Option<ResolvedFunctionOverload>,
-    positions: Option<Vec<usize>>,
+    pub(super) overload: Option<Produced<ResolvedFunctionOverload>>,
+    positions: Option<Produced<Vec<usize>>>,
     pub(super) kind: Option<super::super::ordered_calls::Kind>,
 }
 
 impl SelectedFunctionArguments {
+    pub(super) fn validate_call_modifiers(
+        &self,
+        expression: &ScalarExpr,
+        within_group: bool,
+        arguments: &ObservedFunctionArguments,
+    ) -> Result<(), SQLError> {
+        let ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            order_by,
+            distinct,
+            filter,
+            ..
+        } = expression
+        else {
+            unreachable!("function modifier scope");
+        };
+        self.validate_modifiers(
+            name,
+            binding.as_ref(),
+            args,
+            super::super::ordered_calls::Modifiers {
+                direct: super::super::ordered_calls::DirectArguments::from(args.as_slice()),
+                ordered: order_by.len(),
+                within_group,
+                distinct: *distinct,
+                filtered: filter.is_some(),
+            },
+            arguments,
+        )
+    }
+
     pub(super) fn validate_modifiers(
         &self,
         name: &str,
@@ -128,18 +177,13 @@ impl SelectedFunctionArguments {
         modifiers: super::super::ordered_calls::Modifiers,
         arguments: &ObservedFunctionArguments,
     ) -> Result<(), SQLError> {
+        let types = arguments.types()?;
         let kind = self.kind.or(self
             .overload
             .as_ref()
             .map(|_| super::super::ordered_calls::Kind::Ordinary));
         kind.map_or(Ok(()), |kind| {
-            super::super::ordered_calls::validate(
-                name,
-                kind,
-                modifiers,
-                &arguments.names,
-                &arguments.types(),
-            )
+            super::super::ordered_calls::validate(name, kind, modifiers, &arguments.names, &types)
         })?;
         super::super::ordered_calls::validate_builtin_aggregate_arguments(
             name,
@@ -153,7 +197,7 @@ impl SelectedFunctionArguments {
                     "42883",
                     name,
                     &arguments.names,
-                    &arguments.types(),
+                    &types,
                     "does not exist",
                 )
             },
@@ -163,8 +207,8 @@ impl SelectedFunctionArguments {
 
 pub(super) enum FunctionResult {
     /// The original argument analysis selected a result, including a deferred UQA result.
-    Selected(Option<ColumnType>),
-    Bound(ColumnType, Box<FunctionBinding>),
+    Selected(Option<AnalysisType>),
+    Bound(AnalysisType, Produced<FunctionBinding>),
     Unselected,
 }
 
@@ -179,28 +223,38 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ObservedFunctionArguments, SQLError> {
-        let arguments = crate::scalar_call_arguments(args)?;
-        let mut values = Vec::new();
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let arguments = crate::ir::scalar_call_arguments_with_control(args, &control)?;
+        let mut values = AnalysisVec::new(&control);
+        values.reserve(arguments.len() + ordered.len(), &control)?;
+        let mut names = ProductionVec::new(control);
+        names.reserve(arguments.len() + ordered.len())?;
         for (index, argument) in arguments.iter().enumerate() {
             let value = if crate::semantics::is_semantic_field_argument(name, args, index)? {
                 ExpressionType::resolved(Some(ColumnType::Text))
             } else {
                 self.expression(argument.value, input, subqueries)?
             };
-            values.push(value);
+            values.push(value, &control)?;
+            let (name, memory) = match argument.name {
+                Some(name) => {
+                    let (name, memory) = control.copy_text(name)?.into_parts();
+                    (Some(name), memory)
+                }
+                None => (None, control.empty_reservation()),
+            };
+            names.push_produced(control.finish(name, memory)?)?;
         }
-        let mut names = arguments
-            .iter()
-            .map(|argument| argument.name.map(str::to_string))
-            .collect::<Vec<_>>();
         for order in ordered {
-            values.push(self.expression(&order.expr, input, subqueries)?);
-            names.push(None);
+            values.push(self.expression(&order.expr, input, subqueries)?, &control)?;
+            names.push_produced(control.finish(None, control.empty_reservation())?)?;
         }
         Ok(ObservedFunctionArguments {
             values,
-            names,
+            names: names.finish()?,
             variadic: arguments.iter().any(|argument| argument.explicit_variadic),
+            control: owner,
         })
     }
 
@@ -211,14 +265,18 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         arguments: &ObservedFunctionArguments,
     ) -> Result<SelectedFunctionArguments, SQLError> {
-        if binding.is_none() && self.routines.has_untyped_function(name) {
+        if binding.is_none()
+            && self
+                .routines
+                .has_untyped_function_with_control(name, &self.scope.control())?
+        {
             return Ok(SelectedFunctionArguments {
                 overload: None,
                 positions: None,
                 kind: None,
             });
         }
-        let types = arguments.types();
+        let types = arguments.types()?;
         let mut kind = None;
         let (overload, positions) = if matches!(
             binding.and_then(|binding| binding.dispatch),
@@ -242,50 +300,50 @@ impl Preparation<'_> {
                 explicit_variadic: arguments.variadic,
             },
             Some(self.routines),
-            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &self.scope.control(),
         )? {
-            (
-                Some(
-                    selected
-                        .into_uncontrolled()
-                        .expect("ordinary routine selection has no reservation"),
-                ),
-                None,
-            )
-        } else if let Some(fixed) = crate::resolve_fixed_builtin_call(
+            (Some(selected), None)
+        } else if let Some(fixed) = crate::type_resolution::resolve_fixed_builtin_call_with_control(
             name,
             binding,
             &arguments.names,
             &types,
             arguments.variadic,
             Some(self.routines),
+            &self.scope.control(),
         )? {
             (Some(fixed.selected), fixed.builtin_argument_positions)
-        } else if let Some(array) = crate::type_resolution::resolve_array_transform_call(
-            name,
-            binding,
-            args,
-            &types,
-            &self.parameters.values(),
-            arguments.variadic,
-            self.routines,
-        )? {
+        } else if let Some(array) =
+            crate::type_resolution::resolve_array_transform_call_with_control(
+                name,
+                binding,
+                crate::type_resolution::ArrayTransformArguments {
+                    expressions: args,
+                    types: &types,
+                    parameters: &self.parameters.values()?,
+                    explicit_variadic: arguments.variadic,
+                },
+                self.routines,
+                &self.scope.control(),
+            )?
+        {
             kind = Some(super::super::ordered_calls::Kind::Ordinary);
             (array.overload, array.builtin_argument_positions)
         } else {
             (
-                self.routines.resolve_function_overload(
+                self.routines.resolve_function_overload_with_control(
                     name,
                     binding,
                     &arguments.names,
                     &types,
                     arguments.variadic,
+                    &self.scope.control(),
                 )?,
                 None,
             )
         };
         if let Some(selected) = &overload {
-            self.scope.record_routine_dependency(&selected.binding);
+            self.scope.record_routine_dependency(&selected.binding)?;
         }
         Ok(SelectedFunctionArguments {
             overload,
@@ -302,32 +360,32 @@ impl Preparation<'_> {
         ordered: &[crate::ScalarOrder],
         arguments: &ObservedFunctionArguments,
     ) -> Result<SelectedFunctionArguments, SQLError> {
-        if let Some((selected, kind)) = super::super::ordered_calls::resolve(
+        if let Some((selected, kind)) = super::super::ordered_calls::resolve_with_control(
             name,
             binding,
             &arguments.names,
-            &arguments.types(),
+            &arguments.types()?,
             arguments.variadic,
             self.routines,
+            &self.scope.control(),
         )? {
-            self.scope.record_routine_dependency(&selected.binding);
+            self.scope.record_routine_dependency(&selected.binding)?;
             Ok(SelectedFunctionArguments {
                 overload: Some(selected),
                 positions: None,
                 kind: Some(kind),
             })
+        } else if ordered.is_empty() {
+            self.select_function_arguments(name, binding, args, arguments)
         } else {
-            let args = if ordered.is_empty() {
-                std::borrow::Cow::Borrowed(args)
-            } else {
-                std::borrow::Cow::Owned(
-                    args.iter()
-                        .chain(ordered.iter().map(|order| &order.expr))
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                )
-            };
-            self.select_function_arguments(name, binding, &args, arguments)
+            let control = self.scope.control();
+            let mut combined = ProductionVec::new(control);
+            combined.reserve(args.len() + ordered.len())?;
+            for argument in args.iter().chain(ordered.iter().map(|order| &order.expr)) {
+                combined.push_produced(argument.copy_for_rewrite(&control)?.finish(&control)?)?;
+            }
+            let combined = combined.finish()?;
+            self.select_function_arguments(name, binding, &combined, arguments)
         }
     }
 
@@ -336,7 +394,7 @@ impl Preparation<'_> {
         dispatch: crate::ast::FunctionDispatch,
         arguments: &mut ObservedFunctionArguments,
     ) -> Result<FunctionResult, SQLError> {
-        let types = arguments.types();
+        let types = arguments.types()?;
         if let Some(crate::ast::FunctionDispatch::PatternEscape { similar }) = Some(dispatch) {
             if !(1..=2).contains(&types.len()) {
                 return Err(SQLError::Internal("invalid pattern escape operands".into()));
@@ -351,16 +409,15 @@ impl Preparation<'_> {
             let selected = crate::type_resolution::pattern::select_escape(
                 similar,
                 &inputs[..types.len()],
-                &uqa_core::memory::ProductionControl::uncontrolled(),
+                &self.scope.control(),
             )?;
             for value in &mut arguments.values {
                 self.parameters.coerce_unknown(value, &selected)?;
             }
-            return Ok(FunctionResult::Selected(Some(
-                selected
-                    .into_uncontrolled()
-                    .expect("ordinary pattern helper selection"),
-            )));
+            return Ok(FunctionResult::Selected(Some(AnalysisType::from_produced(
+                selected,
+                &self.scope.control(),
+            )?)));
         }
         if let Some(crate::ast::FunctionDispatch::Pattern { operator, .. }) = Some(dispatch) {
             if arguments.values.iter().any(ExpressionType::is_deferred) {
@@ -379,13 +436,15 @@ impl Preparation<'_> {
             let selected = crate::type_resolution::pattern::select(
                 operator,
                 &inputs[..types.len()],
-                &uqa_core::memory::ProductionControl::uncontrolled(),
+                &self.scope.control(),
             )?;
             for (position, value) in arguments.values.iter_mut().enumerate() {
                 self.parameters
                     .coerce_unknown(value, selected.argument(position))?;
             }
-            return Ok(FunctionResult::Selected(Some(ColumnType::Boolean)));
+            return Ok(FunctionResult::Selected(Some(AnalysisType::Inline(
+                ColumnType::Boolean,
+            ))));
         }
         unreachable!("only native pattern dispatches enter pattern argument coercion")
     }
@@ -398,7 +457,11 @@ impl Preparation<'_> {
         arguments: &mut ObservedFunctionArguments,
         selection: &SelectedFunctionArguments,
     ) -> Result<FunctionResult, SQLError> {
-        if binding.is_none() && self.routines.has_untyped_function(name) {
+        if binding.is_none()
+            && self
+                .routines
+                .has_untyped_function_with_control(name, &self.scope.control())?
+        {
             return Ok(FunctionResult::Selected(None));
         }
         if matches!(
@@ -406,13 +469,15 @@ impl Preparation<'_> {
             Some(crate::ast::FunctionDispatch::IsDistinct)
         ) && matches!(original_args, [ScalarExpr::Row(_), ScalarExpr::Row(_)])
         {
-            let [left, right] = arguments.values.as_mut_slice() else {
+            let [left, right] = &mut arguments.values[..] else {
                 return Err(SQLError::Internal(
                     "ROW DISTINCT analysis lost its arguments".into(),
                 ));
             };
             self.coerce_row_comparison(BinaryOp::Equal, left, right, true)?;
-            return Ok(FunctionResult::Selected(Some(ColumnType::Boolean)));
+            return Ok(FunctionResult::Selected(Some(AnalysisType::Inline(
+                ColumnType::Boolean,
+            ))));
         }
         if let Some(
             dispatch @ (crate::ast::FunctionDispatch::Pattern { .. }
@@ -427,19 +492,26 @@ impl Preparation<'_> {
         {
             return self.coerce_concatenation_arguments(arguments);
         }
-        let types = arguments.types();
+        let types = arguments.types()?;
         if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)
         {
-            let selected = crate::type_resolution::numeric_operator_types(operator, &types)?;
+            let selected = crate::type_resolution::numeric_operator_types_with_control(
+                operator,
+                &types,
+                &self.scope.control(),
+            )?;
             for (value, target) in arguments.values.iter_mut().zip(&selected.arguments) {
                 self.parameters.coerce_unknown(value, target)?;
             }
-            return Ok(FunctionResult::Selected(Some(selected.result)));
+            return Ok(FunctionResult::Selected(Some(AnalysisType::from_produced(
+                selected.result.clone_with_control(&self.scope.control())?,
+                &self.scope.control(),
+            )?)));
         }
         if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
             if name == "nullif" {
-                if let [left, right] = arguments.values.as_mut_slice() {
+                if let [left, right] = &mut arguments.values[..] {
                     let original = left.ty.clone();
                     let deferred = left.is_deferred() || right.is_deferred();
                     let [selected, _, _] = self.binary_types(BinaryOp::Equal, left, right)?;
@@ -481,29 +553,24 @@ impl Preparation<'_> {
         &mut self,
         arguments: &mut ObservedFunctionArguments,
     ) -> Result<FunctionResult, SQLError> {
-        let types = arguments.types();
+        let types = arguments.types()?;
         let [left, right] = types.as_slice() else {
             return Err(SQLError::Internal("invalid concatenation operands".into()));
         };
         if arguments.values.iter().any(ExpressionType::is_deferred) {
             return Ok(FunctionResult::Selected(None));
         }
-        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        let owner = self.scope.control().capture();
+        let control = owner.control();
         let selected =
             crate::type_resolution::concatenation::select(left.as_ref(), right.as_ref(), &control)?;
         for (position, value) in arguments.values.iter_mut().enumerate() {
             self.parameters
                 .coerce_unknown(value, selected.argument(position))?;
         }
-        let binding = selected
-            .binding(&control)?
-            .into_uncontrolled()
-            .expect("ordinary concatenation binding");
-        let result = selected
-            .into_result(&control)?
-            .into_uncontrolled()
-            .expect("ordinary concatenation selection");
-        Ok(FunctionResult::Bound(result, Box::new(binding)))
+        let binding = selected.binding(&control)?;
+        let result = AnalysisType::from_produced(selected.into_result(&control)?, &control)?;
+        Ok(FunctionResult::Bound(result, binding))
     }
 
     /// Record `PostgreSQL`'s `inputcollid` on the binding the call keeps: its selected overload, its existing binding, or, for a regular-expression function without a registered signature, a built-in selected by name. Type and collation observers also keep the argument metadata they observe.
@@ -512,25 +579,34 @@ impl Preparation<'_> {
         expression: &ScalarExpr,
         arguments: &ObservedFunctionArguments,
         input_collation: Option<CollationSelection>,
-        selected: Option<&mut ResolvedFunctionOverload>,
-    ) {
+        selected: Option<Produced<ResolvedFunctionOverload>>,
+    ) -> Result<Option<Produced<ResolvedFunctionOverload>>, SQLError> {
         let ScalarExpr::Func { name, binding, .. } = expression else {
             unreachable!("function expression");
         };
-        if let Some(selected) = selected {
+        let control = self.scope.control();
+        let selected = if let Some(selected) = selected {
+            let (mut selected, memory) = selected.into_parts();
             selected.binding.input_collation = input_collation;
             arguments.retain_argument_observer(&mut selected.binding);
-        } else if binding.is_none()
-            && crate::expr::binds_input_collation_by_name(name)
-            && !self.routines.has_untyped_function(name)
-        {
-            self.parameters.retain_builtin_selection(
-                expression,
-                FunctionBinding::builtin_by_name(name, input_collation),
-            );
-        }
+            Some(control.finish(selected, memory)?)
+        } else {
+            if binding.is_none()
+                && crate::expr::binds_input_collation_by_name(name)
+                && !self
+                    .routines
+                    .has_untyped_function_with_control(name, &control)?
+            {
+                let selected =
+                    FunctionBinding::builtin_by_name_with_control(name, input_collation, &control)?;
+                self.parameters
+                    .retain_builtin_selection(expression, selected)?;
+            }
+            None
+        };
         self.parameters
-            .retain_input_collation(expression, input_collation);
+            .retain_input_collation(expression, input_collation)?;
+        Ok(selected)
     }
 
     fn function_argument_targets(
@@ -538,62 +614,76 @@ impl Preparation<'_> {
         name: &str,
         binding: Option<&FunctionBinding>,
         selection: &SelectedFunctionArguments,
-        types: Vec<Option<ColumnType>>,
-    ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-        Ok(if let Some(selected) = &selection.overload {
-            let types = selected
-                .binding
-                .invocation
-                .as_ref()
-                .map_or(&selected.binding.argument_types, |invocation| {
-                    &invocation.argument_targets
-                });
-            types
-                .iter()
-                .map(|name| {
-                    if super::super::ordered_calls::is_polymorphic(name) {
-                        Ok(None)
-                    } else {
-                        self.type_name(name).map(Some)
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        } else if let Some(binding) = binding.filter(|binding| {
-            binding.builtin && binding.dispatch.is_none() && !binding.argument_types.is_empty()
-        }) {
-            binding
-                .argument_types
-                .iter()
-                .map(|name| {
-                    if super::super::ordered_calls::is_polymorphic(name) {
-                        Ok(None)
-                    } else {
-                        self.type_name(name).map(Some)
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        } else if matches!(name, "cypher" | "ag_catalog.cypher") {
-            [
-                ColumnType::Name,
-                ColumnType::Text,
-                self.type_name("ag_catalog.agtype")?,
-            ]
-            .into_iter()
-            .take(types.len())
-            .map(Some)
-            .collect()
+        types: Produced<Vec<Option<ColumnType>>>,
+    ) -> Result<Produced<Vec<Option<ColumnType>>>, SQLError> {
+        let control = self.scope.control();
+        let declarations = selection
+            .overload
+            .as_ref()
+            .map(|selected| {
+                selected
+                    .binding
+                    .invocation
+                    .as_ref()
+                    .map_or(&selected.binding.argument_types, |invocation| {
+                        &invocation.argument_targets
+                    })
+            })
+            .or_else(|| {
+                binding
+                    .filter(|binding| {
+                        binding.builtin
+                            && binding.dispatch.is_none()
+                            && !binding.argument_types.is_empty()
+                    })
+                    .map(|binding| &binding.argument_types)
+            });
+        let mut output = ProductionVec::new(control);
+        if let Some(declarations) = declarations {
+            output.reserve(declarations.len())?;
+            for name in declarations {
+                let ty = if super::super::ordered_calls::is_polymorphic(name) {
+                    None
+                } else {
+                    Some(resolve_type_name(self.routines, name, &control)?)
+                };
+                output.push_produced(optional_type(ty, &control)?)?;
+            }
+            return Ok(output.finish()?);
+        }
+        if matches!(name, "cypher" | "ag_catalog.cypher") {
+            let agtype = resolve_type_name(self.routines, "ag_catalog.agtype", &control)?;
+            output.reserve(types.len().min(3))?;
+            for ty in [&ColumnType::Name, &ColumnType::Text, &*agtype]
+                .into_iter()
+                .take(types.len())
+            {
+                output.push_produced(optional_type(
+                    Some(ty.clone_with_control(&control)?),
+                    &control,
+                )?)?;
+            }
+            return Ok(output.finish()?);
+        }
+        let declared = if let Some(positions) = &selection.positions {
+            output.reserve(types.len())?;
+            for destination in 0..types.len() {
+                let source = positions
+                    .iter()
+                    .position(|position| *position == destination);
+                let ty = source
+                    .and_then(|source| types[source].as_ref())
+                    .map(|ty| ty.clone_with_control(&control))
+                    .transpose()?;
+                output.push_produced(optional_type(ty, &control)?)?;
+            }
+            output.finish()?
         } else {
-            let declared = if let Some(positions) = &selection.positions {
-                let mut declared = vec![None; types.len()];
-                for (ty, position) in types.into_iter().zip(positions) {
-                    declared[*position] = ty;
-                }
-                declared
-            } else {
-                types
-            };
-            crate::type_resolution::builtin_function_argument_targets(name, &declared)
-        })
+            types
+        };
+        crate::type_resolution::builtin_function_argument_targets_with_control(
+            name, &declared, &control,
+        )
     }
 }
 
@@ -601,10 +691,10 @@ impl Preparation<'_> {
 fn ordered_result_type(
     selection: &SelectedFunctionArguments,
     arguments: &ObservedFunctionArguments,
-) -> Result<Option<ColumnType>, SQLError> {
+) -> Result<Option<AnalysisType>, SQLError> {
     use crate::type_resolution::{
-        match_routine_signature, routine_polymorphic_type, RoutineCallDescriptor,
-        RoutineParameterDescriptor,
+        match_routine_candidate_with_control, routine_polymorphic_type_with_control,
+        RoutineCallDescriptor, RoutineParameterDescriptor, RoutineSignatureProductionError,
     };
     if !matches!(
         selection.kind,
@@ -621,42 +711,53 @@ fn ordered_result_type(
     let ColumnType::Named(result) = &selected.return_type else {
         return Ok(None);
     };
-    if routine_polymorphic_type(result).is_none() {
+    let control = arguments.control.control();
+    if routine_polymorphic_type_with_control(result, &control)?.is_none() {
         return Ok(None);
     }
-    let parameters = selected
-        .binding
-        .argument_types
-        .iter()
-        .map(|name| RoutineParameterDescriptor {
-            name: None,
-            type_name: name.clone(),
-            column_type: None,
-            has_default: false,
-            default_type: None,
-            variadic: false,
-        })
-        .collect::<Vec<_>>();
-    let types = arguments.types();
-    let matched = match_routine_signature(
+    let mut parameters = ProductionVec::new(control);
+    parameters.reserve(selected.binding.argument_types.len())?;
+    for name in &selected.binding.argument_types {
+        let (type_name, memory) = control.copy_text(name)?.into_parts();
+        parameters.push_produced(control.finish(
+            RoutineParameterDescriptor {
+                name: None,
+                type_name,
+                column_type: None,
+                has_default: false,
+                default_type: None,
+                variadic: false,
+            },
+            memory,
+        )?)?;
+    }
+    let parameters = parameters.finish()?;
+    let types = arguments.types()?;
+    let matched = match_routine_candidate_with_control(
         &parameters,
         RoutineCallDescriptor {
             argument_names: &arguments.names,
             argument_types: &types,
             explicit_variadic: arguments.variadic,
         },
+        &control,
     )
-    .map_err(|error| {
-        SQLError::Internal(format!(
-            "selected ordered-set signature cannot resolve its result: {error:?}"
-        ))
+    .map_err(|error| match error {
+        RoutineSignatureProductionError::Production(error) => error,
+        RoutineSignatureProductionError::Signature(error) => SQLError::Internal(format!(
+            "selected ordered-set signature cannot resolve its result: {:?}",
+            &*error
+        )),
     })?
     .ok_or_else(|| {
         SQLError::Internal("selected ordered-set signature no longer matches its arguments".into())
     })?;
-    matched.substitute_type(result).map(Some).ok_or_else(|| {
-        SQLError::Internal("selected ordered-set result type remains polymorphic".into())
-    })
+    let result = matched
+        .substitute_type_with_control(result, &control)?
+        .ok_or_else(|| {
+            SQLError::Internal("selected ordered-set result type remains polymorphic".into())
+        })?;
+    Ok(Some(AnalysisType::from_produced(result, &control)?))
 }
 
 /// Ordered and FILTER expressions are visited independently of a call's result collation.
@@ -669,11 +770,14 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ObservedFunctionModifiers, SQLError> {
         let mut selected = Derivation::None;
-        let mut order_types = Vec::with_capacity(orders.len());
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let mut order_types = AnalysisVec::new(&control);
+        order_types.reserve(orders.len(), &control)?;
         for order in orders {
             let value = self.expression(&order.expr, input, subqueries)?;
             selected = selected.combine(value.derivation.key().error_only());
-            order_types.push(value.ty);
+            order_types.push(value.ty, &control)?;
         }
         if let Some(filter) = filter {
             let filter = self.in_placement(SetPlacement::Filter, |analysis| {
@@ -694,7 +798,7 @@ impl Preparation<'_> {
         modifiers: &ObservedFunctionModifiers,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Option<ColumnType>, SQLError> {
+    ) -> Result<Option<AnalysisType>, SQLError> {
         let (args, orders, filter) = match expression {
             ScalarExpr::Func {
                 binding,
@@ -715,49 +819,56 @@ impl Preparation<'_> {
             }
             _ => return Err(SQLError::Internal("expected analyzed function call".into())),
         };
-        let mut observations = crate::scalar_call_arguments(args)?
-            .into_iter()
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let call_arguments = crate::ir::scalar_call_arguments_with_control(args, &control)?;
+        let observations = call_arguments
+            .iter()
             .zip(&arguments.values)
-            .map(|(argument, value)| (argument.value, value.ty.as_ref()))
-            .collect::<Vec<_>>();
-        for (position, order) in orders.iter().enumerate() {
-            let ty = arguments
-                .values
-                .get(args.len() + position)
-                .map(|value| value.ty.as_ref())
-                .unwrap_or_else(|| modifiers.order_types[position].as_ref());
-            observations.push((&order.expr, ty));
-        }
-        if let Some(filter) = filter {
-            observations.push((filter, Some(&ColumnType::Boolean)));
-        }
-        let inputs = crate::type_resolution::CallInputTypes::new(input, observations);
-        let parameters = self.parameters.values();
+            .map(|(argument, value)| (argument.value, value.ty.as_deref()))
+            .chain(orders.iter().enumerate().map(|(position, order)| {
+                let ty = arguments
+                    .values
+                    .get(args.len() + position)
+                    .map(|value| value.ty.as_deref())
+                    .unwrap_or_else(|| modifiers.order_types[position].as_deref());
+                (&order.expr, ty)
+            }))
+            .chain(filter.map(|filter| (filter, Some(&ColumnType::Boolean))));
+        let inputs = crate::type_resolution::CallInputTypes::new_with_control(
+            input,
+            observations,
+            &control,
+        )?;
+        let parameters = self.parameters.values()?;
         if self.scope.validate_references {
             super::super::analysis::validate_call(
                 self.routines,
                 expression,
-                &inputs,
+                &*inputs,
                 &parameters,
                 self.routines,
             )?;
         }
-        crate::type_resolution::call_type_from_observations(
+        crate::type_resolution::call_type_from_observations_with_control(
             expression,
             &inputs,
             &parameters,
             self.routines,
-        )
+            &control,
+        )?
+        .map(|ty| AnalysisType::from_produced(ty, &control))
+        .transpose()
     }
 }
 
 pub(super) fn collated_result(
-    ty: Option<ColumnType>,
+    ty: Option<AnalysisType>,
     values: &[ExpressionType],
     binding: Option<&FunctionBinding>,
     additional: Derivation,
 ) -> ExpressionType {
-    let mut value = ExpressionType::combined(ty, values);
+    let mut value = ExpressionType::combined_owned(ty, values);
     if matches!(
         binding.and_then(|binding| binding.dispatch),
         Some(crate::ast::FunctionDispatch::IsDistinct)
@@ -768,4 +879,24 @@ pub(super) fn collated_result(
     }
     value.derivation = value.derivation.combine(additional);
     value
+}
+
+fn optional_type(
+    ty: Option<Produced<ColumnType>>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Produced<Option<ColumnType>>, SQLError> {
+    let (ty, memory) = ty.map_or((None, control.empty_reservation()), |ty| {
+        let (ty, memory) = ty.into_parts();
+        (Some(ty), memory)
+    });
+    Ok(control.finish(ty, memory)?)
+}
+fn resolve_type_name(
+    resolver: &dyn crate::FunctionTypeResolver,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    resolver
+        .resolve_type_name_with_control(name, control)?
+        .map_or_else(|| ColumnType::from_sql_name_with_control(name, control), Ok)
 }

@@ -90,10 +90,7 @@ fn failed_role_declaration_preserves_live_registry_identity_and_prepared_cache()
         &memberships,
         &engine.durable.role_memberships.snapshot()
     ));
-    assert!(std::sync::Arc::ptr_eq(
-        &prepared,
-        &engine.session.prepared.read()["saved"].logical_plan
-    ));
+    assert!(prepared.ptr_eq(&engine.session.prepared.read()["saved"].logical_plan));
     assert_eq!(
         engine
             .current_role()

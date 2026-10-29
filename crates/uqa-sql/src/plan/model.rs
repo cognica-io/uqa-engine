@@ -58,7 +58,7 @@ pub struct QueryPlan {
     pub analyzed_output: Option<crate::RowSchema>,
     /// Already-analyzed input layouts, consumed before any optimizer rewrite changes source topology. Stored syntax never retains them.
     #[serde(skip)]
-    pub analyzed_source: Option<std::sync::Arc<AnalyzedSource>>,
+    pub analyzed_source: Option<super::SharedAnalyzedSource>,
     /// Grouping-set equality established before scalar optimization. Stored SQL retains its original grouping syntax.
     #[serde(skip)]
     pub analyzed_grouping: Option<crate::semantics::grouping_sets::AnalyzedGroupingSets>,

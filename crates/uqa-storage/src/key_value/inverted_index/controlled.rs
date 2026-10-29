@@ -23,6 +23,45 @@ use uqa_core::{
 };
 
 impl OccurrenceRead<'_> {
+    pub(super) fn field_names_budgeted(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<uqa_core::memory::BudgetedString>> {
+        self.require_graph_format_budgeted(control)?;
+        let prefix = self.read_key(keys::FIELD, &[], control)?;
+        let mut fields = BudgetedVec::new(control.memory());
+        self.store
+            .visit_prefix_after(&prefix, None, usize::MAX, control, &mut |key, value| {
+                control.check()?;
+                FieldStats::from_bytes(value)?;
+                let field = keys::read_field_ref(key)?;
+                fields.reserve(1)?;
+                fields.push(crate::inverted_index::statistics::field_name(
+                    field, control,
+                )?)?;
+                Ok(())
+            })?;
+        uqa_core::ordering::sort_by_with_control(
+            &mut fields,
+            &mut || control.check(),
+            |left, right, poll| {
+                for (left, right) in left
+                    .as_bytes()
+                    .chunks(1024)
+                    .zip(right.as_bytes().chunks(1024))
+                {
+                    poll()?;
+                    let order = left.cmp(right);
+                    if !order.is_eq() {
+                        return Ok(order);
+                    }
+                }
+                Ok(left.len().cmp(&right.len()))
+            },
+        )?;
+        Ok(fields)
+    }
+
     fn read_key(
         &self,
         kind: u8,

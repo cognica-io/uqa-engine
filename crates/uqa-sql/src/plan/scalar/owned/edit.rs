@@ -154,7 +154,7 @@ impl OwnedScalarExpr {
     }
 
     // The corresponding IR children have already been destroyed. Move later owners over the removed range before retiring its reservations; do not shrink the parent's still-live metadata buffer.
-    fn remove_child_owners(&mut self, removed: std::ops::Range<usize>) {
+    pub(super) fn remove_child_owners(&mut self, removed: std::ops::Range<usize>) {
         if let Some(memory) = &mut self.memory {
             let count = removed.len();
             let retained = memory.children.len() - count;

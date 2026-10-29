@@ -37,7 +37,7 @@ fn next(
     }
 }
 
-pub(super) fn optimize(
+pub(in crate::optimizer::scalar) fn optimize(
     expression: OwnedScalarExpr,
     and: bool,
     config: &OptimizerConfig,

@@ -37,8 +37,12 @@ fn retained_constants_preserve_prepared_dependency_identity_without_payload_read
             }
         };
         rewrite_fixture(&mut candidate, &mut freeze);
-        Arc::make_mut(&mut candidate.source_plan).rewrite_scalar_expressions(&mut freeze);
-        Arc::make_mut(&mut candidate.logical_plan).rewrite_scalar_expressions(&mut freeze);
+        let mut source_plan = candidate.source_plan.as_ref().clone();
+        source_plan.rewrite_scalar_expressions(&mut freeze);
+        candidate.source_plan = source_plan.into();
+        let mut logical_plan = candidate.logical_plan.as_ref().clone();
+        logical_plan.rewrite_scalar_expressions(&mut freeze);
+        candidate.logical_plan = logical_plan.into();
         assert!(candidate.has_tracked_executable_dependencies());
     }
 }

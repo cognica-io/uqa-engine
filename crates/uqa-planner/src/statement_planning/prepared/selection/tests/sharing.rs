@@ -24,8 +24,8 @@ fn cached_inputs(payload_bytes: usize) -> Inputs {
     {
         let mut entry = inputs.entry.borrow_mut();
         let entry = entry.as_mut().unwrap();
-        entry.logical_plan = Arc::new(plan.clone());
-        entry.source_plan = Arc::clone(&entry.logical_plan);
+        entry.logical_plan = plan.clone().into();
+        entry.source_plan = entry.logical_plan.clone();
         entry.plan = Some(plan.into());
         entry.generic_cost = Some(1.0);
         entry.result_schema = Some(RowSchema::with_types(
@@ -121,12 +121,17 @@ fn failed_or_unwound_selection_preserves_shared_cache_ownership() {
     impl PreparedPlanOptimization for Failure {
         fn optimize_plan(
             &self,
-            _: UnifiedPlan,
+            _: MutableExecutablePlan,
+            _: &ProductionControl<'_>,
         ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
             assert!(!self.0, "optimizer unwind");
             Err(SQLError::Internal("optimizer error".into()))
         }
-        fn estimate_plan(&self, _: &UnifiedPlan) -> Result<crate::plan_cost::PlanCost, SQLError> {
+        fn estimate_plan(
+            &self,
+            _: &UnifiedPlan,
+            _: &ProductionControl<'_>,
+        ) -> Result<crate::plan_cost::PlanCost, SQLError> {
             panic!("failed optimization does not estimate a cost");
         }
     }

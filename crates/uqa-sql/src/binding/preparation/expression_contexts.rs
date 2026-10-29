@@ -52,7 +52,7 @@ impl Preparation<'_> {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             for (expression, item) in expressions.iter().zip(&mut items) {
-                let element = if matches!(item.ty, Some(ColumnType::Array(_))) {
+                let element = if matches!(item.ty.as_deref(), Some(ColumnType::Array(_))) {
                     array_type
                 } else {
                     element.as_ref()
@@ -90,7 +90,7 @@ impl Preparation<'_> {
                 "42846",
                 format!(
                     "cannot cast type {} to {}",
-                    source.ty.as_ref().expect("known source").display_name(),
+                    source.ty.as_deref().expect("known source").display_name(),
                     target.display_name()
                 ),
             ));
@@ -180,7 +180,7 @@ impl Preparation<'_> {
             }
             selected = selected.combine(value.derivation);
         }
-        let mut result = ExpressionType::resolved(ty);
+        let mut result = ExpressionType::resolved_owned(ty);
         result.derivation = selected.result(result.derivation.oid());
         Ok(result)
     }
@@ -200,8 +200,8 @@ impl Preparation<'_> {
         spec: &crate::ScalarWindowSpec,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-        inherited: Option<&(usize, Option<ColumnType>)>,
-    ) -> Result<(usize, Option<ColumnType>), SQLError> {
+        inherited: Option<&(usize, Option<super::ownership::AnalysisType>)>,
+    ) -> Result<(usize, Option<super::ownership::AnalysisType>), SQLError> {
         let mut order_type = None;
         for item in &spec.order_by {
             let mut value = self.expression(&item.expr, input, subqueries)?;
@@ -213,7 +213,7 @@ impl Preparation<'_> {
             }
             self.parameters
                 .collations
-                .require_key(&item.expr, value.derivation);
+                .require_key(&item.expr, value.derivation)?;
             if order_type.is_none() {
                 order_type = value.ty;
             }
@@ -228,7 +228,7 @@ impl Preparation<'_> {
             }
             self.parameters
                 .collations
-                .require_key(item, value.derivation);
+                .require_key(item, value.derivation)?;
         }
         let (order_count, order_type) = if spec.order_by.is_empty() {
             inherited.cloned().unwrap_or_default()
@@ -243,7 +243,7 @@ impl Preparation<'_> {
                 {
                     let target = match frame.mode {
                         crate::ast::FrameMode::Range if order_count == 1 => {
-                            Some(crate::range_frame_offset_type(order_type.as_ref(), None)?)
+                            Some(crate::range_frame_offset_type(order_type.as_deref(), None)?)
                         }
                         crate::ast::FrameMode::Range => None,
                         crate::ast::FrameMode::Rows | crate::ast::FrameMode::Groups => {
@@ -278,7 +278,7 @@ fn cast_initial_collation(
         return Ok(source.initial_collation);
     }
     let modifier = pg_type_modifier(target);
-    if source.ty.as_ref().is_some_and(|source| {
+    if source.ty.as_deref().is_some_and(|source| {
         pg_type_oid(source) == pg_type_oid(target)
             && (modifier < 0 || pg_type_modifier(source) == modifier)
     }) {
@@ -298,7 +298,7 @@ fn cast_collation(
     source: &ExpressionType,
     target: &ColumnType,
 ) -> Result<Derivation, SQLError> {
-    let selected = source.derivation.coerce(source.ty.as_ref(), target);
+    let selected = source.derivation.coerce(source.ty.as_deref(), target);
     // Coercion peels a direct COLLATE clause and reapplies it outside the converted value.
     if crate::catalog::type_metadata::pg_type_collation_oid(target) != 0
         && crate::catalog::collations::expression::scalar_clause(expression)?.is_some()

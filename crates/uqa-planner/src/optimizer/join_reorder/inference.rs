@@ -13,8 +13,8 @@ use uqa_sql::SQLError;
 
 pub(super) type JoinPredicateKey<'a> = ((&'a str, &'a str), (&'a str, &'a str));
 
-pub(super) type InferredPredicates<'p, 'c> =
-    ProductionMap<'c, JoinPredicateKey<'p>, &'p ScalarExpr>;
+pub(super) type InferredPredicates<'k, 'p, 'c> =
+    ProductionMap<'c, JoinPredicateKey<'k>, &'p ScalarExpr>;
 
 pub(super) fn join_predicate<'p>(
     expression: &'p ScalarExpr,
@@ -62,11 +62,11 @@ fn predicate_key(predicate: JoinPredicateRef<'_>) -> JoinPredicateKey<'_> {
 }
 
 /// Conjunction keeps the first expression for each canonical equality; disjunction keeps the first branch's expression only when every subsequent branch implies that key. Results retain the original key order and operand orientation.
-pub(super) fn implied_join_predicates<'p, 'c>(
+pub(super) fn implied_join_predicates<'p: 'k, 'k, 'c>(
     expression: &'p ScalarExpr,
-    column_owners: &ColumnOwners<'p>,
+    column_owners: &ColumnOwners<'k>,
     control: &ProductionControl<'c>,
-) -> Result<InferredPredicates<'p, 'c>, SQLError> {
+) -> Result<InferredPredicates<'k, 'p, 'c>, SQLError> {
     control.check()?;
     if let Some(predicate) = join_predicate(expression, column_owners) {
         let mut output = ProductionMap::new(*control);

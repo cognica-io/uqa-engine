@@ -14,7 +14,9 @@ mod compaction;
 pub use compaction::{
     prune_command_with_control, prune_expression_with_control, prune_query_with_control,
 };
-pub(crate) use compaction::{prune_command_with_retention, prune_query_with_retention};
+pub(crate) use compaction::{
+    prune_command_with_retention, prune_expression_with_retention, prune_query_with_retention,
+};
 
 mod transfer;
 pub use transfer::transfer_expression;

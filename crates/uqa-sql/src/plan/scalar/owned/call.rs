@@ -15,6 +15,35 @@ use crate::{
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
 impl OwnedScalarExpr {
+    /// Canonicalize a grouping identity's built-in spelling in its existing string buffer. Removing a prefix changes length, never retained capacity.
+    pub(crate) fn canonicalize_call_name(
+        mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        self.assert_owner(control);
+        control.check()?;
+        let (ScalarExpr::Func { name, .. } | ScalarExpr::WindowCall { name, .. }) =
+            &mut self.expression
+        else {
+            panic!("call spelling requires a function or window call")
+        };
+        let mut start = 0;
+        while start < name.len() {
+            control.check()?;
+            let mut end = (start + 4096).min(name.len());
+            while !name.is_char_boundary(end) {
+                end -= 1;
+            }
+            name[start..end].make_ascii_lowercase();
+            start = end;
+        }
+        if name.starts_with("pg_catalog.") {
+            name.drain(.."pg_catalog.".len());
+        }
+        control.check()?;
+        Ok(self)
+    }
+
     /// Preserve the parser's inline ordering-syntax identity without rebuilding any call storage.
     pub fn set_call_order_syntax(
         mut self,

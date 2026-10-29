@@ -10,13 +10,17 @@ use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
 /// The immutable enclosing object owns these buffers. Ordinary copy-on-write creates new ordinary buffers; sharing the enclosing Arc retains this one lease.
 #[derive(Debug, Default)]
 pub(in crate::schema) struct SchemaMemory {
-    _reservation: Option<MemoryReservation>,
+    reservation: Option<MemoryReservation>,
 }
 
 impl SchemaMemory {
+    pub(in crate::schema) fn into_reservation(self) -> Option<MemoryReservation> {
+        self.reservation
+    }
+
     pub(in crate::schema) fn new(memory: Option<MemoryReservation>) -> Self {
         Self {
-            _reservation: memory,
+            reservation: memory,
         }
     }
 }
@@ -42,7 +46,7 @@ pub(in crate::schema) fn boxed_text(
 }
 
 /// Vec-to-box conversion may replace a spare-capacity buffer. Admit that exact destination while the old capacity and every element remain owned, then release only the old buffer's lease after conversion.
-pub(super) fn boxed_slice<T>(
+pub(in crate::schema) fn boxed_slice<T>(
     value: Produced<Vec<T>>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Box<[T]>>, SQLError> {

@@ -8,7 +8,7 @@ use super::*;
 
 fn relation(oid: u32) -> PreparedAnalysisDependencies {
     PreparedAnalysisDependencies {
-        relations: BTreeSet::from([oid]),
+        relations: uqa_core::memory::OwnedSet::from([oid]),
         ..Default::default()
     }
 }
@@ -16,8 +16,8 @@ fn relation(oid: u32) -> PreparedAnalysisDependencies {
 #[test]
 fn catalog_events_match_only_selected_objects_until_global_invalidation() {
     let dependencies = PreparedAnalysisDependencies {
-        relations: BTreeSet::from([10]),
-        routines: BTreeSet::from([[7; 16]]),
+        relations: uqa_core::memory::OwnedSet::from([10]),
+        routines: uqa_core::memory::OwnedSet::from([[7; 16]]),
     };
     assert!(PreparedCatalogChange::Relation(10).affects(&dependencies));
     assert!(!PreparedCatalogChange::Relation(11).affects(&dependencies));
@@ -79,15 +79,17 @@ fn cached_entry(executable: &str) -> PreparedStatementPlan {
     let lower = |sql: &str| UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0));
     let source = Arc::new(lower("SELECT lower('HELLO') AS value"));
     PreparedStatementPlan {
+        definition_identity: std::sync::Arc::new(()),
         composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
-        source_plan: Arc::clone(&source),
-        logical_plan: source,
+        source_plan: Arc::clone(&source).into(),
+        logical_plan: source.into(),
         needs_analysis: false,
-        effective_search_path: None,
-        dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
-        dependency_snapshot: None,
+        effective_search_path: None.into(),
+        dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default()
+            .into(),
+        dependency_snapshot: None.into(),
         plan: Some(lower(executable).into()),
-        parameter_types: Vec::new(),
+        parameter_types: Vec::new().into(),
         result_schema: Some(RowSchema::with_types(
             vec!["value".into()],
             vec![Some(ColumnType::Text)],
@@ -113,9 +115,9 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
             .unwrap()
             .remove(0),
     ));
-    mixed.source_plan = std::sync::Arc::clone(&source);
-    mixed.logical_plan = source;
-    mixed.parameter_types = vec![Some(ColumnType::Text)];
+    mixed.source_plan = std::sync::Arc::clone(&source).into();
+    mixed.logical_plan = source.into();
+    mixed.parameter_types = vec![Some(ColumnType::Text)].into();
     mixed.result_schema = Some(RowSchema::with_types(
         vec!["folded".into(), "live".into()],
         vec![Some(ColumnType::Text), Some(ColumnType::Text)],
@@ -158,7 +160,7 @@ fn local_acl_publication_and_peer_refresh_preserve_mixed_builtin_plans() {
 #[test]
 fn definition_events_still_discard_referenced_plans_and_analysis_invalidations_win() {
     let mut referenced = cached_entry("SELECT 'hello' AS value");
-    referenced.dependencies = relation(42);
+    referenced.dependencies = relation(42).into();
     CatalogRegistryChange::Definitions.invalidate([&mut referenced]);
     assert!(referenced.plan.is_none());
     let mut constant = cached_entry("SELECT 'hello' AS value");

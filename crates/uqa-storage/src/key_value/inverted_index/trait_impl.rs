@@ -238,6 +238,15 @@ impl InvertedIndex for KeyValueInvertedIndex {
         self.read(|view| view.doc_freq_key(field, term))
     }
 
+    fn doc_freq_key_budgeted(
+        &self,
+        field: &str,
+        term: &TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        self.read(|view| view.doc_freq_key_budgeted(field, term, control))
+    }
+
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
         self.read(|view| view.get_doc_length(doc_id, field))
     }
@@ -315,6 +324,13 @@ impl InvertedIndex for KeyValueInvertedIndex {
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
         self.read(|view| view.field_names())
+    }
+
+    fn field_names_budgeted(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<uqa_core::memory::BudgetedString>> {
+        self.read(|view| view.field_names_budgeted(control))
     }
 
     fn set_field_analyzer(

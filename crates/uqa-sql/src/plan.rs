@@ -22,18 +22,24 @@ use crate::ast::{
 };
 use crate::ir::{ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec};
 
+mod analyzed;
 mod command_children;
+pub use analyzed::SharedAnalyzedSource;
 mod command_expressions;
 pub(crate) mod copy;
 pub mod input_projection;
 mod memory;
 mod model;
 mod mutable;
+pub use mutable::OwnedScopedPlanVisitor;
 pub use mutable::{
     CommandAssignmentSlot, CommandQuerySlot, CommandScalarSlot, MutableCommandPlan,
-    MutableExecutablePlan, MutableQueryPlan, MutableSourcePlan, QueryChildSlot, QueryScalarSlot,
+    MutableExecutablePlan, MutableExpressionPlan, MutableJoinParts, MutableJoinShell,
+    MutableQueryPlan, MutableSourcePlan, OwnedDeferredRewriteIter, OwnedProjection,
+    OwnedProjectionIter, QueryChildSlot, QueryScalarSlot, ScalarArenaTransform, ScalarQueryArena,
     SourceChildSlot, SourceScalarSlot,
 };
+pub(crate) use mutable::{QueryMetadataUpdate, SourceMetadataUpdate};
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
 mod owned;
@@ -44,7 +50,7 @@ mod retained;
 pub use retained::RetainedCtePlan;
 mod rewrite;
 mod scalar;
-pub use scalar::{OwnedScalarChildren, OwnedScalarExpr};
+pub use scalar::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
 mod scoped_visit;
 pub use scoped_visit::ScopedPlanVisitor;
 mod source_metadata;

@@ -88,6 +88,23 @@ impl IndexedSpill {
 
     /// Append a record already encoded and validated against this store's physical schema.
     fn push_encoded(&mut self, payload: &[u8]) -> ExecResult<()> {
+        self.push_encoded_with_control(payload, &ProductionControl::uncontrolled())
+    }
+
+    fn push_encoded_with_control(
+        &mut self,
+        payload: &[u8],
+        control: &ProductionControl<'_>,
+    ) -> ExecResult<()> {
+        self.append_encoded(payload, || check_publication(control))
+    }
+
+    fn append_encoded(
+        &mut self,
+        payload: &[u8],
+        mut check: impl FnMut() -> ExecResult<()>,
+    ) -> ExecResult<()> {
+        check()?;
         let length = u64::try_from(payload.len())
             .map_err(|_| spill_error("indexed spill row is too large"))?;
         // Validate every piece of metadata before touching either file.  A
@@ -118,16 +135,31 @@ impl IndexedSpill {
                     spill_error(format!("failed to seek indexed spill offsets: {error}"))
                 })?;
 
-        let write_result = (|| -> std::io::Result<()> {
-            self.data.as_file_mut().write_all_vectored(&mut [
-                IoSlice::new(&length.to_le_bytes()),
-                IoSlice::new(payload),
-            ])?;
-            self.data.as_file_mut().flush()?;
+        let write_result = (|| -> ExecResult<()> {
+            check()?;
+            let mut chunks = payload.chunks(64 * 1024);
+            let first = chunks.next().unwrap_or(&[]);
+            check()?;
+            self.data
+                .as_file_mut()
+                .write_all_vectored(&mut [IoSlice::new(&length.to_le_bytes()), IoSlice::new(first)])
+                .map_err(append_error)?;
+            for chunk in chunks {
+                check()?;
+                self.data
+                    .as_file_mut()
+                    .write_all(chunk)
+                    .map_err(append_error)?;
+            }
+            self.data.as_file_mut().flush().map_err(append_error)?;
+            check()?;
             self.offsets
                 .as_file_mut()
-                .write_all(&data_length.to_le_bytes())?;
-            self.offsets.as_file_mut().flush()
+                .write_all(&data_length.to_le_bytes())
+                .map_err(append_error)?;
+            self.offsets.as_file_mut().flush().map_err(append_error)?;
+            check()?;
+            Ok(())
         })();
         if let Err(error) = write_result {
             let data_rollback = self.data.as_file_mut().set_len(data_length);
@@ -141,13 +173,15 @@ impl IndexedSpill {
                 )),
             };
             if let Some(rollback) = rollback_error {
-                return Err(spill_error(format!(
-                    "failed to append indexed spill row: {error}; {rollback}"
-                )));
+                let error = crate::physical::physical_exec_error(error);
+                return Err(error
+                    .with_cleanup(
+                        uqa_sql::SQLError::Internal(rollback),
+                        "roll back indexed spill append",
+                    )
+                    .into());
             }
-            return Err(spill_error(format!(
-                "failed to append indexed spill row: {error}"
-            )));
+            return Err(error);
         }
 
         self.rows = next_rows;
@@ -274,4 +308,14 @@ fn read_indexed_offset(file: &mut OffsetFile, position: u64) -> ExecResult<u64> 
     file.read_exact(&mut encoded)
         .map_err(|error| spill_error(format!("failed to read indexed spill offset: {error}")))?;
     Ok(u64::from_le_bytes(encoded))
+}
+
+fn append_error(error: std::io::Error) -> crate::physical::ExecError {
+    spill_error(format!("failed to append indexed spill row: {error}"))
+}
+
+fn check_publication(control: &ProductionControl<'_>) -> ExecResult<()> {
+    control.check()?;
+    uqa_sql::expr::check_statement_cancellation().map_err(uqa_sql::SQLError::from)?;
+    Ok(())
 }

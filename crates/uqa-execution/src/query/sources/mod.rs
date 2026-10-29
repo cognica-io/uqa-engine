@@ -11,7 +11,6 @@ use crate::physical::physical_exec_error;
 use crate::query::{
     binding::{bind_source_plan_schema, bind_source_plan_schema_for_execution},
     consumer::QueryOutputMode,
-    locking::apply_propagated_view_lock,
     output::{query_output_shared, QueryOutput},
     projection::physical_work_mem_bytes,
     source_projection::{alias_join_operator, qualify_source_operator_with_columns},

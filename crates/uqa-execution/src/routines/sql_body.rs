@@ -7,6 +7,7 @@
 use std::{borrow::Cow, cell::RefCell};
 
 pub mod inputs;
+mod parameters;
 mod statements;
 
 use super::descriptions::RoutineBodyDescriptions;
@@ -19,7 +20,7 @@ use uqa_sql::{
     plan::{CommandPlan, UnifiedPlan},
     plpgsql::runtime_diagnostics::result_row_values,
     routines::{
-        body_parameters::{is_sql_body_parameter, sql_body_parameter_scope},
+        body_parameters::sql_body_parameter_scope_with_control,
         declaration::RoutineTypeCatalog,
         resolution::RoutineOverloadContext,
         result_check::{
@@ -64,7 +65,15 @@ pub(crate) fn execute_described_sql_language(
         definition: def,
         plans,
     } = body;
-    let params = body_parameters(context.expressions, def, bound, descriptions)?;
+    let resources = context.planning_resources()?;
+    let control = resources.control();
+    let params = parameters::body_parameters_with_control(
+        context.expressions,
+        def,
+        bound,
+        descriptions,
+        &control,
+    )?;
     if plans.is_empty() {
         check_sql_function_result(types, def, None)?;
     }
@@ -80,30 +89,32 @@ pub(crate) fn execute_described_sql_language(
         Ok(())
     };
     let parameters = matches!(def.body, FunctionBody::Source(_))
-        .then(|| sql_body_parameter_scope(def, &params))
+        .then(|| sql_body_parameter_scope_with_control(def, &params, &control))
         .transpose()?;
     let identity = inputs::SQLBodyIdentity::new(function)?;
-    let parameter_types = params
-        .iter()
-        .map(|param| {
-            param
-                .declared_scalar_type()
-                .cloned()
-                .ok_or_else(|| SQLError::Internal("SQL body parameter has no concrete type".into()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut parameter_types = uqa_core::memory::ProductionVec::new(control);
+    parameter_types.reserve(params.len())?;
+    for parameter in params.iter() {
+        let ty = parameter
+            .declared_scalar_type()
+            .ok_or_else(|| SQLError::Internal("SQL body parameter has no concrete type".into()))?;
+        parameter_types.push_produced(ty.clone_with_control(&control)?)?;
+    }
+    let parameter_types = parameter_types.finish()?;
     let statements = statements::SQLStatements {
+        control,
         context,
         types,
         overloads,
         params: &params,
         parameters,
         identity,
-        parameter_types,
+        parameter_types: &parameter_types,
         inputs: context.statements.body_input_context(),
     };
     let mut last = SQLResult::empty();
     for (position, plan) in plans.iter().enumerate() {
+        control.check()?;
         let check = (position + 1 == plans.len())
             .then_some(&check_result as super::context::StatementResultCheck<'_>);
         let frame = || {
@@ -177,51 +188,25 @@ fn checked_body_result_layout<'a>(
     Ok(layout)
 }
 
+#[cfg(test)]
 fn body_parameters(
     expressions: &dyn uqa_sql::assignment::routines::RoutineValueContext,
     def: &CreateFunction,
     bound: &[Value],
     descriptions: Option<RoutineBodyDescriptions<'_>>,
 ) -> Result<Vec<SQLParam>, SQLError> {
-    let call_params = def.call_params();
-    let call_count = def.call_arity();
-    if call_count != bound.len() {
-        return Err(SQLError::Internal(format!(
-            "routine `{}` received {} values for {} concrete call parameters",
-            def.name,
-            bound.len(),
-            call_count
-        )));
-    }
-    let body_positions = def
-        .params
-        .iter()
-        .enumerate()
-        .filter(|(_, parameter)| is_sql_body_parameter(parameter))
-        .map(|(position, _)| position);
-    bound
-        .iter()
-        .cloned()
-        .zip(call_params)
-        .filter(|(_, parameter)| is_sql_body_parameter(parameter))
-        .zip(body_positions)
-        .map(|((value, parameter), index)| {
-            let ty = if let Some(saved) = descriptions {
-                saved
-                    .description
-                    .body_parameter_type(index, &parameter.type_name, saved.environment)?
-                    .into_owned()
-            } else {
-                uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
-                    .ok()
-                    .or_else(|| expressions.catalog_column_type(&parameter.type_name))
-                    .ok_or_else(|| {
-                        SQLError::TypeMismatch(format!("unknown type `{}`", parameter.type_name))
-                    })?
-            };
-            Ok(SQLParam::typed_scalar(value, ty))
-        })
-        .collect()
+    parameters::body_parameters_with_control(
+        expressions,
+        def,
+        bound,
+        descriptions,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|parameters| {
+        parameters
+            .into_uncontrolled()
+            .expect("ordinary SQL-body parameters")
+    })
 }
 
 fn shape_result(

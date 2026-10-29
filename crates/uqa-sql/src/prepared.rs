@@ -7,12 +7,17 @@
 //! Prepared definitions, result descriptors, and SQL EXECUTE argument contracts.
 
 use crate::{ColumnType, RowSchema, SQLError, SQLParam};
-use uqa_core::Value;
+mod production;
+pub use production::{
+    analysis_parameters_with_control, declared_parameter_types_for_plan_with_control,
+    declared_parameter_types_with_control,
+};
 pub mod arguments;
 pub mod composites;
 pub mod definition;
 pub mod dependencies;
 pub mod entry;
+pub mod ownership;
 pub mod planning;
 pub mod utility;
 
@@ -21,33 +26,14 @@ pub fn declared_parameter_types(
     logical_plan: &mut crate::plan::UnifiedPlan,
     declared: &[ColumnType],
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-    let mut parameter_types = declared
-        .iter()
-        .map(|ty| match ty {
-            crate::ast::ColumnType::Named(name) if is_unknown_type(name)? => Ok(None),
-            _ => crate::type_resolution::resolve_declared_column_type(resolver, ty).map(Some),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if utility::requires_analysis(logical_plan) {
-        logical_plan.rewrite_scalar_expressions(&mut |expression| {
-            if let crate::ScalarExpr::Param(index) = expression {
-                parameter_types.resize(parameter_types.len().max(*index), None);
-            }
-        });
-    }
-    Ok(parameter_types)
-}
-
-fn is_unknown_type(name: &str) -> Result<bool, crate::SQLError> {
-    Ok(crate::parse_regtype_name(name)?.is_some_and(|parsed| {
-        parsed.array_dimensions == 0
-            && !parsed.has_type_modifiers
-            && match parsed.names.as_slice() {
-                [local] => local == "unknown",
-                [schema, local] => schema == "pg_catalog" && local == "unknown",
-                _ => false,
-            }
-    }))
+    declared_parameter_types_with_control(
+        resolver,
+        logical_plan,
+        declared,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary prepared parameter owner".into()))
 }
 
 pub fn analyze_prepared_plan(
@@ -69,13 +55,13 @@ pub fn analyze_prepared_plan(
 }
 
 pub(crate) fn analysis_parameters(parameter_types: &[Option<ColumnType>]) -> Vec<SQLParam> {
-    parameter_types
-        .iter()
-        .map(|ty| match ty {
-            Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
-            None => SQLParam::Scalar(Value::Null),
-        })
-        .collect()
+    analysis_parameters_with_control(
+        parameter_types,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary analysis parameters")
+    .into_uncontrolled()
+    .expect("ordinary parameter owner")
 }
 
 pub fn prepared_result_schema_matches(left: Option<&RowSchema>, right: Option<&RowSchema>) -> bool {

@@ -261,41 +261,15 @@ fn push_type(
 
 /// Input analysis already selected and coerced every child before moving the parent call.
 pub(crate) fn normalize_retained(expression: &mut ScalarExpr) -> Result<(), SQLError> {
-    let ScalarExpr::Func {
-        binding: Some(binding),
-        args,
-        ..
-    } = expression
-    else {
-        return Ok(());
-    };
-    if !binding.builtin
-        || JsonPathFunction::lookup(&binding.name).is_none()
-        || matches!(binding.dispatch, Some(FunctionDispatch::JsonPath { .. }))
-    {
-        return Ok(());
-    }
-    let Some(invocation) = &binding.invocation else {
-        return Ok(());
-    };
-    let original = invocation
-        .argument_sources
-        .iter()
-        .map(|ty| {
-            ty.as_deref()
-                .and_then(|ty| ColumnType::from_sql_name(ty).ok())
-        })
-        .collect::<Vec<_>>();
-    let explicit = matches!(
-        invocation.variadic_mode,
-        crate::ast::RoutineVariadicMode::Explicit { .. }
-    );
-    normalize(
-        binding,
-        args,
-        &original,
-        explicit,
-        &mut None,
-        &ProductionControl::uncontrolled(),
-    )
+    let control = ProductionControl::uncontrolled();
+    let input = std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null));
+    let output = super::owned::normalize_retained_owned(
+        crate::plan::OwnedScalarExpr::uncontrolled(input),
+        &control,
+    )?;
+    *expression = output
+        .finish(&control)?
+        .into_uncontrolled()
+        .expect("ordinary retained JSON path normalization");
+    Ok(())
 }

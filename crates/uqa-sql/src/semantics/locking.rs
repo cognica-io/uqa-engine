@@ -17,6 +17,8 @@ use crate::{
 use std::collections::BTreeSet;
 
 pub mod null_rejection;
+mod owned;
+pub use owned::apply_propagated_view_lock_owned;
 
 fn cte_plan_has_row_locks(body: &crate::plan::CtePlanBody) -> bool {
     match body {

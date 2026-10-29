@@ -88,13 +88,7 @@ fn nested_select_coverage_checks_complete_lineage_once() {
 fn select_coverage_requires_the_same_role_incarnation_and_lookup_mode() {
     use std::sync::Arc;
     use uqa_sql::catalog::roles::identity::RoleBinding;
-    let role = |id| {
-        RoleReference::Bound(Arc::new(RoleBinding {
-            name: "reader".into(),
-            oid: 42,
-            object_id: [id; 16],
-        }))
-    };
+    let role = |id| RoleReference::Bound(Arc::new(RoleBinding::new("reader".into(), 42, [id; 16])));
     let mut original = empty_scope();
     let original = original.enter_privilege_subject(role(1));
     let plan = query("SELECT * FROM (SELECT * FROM (VALUES (7)) AS input(value)) AS derived");

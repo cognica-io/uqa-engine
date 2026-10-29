@@ -70,6 +70,15 @@ impl uqa_sql::plan::AggregateClassifier for ScopedEngineHook<'_> {
     fn is_registered_aggregate(&self, name: &str) -> bool {
         self.engine.has_registered_aggregate_function(name)
     }
+
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.runtime
+            .has_aggregate_function_with_control(name, control)
+    }
 }
 
 impl uqa_execution::functions::AggregateFunctionRegistry for ScopedEngineHook<'_> {
@@ -176,12 +185,38 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ).require_execute(binding)
     }
 
+    fn require_builtin_execute_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        use uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution;
+        control.check()?;
+        uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions::capture(
+            &self.catalog_context(),
+        ).require_execute_with_control(binding, control)
+    }
+
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         Some(self.engine.transaction_timestamp_micros())
     }
 
     fn statement_timestamp_micros(&self) -> Option<i64> {
         Some(self.engine.statement_timestamp_micros())
+    }
+
+    fn resolve_oid_alias_input_with_control(
+        &self,
+        ty: &uqa_sql::ColumnType,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_oid_alias_input_with_control(
+            &self.catalog_context(),
+            ty,
+            name,
+            control,
+        )
     }
 
     fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
@@ -240,6 +275,30 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
                 &self.catalog_context(),
                 oid,
             ),
+        )
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        uqa_execution::catalog::projection::resolve_catalog_column_type_with_control(
+            &self.catalog_context(),
+            name,
+            control,
+        )
+    }
+
+    fn resolve_type_oid_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        uqa_execution::catalog::projection::resolve_catalog_user_type_by_oid_with_control(
+            &self.catalog_context(),
+            oid,
+            control,
         )
     }
 
@@ -357,6 +416,20 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         self.runtime.has_scalar_functions()
     }
 
+    fn call_bound_builtin_function_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Option<Result<uqa_core::memory::Produced<Value>, SQLError>> {
+        uqa_execution::query::scalar_functions::call_bound_builtin_with_control(
+            &self.scalar_function_context(),
+            binding,
+            args,
+            control,
+        )
+    }
+
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
         self.catalog_context()
             .current_schema_name()
@@ -457,6 +530,20 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         &self,
     ) -> Option<uqa_sql::routines::invocation::descriptions::RoutineDescriptionScope> {
         ScopedEngineHook::routine_description_scope(self)
+    }
+
+    fn call_bound_user_function_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Option<Result<uqa_core::memory::Produced<Value>, SQLError>> {
+        uqa_execution::routines::invocation::evaluate_bound_scalar_for_planning(
+            &self.engine.routine_invocation_context(),
+            binding,
+            args,
+            control,
+        )
     }
 
     fn call_bound_user_function_with_descriptions(

@@ -117,6 +117,35 @@ impl SessionExecutionView<'_> {
             .map(|name| SessionParameter::Placeholder(name.to_string()))
     }
 
+    pub(crate) fn parameter_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        control.check()?;
+        let registry = self.session.parameters.lock();
+        if let Some(definition) = find_parameter(name) {
+            if definition
+                .library
+                .is_none_or(|library| registry.library_loaded(library))
+            {
+                return Ok(control.copy_text(definition.name)?);
+            }
+        }
+        if let Some(name) = registry.placeholder_with_control(name, control)? {
+            return Ok(control.copy_text(name)?);
+        }
+        Err(SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: control
+                .format(format_args!(
+                    "unrecognized configuration parameter \"{name}\""
+                ))?
+                .into_parts()
+                .0,
+        })
+    }
+
     /// The setting `RESET` restores: the client's startup setting, the engine's default or the boot value.
     pub(crate) fn reset_setting(&self, definition: &ParameterDefinition) -> String {
         self.session.reset_setting(definition)
@@ -222,7 +251,7 @@ impl SessionExecutionView<'_> {
                     .session
                     .parameters
                     .lock()
-                    .client_setting(definition.name)
+                    .client_setting_with_control(definition.name, control)?
                 {
                     return Ok(Some(control.copy_text(setting)?));
                 }

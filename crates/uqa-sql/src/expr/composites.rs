@@ -39,13 +39,24 @@ pub fn datum_is_composite(
     datum: &uqa_core::DatumValue,
     engine: &dyn super::EngineHook,
 ) -> Result<bool> {
+    datum_is_composite_with_control(
+        datum,
+        engine,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn datum_is_composite_with_control(
+    datum: &uqa_core::DatumValue,
+    engine: &dyn super::EngineHook,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool> {
+    control.check()?;
     if datum.record_fields().is_some() {
         return Ok(true);
     }
-    let ty = engine
-        .resolve_type_oid(datum.type_oid())
-        .map_err(SQLError::Internal)?;
-    let mut ty = ty.as_ref();
+    let ty = engine.resolve_type_oid_with_control(datum.type_oid(), control)?;
+    let mut ty = ty.as_deref();
     while let Some(ColumnType::Domain { base, .. }) = ty {
         ty = Some(base);
     }

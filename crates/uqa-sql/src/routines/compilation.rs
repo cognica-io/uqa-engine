@@ -6,6 +6,9 @@
 
 //! Routine language validation and body lowering over declared types and fresh binding inputs.
 
+mod ownership;
+pub use ownership::bind_analyzed_sql_body_types_owned;
+
 use super::{
     declaration::{
         resolve_plpgsql_datum_types, routine_definition_error, routine_parameter_regrole_constants,
@@ -44,6 +47,21 @@ pub trait RoutineCompilationCatalog: crate::schema::dependencies::oid_alias::Oid
     fn has_registered_aggregate_function(&self, name: &str) -> bool;
     fn binding_snapshot(&self) -> Result<BindingSnapshot, SQLError>;
     fn stored_query_namespace(&self) -> StoredQueryNamespace;
+    /// External adapters retain their ordinary callback boundary; native implementations construct each captured name under this control.
+    fn binding_snapshot_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::binding::production::ControlledBindingSnapshot, SQLError> {
+        control.check()?;
+        self.binding_snapshot()?.copy_with_control(control)
+    }
+    fn stored_query_namespace_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::binding::production::ControlledStoredQueryNamespace, SQLError> {
+        control.check()?;
+        self.stored_query_namespace().copy_with_control(control)
+    }
 }
 #[derive(Clone, Copy)]
 pub struct RoutineCompilationContext<'a> {

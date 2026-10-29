@@ -20,11 +20,13 @@ use super::tree::extract_string;
 
 mod declarations;
 mod object_names;
+mod routine_names;
 pub(crate) use declarations::compile_retained_type_declaration;
 pub(crate) use declarations::compile_retained_type_reference;
 pub(super) use declarations::preserve_alter_type_declaration;
 pub use object_names::parse_regobject_name;
 pub use object_names::parse_regobject_name_with_control;
+pub use routine_names::parse_regprocedure_name_with_control;
 
 /// Parser-normalized type identity used by `PostgreSQL`'s `regtype` and `regprocedure` input functions. Components retain the parser's distinction between aliases such as unquoted `integer` (normalized to `pg_catalog.int4`) and a quoted type named `"integer"`. Modifier values do not participate in OID lookup; their presence is retained for declaration validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,126 +169,13 @@ fn parse_regtype_name_text_with_control(
 
 /// Parse one routine-name string with either an omitted signature (`regproc`) or an exact signature (`regprocedure`). The caller owns the soft-error and cross-database policy because the two SQL input functions intentionally differ from ordinary DDL.
 pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureName>> {
-    let mut in_quote = false;
-    let left_parenthesis = input.bytes().enumerate().find_map(|(offset, byte)| {
-        if byte == b'"' {
-            in_quote = !in_quote;
-            None
-        } else if byte == b'(' && !in_quote {
-            Some(offset)
-        } else {
-            None
-        }
-    });
-    let Some(left_parenthesis) = left_parenthesis else {
-        return parse_regobject_name(input)
-            .map(|names| {
-                Some(ParsedRegprocedureName {
-                    names,
-                    argument_types: None,
-                })
-            })
-            .ok_or_else(|| regprocedure_syntax_error("expected a left parenthesis".into()));
-    };
-    let Some(names) = parse_regobject_name(&input[..left_parenthesis]) else {
-        return Ok(None);
-    };
-
-    let bytes = input.as_bytes();
-    let mut end = bytes.len();
-    while end > left_parenthesis + 1 && scanner_isspace(bytes[end - 1]) {
-        end -= 1;
-    }
-    if end <= left_parenthesis + 1 || bytes[end - 1] != b')' {
-        return Err(regprocedure_syntax_error(format!(
-            "expected a right parenthesis in routine identity \"{input}\""
-        )));
-    }
-    let arguments = &input[left_parenthesis + 1..end - 1];
-    let argument_types = parse_regprocedure_argument_types(input, arguments)?;
-
-    Ok(Some(ParsedRegprocedureName {
-        names,
-        argument_types: Some(argument_types),
-    }))
-}
-
-fn parse_regprocedure_argument_types(
-    input: &str,
-    arguments: &str,
-) -> Result<Vec<ParsedRegtypeName>> {
-    let argument_bytes = arguments.as_bytes();
-    let mut argument_types = Vec::new();
-    let mut offset = 0usize;
-    let mut had_comma = false;
-    loop {
-        while argument_bytes
-            .get(offset)
-            .is_some_and(|byte| scanner_isspace(*byte))
-        {
-            offset += 1;
-        }
-        if offset == argument_bytes.len() {
-            if had_comma {
-                return Err(regprocedure_syntax_error(format!(
-                    "expected a type name in routine identity \"{input}\""
-                )));
-            }
-            break;
-        }
-
-        let start = offset;
-        let mut quoted = false;
-        let mut nesting = 0i32;
-        while let Some(byte) = argument_bytes.get(offset).copied() {
-            if byte == b'"' {
-                quoted = !quoted;
-            } else if byte == b',' && !quoted && nesting == 0 {
-                break;
-            } else if !quoted {
-                match byte {
-                    b'(' | b'[' => nesting += 1,
-                    b')' | b']' => nesting -= 1,
-                    _ => {}
-                }
-            }
-            offset += 1;
-        }
-        if quoted || nesting != 0 {
-            return Err(regprocedure_syntax_error(format!(
-                "improper type name in routine identity \"{input}\""
-            )));
-        }
-        let mut type_end = offset;
-        while type_end > start && scanner_isspace(argument_bytes[type_end - 1]) {
-            type_end -= 1;
-        }
-        let Some(type_name) = parse_regtype_name(&arguments[start..type_end])? else {
-            return Err(SQLError::Parse(format!(
-                "invalid type name in routine identity \"{input}\""
-            )));
-        };
-        if argument_types.len() == POSTGRES_FUNCTION_MAX_ARGUMENTS {
-            return Err(SQLError::Routine {
-                sqlstate: "54023".into(),
-                message: format!("too many arguments in routine identity \"{input}\""),
-            });
-        }
-        argument_types.push(type_name);
-        had_comma = argument_bytes.get(offset) == Some(&b',');
-        if had_comma {
-            offset += 1;
-        }
-    }
-
-    Ok(argument_types)
-}
-
-fn regprocedure_syntax_error(message: String) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22P02".into(),
-        message,
-    }
+    parse_regprocedure_name_with_control(input, &ProductionControl::uncontrolled()).map(|parsed| {
+        parsed.map(|parsed| {
+            parsed
+                .into_uncontrolled()
+                .expect("ordinary routine identity parsing")
+        })
+    })
 }
 
 pub(super) fn compile_foreign_key_action(raw: &str) -> Result<crate::ast::ForeignKeyAction> {

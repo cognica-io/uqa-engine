@@ -13,10 +13,13 @@ use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{ColumnType, CompositeTypeReference},
-    catalog::{array_type_names::array_type_name, relation_oids::RelationCatalogOids},
+    catalog::relation_oids::RelationCatalogOids,
     expr::composites::{CompositeAttribute, CompositeTypeDescriptor},
     SQLError,
 };
+
+mod production;
+pub use production::descriptor_with_control;
 
 fn definitions(
     catalog: &CatalogReadView,
@@ -58,25 +61,6 @@ fn column_type(identity: &RelationIdentity, oids: RelationCatalogOids) -> Option
     oids.row_type_reference(identity).map(ColumnType::Composite)
 }
 
-pub(crate) fn by_name(catalog: &CatalogReadView, schema: &str, name: &str) -> Option<ColumnType> {
-    definitions(catalog)
-        .filter(|(identity, _, _)| identity.schema == schema)
-        .find_map(|(identity, oids, array)| {
-            if identity.name == name {
-                column_type(identity, oids)
-            } else if oids.array_type.is_some()
-                && array.map_or_else(
-                    || array_type_name(&identity.name, 0) == name,
-                    |array| array == name,
-                )
-            {
-                column_type(identity, oids).map(|ty| ColumnType::Array(Box::new(ty)))
-            } else {
-                None
-            }
-        })
-}
-
 pub(crate) fn by_oid(catalog: &CatalogReadView, oid: u32) -> Option<ColumnType> {
     definitions(catalog).find_map(|(identity, oids, _)| {
         if oids.row_type == Some(oid) {
@@ -87,6 +71,91 @@ pub(crate) fn by_oid(catalog: &CatalogReadView, oid: u32) -> Option<ColumnType> 
             None
         }
     })
+}
+
+pub(crate) fn by_name(catalog: &CatalogReadView, schema: &str, name: &str) -> Option<ColumnType> {
+    by_name_with_control(
+        catalog,
+        schema,
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary relation type projection cannot be cancelled or limited")
+    .map(|value| value.into_uncontrolled().expect("ordinary type projection"))
+}
+
+pub(crate) fn by_oid_with_control(
+    catalog: &CatalogReadView,
+    oid: u32,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    for (identity, oids, _) in definitions(catalog) {
+        control.check()?;
+        let array = if oids.row_type == Some(oid) {
+            false
+        } else if oids.array_type == Some(oid) {
+            true
+        } else {
+            continue;
+        };
+        let Some(reference) = oids.row_type_reference_with_control(identity, control)? else {
+            return Ok(None);
+        };
+        let (reference, memory) = reference.into_parts();
+        let ty = control.finish(ColumnType::Composite(reference), memory)?;
+        return if array {
+            ColumnType::array_with_control(ty, control)
+                .map(Some)
+                .map_err(Into::into)
+        } else {
+            Ok(Some(ty))
+        };
+    }
+    Ok(None)
+}
+
+pub(crate) fn by_name_with_control(
+    catalog: &CatalogReadView,
+    schema: &str,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    for (identity, oids, array) in definitions(catalog) {
+        control.check()?;
+        if identity.schema != schema {
+            continue;
+        }
+        let array = if identity.name == name {
+            false
+        } else if oids.array_type.is_some()
+            && array.map_or_else(
+                || {
+                    uqa_sql::catalog::array_type_names::default_array_type_name_matches(
+                        &identity.name,
+                        name,
+                    )
+                },
+                |array| array == name,
+            )
+        {
+            true
+        } else {
+            continue;
+        };
+        let Some(reference) = oids.row_type_reference_with_control(identity, control)? else {
+            return Ok(None);
+        };
+        let (reference, memory) = reference.into_parts();
+        let ty = control.finish(ColumnType::Composite(reference), memory)?;
+        return if array {
+            ColumnType::array_with_control(ty, control)
+                .map(Some)
+                .map_err(Into::into)
+        } else {
+            Ok(Some(ty))
+        };
+    }
+    Ok(None)
 }
 
 /// Selected relation descriptors and missing OIDs belong to one immutable read view.

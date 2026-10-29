@@ -106,7 +106,30 @@ impl CatalogFacade for KeyValueCatalog {
         if !self.store.transaction_model().is_versioned() {
             return Ok(None);
         }
-        self.record_revisions_impl(records).map(Some)
+        self.record_revisions_with_control(
+            records,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .map(|revisions| {
+            revisions
+                .into_uncontrolled()
+                .map_err(|_| StorageBackendError::Other("ordinary catalog revision owner".into()))
+        })
+        .transpose()
+    }
+
+    fn record_revisions_with_control(
+        &self,
+        records: &[crate::catalog::CatalogRecordRef<'_>],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> StorageBackendResult<
+        Option<uqa_core::memory::Produced<Vec<Option<crate::catalog::CatalogRecordRevision>>>>,
+    > {
+        control.check()?;
+        if !self.store.transaction_model().is_versioned() {
+            return Ok(None);
+        }
+        self.record_revisions_impl(records, control).map(Some)
     }
 
     fn transaction_model(&self) -> crate::StorageTransactionModel {

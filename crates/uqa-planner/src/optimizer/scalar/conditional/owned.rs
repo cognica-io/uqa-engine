@@ -53,7 +53,7 @@ fn case_match(
     )
 }
 
-pub(super) fn optimize_case(
+pub(in crate::optimizer::scalar) fn optimize_case(
     mut expression: OwnedScalarExpr,
     config: &OptimizerConfig,
     storage: &ProductionControl<'_>,
@@ -126,7 +126,7 @@ pub(super) fn optimize_case(
     Ok(expression)
 }
 
-pub(super) fn optimize_coalesce(
+pub(in crate::optimizer::scalar) fn optimize_coalesce(
     mut expression: OwnedScalarExpr,
     config: &OptimizerConfig,
     storage: &ProductionControl<'_>,

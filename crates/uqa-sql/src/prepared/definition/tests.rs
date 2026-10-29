@@ -84,7 +84,7 @@ fn analyze(scopes: &Scopes, declared: &[ColumnType]) -> Result<PreparedDefinitio
 fn inference_scope_is_released_before_result_descriptor_scope() {
     let scopes = Scopes::default();
     let definition = analyze(&scopes, &[]).unwrap();
-    assert_eq!(definition.parameter_types, vec![Some(ColumnType::Integer)]);
+    assert_eq!(*definition.parameter_types, vec![Some(ColumnType::Integer)]);
     assert_eq!(definition.result_schema.unwrap().columns(), &["value"]);
     assert_eq!(
         *scopes.events.borrow(),
@@ -110,7 +110,7 @@ fn preparation_retains_the_input_scope_namespace_and_live_reads_release_their_sc
         schemas: vec!["pg_catalog".into(), "public".into()],
         creation_namespace: Some("pg_catalog".into()),
     });
-    assert_eq!(definition.effective_search_path, expected);
+    assert_eq!(*definition.effective_search_path, expected);
     assert_eq!(scopes.captures.get(), 2);
     scopes.events.borrow_mut().clear();
     let current = effective_search_path(&PreparedDefinitionContext {

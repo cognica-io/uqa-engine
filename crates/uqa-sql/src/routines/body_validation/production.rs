@@ -13,6 +13,52 @@ use uqa_core::{
     Value,
 };
 
+pub fn reject_undefined_parameters_with_control(
+    plan: crate::plan::PlanRef<'_>,
+    declared: usize,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let mut result = Ok(());
+    plan.visit_scalar_expressions(&mut |expression| {
+        if result.is_err() {
+            return;
+        }
+        result = expression.try_visit(&mut |node| {
+            control.check()?;
+            if let crate::ScalarExpr::Param(index) = node {
+                if *index > declared {
+                    return Err(SQLError::Routine {
+                        sqlstate: control.copy_text("42P02")?.into_parts().0,
+                        message: control
+                            .format(format_args!("there is no parameter ${index}"))?
+                            .into_parts()
+                            .0,
+                    });
+                }
+            }
+            Ok(true)
+        });
+    });
+    result
+}
+
+pub fn reject_output_argument_call_with_control(
+    overloads: &crate::routines::resolution::RoutineOverloadContext<'_>,
+    types: &dyn RoutineTypeCatalog,
+    name: &str,
+    arguments: &[crate::plan::ExpressionPlan],
+    infer: &mut crate::routines::call::OwnedArgumentTypeInference<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    if crate::routines::call::OwnedProcedureCallAnalysis::new(arguments, control)?
+        .result_schema_with_control(name, overloads, types, infer, control)?
+        .is_some()
+    {
+        return Err(super::output_argument_call_error());
+    }
+    Ok(())
+}
+
 pub fn routine_parameter_values_with_control(
     types: &dyn RoutineTypeCatalog,
     definition: &CreateFunction,

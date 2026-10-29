@@ -32,6 +32,23 @@ mod xml;
 /// Catalog input needed after analysis selects a type for an unknown literal. Domain array input includes each element's constraints, so the caller must retain this value rather than read the text again at execution.
 pub trait CatalogInputFunctions {
     fn read_unknown_input(&self, text: &str, target: &ColumnType) -> Result<Value>;
+
+    /// External callbacks retain their original production boundary; a controlled caller receives a distinct admitted value. Native catalogs override this method at their input constructors.
+    fn read_unknown_input_with_control(
+        &self,
+        text: &str,
+        target: &ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        control.check()?;
+        let value = self.read_unknown_input(text, target)?;
+        control.check()?;
+        if control.budget().is_some() {
+            Ok(control.copy_value(&value)?)
+        } else {
+            Ok(control.finish(value, None)?)
+        }
+    }
 }
 
 pub(crate) fn requires_domain_array_input(target: &ColumnType) -> bool {
@@ -59,19 +76,36 @@ pub fn read_catalog_input(
     target: &ColumnType,
     engine: &dyn EngineHook,
 ) -> Result<Value> {
+    read_catalog_input_with_control(text, target, engine, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary catalog input owner".into()))
+}
+
+pub fn read_catalog_input_with_control(
+    text: &str,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     if requires_domain_array_input(target) {
-        return read_catalog_array_input(text, target, engine);
+        return read_catalog_array_input_with_control(text, target, engine, control);
     }
     if !requires_catalog_constant_input(target) {
         return Err(SQLError::Internal(
             "constant input requires a catalog or session context".into(),
         ));
     }
-    super::cast_value_with_type_resolution(
-        &Value::Str(text.into()),
+    let text = control.copy_text(text)?;
+    let (text, memory) = text.into_parts();
+    let input = control.finish(Value::Str(text), memory)?;
+    let target_name = target.catalog_name_with_control(control)?;
+    cast_value_with_type_resolution_with_control(
+        &input,
         Some("unknown"),
-        &target.catalog_name(),
+        &target_name,
         Some(engine),
+        control,
     )
 }
 
@@ -81,29 +115,37 @@ pub fn read_catalog_array_input(
     target: &ColumnType,
     engine: &dyn EngineHook,
 ) -> Result<Value> {
+    read_catalog_array_input_with_control(text, target, engine, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary catalog array input owner".into()))
+}
+
+fn read_catalog_array_input_with_control(
+    text: &str,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     if !requires_domain_array_input(target) {
         return Err(SQLError::Internal(
             "catalog array input requires domain elements".into(),
         ));
     }
-    let control = ProductionControl::uncontrolled();
     let element = array_leaf_type(target);
-    let target_name = element.catalog_name_with_control(&control)?;
-    let array = parse_pg_array_literal_with_input(text, &control, |value| {
+    let target_name = element.catalog_name_with_control(control)?;
+    let array = parse_pg_array_literal_with_input(text, control, |value| {
         cast_value_with_type_resolution_with_control(
             &value,
             None,
             &target_name,
             Some(engine),
-            &control,
+            control,
         )
     })?;
     let (array, memory) = array.into_parts();
     let oid = crate::catalog::type_metadata::pg_type_oid(element) as u32;
-    control
-        .finish(Value::Array(array.with_element_type_oid(Some(oid))), memory)?
-        .into_uncontrolled()
-        .map_err(|_| SQLError::Internal("ordinary catalog array input owner".into()))
+    Ok(control.finish(Value::Array(array.with_element_type_oid(Some(oid))), memory)?)
 }
 
 #[must_use]
@@ -471,15 +513,9 @@ fn resolve_catalog_type_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>> {
     engine
-        .map(|engine| engine.resolve_type_name(name))
+        .map(|engine| engine.resolve_type_name_with_control(name, control))
         .transpose()
-        .map_err(SQLError::Internal)?
-        .flatten()
-        .map(|ty| {
-            ty.retain_external_with_control(control)
-                .map_err(SQLError::from)
-        })
-        .transpose()
+        .map(Option::flatten)
 }
 
 fn record_identity_cast(
@@ -492,7 +528,7 @@ fn record_identity_cast(
     if matches!(target, ColumnType::Record) {
         // Composite-to-record coercion is a binary relabel: even malformed physical fields remain unread.
         if let Value::Datum(datum) = value {
-            if crate::expr::composites::datum_is_composite(datum, engine)? {
+            if crate::expr::composites::datum_is_composite_with_control(datum, engine, control)? {
                 return Ok(Some(control.copy_value(value)?));
             }
         }

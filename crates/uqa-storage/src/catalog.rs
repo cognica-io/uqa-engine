@@ -313,6 +313,25 @@ pub trait CatalogFacade: Send + Sync {
         Ok(None)
     }
 
+    /// Native producers admit selected revision buffers before allocation. External catalogs retain their existing snapshot operation and lend its immutable revision identities into an admitted destination.
+    fn record_revisions_with_control(
+        &self,
+        records: &[CatalogRecordRef<'_>],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Produced<Vec<Option<CatalogRecordRevision>>>>>
+    {
+        control.check()?;
+        let Some(revisions) = self.record_revisions(records)? else {
+            return Ok(None);
+        };
+        let mut output = uqa_core::memory::ProductionVec::new(*control);
+        output.reserve(revisions.len())?;
+        for revision in revisions {
+            output.push_produced(control.finish(revision, control.empty_reservation())?)?;
+        }
+        Ok(Some(output.finish()?))
+    }
+
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()>;
     /// Remove one metadata record, retaining its private deletion and write precondition until transaction end.
     fn delete_metadata(&self, key: &str) -> StorageBackendResult<()>;

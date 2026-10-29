@@ -12,6 +12,7 @@ use crate::plan::QueryPlan;
 use crate::routines::SQLUserFunction;
 use crate::{ColumnType, SQLError};
 use std::sync::Arc;
+mod owned;
 
 #[derive(Clone)]
 pub struct TableDefinition {
@@ -47,6 +48,17 @@ pub trait AnalysisCatalog: Send + Sync {
         Ok(None)
     }
 
+    fn prepared_dependency_snapshot_with_control(
+        &self,
+        dependencies: &crate::prepared::dependencies::PreparedAnalysisDependencies,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<crate::prepared::dependencies::PreparedDependencySnapshot>, SQLError> {
+        control.check()?;
+        self.prepared_dependency_snapshot(dependencies)?
+            .map(|snapshot| snapshot.copy_with_control(control))
+            .transpose()
+    }
+
     /// The OID of a relation successfully selected in this same immutable namespace. The binder calls this after selecting a catalog relation, never for a CTE or an unsuccessful lookup candidate. Catalog fixtures without identities may leave this unavailable.
     fn relation_dependency(
         &self,
@@ -54,6 +66,19 @@ pub trait AnalysisCatalog: Send + Sync {
         _name: &str,
     ) -> Result<Option<u32>, SQLError> {
         Ok(None)
+    }
+
+    /// Observe a selected relation identity within the caller's planning control.
+    fn relation_dependency_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<u32>, SQLError> {
+        control.check()?;
+        let dependency = self.relation_dependency(resolution, name)?;
+        control.check()?;
+        Ok(dependency)
     }
 
     /// The schemas that exist and that the analyzing role may use, including implicit namespaces, and its creation namespace. Catalogs without namespace state leave this unavailable.
@@ -64,11 +89,73 @@ pub trait AnalysisCatalog: Send + Sync {
         Ok(None)
     }
 
+    fn effective_search_path_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Option<super::resolution::EffectiveSearchPath>>, SQLError>
+    {
+        use uqa_core::memory::ProductionVec;
+        control.check()?;
+        let Some(path) = self.effective_search_path(resolution)? else {
+            return Ok(control.finish(None, control.empty_reservation())?);
+        };
+        let mut schemas = ProductionVec::new(*control);
+        for schema in &path.schemas {
+            schemas.push_produced(control.copy_text(schema)?)?;
+        }
+        let creation = path
+            .creation_namespace
+            .as_ref()
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        let (schemas, schema_memory) = schemas.finish()?.into_parts();
+        let (creation_namespace, creation_memory) = creation.map_or_else(
+            || (None, control.empty_reservation()),
+            |name| {
+                let (name, memory) = name.into_parts();
+                (Some(name), memory)
+            },
+        );
+        Ok(control.finish(
+            Some(super::resolution::EffectiveSearchPath {
+                schemas,
+                creation_namespace,
+            }),
+            control.combine(schema_memory, creation_memory),
+        )?)
+    }
+
     fn table_resolved(
         &self,
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<TableDefinition>, SQLError>;
+    /// Native implementations share already retained declarations and admit namespace lookup scratch before producing it.
+    fn table_resolved_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<TableDefinition>, SQLError> {
+        control.check()?;
+        let table = self.table_resolved(resolution, name)?;
+        control.check()?;
+        Ok(table)
+    }
+
+    fn table_name_resolved_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
+        control.check()?;
+        self.table_name_resolved(resolution, name)?
+            .map(|name| control.copy_text(&name).map_err(Into::into))
+            .transpose()
+    }
+
     fn table_name_resolved(
         &self,
         resolution: &RelationNameResolution,

@@ -177,6 +177,13 @@ pub fn routine_pseudo_type_name(oid: i64) -> Option<&'static str> {
         .find_map(|(name, candidate)| (*candidate == oid).then_some(*name))
 }
 
+/// Resolve an already canonical pseudo-type catalog name without constructing a declaration.
+pub fn routine_pseudo_type_oid(name: &str) -> Option<i64> {
+    ROUTINE_PSEUDO_TYPES
+        .iter()
+        .find_map(|(candidate, oid)| (*candidate == name).then_some(*oid))
+}
+
 pub fn routine_type_oid(type_name: &str) -> i64 {
     routine_type_oid_with_control(
         type_name,
@@ -476,7 +483,7 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
 /// The OID of a domain's generated array type: the recorded one, or for a domain created before array OIDs were recorded, the one derived from its OID.
 pub fn pg_domain_array_oid(domain_oid: u32, array_oid: Option<u32>) -> i64 {
     array_oid.map_or_else(
-        || super::oids::stable_oid("domain_array", &domain_oid.to_string()),
+        || super::oids::stable_numeric_oid("domain_array", domain_oid),
         i64::from,
     )
 }

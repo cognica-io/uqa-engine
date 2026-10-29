@@ -25,6 +25,8 @@ mod identities;
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogRetentionError {
     #[error(transparent)]
+    SQL(#[from] crate::SQLError),
+    #[error(transparent)]
     Memory(#[from] MemoryError),
     #[error(transparent)]
     Cancelled(#[from] QueryCancelled),
@@ -47,6 +49,7 @@ impl From<ValueRetentionError> for CatalogRetentionError {
 impl From<CatalogRetentionError> for crate::SQLError {
     fn from(error: CatalogRetentionError) -> Self {
         match error {
+            CatalogRetentionError::SQL(error) => error,
             CatalogRetentionError::Memory(error) => Self::Routine {
                 sqlstate: "53200".into(),
                 message: error.to_string(),

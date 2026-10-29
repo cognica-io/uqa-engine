@@ -8,6 +8,7 @@ use crate::{binding::VariableSiteResolution, ColumnType};
 use uqa_core::Value;
 
 mod collations;
+mod owned;
 struct Variables(i64);
 impl VariableResolver for Variables {
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {

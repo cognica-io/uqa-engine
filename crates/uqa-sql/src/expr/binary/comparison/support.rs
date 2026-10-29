@@ -43,11 +43,9 @@ impl ComparisonSupport {
             return self.available_for_type(element, Some(&composites), control);
         }
         let ty = catalog
-            .map(|catalog| catalog.value_type_by_oid(oid))
+            .map(|catalog| catalog.value_type_by_oid_with_control(oid, control))
             .transpose()?
-            .flatten()
-            .map(|ty| ty.retain_external_with_control(control))
-            .transpose()?;
+            .flatten();
         if let Some(ty) = ty {
             return self.available_for_type(&ty, Some(&composites), control);
         }

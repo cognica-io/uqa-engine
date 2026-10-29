@@ -24,8 +24,17 @@ pub fn eval_scalar(
     expression: &ScalarExpr,
     context: &ScalarEvalContext<'_>,
 ) -> Result<Value, SQLError> {
-    eval_scalar_inner(expression, context, &ProductionControl::uncontrolled())
+    eval_scalar_with_control(expression, context, &ProductionControl::uncontrolled())
         .map(|value| value.into_uncontrolled().expect("ordinary scalar result"))
+}
+
+/// Evaluate a scalar with the invoking producer's allowance and cancellation scopes. The returned owner retains the selected value after temporary operands have been released.
+pub fn eval_scalar_with_control(
+    expression: &ScalarExpr,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    eval_scalar_inner(expression, context, control)
 }
 
 /// Evaluate a validated generated-column expression against borrowed row fields. The context has no query runner, session callbacks or physical whole-row schema; their general execution contracts remain with `eval_scalar`.

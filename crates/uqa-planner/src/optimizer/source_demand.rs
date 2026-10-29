@@ -10,6 +10,8 @@ mod ctes;
 mod positions;
 mod references;
 
+pub(super) mod owned;
+
 use positions::Demand;
 use uqa_core::{RelationIdentity, RelationName};
 

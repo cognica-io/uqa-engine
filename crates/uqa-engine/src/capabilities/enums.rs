@@ -115,6 +115,14 @@ impl EnumLabelCatalog for Engine {
         self.catalog_read_view().range_value_descriptor(oid)
     }
 
+    fn value_type_by_oid_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        uqa_sql::expr::EngineHook::resolve_type_oid_with_control(self, oid, control)
+    }
+
     fn value_type_by_oid(&self, oid: u32) -> Result<Option<uqa_sql::ColumnType>, SQLError> {
         uqa_sql::expr::EngineHook::resolve_type_oid(self, oid).map_err(SQLError::Internal)
     }
@@ -129,6 +137,16 @@ impl EnumLabelCatalog for Engine {
     ) -> Result<Option<std::sync::Arc<uqa_sql::expr::composites::CompositeTypeDescriptor>>, SQLError>
     {
         uqa_sql::expr::composites::CompositeTypeCatalog::composite_type(self, oid)
+    }
+
+    fn value_composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::expr::composites::OwnedCompositeTypeDescriptor>, SQLError> {
+        uqa_sql::expr::composites::CompositeTypeCatalog::composite_type_with_control(
+            self, oid, control,
+        )
     }
 
     fn enum_type_comparison_states(

@@ -8,30 +8,19 @@
 
 use std::{cell::RefCell, sync::Arc};
 
+mod production;
+
 #[derive(Debug)]
 pub(super) struct SourcePositions {
     length: usize,
     excess_bytes: Vec<(usize, usize)>,
+    memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl SourcePositions {
     pub(super) fn new(sql: &str) -> Self {
-        let mut excess = 0;
-        let excess_bytes = sql
-            .char_indices()
-            .filter_map(|(offset, character)| {
-                let width = character.len_utf8();
-                if width == 1 {
-                    return None;
-                }
-                excess += width - 1;
-                Some((offset + width, excess))
-            })
-            .collect();
-        Self {
-            length: sql.len(),
-            excess_bytes,
-        }
+        Self::new_with_control(sql, &uqa_core::memory::ProductionControl::uncontrolled())
+            .expect("ordinary source-position index")
     }
 
     fn position(&self, location: i32) -> Option<u32> {

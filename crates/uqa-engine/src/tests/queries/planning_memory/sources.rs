@@ -26,15 +26,24 @@ fn native_owned_source_optimization_preserves_input_allocations(#[case] provider
         panic!("values")
     };
     rows.resize_with(8192, || vec![ScalarExpr::Param(1)]);
-    let pointer = rows.as_ptr();
-    let row_pointers: Vec<_> = rows.iter().map(Vec::as_ptr).collect();
     let retention = engine.query_retention_control().unwrap();
     let memory = retention.memory();
     let baseline = memory.used();
+    let control = uqa_core::memory::ProductionControl::new(
+        memory,
+        retention.cancellation(),
+        retention.cancellation(),
+    );
+    let query = query.copy_for_rewrite(&control).unwrap();
+    let RelationalPlan::Values { rows, .. } = &query.root else {
+        panic!("values")
+    };
+    let pointer = rows.as_ptr();
+    let row_pointers: Vec<_> = rows.iter().map(Vec::as_ptr).collect();
     let occupied = memory.reserve(memory.available() - 64 * 1024).unwrap();
     let mut output = None;
     let allocation = allocation_counter::measure(|| {
-        output = Some(engine.optimize_retained_query(*query).unwrap());
+        output = Some(engine.optimize_retained_query(query, &control).unwrap());
     });
     assert!(
         allocation.bytes_total < 16 * 1024,

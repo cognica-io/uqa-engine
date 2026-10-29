@@ -11,6 +11,10 @@ use uqa_sql::plan::OwnedScalarExpr;
 
 mod boolean;
 mod owned;
+pub(super) use boolean::optimize as optimize_owned_boolean;
+pub(super) use owned::{
+    optimize_case as optimize_owned_case, optimize_coalesce as optimize_owned_coalesce,
+};
 
 use super::constants::literal_value_with_control;
 use super::{optimize_scalar, OptimizerConfig, SQLError, ScalarExpr, Value};
@@ -26,7 +30,7 @@ pub(super) fn optimize_boolean(
     } else {
         ScalarExpr::Or(items)
     };
-    let output = boolean::optimize(
+    let output = optimize_owned_boolean(
         OwnedScalarExpr::uncontrolled(expression),
         and,
         config,
@@ -41,7 +45,7 @@ pub(super) fn optimize_case(
     config: &OptimizerConfig,
 ) -> Result<ScalarExpr, SQLError> {
     let storage = ProductionControl::uncontrolled();
-    let output = owned::optimize_case(
+    let output = optimize_owned_case(
         OwnedScalarExpr::uncontrolled(expression),
         config,
         &storage,
@@ -55,7 +59,7 @@ pub(super) fn optimize_coalesce(
     config: &OptimizerConfig,
 ) -> Result<ScalarExpr, SQLError> {
     let storage = ProductionControl::uncontrolled();
-    let output = owned::optimize_coalesce(
+    let output = optimize_owned_coalesce(
         OwnedScalarExpr::uncontrolled(expression),
         config,
         &storage,

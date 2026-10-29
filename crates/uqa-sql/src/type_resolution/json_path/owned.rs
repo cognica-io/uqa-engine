@@ -78,6 +78,64 @@ pub(in crate::type_resolution) fn bind_owned_call(
     Ok(call)
 }
 
+/// Ordered preparation selected the invocation already; normalize its owned children without repeating overload resolution.
+pub(crate) fn normalize_retained_owned(
+    expression: OwnedScalarExpr,
+    control: &ProductionControl<'_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    let ScalarExpr::Func {
+        binding: Some(binding),
+        ..
+    } = &*expression
+    else {
+        return Ok(expression);
+    };
+    if !binding.builtin
+        || JsonPathFunction::lookup(&binding.name).is_none()
+        || matches!(binding.dispatch, Some(FunctionDispatch::JsonPath { .. }))
+        || binding.invocation.is_none()
+    {
+        return Ok(expression);
+    }
+    let binding = binding.clone_with_control(control)?;
+    let invocation = binding
+        .invocation
+        .as_ref()
+        .expect("selected JSON path invocation");
+    let mut original = ProductionVec::new(*control);
+    original.reserve(invocation.argument_sources.len())?;
+    for source in &invocation.argument_sources {
+        let parsed = match source.as_deref() {
+            Some(source) => match ColumnType::from_sql_name_with_control(source, control) {
+                Ok(value) => Some(value),
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Err(_) => None,
+            },
+            None => None,
+        };
+        let (value, memory) = parsed.map_or((None, control.empty_reservation()), |value| {
+            let (value, memory) = value.into_parts();
+            (Some(value), memory)
+        });
+        original.push_produced(control.finish(value, memory)?)?;
+    }
+    let original = original.finish()?;
+    let explicit = matches!(
+        invocation.variadic_mode,
+        crate::ast::RoutineVariadicMode::Explicit { .. }
+    );
+    normalize(
+        OwnedBindingCall::new(expression, control)?,
+        &binding,
+        &original,
+        explicit,
+        control,
+    )
+    .map(OwnedBindingCall::into_expression)
+}
+
 fn normalize(
     mut call: OwnedBindingCall,
     binding: &FunctionBinding,

@@ -21,12 +21,31 @@ use uqa_sql::SQLError;
 use uqa_storage::{read_control::StorageReadControl, InvertedIndex};
 
 struct TableStatistics(Arc<TableState>, StorageReadControl);
-struct TextRead<'a>(RwLockReadGuard<'a, Box<dyn InvertedIndex>>);
+struct TextRead<'a>(
+    RwLockReadGuard<'a, Box<dyn InvertedIndex>>,
+    &'a StorageReadControl,
+);
 struct VectorRead<'a>(
     RwLockReadGuard<'a, uqa_storage::vector_index::VectorIndexes>,
     &'a StorageReadControl,
 );
 impl TextStatisticsRead for TextRead<'_> {
+    fn query_doc_freq_with_control(
+        &self,
+        field: Option<&str>,
+        query: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<u64, SQLError> {
+        control.check()?;
+        let frequency =
+            uqa_storage::inverted_index::query_document_frequency(&**self.0, field, query, self.1)
+                .map_err(|error| {
+                    crate::search::storage_sql_error("execute analyze optimizer query", error)
+                })?;
+        control.check()?;
+        Ok(frequency)
+    }
+
     fn field_names(&self) -> Result<Option<Vec<String>>, SQLError> {
         self.0.field_names().map(Some).map_err(|error| {
             crate::search::storage_sql_error("execute read document frequency", error)
@@ -131,7 +150,7 @@ impl VectorStatisticsRead for VectorRead<'_> {
 }
 impl RetrievalStatisticsTable for TableStatistics {
     fn text_index(&self) -> Box<dyn TextStatisticsRead + '_> {
-        Box::new(TextRead(self.0.inverted_index.read()))
+        Box::new(TextRead(self.0.inverted_index.read(), &self.1))
     }
     fn vector_indexes(&self) -> Box<dyn VectorStatisticsRead + '_> {
         Box::new(VectorRead(self.0.vector_indexes.read(), &self.1))
@@ -184,17 +203,16 @@ impl RetrievalPlanningCatalog for Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let index = t.inverted_index.read();
-        let analyzer = index.search_analyzer_revision(field).map_err(|error| {
-            crate::search::storage_sql_error("resolve text analyzer revision", error)
-        })?;
-        let analyzed_terms = analyzer
-            .analyze_tokens(query)
-            .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?
-            .tokens()
-            .len();
-        let indexed_document_count = index.field_doc_count(field).map_err(|error| {
-            crate::search::storage_sql_error("read indexed document count", error)
-        })?;
+        let control = self.query_retention_control()?;
+        let analyzed_terms =
+            uqa_storage::inverted_index::query_term_count(&**index, field, query, &control)
+                .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?;
+        let indexed_document_count = index
+            .field_stats_scalar_budgeted(field, &control)
+            .map_err(|error| {
+                crate::search::storage_sql_error("read indexed document count", error)
+            })?
+            .total_docs;
         Ok(uqa_planner::TextTopKCapabilities {
             analyzed_term_count: analyzed_terms,
             indexed_document_count,

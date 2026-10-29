@@ -15,11 +15,26 @@ use uqa_storage::{PersistentStorageProvider, SequenceValuePosition, StorageBacke
 /// Reads the value records of the latest commit in a read transaction of its own, which leaves the caller's transaction and snapshot alone.
 pub struct ProviderSequenceValues {
     provider: Arc<dyn PersistentStorageProvider>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl ProviderSequenceValues {
     pub fn new(provider: Arc<dyn PersistentStorageProvider>) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            _memory: None,
+        }
+    }
+
+    pub fn shared_with_control(
+        provider: Arc<dyn PersistentStorageProvider>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Arc<Self>, uqa_sql::SQLError> {
+        let memory = control.reserve(size_of::<Self>())?;
+        Ok(Arc::new(Self {
+            provider,
+            _memory: memory,
+        }))
     }
 }
 

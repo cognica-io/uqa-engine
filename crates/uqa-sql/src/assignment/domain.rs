@@ -13,6 +13,8 @@ use uqa_core::{
     Value,
 };
 
+mod diagnostics;
+
 #[cfg(test)]
 mod tests;
 
@@ -34,6 +36,16 @@ pub fn cast_domain_value_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>, SQLError> {
     convert_domain_value_with_control(context, value, source, ty, false, control)
+}
+
+pub fn assign_domain_value_with_control(
+    context: &dyn AssignmentContext,
+    value: &Value,
+    source: Option<&str>,
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>, SQLError> {
+    convert_domain_value_with_control(context, value, source, ty, true, control)
 }
 
 pub fn assign_domain_value(
@@ -88,15 +100,18 @@ fn convert_domain_value_with_control(
     let ColumnType::Domain { oid, .. } = ty else {
         return Ok(None);
     };
-    let Some(domain) = context.domain_by_oid(*oid) else {
+    let Some(domain) = context.domain_by_oid_with_control(*oid, control)? else {
         return Ok(None);
     };
-    let domain = domain.retain_external_with_control(control)?;
-    if source
-        .and_then(|name| context.resolve_type_name(name).ok().flatten())
-        .as_ref()
-        == Some(ty)
-    {
+    let source_type = source
+        .map(|name| context.resolve_type_name_with_control(name, control))
+        .transpose();
+    let source_type = match source_type {
+        Ok(ty) => ty.flatten(),
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        Err(_) => None,
+    };
+    if source_type.as_deref() == Some(ty) {
         return Ok(Some(
             super::conversion::normalize_legacy_vector_carrier_with_control(value, ty, control)?
                 .map_or_else(|| control.copy_value(value), Ok)?,
@@ -112,8 +127,7 @@ fn convert_domain_value_with_control(
     } = &*base
     {
         control.check()?;
-        if let Some(parent) = context.domain_by_oid(*oid) {
-            let parent = parent.retain_external_with_control(control)?;
+        if let Some(parent) = context.domain_by_oid_with_control(*oid, control)? {
             base = parent.definition.base.clone_with_control(control)?;
             chain.push_produced(parent)?;
         } else {
@@ -122,19 +136,16 @@ fn convert_domain_value_with_control(
     }
     let value = if assignment {
         let source = source
-            .map(|source| {
-                context
-                    .resolve_type_name(source)
-                    .map_err(SQLError::Internal)
-            })
+            .map(|source| context.resolve_type_name_with_control(source, control))
             .transpose()?
             .flatten();
-        control.retain_external_value(super::conversion::coerce_assignment_value(
+        super::conversion::coerce_assignment_value_with_control(
             context,
-            value.clone(),
+            control.copy_value(value)?,
             &base,
-            source.as_ref(),
-        )?)?
+            source.as_deref(),
+            control,
+        )?
     } else {
         crate::expr::cast_value_with_type_resolution_with_control(
             value,
@@ -158,13 +169,12 @@ fn check_value(
             .iter()
             .any(|domain| domain.definition.not_null.is_some())
     {
-        return Err(domain_error(
-            "23502",
-            format!(
-                "domain {} does not allow null values",
-                domain_display_name(context, chain[0].oid)?
-            ),
-        ));
+        return Err(diagnostics::violation(
+            context,
+            chain[0].oid,
+            None,
+            control,
+        )?);
     }
     // Checks may change the catalog. Retain the admitted tuple before invoking them.
     let value = crate::expr::composites::retain_value_with_control(
@@ -173,29 +183,31 @@ fn check_value(
         control,
     )?;
     let row = DomainValue(&value);
-    let (check_type, _type_memory) = chain[0]
-        .definition
-        .base
-        .clone_with_control(control)?
-        .into_parts();
-    let schema = RowSchema::with_types(vec!["value".into()], vec![Some(check_type)]);
+    let schema = RowSchema::with_column_metadata_with_control(
+        None,
+        [("value", Some(&chain[0].definition.base), None)],
+        control,
+    )?;
     for check in chain
         .iter()
         .rev()
         .flat_map(|domain| &domain.definition.checks)
     {
         control.check()?;
-        let result = context.evaluate_domain_check(&check.expression, &row, &schema)?;
+        let result = context.evaluate_domain_check_with_control(
+            &check.expression,
+            &row,
+            &schema,
+            control,
+        )?;
         control.check()?;
-        if result == Value::Bool(false) {
-            return Err(domain_error(
-                "23514",
-                format!(
-                    "value for domain {} violates check constraint \"{}\"",
-                    domain_display_name(context, chain[0].oid)?,
-                    check.name.as_deref().expect("bound domain constraint")
-                ),
-            ));
+        if *result == Value::Bool(false) {
+            return Err(diagnostics::violation(
+                context,
+                chain[0].oid,
+                Some(check.name.as_deref().expect("bound domain constraint")),
+                control,
+            )?);
         }
     }
     Ok(value)
@@ -215,13 +227,6 @@ impl crate::expr::RowLookup for DomainValue<'_> {
     fn positional_column(&self, index: usize) -> Option<&Value> {
         (index == 0).then_some(self.0)
     }
-}
-
-fn domain_display_name(context: &dyn AssignmentContext, oid: u32) -> Result<String, SQLError> {
-    context
-        .resolve_regtype_output(&ColumnType::Regtype, i64::from(oid))
-        .map_err(SQLError::Internal)?
-        .ok_or_else(|| SQLError::Internal("domain type has no catalog display name".into()))
 }
 
 pub fn domain_error(sqlstate: &str, message: impl Into<String>) -> SQLError {

@@ -6,15 +6,15 @@
 
 //! Routine invocation metadata, concrete signatures, and anonymous-record assignment rules.
 pub mod descriptions;
+mod output;
 use crate::{
     assignment::routines::RoutineValueContext,
-    ast::{
-        ColumnType, CreateFunction, FunctionParamMode, FunctionReturns, RoutineInvocationBinding,
-    },
+    ast::{ColumnType, CreateFunction, FunctionReturns, RoutineInvocationBinding},
     expr::value_type_name,
     routines::declaration::RoutineTypeCatalog,
     SQLError,
 };
+pub use output::call_output_schema_with_control;
 use uqa_core::Value;
 pub fn output_column_names(def: &CreateFunction) -> Vec<String> {
     def.output_params()
@@ -193,33 +193,10 @@ pub fn call_output_schema(
     definition: &crate::ast::CreateFunction,
     parameter_types: &[String],
 ) -> Result<Option<crate::RowSchema>, SQLError> {
-    let output_indices = definition
-        .params
-        .iter()
-        .enumerate()
-        .filter_map(|(index, parameter)| {
-            matches!(
-                parameter.mode,
-                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-            )
-            .then_some(index)
-        })
-        .collect::<Vec<_>>();
-    if output_indices.is_empty() {
-        return Ok(None);
-    }
-    let columns = output_column_names(definition);
-    let column_types = output_indices
-        .into_iter()
-        .map(|index| {
-            catalog
-                .resolve_catalog_column_type(&parameter_types[index])
-                .or_else(|| crate::ast::ColumnType::from_sql_name(&parameter_types[index]).ok())
-                .map(Some)
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!("unknown type `{}`", parameter_types[index]))
-                })
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    Ok(Some(crate::RowSchema::with_types(columns, column_types)))
+    call_output_schema_with_control(
+        catalog,
+        definition,
+        parameter_types,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }

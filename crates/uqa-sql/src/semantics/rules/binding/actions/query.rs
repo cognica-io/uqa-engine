@@ -54,6 +54,20 @@ impl RuleAction {
         Ok(Self::Rewritten(plan))
     }
 
+    pub fn lower_with_control(
+        self,
+        aggregates: &dyn AggregateClassifier,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableExecutablePlan, SQLError> {
+        match self {
+            Self::Stored(statement) => {
+                UnifiedPlan::lower_borrowed_for_rewrite(&statement, aggregates, control)?
+                    .mark_catalog_relations_bound(control)
+            }
+            Self::Rewritten(plan) => plan.copy_for_rewrite(control),
+        }
+    }
+
     pub fn lower(self, aggregates: &dyn AggregateClassifier) -> Result<UnifiedPlan, SQLError> {
         match self {
             Self::Stored(statement) => {

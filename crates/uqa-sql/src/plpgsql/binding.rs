@@ -44,6 +44,38 @@ impl ResolvedVariable {
 /// Resolves routine variables while a compiled expression / statement
 /// is being specialized for one execution.
 pub trait VariableResolver {
+    /// External resolvers may retain their own callback allocation policy. Native activations override this producer and admit values and type descriptors before copying them.
+    fn resolve_input_with_control(
+        &mut self,
+        reference: &super::PLpgSQLVariableReference,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<super::PLpgSQLInput>>> {
+        control.check()?;
+        let value = match reference {
+            super::PLpgSQLVariableReference::Name(name) => self.resolve_name(name)?,
+            super::PLpgSQLVariableReference::Qualified { qualifier, column } => {
+                self.resolve_qualified(qualifier, column)?
+            }
+            super::PLpgSQLVariableReference::Parameter(index) => self.resolve_param(*index)?,
+        };
+        value
+            .map(|value| {
+                let ty = value
+                    .declared_type
+                    .as_deref()
+                    .and_then(|name| self.parameter_type(name));
+                super::PLpgSQLInput::from_parts(
+                    control.copy_value(&value.value)?,
+                    ty.as_ref()
+                        .map(|ty| ty.clone_with_control(control))
+                        .transpose()?,
+                    value.collation_oid,
+                    control,
+                )
+            })
+            .transpose()
+    }
+
     /// Read a prepared variable with its selected concrete type. Existing resolvers
     /// retain textual resolution; typed activation records can preserve their
     /// descriptor without spelling and resolving it again.

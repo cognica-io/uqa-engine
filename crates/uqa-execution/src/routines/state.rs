@@ -9,12 +9,8 @@
 use super::{
     cast_value_from, coercion_type_name, BTreeSet, ColumnType, CreateFunction, DatumResolver, Flow,
     FunctionReturns, HashMap, Interpreter, PLpgSQLBlock, PLpgSQLExpression, PLpgSQLFunction,
-    PLpgSQLStatement, RoutineContext, RoutineOutcome, SQLError, SQLParam, SQLResult, Statement,
-    Value,
+    PLpgSQLStatement, RoutineContext, RoutineOutcome, SQLError, SQLResult, Value,
 };
-use uqa_sql::binding::{resolve_variable_sites, VariableSiteResolution};
-use uqa_sql::plan::UnifiedPlan;
-use uqa_sql::ScalarExpr;
 
 impl<'a> Interpreter<'a> {
     pub fn new(
@@ -66,9 +62,15 @@ impl<'a> Interpreter<'a> {
                 out_datums.push(idx);
             }
         }
+        let planning = services.planning_resources()?;
+        let preparations =
+            services
+                .statements
+                .plpgsql_preparations(def, parsed, &planning.control())?;
         let mut interpreter = Self {
+            planning,
             descriptions: None,
-            preparations: services.statements.plpgsql_preparations(def, parsed),
+            preparations,
             services,
             def,
             datums,
@@ -88,42 +90,47 @@ impl<'a> Interpreter<'a> {
             is_set: def.returns_set(),
             variable_conflict: parsed.variable_conflict,
         };
+        interpreter.bind_arguments(bound)?;
+        // Each block initializes its own declared variables when reached.
+        if let Some(found) = interpreter.found {
+            interpreter.values[found] = Value::Bool(false);
+        }
+        Ok(interpreter)
+    }
+
+    fn bind_arguments(&mut self, bound: Vec<Value>) -> Result<(), SQLError> {
         // Bind call arguments onto the leading parameter datums.
         // Procedure OUT arguments start NULL (the placeholder value a
         // caller passes is discarded, matching PostgreSQL 14+).
         let mut bound = bound.into_iter();
-        for (idx, param) in def.params.iter().enumerate() {
+        for (idx, param) in self.def.params.iter().enumerate() {
             let takes_argument = match param.mode {
                 uqa_sql::ast::FunctionParamMode::In
                 | uqa_sql::ast::FunctionParamMode::InOut
                 | uqa_sql::ast::FunctionParamMode::Variadic => true,
-                uqa_sql::ast::FunctionParamMode::Out => def.is_procedure,
+                uqa_sql::ast::FunctionParamMode::Out => self.def.is_procedure,
                 uqa_sql::ast::FunctionParamMode::Table => false,
             };
             if takes_argument {
                 let value = bound.next().ok_or_else(|| {
                     SQLError::Internal(format!(
                         "PL/pgSQL routine `{}` ran out of validated arguments while binding parameter {}",
-                        def.name,
+                        self.def.name,
                         idx + 1
                     ))
                 })?;
                 if !matches!(param.mode, uqa_sql::ast::FunctionParamMode::Out) {
-                    interpreter.values[idx] = value;
+                    self.values[idx] = value;
                 }
             }
         }
         if bound.next().is_some() {
             return Err(SQLError::Internal(format!(
                 "PL/pgSQL routine `{}` left validated arguments unbound",
-                def.name
+                self.def.name
             )));
         }
-        // Each block initializes its own declared variables when reached.
-        if let Some(found) = interpreter.found {
-            interpreter.values[found] = Value::Bool(false);
-        }
-        Ok(interpreter)
+        Ok(())
     }
 
     pub fn into_outcome(self) -> RoutineOutcome {
@@ -266,33 +273,6 @@ impl<'a> Interpreter<'a> {
             result.value_at(0, 0).cloned().unwrap_or(Value::Null),
             result.column_types.first().cloned().flatten(),
         ))
-    }
-
-    /// How each variable site of `statement` resolves in the scope the statement runs in.
-    pub(super) fn resolve_variable_sites(
-        &self,
-        statement: Statement,
-        params: &[SQLParam],
-        names: Vec<ScalarExpr>,
-    ) -> Result<Vec<VariableSiteResolution>, SQLError> {
-        let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
-            self.services.runtime.has_aggregate_function(name)
-        });
-        let mut names = Some(names);
-        let mut resolutions = Vec::new();
-        self.services
-            .statements
-            .with_statement_scope(&mut |routines, ctes| {
-                resolutions = resolve_variable_sites(
-                    routines,
-                    &mut plan,
-                    params,
-                    ctes,
-                    names.take().unwrap_or_default(),
-                )?;
-                Ok(())
-            })?;
-        Ok(resolutions)
     }
 
     pub(super) fn eval_boolean(&self, expr: &PLpgSQLExpression) -> Result<Option<bool>, SQLError> {

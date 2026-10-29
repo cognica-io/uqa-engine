@@ -68,13 +68,18 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     cached: Option<CachedStatement>,
 ) -> Result<SQLCursor, SQLError> {
+    let planning_owner = context
+        .planning
+        .planning_control()
+        .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
+    let control = planning_owner.control();
     let (statement, initial_plan, cached_optimized, parser) = if let Some(cached) = cached {
         for notice in cached.parser.notices.iter() {
             context.runtime.notices.push(notice.clone());
         }
         let optimized = cached.optimized_plan_for(params).cloned();
         (
-            cached.statement.as_ref().clone(),
+            cached.statement,
             cached.logical_plan,
             optimized,
             cached.parser,
@@ -113,22 +118,24 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 single_query_error(statements.len()),
             ));
         }
-        let statement = statements.remove(0);
-        let plan = Arc::new(UnifiedPlan::lower_with(
-            statement.clone(),
-            context.aggregates,
-        ));
-        context.cache.cache_sql_statement(
-            sql.to_string(),
-            Arc::new(statement.clone()),
-            Arc::clone(&plan),
-            parser.clone(),
-        );
+        let statement = Arc::new(statements.remove(0));
+        let plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
+            .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
+        context
+            .cache
+            .cache_sql_statement(
+                sql,
+                statement.clone(),
+                plan.clone(),
+                parser.clone(),
+                &control,
+            )
+            .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
         (statement, plan, None, parser)
     };
     if context.statements.notification_subscriptions_required()
         && matches!(
-            statement,
+            statement.as_ref(),
             uqa_sql::Statement::Listen { .. } | uqa_sql::Statement::Unlisten { .. }
         )
     {
@@ -150,28 +157,34 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             context
                 .transactions
                 .prepare_explicit_statement_snapshot(true)?;
-            let mut plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+            let mut plan = super::batch::analysis::lower(&statement, context.aggregates, &control)?;
             let current_query = query_from_plan(&plan)?;
             context.cache.cache_sql_statement(
-                sql.to_string(),
-                Arc::new(statement.clone()),
-                Arc::new(plan.clone()),
+                sql,
+                statement.clone(),
+                plan.clone(),
                 parser.clone(),
-            );
+                &control,
+            )?;
             if query_may_mutate_engine(&context.effects.query_effect_context(), current_query)?
                 && !has_row_locks
                 && context.transactions.prepare_explicit_transaction_writer()?
             {
-                plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+                plan = super::batch::analysis::lower(&statement, context.aggregates, &control)?;
                 query_from_plan(&plan)?;
                 context.cache.cache_sql_statement(
-                    sql.to_string(),
-                    Arc::new(statement.clone()),
-                    Arc::new(plan.clone()),
+                    sql,
+                    statement.clone(),
+                    plan.clone(),
                     parser.clone(),
-                );
+                    &control,
+                )?;
             }
-            let optimized = context.planning.plan_for_execution(plan, params)?;
+            let optimized = context.planning.plan_owned_for_execution(
+                plan.copy_for_rewrite(&control)?,
+                params,
+                &control,
+            )?;
             let executor =
                 UnifiedPlanExecutor::new(context.statements.statement_execution_context(), params);
             execute_spilled(&executor, &optimized)
@@ -187,12 +200,16 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         let optimized = if let Some(plan) = cached_optimized {
             plan
         } else {
-            let (plan, reusable) = context
-                .planning
-                .plan_for_statement_cache(initial_plan.as_ref().clone(), params)?;
+            let (plan, reusable) = context.planning.plan_owned_for_statement_cache(
+                initial_plan.copy_for_rewrite(&control)?,
+                params,
+                &control,
+            )?;
 
             if reusable {
-                context.cache.cache_optimized_sql_plan(sql, plan.clone());
+                context
+                    .cache
+                    .cache_optimized_sql_plan(sql, plan.clone(), &control)?;
             }
             plan
         };
@@ -213,13 +230,18 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     {
         return rollback_after_statement_error(context.transactions, error);
     }
-    let mut plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-    context.cache.cache_sql_statement(
-        sql.to_string(),
-        Arc::new(statement.clone()),
-        Arc::new(plan.clone()),
-        parser.clone(),
-    );
+    let mut plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
+        .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
+    context
+        .cache
+        .cache_sql_statement(
+            sql,
+            statement.clone(),
+            plan.clone(),
+            parser.clone(),
+            &control,
+        )
+        .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
     let must_restart_as_writer = if is_read_query && context.persistent_backend && !has_row_locks {
         match query_from_plan(&plan).and_then(|query| {
             query_may_mutate_engine(&context.effects.query_effect_context(), query)
@@ -244,16 +266,21 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         {
             return rollback_after_statement_error(context.transactions, error);
         }
-        plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+        plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
+            .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
         if let Err(error) = query_from_plan(&plan) {
             return rollback_after_statement_error(context.transactions, error);
         }
-        context.cache.cache_sql_statement(
-            sql.to_string(),
-            Arc::new(statement.clone()),
-            Arc::new(plan.clone()),
-            parser.clone(),
-        );
+        context
+            .cache
+            .cache_sql_statement(
+                sql,
+                statement.clone(),
+                plan.clone(),
+                parser.clone(),
+                &control,
+            )
+            .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
     }
     let mutating_query = match query_from_plan(&plan)
         .and_then(|query| query_may_mutate_engine(&context.effects.query_effect_context(), query))
@@ -264,22 +291,31 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     if mutating_query && context.persistent_backend && !has_row_locks {
         match context.transactions.prepare_explicit_transaction_writer() {
             Ok(true) => {
-                plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
+                plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
+                    .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
                 if let Err(error) = query_from_plan(&plan) {
                     return rollback_after_statement_error(context.transactions, error);
                 }
-                context.cache.cache_sql_statement(
-                    sql.to_string(),
-                    Arc::new(statement.clone()),
-                    Arc::new(plan.clone()),
-                    parser.clone(),
-                );
+                context
+                    .cache
+                    .cache_sql_statement(
+                        sql,
+                        statement.clone(),
+                        plan.clone(),
+                        parser.clone(),
+                        &control,
+                    )
+                    .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
             }
             Ok(false) => {}
             Err(error) => return rollback_after_statement_error(context.transactions, error),
         }
     }
-    let optimized = match context.planning.plan_for_execution(plan, params) {
+    let optimized = match plan.copy_for_rewrite(&control).and_then(|plan| {
+        context
+            .planning
+            .plan_owned_for_execution(plan, params, &control)
+    }) {
         Ok(plan) => plan,
         Err(error) => return rollback_after_statement_error(context.transactions, error),
     };

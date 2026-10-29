@@ -37,12 +37,19 @@ pub fn relation_column(
     expression: &crate::ScalarExpr,
     schema: &crate::RowSchema,
 ) -> Option<crate::ColumnIdentity> {
+    relation_column_ref(expression, schema).cloned()
+}
+
+/// Borrow the selected retained schema identity without allocating a duplicate name.
+pub fn relation_column_ref<'a>(
+    expression: &crate::ScalarExpr,
+    schema: &'a crate::RowSchema,
+) -> Option<&'a crate::ColumnIdentity> {
     let (base, field) = field_reference(expression)?;
     let qualifier = whole_row_qualifier(base, schema)?;
     schema
         .qualified_position(qualifier, field)
         .and_then(|position| schema.identity(position))
-        .cloned()
 }
 
 /// Whole-row projection resolves directly against the relation namespace, before consulting a named composite descriptor.
@@ -129,6 +136,16 @@ pub(crate) fn value_field_type_with_control(
     resolver: Option<&dyn FunctionTypeResolver>,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    Ok(value_field_metadata_with_control(base, field, resolver, control)?.map(|(ty, _)| ty))
+}
+
+/// Retain the selected type and observe its collation from the same controlled catalog descriptor.
+pub(crate) fn value_field_metadata_with_control(
+    base: Option<&ColumnType>,
+    field: &str,
+    resolver: Option<&dyn FunctionTypeResolver>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<(uqa_core::memory::Produced<ColumnType>, u32)>, SQLError> {
     control.check()?;
     let Some(base) = base else {
         return Ok(None);
@@ -142,7 +159,11 @@ pub(crate) fn value_field_type_with_control(
             let Some(catalog) = resolver.and_then(FunctionTypeResolver::composite_types) else {
                 return Ok(None);
             };
-            let descriptor = crate::expr::composites::descriptor(Some(catalog), reference.oid)?;
+            let descriptor = crate::expr::composites::descriptor_with_control(
+                Some(catalog),
+                reference.oid,
+                control,
+            )?;
             let (_, attribute) = descriptor
                 .attribute(field)
                 .ok_or_else(|| SQLError::Routine {
@@ -152,11 +173,10 @@ pub(crate) fn value_field_type_with_control(
                         base.display_name()
                     ),
                 })?;
-            attribute
-                .ty
-                .clone_with_control(control)
-                .map(Some)
-                .map_err(Into::into)
+            Ok(Some((
+                attribute.ty.clone_with_control(control)?,
+                attribute.collation_oid(),
+            )))
         }
         ColumnType::Record => Err(undefined_record_field(field)),
         other => Err(SQLError::Routine {
@@ -196,16 +216,6 @@ pub(crate) fn constant_field_type_with_control(
         })()),
         _ => None,
     }
-}
-
-/// Select type and declaration collation together from one catalog generation.
-pub(crate) fn value_field_metadata(
-    base: Option<&ColumnType>,
-    field: &str,
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<(ColumnType, u32)>, SQLError> {
-    value_field_selection(base, field, resolver)
-        .map(|selected| selected.map(|selected| (selected.ty, selected.collation)))
 }
 
 pub(crate) struct SelectedValueField {

@@ -23,7 +23,8 @@ fn named_row_type() -> ColumnType {
 #[test]
 fn spill_readers_retain_named_rows_and_record_field_descriptors() {
     let row_type = named_row_type();
-    let fields = Arc::from([Some(ColumnType::SmallInteger), Some(ColumnType::Text)]);
+    let fields: uqa_sql::schema::RecordFields =
+        vec![Some(ColumnType::SmallInteger), Some(ColumnType::Text)].into();
     let schema = RowSchema::with_qualified_types(
         "items",
         vec!["value".into()],
@@ -31,7 +32,7 @@ fn spill_readers_retain_named_rows_and_record_field_descriptors() {
     )
     .with_relation_row_type("items", row_type.clone())
     .unwrap()
-    .with_record_fields([(0, Arc::clone(&fields))]);
+    .with_record_fields([(0, fields.clone())]);
     let values = vec![Value::Record(
         vec![("n".into(), Value::Int(42)), ("s".into(), Value::Null)].into(),
     )];
@@ -64,9 +65,9 @@ fn spill_readers_retain_named_rows_and_record_field_descriptors() {
             assert_eq!(batches.len(), 1);
             assert_eq!(batches[0].schema, schema);
             assert_eq!(batches[0].schema.whole_row_type("items"), Some(&row_type));
-            assert!(Arc::ptr_eq(
-                batches[0].schema.record_fields(0).unwrap(),
-                &fields
+            assert!(std::ptr::eq(
+                &raw const **batches[0].schema.record_fields(0).unwrap(),
+                &raw const *fields
             ));
             assert_eq!(batches[0].rows[0].value(0), Some(&values[0]));
         }

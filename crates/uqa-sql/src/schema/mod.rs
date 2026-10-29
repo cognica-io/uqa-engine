@@ -37,7 +37,9 @@ pub use collations::CollationBinding;
 use collations::Collations;
 pub use input_slots::InputSlots;
 pub use record_fields::RecordFields;
-pub(crate) use record_fields::{RecordDescriptor, RecordFieldMetadata, RecordMetadata};
+pub(crate) use record_fields::{
+    RecordDescriptor, RecordFieldMetadata, RecordMemory, RecordMetadata,
+};
 
 const NULL_SLOT: usize = usize::MAX;
 
@@ -164,6 +166,7 @@ struct SchemaBuildMetadata {
     extra_ambiguous_qualified: SchemaSet<ColumnIdentity>,
     local_width: Option<usize>,
     lateral_restrictions: Option<Arc<lateral::LateralRestrictions>>,
+    memory: production::lease::SchemaMemory,
 }
 
 pub struct PhysicalLayout {

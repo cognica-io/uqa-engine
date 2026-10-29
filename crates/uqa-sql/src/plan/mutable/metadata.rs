@@ -19,6 +19,96 @@ use uqa_core::{
 };
 
 impl MutableQueryPlan {
+    pub fn append_row_lock(
+        mut self,
+        strength: crate::ast::LockStrength,
+        wait: crate::ast::LockWait,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
+            return Ok(self);
+        };
+        let clause = crate::ast::LockingClause {
+            strength,
+            wait,
+            relations: Vec::new(),
+        };
+        if let Some(mut copying) = super::Copying::for_rewrite(*control) {
+            let count = block.locking.len() + 1;
+            let locking = copying.map(0..count, |copying, index| {
+                let clause = block.locking.get(index).unwrap_or(&clause);
+                Ok(crate::ast::LockingClause {
+                    strength: clause.strength,
+                    wait: clause.wait,
+                    relations: copying.texts(&clause.relations)?,
+                })
+            })?;
+            block.locking = locking;
+            *block_memory(self.memory.as_mut().expect("controlled query")).field_mut("locking") =
+                Some(copying.into_rewrite_memory());
+        } else {
+            block.locking.push(clause);
+        }
+        Ok(self)
+    }
+
+    pub fn set_privilege_subject(
+        mut self,
+        subject: Option<Produced<crate::catalog::roles::RoleReference>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let (subject, owner) = if let Some(mut copying) = super::Copying::for_rewrite(*control) {
+            let subject = subject
+                .map(|subject| copying.take_privilege_subject(subject))
+                .transpose()?;
+            (subject, Some(copying.into_rewrite_memory()))
+        } else {
+            (
+                subject.map(|subject| {
+                    subject
+                        .into_uncontrolled()
+                        .expect("ordinary privilege subject")
+                }),
+                None,
+            )
+        };
+        self.query.relation_privilege_subject = subject;
+        if let Some(memory) = &mut self.memory {
+            *memory.field_mut("relation_privilege_subject") = owner;
+        }
+        Ok(self)
+    }
+
+    pub fn clear_privilege_columns(
+        mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
+            return Err(SQLError::Internal(
+                "privilege column reset requires a query block".into(),
+            ));
+        };
+        block.privilege_columns.clear();
+        if let Some(memory) = &mut self.memory {
+            let owner = memory
+                .field_mut("root")
+                .as_mut()
+                .expect("query root")
+                .field_mut("block")
+                .as_mut()
+                .expect("query block")
+                .field_mut("privilege_columns");
+            *owner = super::Copying::for_rewrite(*control).map(super::Copying::into_rewrite_memory);
+        }
+        Ok(self)
+    }
+
     /// Retain one privilege dependency after admitting its tree node. Duplicate identities retain the original node and release the unused supplied identity.
     pub fn include_privilege_column(
         mut self,
@@ -40,7 +130,11 @@ impl MutableQueryPlan {
         let memory = control.combine(payload, node);
         block.privilege_columns.insert(identity);
         if let Some(owner) = &mut self.memory {
-            let RewriteMemory::Fields { direct, .. } = block_memory(owner) else {
+            let RewriteMemory::Fields { direct, .. } = block_memory(owner)
+                .field_mut("privilege_columns")
+                .as_mut()
+                .expect("privilege column owner")
+            else {
                 unreachable!("query block field owner");
             };
             direct.absorb(memory.expect("controlled privilege dependency"));

@@ -14,6 +14,9 @@ use crate::{RowSchema, ScalarExpr};
 use uqa_core::Value;
 
 mod array_transform;
+pub(crate) use array_transform::{
+    resolve_array_transform_call_with_control, ArrayTransformArguments,
+};
 pub(crate) mod between;
 pub(crate) mod boolean;
 pub(crate) use array_transform::resolve_array_transform_call;
@@ -22,30 +25,41 @@ pub use call::{FunctionBindingParts, OwnedBindingCall};
 mod cast_compatibility;
 mod checksum;
 mod common;
+pub(crate) use common::common_context_expression_type_with_control;
 pub(crate) use common::{function_arguments_have_runtime_types, runtime_input};
 pub(crate) use common::{parameter_type_matches, parameter_type_with_control};
 pub(crate) mod concatenation;
 pub(crate) use common::literal_input_type_with_control;
 pub use common::runtime_value_type_with_control;
-pub(crate) use common::select_common_input_type_in_with_control;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
 pub(crate) use common::{array_element_type, base_type};
+pub(crate) use common::{
+    select_common_input_type_in_with_control, select_common_input_type_with_control,
+};
 mod containment;
 pub(crate) mod enums;
 mod equality;
 pub(crate) mod field_selection;
 pub use field_selection::relation_column as relation_field_column;
+pub use field_selection::relation_column_ref as relation_field_column_ref;
 mod fixed_builtin;
+#[cfg(test)]
 pub(crate) use fixed_builtin::overloads as fixed_builtin_overloads;
+pub(crate) use fixed_builtin::overloads_with_control as fixed_builtin_overloads_with_control;
+pub(crate) use fixed_builtin::resolve_fixed_builtin_call_with_control;
+pub(crate) use overload_resolution::builtin_binding_matches_with_control;
 mod function_inputs;
 mod functions;
-pub(crate) use function_inputs::{call_type_from_observations, CallInputTypes};
+pub(crate) use function_inputs::{call_type_from_observations_with_control, CallInputTypes};
+pub(crate) use functions::builtin_function_argument_targets_with_control;
+pub(crate) use functions::builtin_function_type_with_resolver_and_control;
 mod gamma;
 mod inference;
 mod production;
 use inference::scalar_type_inner_with_control;
 mod introspection;
+pub(crate) use introspection::bind_stored_inputs_owned;
 pub(crate) mod json_path;
 mod json_strip;
 mod length;
@@ -98,15 +112,18 @@ pub use cast_compatibility::{
 pub(crate) use cast_compatibility::{cast_catalog_entry_with_control, preserves_record_identity};
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
+pub(crate) use common::effective_overload_argument_type_ref_with_params;
 pub use common::{
     common_context_expression_type, common_type, common_type_in, common_type_in_with_control,
     effective_overload_argument_type, effective_overload_argument_type_with_params,
-    function_call_argument_signature, select_common_input_type, values_column_types,
-    CommonTypeContext, FunctionCallArgumentSignature,
+    function_call_argument_signature, function_call_argument_signature_with_control,
+    select_common_input_type, values_column_types, CommonTypeContext,
+    FunctionCallArgumentSignature,
 };
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
 };
+pub(crate) use fixed_builtin::resolve_syntax_binding_with_control as resolve_fixed_syntax_binding_with_control;
 #[doc(hidden)]
 pub use fixed_builtin::{
     fixed_builtin_return_type, fixed_builtin_return_type_with_control,
@@ -121,6 +138,7 @@ pub use gamma::{resolve_gamma_overload, ResolvedGammaOverload};
 pub use introspection::{
     bind_type_introspection, bind_type_introspection_owned, bind_type_introspection_with_control,
     bind_type_introspection_with_resolver, validate_catalog_literals,
+    validate_catalog_literals_with_control,
 };
 #[doc(hidden)]
 pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
@@ -137,7 +155,10 @@ pub use operators::{
     require_ordering_operator, unary_minus_catalog_entry, unary_operator_by_oid,
     BinaryOperatorCatalogEntry, NumericOperatorTypes, UnaryOperatorCatalogEntry,
 };
-pub(crate) use operators::{named_binary_operator_catalog_entry, named_binary_operator_types};
+pub(crate) use operators::{
+    named_binary_operator_catalog_entry, named_binary_operator_types,
+    named_binary_operator_types_with_control,
+};
 #[doc(hidden)]
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
@@ -578,7 +599,10 @@ pub(super) fn scalar_type_inner(
 mod tests;
 
 mod declaration;
-pub use declaration::{resolve_alter_column_type, resolve_declared_column_type};
+pub use declaration::{
+    resolve_alter_column_type, resolve_declared_column_type,
+    resolve_declared_column_type_with_control,
+};
 
 mod coercion;
 pub mod composite_rows;

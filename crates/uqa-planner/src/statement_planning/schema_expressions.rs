@@ -23,21 +23,38 @@ pub fn optimize_catalog_scalar(
     expression: &mut uqa_sql::ScalarExpr,
 ) -> Result<(), SQLError> {
     let resources = context.optimization.production_resources()?;
-    optimize_scalar_expression(expression, &catalog_config(context, resources.as_ref()))
+    optimize_scalar_expression(expression, &catalog_config(context, resources.as_ref())?)
+}
+
+/// Rewrite a catalog scalar whose input already belongs to the invoking request. Nested domain checks and routine preparation keep the same allowance and both cancellation scopes.
+pub fn optimize_owned_catalog_scalar(
+    context: &StatementPlanningContext<'_>,
+    expression: uqa_sql::plan::OwnedScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+    let mut config = OptimizerConfig::new(context.constant_evaluator);
+    config.production = *control;
+    config.builtin_permissions = context
+        .optimization
+        .builtin_permissions_with_control(control)?;
+    config.routine_inlining = context.optimization.routine_inlining();
+    crate::optimizer::optimize_owned_scalar_expression(expression, &config)
 }
 
 fn catalog_config<'a>(
     context: &'a StatementPlanningContext<'_>,
     resources: Option<&'a super::executable::PlanningResources>,
-) -> OptimizerConfig<'a> {
+) -> Result<OptimizerConfig<'a>, SQLError> {
     let mut config = OptimizerConfig::new(context.constant_evaluator);
     config.production = resources.map_or_else(
         uqa_core::memory::ProductionControl::uncontrolled,
         super::executable::PlanningResources::control,
     );
-    config.builtin_permissions = context.optimization.builtin_permissions();
+    config.builtin_permissions = context
+        .optimization
+        .builtin_permissions_with_control(&config.production)?;
     config.routine_inlining = context.optimization.routine_inlining();
-    config
+    Ok(config)
 }
 
 /// Plan a rule's WHERE condition as a qualification. UNKNOWN and FALSE both reject a row here; they remain distinct in scalar/default/CHECK contexts.
@@ -46,7 +63,7 @@ pub fn optimize_rule_condition(
     expression: &mut uqa_sql::plan::ExpressionPlan,
 ) -> Result<(), SQLError> {
     let resources = context.optimization.production_resources()?;
-    let mut config = catalog_config(context, resources.as_ref());
+    let mut config = catalog_config(context, resources.as_ref())?;
     // Stored rule analysis has already retained every conditional result coercion.
     config.coerced_conditionals = true;
     optimize_scalar_expression(&mut expression.scalar, &config)?;
@@ -100,7 +117,7 @@ pub fn plan_schema_expression(
         SQLError::Internal("schema expression planning requires routine metadata".into())
     })?;
     let resources = context.optimization.production_resources()?;
-    let mut config = catalog_config(context, resources.as_ref());
+    let mut config = catalog_config(context, resources.as_ref())?;
     config.routine_inlining = Some(routines);
     config.coerced_conditionals = true;
     optimize_scalar_expression(&mut analyzed.scalar, &config)?;

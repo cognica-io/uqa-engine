@@ -45,7 +45,7 @@ impl SchemaScope {
     ) -> Result<(), SQLError> {
         let previous = match command.ctes_mut() {
             Some(ctes) => self.bind_cte_routine_schemas(routines, ctes, params, outer)?,
-            None => Vec::new(),
+            None => super::ctes::CteScopeStack::new(0, &self.control())?,
         };
         let result = self.bind_command_clauses_for_storage(routines, command, params, outer);
         self.restore_cte_schemas(previous);

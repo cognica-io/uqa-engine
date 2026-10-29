@@ -341,22 +341,28 @@ pub(in crate::compiler) fn compile_sql_value_function(
         }
     };
     // SQL value syntax cannot select a user overload, but fixed built-ins must retain the registry's canonical identity.
-    let binding =
-        crate::type_resolution::resolve_fixed_builtin_call(name, None, &[], &[], false, None)?
-            .map_or_else(
-                || FunctionBinding {
-                    object_id: None,
-                    name: name.into(),
-                    argument_types: Vec::new(),
-                    builtin: true,
-                    dispatch: None,
-                    invocation: None,
-                    value_binding: None,
-                    resolution_error: None,
-                    input_collation: None,
-                },
-                |call| call.selected.binding,
-            );
+    let binding = crate::type_resolution::resolve_fixed_syntax_binding_with_control(
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map_or_else(
+        || FunctionBinding {
+            object_id: None,
+            name: name.into(),
+            argument_types: Vec::new(),
+            builtin: true,
+            dispatch: None,
+            invocation: None,
+            value_binding: None,
+            resolution_error: None,
+            input_collation: None,
+        },
+        |binding| {
+            binding
+                .into_uncontrolled()
+                .expect("ordinary SQL value binding")
+        },
+    );
     let call = Expr::Func {
         order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
         binding: Some(binding),

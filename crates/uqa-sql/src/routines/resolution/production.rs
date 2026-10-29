@@ -28,7 +28,10 @@ pub(super) mod diagnostics;
 mod invocation;
 mod matching;
 mod parameters;
+mod routine;
 pub(super) mod selection;
+mod table;
+pub use routine::OwnedStaticFunctionMatch;
 
 #[cfg(test)]
 mod tests;
@@ -312,4 +315,31 @@ pub(super) fn match_ordinary(
             panic!("ordinary routine matching cannot fail production: {error}")
         }
     }
+}
+
+pub(crate) fn selected_binding(
+    function: &crate::routines::SQLUserFunction,
+    invocation: Produced<RoutineInvocationBinding>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<FunctionBinding>, SQLError> {
+    let mut arguments = uqa_core::memory::ProductionVec::new(*control);
+    for parameter in function.def.identity_params() {
+        control.check()?;
+        arguments.push_produced(canonical_routine_type_name_with_control(
+            &parameter.type_name,
+            control,
+        )?)?;
+    }
+    FunctionBindingParts {
+        object_id: function.def.object_id,
+        name: control.copy_text(&function.def.name)?,
+        argument_types: arguments.finish()?,
+        builtin: false,
+        dispatch: None,
+        invocation: Some(invocation),
+        value_binding: None,
+        resolution_error: None,
+        input_collation: None,
+    }
+    .finish(control)
 }

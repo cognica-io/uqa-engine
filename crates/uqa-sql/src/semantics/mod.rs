@@ -17,6 +17,7 @@ pub use cte_order::{
 };
 mod expression_shape;
 mod functions;
+pub use functions::FunctionName;
 mod input_values;
 mod membership;
 pub use input_values::{

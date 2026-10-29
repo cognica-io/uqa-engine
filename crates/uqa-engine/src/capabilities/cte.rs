@@ -117,9 +117,38 @@ impl QueryOutputRewriter for Engine {
 
     fn optimize_retained_query(
         &self,
-        query: QueryPlan,
+        query: uqa_sql::plan::MutableQueryPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError> {
-        super::statement_planning::optimize_engine_query(self, std::borrow::Cow::Owned(query))
+        uqa_planner::statement_planning::executable::optimize_retained_query(
+            &self.statement_planning_context(),
+            query,
+            control,
+        )
+    }
+
+    fn prune_owned_query_outputs(
+        &self,
+        query: uqa_sql::plan::MutableQueryPlan,
+        aliases: &[String],
+        projection: &uqa_sql::plan::source_projection::SourceProjection,
+        schema: &uqa_sql::RowSchema,
+        visible_ctes: &dyn Fn(&str) -> bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::MutableQueryPlan, SQLError> {
+        uqa_planner::optimizer::prune_owned_query_outputs(
+            query,
+            aliases,
+            &|name| projection.contains(name),
+            Some(schema),
+            uqa_planner::optimizer::OutputPruningContext {
+                production: *control,
+                aggregates: self,
+                routines: Some(self),
+                volatility: Some(self),
+                visible_ctes,
+            },
+        )
     }
 
     fn push_output_filter(

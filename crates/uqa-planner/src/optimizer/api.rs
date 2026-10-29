@@ -48,12 +48,22 @@ pub fn optimize_scalar_expression(
     super::optimize_scalar_slot(expression, config)
 }
 
+/// Simplify an independently owned scalar under its existing statement allowance.
+pub fn optimize_owned_scalar_expression(
+    expression: uqa_sql::plan::OwnedScalarExpr,
+    config: &OptimizerConfig<'_>,
+) -> Result<uqa_sql::plan::OwnedScalarExpr, uqa_sql::SQLError> {
+    super::scalar::owned::optimize(expression, config)
+}
+
 type ConstantStorageResult =
     Result<Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>, uqa_sql::SQLError>;
 
 /// Borrowed initialization is used only while optimizing a VALUES command; produced literals own their storage independently.
 #[derive(Clone, Copy)]
-pub(crate) struct ConstantStorageFactory<'a>(pub &'a dyn Fn() -> ConstantStorageResult);
+pub(crate) struct ConstantStorageFactory<'a>(
+    pub &'a dyn Fn(&uqa_core::memory::ProductionControl<'_>) -> ConstantStorageResult,
+);
 
 impl std::fmt::Debug for ConstantStorageFactory<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -89,11 +99,32 @@ pub struct OptimizerConfig<'a> {
 
 impl OptimizerConfig<'_> {
     pub(super) fn for_values(&self) -> Result<Self, uqa_sql::SQLError> {
-        let mut config = self.clone();
-        config.retain_values_constants = true;
+        let mut config = self.for_values_without_active()?;
+        config
+            .active_inline_routines
+            .clone_from(&self.active_inline_routines);
+        Ok(config)
+    }
+
+    pub(super) fn for_values_without_active(&self) -> Result<Self, uqa_sql::SQLError> {
+        let mut config = Self {
+            production: self.production,
+            coerced_conditionals: self.coerced_conditionals,
+            enable_filter_pushdown: self.enable_filter_pushdown,
+            enable_boolean_simplify: self.enable_boolean_simplify,
+            enable_vector_threshold_merge: self.enable_vector_threshold_merge,
+            enable_join_reordering: self.enable_join_reordering,
+            constant_evaluator: self.constant_evaluator,
+            constant_storage: self.constant_storage.clone(),
+            retain_values_constants: true,
+            constant_storage_factory: self.constant_storage_factory,
+            builtin_permissions: self.builtin_permissions.clone(),
+            routine_inlining: self.routine_inlining,
+            active_inline_routines: Vec::new(),
+        };
         if config.constant_storage.is_none() {
             if let Some(factory) = config.constant_storage_factory {
-                config.constant_storage = factory.0()?;
+                config.constant_storage = factory.0(&config.production)?;
             }
         }
         Ok(config)
@@ -212,5 +243,20 @@ pub fn optimize_with_aggregates_and_statistics(
         reorder_unified_plan_joins(plan, statistics, &config.production)
     } else {
         Ok(plan.into())
+    }
+}
+
+/// Optimize a mutable admitted plan without converting its constructor owners to ordinary storage.
+pub fn optimize_owned_with_aggregates_and_statistics(
+    plan: uqa_sql::plan::MutableExecutablePlan,
+    config: &OptimizerConfig<'_>,
+    aggregates: &dyn AggregateClassifier,
+    statistics: &dyn SourceStatistics,
+) -> OptimizerResult<uqa_sql::plan::MutableExecutablePlan> {
+    let plan = super::owned::optimize(plan, config, aggregates)?;
+    if config.enable_join_reordering {
+        super::join_reorder::reorder_owned_plan(plan, statistics, &config.production)
+    } else {
+        Ok(plan)
     }
 }

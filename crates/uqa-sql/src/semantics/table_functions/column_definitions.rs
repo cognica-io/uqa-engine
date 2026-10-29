@@ -6,10 +6,8 @@
 
 //! Column definition lists of functions in FROM, checked against the class of each function's result.
 
-use crate::ast::{
-    ColumnType, FunctionBinding, FunctionParamMode, FunctionReturns, RoutineInvocationBinding,
-};
-use crate::routines::{routine_returns_anonymous_record, RoutineResolution, SQLUserFunction};
+use crate::ast::{ColumnType, FunctionBinding, RoutineInvocationBinding};
+use crate::routines::{RoutineResolution, SQLUserFunction};
 use crate::type_resolution::FunctionTypeResolver;
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 
@@ -154,45 +152,12 @@ pub(super) fn user_function_result_class(
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Result<ResultClass, SQLError> {
-    if routine_returns_anonymous_record(&function.def) {
-        return Ok(ResultClass::Record);
-    }
-    if function.def.output_params().nth(1).is_some() {
-        return Ok(ResultClass::OutParameters);
-    }
-    // A single OUT parameter, such as the one column of RETURNS TABLE, gives the result its type.
-    let output = function
-        .def
-        .params
-        .iter()
-        .enumerate()
-        .find(|(_, parameter)| {
-            matches!(
-                parameter.mode,
-                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-            )
-        });
-    let (declared, concrete) = match (output, &function.def.returns) {
-        (Some((position, output)), _) => (
-            output.type_name.as_str(),
-            invocation
-                .and_then(|invocation| invocation.parameter_types.get(position))
-                .map(String::as_str),
-        ),
-        (None, FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) => (
-            type_name.as_str(),
-            invocation.and_then(|invocation| invocation.return_type.as_deref()),
-        ),
-        _ => return Ok(ResultClass::Scalar),
-    };
-    let type_name = concrete.unwrap_or(declared);
-    if crate::type_resolution::routine_polymorphic_type(type_name).is_some() {
-        return Ok(ResultClass::Unclassified);
-    }
-    Ok(match routines.resolve_type_name(type_name)? {
-        Some(ty) => type_result_class(&ty),
-        None => ResultClass::Scalar,
-    })
+    super::production::user_function_result_class_with_control(
+        routines,
+        function,
+        invocation,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 fn builtin_result_class(
@@ -243,7 +208,7 @@ fn builtin_result_class(
 }
 
 /// The class of a result of type `ty`; a domain takes its base type's class, as a domain over a composite type does.
-fn type_result_class(ty: &ColumnType) -> ResultClass {
+pub(super) fn type_result_class(ty: &ColumnType) -> ResultClass {
     match ty {
         ColumnType::Domain { base, .. } => type_result_class(base),
         ColumnType::Composite(_) => ResultClass::NamedComposite,

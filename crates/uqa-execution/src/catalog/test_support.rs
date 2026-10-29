@@ -9,7 +9,7 @@
 use super::{
     CatalogDefinitionSnapshot, CatalogReadSnapshot, CatalogReadView, CatalogTableSnapshot,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_sql::{ast::FunctionBinding, ColumnType, SQLError};
 
 mod services;
@@ -45,7 +45,8 @@ pub(crate) fn table_snapshot(
 
 pub(crate) fn empty_catalog() -> CatalogReadView {
     CatalogReadView::new(CatalogReadSnapshot {
-        tables: BTreeMap::default(),
+        tables: uqa_core::memory::OwnedMap::default(),
+        graph_overlay: None,
         definitions: CatalogDefinitionSnapshot {
             builtin_routine_security: Arc::default(),
             foreign_wrappers: Arc::default(),

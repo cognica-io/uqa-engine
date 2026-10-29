@@ -7,9 +7,11 @@
 //! Ordinary WITHIN GROUP lookup keeps declared signatures and modifier checks separate from input coercion.
 
 mod catalog;
+mod production;
+pub(super) use production::resolve_with_control;
 
 use crate::ast::{ColumnType, FunctionBinding, FunctionOrderSyntax};
-use crate::type_resolution::{BuiltinFunctionOverload, ResolvedFunctionOverload};
+use crate::type_resolution::ResolvedFunctionOverload;
 use crate::{FunctionTypeResolver, SQLError};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -51,107 +53,23 @@ pub(super) fn resolve(
     variadic: bool,
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<(ResolvedFunctionOverload, Kind)>, SQLError> {
-    let lower = crate::semantics::builtin_function_dispatch_name(name);
-    let mut declarations = Vec::new();
-    let mut kinds = Vec::new();
-    for declaration in catalog::SIGNATURES.lines() {
-        let mut fields = declaration.split('|');
-        if fields.next() != Some(lower.as_ref()) {
-            continue;
-        }
-        let [arguments_text, result, proc_kind, aggregate_kind, direct] =
-            std::array::from_fn(|_| fields.next().expect("catalog signature field"));
-        let mut arguments = if arguments_text.is_empty() {
-            Vec::new()
-        } else {
-            arguments_text
-                .split(", ")
-                .map(parse_type)
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let kind = match (proc_kind, aggregate_kind) {
-            ("w", _) => Kind::Window,
-            (_, "o") => Kind::OrderedSet {
-                direct: direct.parse().expect("catalog direct count"),
-                polymorphic: arguments_text.contains("anyelement"),
-            },
-            (_, "h") => {
-                if types.is_empty() {
-                    continue;
-                }
-                arguments.resize(types.len(), ColumnType::Named("any".into()));
-                Kind::Hypothetical
-            }
-            _ => Kind::Aggregate,
-        };
-        declarations.push(BuiltinFunctionOverload {
-            variadic: false,
-            name: format!("pg_catalog.{lower}"),
-            argument_names: vec![None; arguments.len()],
-            argument_types: arguments,
-            default_arguments: 0,
-            return_type: parse_type(result)?,
-        });
-        kinds.push(kind);
-    }
-    // These ordinary text declarations share the same candidate ranking; no
-    // unknown input is read until the selected call has passed its modifiers.
-    if matches!(lower.as_ref(), "lower" | "upper" | "initcap") {
-        declarations.push(BuiltinFunctionOverload {
-            variadic: false,
-            name: format!("pg_catalog.{lower}"),
-            argument_names: vec![None],
-            argument_types: vec![ColumnType::Text],
-            default_arguments: 0,
-            return_type: ColumnType::Text,
-        });
-        kinds.push(Kind::Ordinary);
-    }
-    if declarations.is_empty() {
-        return Ok(None);
-    }
-    let selected = resolver
-        .resolve_function_overload_with_builtins(
-            name,
-            binding,
-            names,
-            types,
-            variadic,
-            &declarations,
-        )?
-        .map_or_else(
-            || {
-                crate::type_resolution::resolve_local_builtin_overload(
-                    name,
-                    binding,
-                    names,
-                    types,
-                    &declarations,
-                )
-            },
-            Ok,
-        )?;
-    let kind = if selected.binding.builtin {
-        declarations
-            .iter()
-            .zip(kinds)
-            .find(|(declaration, _)| {
-                crate::type_resolution::builtin_binding_matches(declaration, &selected.binding)
-            })
-            .map(|(_, kind)| kind)
-            .ok_or_else(|| SQLError::Internal("selected aggregate lost its declaration".into()))?
-    } else {
-        Kind::Ordinary
-    };
-    Ok(Some((selected, kind)))
-}
-
-fn parse_type(name: &str) -> Result<ColumnType, SQLError> {
-    if is_polymorphic(name) || matches!(name, "money" | "pg_lsn" | "tid" | "xid8") {
-        Ok(ColumnType::Named(name.into()))
-    } else {
-        ColumnType::from_sql_name(name)
-    }
+    Ok(resolve_with_control(
+        name,
+        binding,
+        names,
+        types,
+        variadic,
+        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|(selected, kind)| {
+        (
+            selected
+                .into_uncontrolled()
+                .expect("ordinary ordered call selection"),
+            kind,
+        )
+    }))
 }
 
 pub(super) fn is_polymorphic(name: &str) -> bool {
@@ -379,7 +297,7 @@ impl super::SchemaScope {
                 &names,
                 &types,
             )?;
-            self.record_routine_dependency(&selected.binding);
+            self.record_routine_dependency(&selected.binding)?;
             FunctionBinding::rebind(binding, selected.binding);
             if within_group && *order_syntax == FunctionOrderSyntax::Legacy {
                 *order_syntax = FunctionOrderSyntax::WithinGroup;

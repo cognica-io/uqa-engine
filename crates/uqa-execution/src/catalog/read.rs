@@ -8,6 +8,7 @@
 
 mod indexes;
 mod privileges;
+mod production;
 
 #[cfg(test)]
 mod tests;
@@ -28,10 +29,14 @@ use super::{
 
 impl CatalogReadView {
     fn relation_names(&self) -> super::relation_names::RelationNameCatalog<'_> {
-        super::relation_names::RelationNameCatalog::new(
+        let names = super::relation_names::RelationNameCatalog::new(
             &self.snapshot.tables,
             &self.snapshot.definitions,
-        )
+        );
+        match &self.snapshot.graph_overlay {
+            Some(overlay) => names.with_graph_names(&overlay.names),
+            None => names,
+        }
     }
 
     fn relation_lookup_candidates(
@@ -70,6 +75,16 @@ impl CatalogReadView {
             .relation_kind_resolution(resolution, name)
     }
 
+    pub fn relation_kind_resolution_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationResolution>, SQLError> {
+        self.relation_names()
+            .relation_kind_resolution_with_control(resolution, name, control)
+    }
+
     pub fn virtual_relation_resolved(
         &self,
         resolution: &RelationNameResolution,
@@ -95,7 +110,7 @@ impl CatalogReadView {
             "ag_catalog".to_string(),
         ];
         schemas.extend(self.snapshot.definitions.schemas.keys().cloned());
-        schemas.extend(self.snapshot.definitions.graphs.keys().cloned());
+        schemas.extend(self.graph_names_iter().map(str::to_owned));
         if let Some(temporary) = &self.snapshot.temporary_namespace {
             schemas.push(temporary.schema.clone());
             schemas.push(temporary.toast_schema());
@@ -627,15 +642,11 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&CatalogTableSnapshot>, SQLError> {
-        for relation in self.relation_lookup_candidates(resolution, name)? {
-            if let Some(table) = self.snapshot.tables.get(&relation) {
-                return Ok(Some(table));
-            }
-            if self.relation_exists(&relation) {
-                return Ok(None);
-            }
-        }
-        Ok(None)
+        self.table_resolved_with_control(
+            resolution,
+            name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
 
     pub fn table_name(
@@ -651,15 +662,16 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<String>, SQLError> {
-        for relation in self.relation_lookup_candidates(resolution, name)? {
-            if self.snapshot.tables.contains_key(&relation) {
-                return Ok(Some(relation.qualified_name()));
-            }
-            if self.relation_exists(&relation) {
-                return Ok(None);
-            }
-        }
-        Ok(None)
+        Ok(self
+            .table_name_resolved_with_control(
+                resolution,
+                name,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?
+            .map(|name| {
+                name.into_uncontrolled()
+                    .expect("ordinary table name lookup")
+            }))
     }
 
     pub fn hierarchy_scan_tables(
@@ -807,15 +819,11 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&crate::catalog::view::StoredView>, SQLError> {
-        for relation in self.relation_lookup_candidates(resolution, name)? {
-            if let Some(view) = self.snapshot.definitions.views.get(&relation) {
-                return Ok(Some(view));
-            }
-            if self.relation_exists(&relation) {
-                return Ok(None);
-            }
-        }
-        Ok(None)
+        self.view_resolved_with_control(
+            resolution,
+            name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
 
     pub fn view_name_resolved(
@@ -823,15 +831,16 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<String>, SQLError> {
-        for relation in self.relation_lookup_candidates(resolution, name)? {
-            if self.snapshot.definitions.views.contains_key(&relation) {
-                return Ok(Some(relation.qualified_name()));
-            }
-            if self.relation_exists(&relation) {
-                return Ok(None);
-            }
-        }
-        Ok(None)
+        Ok(self
+            .view_name_resolved_with_control(
+                resolution,
+                name,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?
+            .map(|name| {
+                name.into_uncontrolled()
+                    .expect("ordinary view name resolution")
+            }))
     }
 
     pub fn foreign_table_resolved(
@@ -839,15 +848,11 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&crate::catalog::foreign::StoredForeignTable>, SQLError> {
-        for relation in self.relation_lookup_candidates(resolution, name)? {
-            if let Some(table) = self.snapshot.definitions.foreign_tables.get(&relation) {
-                return Ok(Some(table));
-            }
-            if self.relation_exists(&relation) {
-                return Ok(None);
-            }
-        }
-        Ok(None)
+        self.foreign_table_resolved_with_control(
+            resolution,
+            name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
 
     pub fn foreign_table_entry_resolved(

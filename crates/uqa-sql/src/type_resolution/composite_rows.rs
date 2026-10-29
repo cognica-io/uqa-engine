@@ -11,6 +11,9 @@ use crate::ast::{ColumnType, CompositeRowBinding};
 use crate::schema::ScalarTypeSchema;
 use crate::{SQLError, SQLParam, ScalarExpr};
 
+mod owned;
+pub(crate) use owned::{bind_stored_row_owned, validate_field_cast_with_control};
+
 /// Detect predecessor row constructors and unknown input literals before a descriptor can acquire additional attributes. Ordinary casts to strings and domains over non-composite types do not need conversion.
 pub fn expression_requires_binding(
     expression: &crate::ast::Expr,

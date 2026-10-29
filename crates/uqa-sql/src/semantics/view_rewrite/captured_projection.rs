@@ -13,6 +13,8 @@ use crate::{
     ColumnIdentity, RowSchema, SQLError, ScalarExpr,
 };
 use std::collections::BTreeMap;
+mod owned;
+pub use owned::{capture_view_projection_owned, OwnedCapturedViewProjection};
 
 pub struct CapturedViewProjection {
     pub source: SourcePlan,

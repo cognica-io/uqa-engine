@@ -23,8 +23,8 @@ pub use casting::{
     cast_value_with_numeric_resolution_with_control, cast_value_with_resolution_with_control,
     cast_value_with_scoped_resolution, cast_value_with_type_resolution,
     cast_value_with_type_resolution_with_control, coercion_type_name, read_catalog_array_input,
-    read_catalog_input, CatalogCastScope, CatalogInputFunctions, RetainedCatalogCast,
-    ScopedCastResult,
+    read_catalog_input, read_catalog_input_with_control, CatalogCastScope, CatalogInputFunctions,
+    RetainedCatalogCast, ScopedCastResult,
 };
 pub(crate) use casting::{requires_catalog_constant_input, requires_domain_array_input};
 pub(crate) use regtype::format_regtype_value_with_catalog_and_control;
@@ -43,6 +43,17 @@ pub trait EngineHook {
     /// Enforce EXECUTE on a selected built-in at an execution boundary. Catalog-free embedders have no mutable routine ACLs.
     fn require_builtin_execute(&self, _binding: &crate::ast::FunctionBinding) -> Result<()> {
         Ok(())
+    }
+
+    /// External hooks own their authorization callbacks; native hooks retain role traversal under the invoking control.
+    fn require_builtin_execute_with_control(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+        control: &ProductionControl<'_>,
+    ) -> Result<()> {
+        control.check()?;
+        self.require_builtin_execute(binding)?;
+        Ok(control.check()?)
     }
 
     /// Start of the current SQL transaction, in Unix microseconds.
@@ -78,6 +89,28 @@ pub trait EngineHook {
         _args: &[(Option<String>, Value)],
     ) -> Option<Result<Value>> {
         None
+    }
+
+    /// Session-backed execution keeps its existing result lifetime. A planning caller receives a separately admitted copy; the execution buffer is never retroactively classified as planning storage.
+    fn call_bound_builtin_function_with_control(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        control: &ProductionControl<'_>,
+    ) -> Option<Result<Produced<Value>>> {
+        if let Err(error) = control.check() {
+            return Some(Err(error.into()));
+        }
+        self.call_bound_builtin_function(binding, args)
+            .map(|result| {
+                let value = result?;
+                control.check()?;
+                if control.budget().is_none() {
+                    Ok(control.finish(value, None)?)
+                } else {
+                    Ok(control.copy_value(&value)?)
+                }
+            })
     }
 
     fn has_scalar_functions(&self) -> bool {
@@ -145,6 +178,31 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// External catalogs own legacy descriptor construction; native catalogs admit selected metadata before producing it.
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<ColumnType>>> {
+        control.check()?;
+        self.resolve_type_name(name)
+            .map_err(SQLError::Internal)?
+            .map(|ty| ty.retain_external_with_control(control).map_err(Into::into))
+            .transpose()
+    }
+
+    fn resolve_type_oid_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<ColumnType>>> {
+        control.check()?;
+        self.resolve_type_oid(oid)
+            .map_err(SQLError::Internal)?
+            .map(|ty| ty.retain_external_with_control(control).map_err(Into::into))
+            .transpose()
+    }
+
     /// Observe whether a physical type OID remains in the current catalog, including types without a scalar value carrier.
     fn type_oid_exists(&self, oid: u32) -> std::result::Result<bool, String> {
         self.resolve_type_oid(oid).map(|ty| ty.is_some())
@@ -172,6 +230,30 @@ pub trait EngineHook {
         self.cast_domain(value, source, target)?
             .map(|value| control.retain_external_value(value).map_err(SQLError::from))
             .transpose()
+    }
+
+    /// Read an OID alias through the invoking planning owner. Native catalogs implement selected lookup directly; external adapters keep their historical input hooks.
+    fn resolve_oid_alias_input_with_control(
+        &self,
+        ty: &ColumnType,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<i64>> {
+        control.check()?;
+        let result = match ty {
+            ColumnType::Regclass => self.resolve_regclass_input(name),
+            ColumnType::Regtype => self.resolve_regtype_input(name),
+            ColumnType::Regproc => self.resolve_regproc(name),
+            ColumnType::Regprocedure => self.resolve_regprocedure_input(name),
+            ColumnType::Regnamespace => self.resolve_regnamespace(name),
+            ColumnType::Regcollation => self.resolve_regcollation(name),
+            ColumnType::Regrole => self.resolve_regrole(name),
+            _ => Err(SQLError::Internal(
+                "expected an OID alias input type".into(),
+            )),
+        }?;
+        control.check()?;
+        Ok(result)
     }
 
     /// Resolve a regtype cast to its OID carrier when a complete type catalog is available.
@@ -339,6 +421,27 @@ pub trait EngineHook {
         _args: &[(Option<String>, Value)],
     ) -> Option<Result<Value>> {
         None
+    }
+
+    /// Run a selected routine with its ordinary execution contract, then admit a distinct destination for the planning result before copying it. Arguments remain borrowed from their producing owner throughout the call.
+    fn call_bound_user_function_with_control(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        control: &ProductionControl<'_>,
+    ) -> Option<Result<Produced<Value>>> {
+        if let Err(error) = control.check() {
+            return Some(Err(error.into()));
+        }
+        self.call_bound_user_function(binding, args).map(|result| {
+            let value = result?;
+            control.check()?;
+            if control.budget().is_none() {
+                Ok(control.finish(value, None)?)
+            } else {
+                Ok(control.copy_value(&value)?)
+            }
+        })
     }
 
     /// Identity for successful bound routine metadata. A mutable context must

@@ -8,11 +8,16 @@
 
 pub(crate) type CteScope = uqa_execution::query::CteScope<crate::session::StatementReadSnapshot>;
 use crate::Engine;
+use uqa_core::memory::ProductionControl;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{catalog::resolution::RelationLookupMode, SQLError};
 
 pub(crate) fn new_for_current_routine(engine: &Engine) -> CteScope {
-    new_for_statement(engine, None)
+    new_for_current_routine_with_control(
+        engine,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary current-routine scope capture")
 }
 
 pub(crate) fn new_for_statement(
@@ -84,6 +89,27 @@ impl
 }
 
 impl uqa_sql::binding::statements::StatementAnalysisScopes for Engine {
+    fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        let resources = self.query_retention_control()?;
+        Ok(ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            &self.runtime.cancellation,
+        )
+        .capture())
+    }
+
+    fn with_controlled_scope(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        analyze: uqa_sql::binding::statements::ControlledStatementAnalysisOperation<'_>,
+    ) -> Result<(), SQLError> {
+        let scope = new_for_current_routine_with_control(self, control)?;
+        analyze(uqa_execution::query::binding::binding_context_with_control(
+            &scope, control,
+        )?)
+    }
+
     fn with_scope(
         &self,
         analyze: uqa_sql::binding::statements::StatementAnalysisOperation<'_>,
@@ -91,4 +117,60 @@ impl uqa_sql::binding::statements::StatementAnalysisScopes for Engine {
         let scope = new_for_current_routine(self);
         analyze(&scope)
     }
+}
+
+pub(crate) fn new_for_current_routine_with_control(
+    engine: &Engine,
+    control: &ProductionControl<'_>,
+) -> Result<CteScope, SQLError> {
+    control.check()?;
+    let revision = engine.runtime.regtype_output_cache.revision();
+    let resolution =
+        uqa_execution::catalog::services::CatalogSession::relation_name_resolution_with_control(
+            &engine.session_execution_view(),
+            control,
+        )?;
+    let mut scope = CteScope::with_catalog_with_control(
+        engine.catalog_read_view_with_control(control)?,
+        resolution,
+        control,
+    )?;
+    scope.set_catalog_revision(engine.session_id, revision);
+    uqa_execution::mutation::triggers::with_current_transition_relations(|relations| {
+        if let Some(relations) = relations {
+            for (name, rows) in relations {
+                scope.insert_shared_with_control(name, rows.clone(), control)?;
+            }
+        }
+        Ok::<_, SQLError>(())
+    })?;
+    if crate::roles::active_routine_reads_command_overlay() == Some(false) {
+        scope.set_reads_command_overlay(false);
+    }
+    Ok(scope)
+}
+
+/// Catalog binding captures the restored immutable view and bound relation identities without inheriting the current statement's CTE namespace.
+pub(crate) fn new_for_catalog_binding_with_control(
+    engine: &Engine,
+    control: &ProductionControl<'_>,
+) -> Result<CteScope, SQLError> {
+    control.check()?;
+    let resolution =
+        uqa_execution::catalog::services::CatalogSession::relation_name_resolution_with_control(
+            &engine.session_execution_view(),
+            control,
+        )?;
+    let (mut resolution, memory) = resolution.into_parts();
+    resolution.set_lookup_mode(uqa_sql::catalog::resolution::RelationLookupMode::Bound);
+    let mut scope = CteScope::with_catalog_with_control(
+        engine.restored_catalog_read_view_with_control(control)?,
+        control.finish(resolution, memory)?,
+        control,
+    )?;
+    scope.set_catalog_revision(
+        engine.session_id,
+        engine.runtime.regtype_output_cache.revision(),
+    );
+    Ok(scope)
 }

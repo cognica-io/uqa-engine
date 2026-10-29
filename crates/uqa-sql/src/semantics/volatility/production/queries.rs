@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Query volatility preserves lexical CTE scopes while each active view owns its admitted cycle-detection entry.
+//! Query volatility borrows lexical CTE scopes and active view names through their catalog callback lifetimes.
 
 use super::{
     expression_contains_volatile_with_control, function_volatility_with_binding_and_control,
@@ -13,58 +13,10 @@ use super::{
 use crate::{
     ast::FunctionVolatility,
     plan::{CtePlanBody, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan},
-    semantics::{functions::lowercase_function_name_with_control, volatility::VolatilityCatalog},
+    semantics::volatility::VolatilityCatalog,
     SQLError, ScalarExpr,
 };
-use std::{borrow::Borrow, cmp::Ordering};
-use uqa_core::{
-    memory::{OwnedMap, Produced, ProductionControl},
-    RelationIdentity,
-};
-
-struct ViewName(Produced<String>);
-impl Borrow<str> for ViewName {
-    fn borrow(&self) -> &str {
-        self.0.as_str()
-    }
-}
-impl PartialEq for ViewName {
-    fn eq(&self, other: &Self) -> bool {
-        *self.0 == *other.0
-    }
-}
-impl Eq for ViewName {}
-impl PartialOrd for ViewName {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for ViewName {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.as_str().cmp(other.0.as_str())
-    }
-}
-
-#[derive(Default)]
-struct Views(OwnedMap<ViewName, ()>);
-impl Views {
-    fn enter(&mut self, name: &str, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
-        control.check()?;
-        if self.0.contains_key(name) {
-            return Ok(false);
-        }
-        let name = ViewName(control.copy_text(name)?);
-        if let Some(budget) = control.budget() {
-            self.0.insert_budgeted(name, (), budget)?;
-        } else {
-            self.0.insert(name, ());
-        }
-        Ok(true)
-    }
-    fn leave(&mut self, name: &str) {
-        self.0.remove(name);
-    }
-}
+use uqa_core::{memory::ProductionControl, RelationIdentity};
 
 pub fn scalar_in_scope_contains_volatile_function_with_control(
     catalog: &dyn VolatilityCatalog,
@@ -92,7 +44,7 @@ pub fn scalar_in_scope_contains_volatile_function_with_control(
             _ => return,
         };
         result = subqueries.get(index).map_or(Ok(true), |query| {
-            query_inner(catalog, query, &mut Views::default(), visible_ctes, control)
+            query_inner(catalog, query, &|_| false, visible_ctes, control)
         });
     });
     result
@@ -103,7 +55,7 @@ pub fn query_contains_volatile_function_with_control(
     plan: &QueryPlan,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    query_inner(catalog, plan, &mut Views::default(), &|_| false, control)
+    query_inner(catalog, plan, &|_| false, &|_| false, control)
 }
 
 pub fn select_contains_volatile_function_with_control(
@@ -144,7 +96,7 @@ pub fn select_contains_volatile_function_with_control(
 fn query_inner(
     catalog: &dyn VolatilityCatalog,
     plan: &QueryPlan,
-    visiting: &mut Views,
+    visiting: &dyn Fn(&str) -> bool,
     outer: &dyn Fn(&str) -> bool,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
@@ -234,7 +186,7 @@ fn query_inner(
 fn source_inner(
     catalog: &dyn VolatilityCatalog,
     source: &SourcePlan,
-    visiting: &mut Views,
+    visiting: &dyn Fn(&str) -> bool,
     scope: &dyn Fn(&str) -> bool,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
@@ -250,17 +202,16 @@ fn source_inner(
                     return Ok(false);
                 }
             }
-            let key = lowercase_function_name_with_control(name, control)?;
-            if !visiting.enter(&key, control)? {
+            if visiting(name) {
                 return Ok(false);
             }
-            let result = catalog
+            let entered =
+                |candidate: &str| candidate.eq_ignore_ascii_case(name) || visiting(candidate);
+            catalog
                 .with_view_query_with_control(name, control, &mut |view| {
-                    query_inner(catalog, view, visiting, &|_| false, control)
+                    query_inner(catalog, view, &entered, &|_| false, control)
                 })
-                .map(|result| result.unwrap_or(false));
-            visiting.leave(&key);
-            result
+                .map(|result| result.unwrap_or(false))
         }
         SourcePlan::Join {
             left, right, on, ..

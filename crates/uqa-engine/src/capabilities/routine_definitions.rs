@@ -53,10 +53,32 @@ impl RoutineTypeCatalog for Engine {
             name,
         )
     }
+    fn resolve_catalog_column_type_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        uqa_execution::catalog::projection::resolve_catalog_column_type_with_control(
+            &self.catalog_execution(),
+            name,
+            control,
+        )
+    }
     fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError> {
         uqa_execution::catalog::projection::resolve_catalog_column_type_name(
             &self.catalog_execution(),
             name,
+        )
+    }
+    fn resolve_catalog_column_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<ColumnType>, SQLError> {
+        uqa_execution::catalog::projection::resolve_catalog_column_type_name_with_control(
+            &self.catalog_execution(),
+            name,
+            control,
         )
     }
     fn resolve_catalog_user_type_by_oid(&self, oid: u32) -> Option<ColumnType> {
@@ -67,6 +89,17 @@ impl RoutineTypeCatalog for Engine {
     }
     fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError> {
         uqa_execution::catalog::projection::format_type_name(&self.catalog_execution(), ty)
+    }
+    fn format_type_with_control(
+        &self,
+        ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        uqa_execution::catalog::projection::format_type_name_with_control(
+            &self.catalog_execution(),
+            ty,
+            control,
+        )
     }
     fn format_type_oid(&self, oid: u32) -> Result<String, SQLError> {
         uqa_execution::catalog::projection::format_type_object(
@@ -117,6 +150,29 @@ impl RoutineParserCatalog for Engine {
     }
 }
 impl RoutineCompilationCatalog for Engine {
+    fn binding_snapshot_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::ControlledBindingSnapshot, SQLError> {
+        let scope = super::query_scope::new_for_catalog_binding_with_control(self, control)?;
+        uqa_execution::query::binding::binding_snapshot_with_control(&scope, control)
+    }
+    fn stored_query_namespace_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::ControlledStoredQueryNamespace, SQLError> {
+        let temporary = control.format(format_args!("pg_temp_{}", self.session_id))?;
+        uqa_execution::mutation::triggers::with_current_transition_relations(|relations| {
+            uqa_sql::binding::production::ControlledStoredQueryNamespace::from_inputs_with_control(
+                temporary,
+                relations
+                    .into_iter()
+                    .flat_map(|relations| relations.keys().map(String::as_str)),
+                control,
+            )
+        })
+    }
+
     fn has_registered_aggregate_function(&self, name: &str) -> bool {
         Engine::has_registered_aggregate_function(self, name)
     }

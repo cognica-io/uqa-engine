@@ -18,6 +18,38 @@ pub trait AssignmentContext: EngineHook + DomainCatalog {
         row: &dyn crate::expr::RowLookup,
         schema: &RowSchema,
     ) -> Result<Value, SQLError>;
+
+    /// External adapters return the selected output spelling. Native catalogs admit visibility and name construction before producing it.
+    fn domain_display_name_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        control.check()?;
+        let name = self
+            .resolve_regtype_output(&crate::ColumnType::Regtype, i64::from(oid))
+            .map_err(SQLError::Internal)?
+            .ok_or_else(|| SQLError::Internal("domain type has no catalog display name".into()))?;
+        let (value, memory) = control
+            .retain_external_value(Value::Str(name))?
+            .into_parts();
+        let Value::Str(name) = value else {
+            unreachable!("domain output name")
+        };
+        Ok(control.finish(name, memory)?)
+    }
+
+    /// Native evaluation keeps lowering, binding and execution under this control; external callbacks own their construction and return an admitted result.
+    fn evaluate_domain_check_with_control(
+        &self,
+        expression: &Expr,
+        row: &dyn crate::expr::RowLookup,
+        schema: &RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Value>, SQLError> {
+        control.check()?;
+        Ok(control.retain_external_value(self.evaluate_domain_check(expression, row, schema)?)?)
+    }
 }
 
 pub mod conversion;

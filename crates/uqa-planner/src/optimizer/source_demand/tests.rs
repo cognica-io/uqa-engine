@@ -99,19 +99,22 @@ fn join_lateral_scope_preserves_captured_input_used_only_by_its_right_child() {
         panic!("right block")
     };
     right.projections[0].expr = ScalarExpr::InternalColumn(relation.column(0));
-    plan.analyzed_source = Some(Arc::new(AnalyzedSource {
-        schema: RowSchema::join(&left_schema, &right_schema, std::iter::empty()),
-        children: Some(Box::new((
-            AnalyzedSource {
-                schema: left_schema,
-                children: None,
-            },
-            AnalyzedSource {
-                schema: right_schema,
-                children: None,
-            },
-        ))),
-    }));
+    plan.analyzed_source = Some(
+        Arc::new(AnalyzedSource {
+            schema: RowSchema::join(&left_schema, &right_schema, std::iter::empty()),
+            children: Some(Box::new((
+                AnalyzedSource {
+                    schema: left_schema,
+                    children: None,
+                },
+                AnalyzedSource {
+                    schema: right_schema,
+                    children: None,
+                },
+            ))),
+        })
+        .into(),
+    );
     let mut plan = UnifiedPlan::Query(plan);
     prune(
         &mut plan,

@@ -54,7 +54,7 @@ impl QueryRuntimeView<'_> {
     ) -> Option<RegisteredSQLFunction<dyn SQLScalarFunction>> {
         self.scalar_functions
             .read()
-            .get(&name.to_ascii_lowercase())
+            .get(runtime_function_name(name).as_str())
             .cloned()
     }
 
@@ -65,7 +65,17 @@ impl QueryRuntimeView<'_> {
     pub fn has_scalar_function(&self, name: &str) -> bool {
         self.scalar_functions
             .read()
-            .contains_key(&name.to_ascii_lowercase())
+            .contains_key(runtime_function_name(name).as_str())
+    }
+
+    pub fn has_scalar_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        let name = uqa_sql::semantics::lowercase_function_name_with_control(name, control)?;
+        control.check()?;
+        Ok(self.scalar_functions.read().contains_key(name.as_str()))
     }
 
     pub fn lookup_table_function(
@@ -74,14 +84,14 @@ impl QueryRuntimeView<'_> {
     ) -> Option<RegisteredSQLFunction<dyn SQLTableFunction>> {
         self.table_functions
             .read()
-            .get(&name.to_ascii_lowercase())
+            .get(runtime_function_name(name).as_str())
             .cloned()
     }
 
     pub fn has_table_function(&self, name: &str) -> bool {
         self.table_functions
             .read()
-            .contains_key(&name.to_ascii_lowercase())
+            .contains_key(runtime_function_name(name).as_str())
     }
 
     pub fn lookup_aggregate_function(
@@ -90,36 +100,64 @@ impl QueryRuntimeView<'_> {
     ) -> Option<RegisteredSQLFunction<dyn SQLAggregateFactory>> {
         self.aggregate_functions
             .read()
-            .get(&name.to_ascii_lowercase())
+            .get(runtime_function_name(name).as_str())
             .cloned()
     }
 
     pub fn has_aggregate_function(&self, name: &str) -> bool {
         self.aggregate_functions
             .read()
-            .contains_key(&name.to_ascii_lowercase())
+            .contains_key(runtime_function_name(name).as_str())
     }
 
     pub fn registered_function_options(&self, name: &str) -> [Option<SQLFunctionOptions>; 3] {
-        let name = name.to_ascii_lowercase();
+        let name = runtime_function_name(name);
         [
             self.scalar_functions
                 .read()
-                .get(&name)
+                .get(name.as_str())
                 .map(|registration| registration.options),
             self.table_functions
                 .read()
-                .get(&name)
+                .get(name.as_str())
                 .map(|registration| registration.options),
             self.aggregate_functions
                 .read()
-                .get(&name)
+                .get(name.as_str())
                 .map(|registration| registration.options),
         ]
+    }
+
+    pub fn has_aggregate_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        let name = uqa_sql::semantics::lowercase_function_name_with_control(name, control)?;
+        control.check()?;
+        Ok(self.aggregate_functions.read().contains_key(name.as_str()))
+    }
+
+    pub fn has_table_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        let name = uqa_sql::semantics::lowercase_function_name_with_control(name, control)?;
+        control.check()?;
+        Ok(self.table_functions.read().contains_key(name.as_str()))
     }
 
     /// Queue a notice for the client, after the notices queued before it.
     pub fn push_notice(&self, notice: uqa_sql::SQLNotice) {
         self.notices.push(notice);
     }
+}
+
+fn runtime_function_name(name: &str) -> uqa_sql::semantics::FunctionName<'_> {
+    uqa_sql::semantics::lowercase_function_name_with_control(
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary runtime identity normalization")
 }

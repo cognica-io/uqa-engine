@@ -8,21 +8,20 @@
 
 use crate::catalog::{
     context::CatalogContext,
-    projection::{builtin_routine_identities, catalog_routine_type_oid, BuiltinRoutineIdentity},
+    projection::{builtin_routine_identities, BuiltinRoutineIdentity},
     CatalogReadView,
 };
 use std::collections::BTreeMap;
 use uqa_sql::{
     ast::FunctionBinding,
     catalog::{
-        roles::{identity::RoleSubject, role_inherits, RoleDefinition, RoleReference},
-        security::{
-            builtin_routines::{BuiltinRoutineExecution, BuiltinRoutineSecurities},
-            object_acl,
-        },
+        roles::{identity::RoleSubject, RoleDefinition, RoleReference},
+        security::builtin_routines::{BuiltinRoutineExecution, BuiltinRoutineSecurities},
     },
     SQLError,
 };
+
+mod production;
 
 #[derive(Clone)]
 pub struct BuiltinRoutinePermissions {
@@ -112,76 +111,27 @@ impl BuiltinRoutinePermissions {
     }
 
     fn require_selected(&self, routine: BuiltinRoutineIdentity) -> Result<(), SQLError> {
-        let Some(authority) = &self.restricted else {
-            return Ok(());
-        };
-        let definitions = &authority.catalog.snapshot().definitions;
-        let acl = definitions
-            .builtin_routine_security
-            .get(&routine.oid)
-            .map(|entry| entry.execute_acl.as_slice());
-        let allowed = object_acl::privilege_allowed(
-            &uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-            acl,
-            false,
-            false,
-            |role| {
-                role_inherits(
-                    &definitions.roles,
-                    &definitions.role_memberships,
-                    &authority.current_role,
-                    role,
-                )
-            },
-        );
-        if allowed {
-            return Ok(());
-        }
-        let kind = if routine.kind == 'a' {
-            "aggregate"
-        } else {
-            "function"
-        };
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!("permission denied for {kind} {}", routine.name),
-        })
-    }
-
-    /// Match the declaration carried by the selected binding, not argument values or the caller's current search path. User identities and compiler syntax dispatch never borrow the ACL of a same-named catalog function.
-    fn selected(&self, binding: &FunctionBinding) -> Option<BuiltinRoutineIdentity> {
-        let authority = self.restricted.as_ref()?;
-        if !binding.builtin || binding.object_id.is_some() || binding.resolution_error.is_some() {
-            return None;
-        }
-        let (schema, name) = uqa_core::RelationIdentity::parse_reference(&binding.name).ok()?;
-        if schema
-            .as_deref()
-            .is_some_and(|schema| schema != "pg_catalog")
-        {
-            return None;
-        }
-        builtin_routine_identities().find(|routine| {
-            routine.name == name
-                && routine.argument_types.len() == binding.argument_types.len()
-                && routine
-                    .argument_types
-                    .iter()
-                    .zip(&binding.argument_types)
-                    .all(|(oid, name)| *oid == catalog_routine_type_oid(&authority.catalog, name))
-        })
+        self.require_selected_with_control(
+            routine,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
 }
 
 impl BuiltinRoutineExecution for BuiltinRoutinePermissions {
     fn require_execute(&self, binding: &FunctionBinding) -> Result<(), SQLError> {
-        if self.unrestricted() {
-            return Ok(());
-        }
-        if let Some(routine) = self.selected(binding) {
-            self.require_selected(routine)?;
-        }
-        Ok(())
+        self.require_with_control(
+            binding,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+    }
+
+    fn require_execute_with_control(
+        &self,
+        binding: &FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.require_with_control(binding, control)
     }
 }
 

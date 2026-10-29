@@ -13,26 +13,43 @@ use uqa_core::{
     Value,
 };
 
+mod analysis;
 mod arenas;
-mod commands;
+pub(crate) use analysis::{QueryMetadataUpdate, SourceMetadataUpdate};
+pub use arenas::{ScalarArenaTransform, ScalarQueryArena};
+pub(crate) mod commands;
+pub(crate) mod construction;
 mod ctes;
+mod deferred;
+pub use deferred::OwnedDeferredRewriteIter;
 mod executable;
+mod expression;
+pub use expression::MutableExpressionPlan;
 mod grouping;
 pub(crate) mod memory;
 mod metadata;
+pub(crate) mod nodes;
 mod parents;
+pub(crate) mod projections;
 mod queries;
+mod scoped;
 mod slots;
+pub use scoped::OwnedScopedPlanVisitor;
 mod sources;
+mod traversal;
 mod vectors;
+mod windows;
 pub use commands::{
     CommandAssignmentSlot, CommandQuerySlot, CommandScalarSlot, MutableCommandPlan,
 };
 pub use executable::MutableExecutablePlan;
 use memory::RewriteMemory;
+pub use projections::{OwnedProjection, OwnedProjectionIter};
 pub use queries::QueryChildSlot;
 pub use slots::QueryScalarSlot;
-pub use sources::{MutableSourcePlan, SourceChildSlot, SourceScalarSlot};
+pub use sources::{
+    MutableJoinParts, MutableJoinShell, MutableSourcePlan, SourceChildSlot, SourceScalarSlot,
+};
 
 /// A private query destination with independently owned scalar fields and query children. Observation is read-only; consuming edits transfer or destroy the corresponding constructor records together with their IR.
 #[derive(Debug)]
@@ -65,6 +82,13 @@ impl QueryPlan {
 }
 
 impl MutableQueryPlan {
+    pub(in crate::plan) fn from_rewrite_parts(
+        query: QueryPlan,
+        memory: Option<RewriteMemory>,
+    ) -> Self {
+        Self { query, memory }
+    }
+
     pub fn reserved_bytes(&self) -> usize {
         self.memory
             .as_ref()

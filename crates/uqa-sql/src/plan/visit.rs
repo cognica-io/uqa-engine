@@ -21,6 +21,15 @@ impl UnifiedPlan {
     }
 }
 
+impl super::PlanRef<'_> {
+    pub fn visit_scalar_expressions(self, visit: &mut dyn FnMut(&ScalarExpr)) {
+        match self {
+            Self::Query(query) => query.visit_scalar_expressions(visit),
+            Self::Command(command) => command.visit_scalar_expressions(visit),
+        }
+    }
+}
+
 fn visit_ctes(ctes: &[CtePlan], visit: &mut dyn FnMut(&ScalarExpr)) {
     for cte in ctes {
         match &cte.body {

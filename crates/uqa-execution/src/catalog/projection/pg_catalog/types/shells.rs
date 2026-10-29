@@ -18,7 +18,7 @@ pub(super) fn rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError
         .map(|definition| {
             let mut row = special_pg_type_catalog_row(PgTypeCatalogMetadata {
                 oid: i64::from(definition.oid),
-                name: definition.identity.name.clone(),
+                name: definition.identity.name.as_str().into(),
                 namespace_oid: namespace_oid(catalog, &definition.identity.schema),
                 len: 4,
                 by_value: true,

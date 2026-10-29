@@ -7,126 +7,34 @@
 //! Constants, columns, function calls, and window specification lowering.
 
 use super::{
-    compile_expr, compile_qualified_name, compile_sort_options, compile_window_frame, DecimalValue,
-    Expr, NodeEnum, OrderBy, Result, SQLError, Value, WindowReference, WindowReferenceKind,
-    WindowSpec,
+    compile_expr, compile_qualified_name, compile_sort_options, compile_window_frame, Expr,
+    NodeEnum, OrderBy, Result, SQLError, Value, WindowReference, WindowReferenceKind, WindowSpec,
 };
 use crate::ast::{FunctionBinding, FunctionOrderSyntax};
 
+mod production;
+pub(in crate::compiler) use production::{
+    compile_column_ref_with_control, compile_const_with_control,
+};
+
 pub(in crate::compiler) fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {
-    if c.isnull {
-        if c.val.is_some() {
-            return Err(SQLError::Internal(
-                "NULL constant unexpectedly has a value payload".into(),
-            ));
-        }
-        return Ok(Expr::Literal(Value::Null));
-    }
-    use pg_query::protobuf::a_const::Val;
-    let Some(val) = c.val.as_ref() else {
-        return Err(SQLError::Internal(
-            "non-NULL constant has no value payload".into(),
-        ));
-    };
-    let value = match val {
-        Val::Ival(i) => Value::Int(i64::from(i.ival)),
-        // Integer literals wider than int4 arrive as Fval strings (the
-        // parser also folds a unary minus into the literal); ones that
-        // fit i64 stay integers (PostgreSQL types them int8), the rest
-        // become numeric.
-        Val::Fval(f)
-            if f.fval
-                .strip_prefix('-')
-                .unwrap_or(&f.fval)
-                .bytes()
-                .all(|b| b.is_ascii_digit()) =>
-        {
-            f.fval.parse::<i64>().map(Value::Int).or_else(|_| {
-                DecimalValue::parse(&f.fval)
-                    .map(Value::Decimal)
-                    .ok_or_else(|| SQLError::Internal(format!("bad numeric literal {}", f.fval)))
-            })?
-        }
-        Val::Fval(f) => DecimalValue::parse(&f.fval).map_or_else(
-            || {
-                f.fval
-                    .parse::<f64>()
-                    .map(Value::Float)
-                    .map_err(|e| SQLError::Internal(e.to_string()))
-            },
-            |d| Ok(Value::Decimal(d)),
-        )?,
-        Val::Sval(s) => Value::Str(s.sval.clone()),
-        Val::Bsval(bits) => {
-            let value = crate::expr::bit_string::input_with_control(
-                &bits.bsval,
-                crate::expr::bit_string::BitStringKind::Fixed,
-                -1,
-                &uqa_core::memory::ProductionControl::uncontrolled(),
-            )?
-            .into_uncontrolled()
-            .expect("literal compilation has an ordinary owner");
-            Value::BitString(value)
-        }
-        Val::Boolval(b) => Value::Bool(b.boolval),
-    };
-    Ok(Expr::Literal(value))
+    compile_const_with_control(c, &uqa_core::memory::ProductionControl::uncontrolled()).map(
+        |expression| {
+            expression
+                .into_uncontrolled()
+                .expect("ordinary literal compilation")
+        },
+    )
 }
 
 pub(in crate::compiler) fn compile_column_ref(c: &pg_query::protobuf::ColumnRef) -> Result<Expr> {
-    let mut parts: Vec<String> = Vec::new();
-    let position = crate::compiler::source_positions::position(c.location);
-    for (index, f) in c.fields.iter().enumerate() {
-        let inner = f
-            .node
-            .as_ref()
-            .ok_or_else(|| SQLError::Internal("ColumnRef contains an empty field".into()))?;
-        match inner {
-            NodeEnum::String(s) if !s.sval.is_empty() => parts.push(s.sval.clone()),
-            NodeEnum::String(_) => {
-                return Err(SQLError::Internal(
-                    "ColumnRef contains an empty name component".into(),
-                ));
-            }
-            NodeEnum::AStar(_) if c.fields.len() == 1 && index == 0 => return Ok(Expr::Star),
-            NodeEnum::AStar(_) => {
-                let qualifier = parts.pop().ok_or_else(|| {
-                    SQLError::Internal("qualified wildcard has no relation name".into())
-                })?;
-                return Ok(Expr::QualifiedStar(
-                    crate::ast::ReferenceName::from(qualifier).with_position(position),
-                ));
-            }
-            other => {
-                return Err(SQLError::Internal(format!(
-                    "ColumnRef contains unexpected field {other:?}"
-                )));
-            }
-        }
-    }
-    match parts.len() {
-        0 => Err(SQLError::Internal("empty ColumnRef".into())),
-        1 => Ok(Expr::Column(
-            crate::ast::ReferenceName::from(parts.pop().ok_or_else(|| {
-                SQLError::Internal("ColumnRef component disappeared during lowering".into())
-            })?)
-            .with_position(position),
-        )),
-        _ => {
-            // `schema.table.col` collapses to `table.col`; `t.col`
-            // round-trips as a qualified ref.
-            let column = parts.pop().ok_or_else(|| {
-                SQLError::Internal("ColumnRef column disappeared during lowering".into())
-            })?;
-            let qualifier = parts.pop().ok_or_else(|| {
-                SQLError::Internal("ColumnRef qualifier disappeared during lowering".into())
-            })?;
-            Ok(Expr::qualified_column(
-                qualifier,
-                crate::ast::ReferenceName::from(column).with_position(position),
-            ))
-        }
-    }
+    compile_column_ref_with_control(c, &uqa_core::memory::ProductionControl::uncontrolled()).map(
+        |expression| {
+            expression
+                .into_uncontrolled()
+                .expect("ordinary reference compilation")
+        },
+    )
 }
 
 pub(in crate::compiler) fn compile_func_call(f: &pg_query::protobuf::FuncCall) -> Result<Expr> {

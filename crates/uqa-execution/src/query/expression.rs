@@ -197,6 +197,124 @@ fn intercepted_call<'expression>(
 }
 
 impl FunctionTypeResolver for ScopedExpressionEvaluator<'_> {
+    fn has_untyped_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.context
+            .has_untyped_function_with_control(name, control)
+    }
+
+    fn resolve_collation_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<u32>, SQLError> {
+        self.context
+            .resolve_collation_name_with_control(name, control)
+    }
+
+    fn is_scalar_function_binding_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.context
+            .is_scalar_function_binding_with_control(binding, control)
+    }
+
+    fn format_type_name_with_control(
+        &self,
+        ty: &uqa_sql::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.context.format_type_name_with_control(ty, control)
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        FunctionTypeResolver::resolve_type_name_with_control(self.context.as_ref(), name, control)
+    }
+
+    fn resolve_scalar_subquery_type_with_control(
+        &self,
+        subquery: crate::SubqueryId,
+        outer_schema: &crate::RowSchema,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        self.context.resolve_scalar_subquery_type_with_control(
+            subquery,
+            outer_schema,
+            params,
+            control,
+        )
+    }
+
+    fn resolve_function_type_with_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        self.context.resolve_function_type_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ResolvedFunctionOverload>>, SQLError> {
+        self.context.resolve_function_overload_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_builtins_and_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        builtins: &[uqa_sql::BuiltinFunctionOverload],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ResolvedFunctionOverload>>, SQLError> {
+        self.context
+            .resolve_function_overload_with_builtins_and_control(
+                name,
+                binding,
+                argument_names,
+                argument_types,
+                explicit_variadic,
+                builtins,
+                control,
+            )
+    }
+
     fn format_type_name(&self, ty: &uqa_sql::ColumnType) -> Result<String, SQLError> {
         self.context.format_type_name(ty)
     }

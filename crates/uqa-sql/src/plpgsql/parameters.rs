@@ -6,6 +6,15 @@
 
 //! Bind procedural variables as invocation parameters, preserving catalog inputs.
 
+mod inputs;
+mod owned;
+mod visit;
+pub use inputs::parameter_type_mismatch_with_control;
+pub use owned::{
+    parameterize_statement_variables_owned, OwnedPLpgSQLVariableBindings,
+    OwnedVariableSiteResolver, PLpgSQLInput,
+};
+
 use super::{
     binding::{bind_statement, ResolvedVariable, VariableResolver},
     variable_conflicts::{statement_variable_names, VariableSiteResolver},

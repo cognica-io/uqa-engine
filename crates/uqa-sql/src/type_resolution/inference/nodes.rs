@@ -102,8 +102,16 @@ pub(super) fn binary_type_with_control(
             control,
         )?;
         let [left_target, right_target, _] = &*selected;
-        common::read_unknown_literals(std::iter::once(lhs.as_ref()), left_target)?;
-        common::read_unknown_literals(std::iter::once(rhs.as_ref()), right_target)?;
+        common::read_unknown_literals_with_control(
+            std::iter::once(lhs.as_ref()),
+            left_target,
+            control,
+        )?;
+        common::read_unknown_literals_with_control(
+            std::iter::once(rhs.as_ref()),
+            right_target,
+            control,
+        )?;
     }
     operators::binary_result_type_with_control(*op, left.as_deref(), right.as_deref(), control)
 }
@@ -174,9 +182,10 @@ pub(super) fn membership_type_with_control(
     drop(inputs);
     match selected {
         Some(common) => {
-            common::read_unknown_literals(
+            common::read_unknown_literals_with_control(
                 std::iter::once(expr.as_ref()).chain(list.iter()),
                 &common,
+                control,
             )?;
             operators::binary_result_type_with_control(
                 crate::ast::BinaryOp::Equal,
@@ -281,11 +290,12 @@ pub(super) fn conditional_type_with_control(
     }
     drop(storage);
     let result = selection.finish(control)?;
-    common::read_unknown_literals(
+    common::read_unknown_literals_with_control(
         when.iter()
             .map(|(_, value)| value)
             .chain(else_branch.as_deref()),
         &result,
+        control,
     )?;
     common::case::case_output_type_with_control(
         expression,

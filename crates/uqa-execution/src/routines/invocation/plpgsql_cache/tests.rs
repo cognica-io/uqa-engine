@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 use super::*;
+use uqa_core::memory::ProductionControl;
 use uqa_sql::ast::Statement;
 use uqa_sql::routines::RoutineBody;
 fn routine() -> SQLUserFunction {
@@ -28,31 +29,79 @@ fn validator_cache_is_shared_only_by_the_same_concrete_signature_and_trigger_rel
         .retain(&function, compile(&function.def).unwrap())
         .unwrap();
     let integer = cache
-        .plpgsql_body(&function, &function.def, None, |_| panic!("validator body"))
+        .plpgsql_body(
+            &function,
+            &function.def,
+            None,
+            &ProductionControl::uncontrolled(),
+            |_| panic!("validator body"),
+        )
         .unwrap();
-    let prep = cache.plpgsql_preparations(&function.def, parsed(&integer));
+    let prep = cache
+        .plpgsql_preparations(
+            &function.def,
+            parsed(&integer),
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap();
     assert!(Arc::ptr_eq(
         &prep,
-        &cache.plpgsql_preparations(&function.def, &parsed(&integer).clone())
+        &cache
+            .plpgsql_preparations(
+                &function.def,
+                &parsed(&integer).clone(),
+                &ProductionControl::uncontrolled()
+            )
+            .unwrap()
     ));
     let mut text = function.def.clone();
     text.params[0].type_name = "text".into();
-    let text_body = cache.plpgsql_body(&function, &text, None, compile).unwrap();
+    let text_body = cache
+        .plpgsql_body(
+            &function,
+            &text,
+            None,
+            &ProductionControl::uncontrolled(),
+            compile,
+        )
+        .unwrap();
     assert!(!Arc::ptr_eq(
         &prep,
-        &cache.plpgsql_preparations(&text, parsed(&text_body))
+        &cache
+            .plpgsql_preparations(
+                &text,
+                parsed(&text_body),
+                &ProductionControl::uncontrolled()
+            )
+            .unwrap()
     ));
     let first = cache
-        .plpgsql_body(&function, &function.def, Some(10), compile)
+        .plpgsql_body(
+            &function,
+            &function.def,
+            Some(10),
+            &ProductionControl::uncontrolled(),
+            compile,
+        )
         .unwrap();
     let second = cache
-        .plpgsql_body(&function, &function.def, Some(11), compile)
+        .plpgsql_body(
+            &function,
+            &function.def,
+            Some(11),
+            &ProductionControl::uncontrolled(),
+            compile,
+        )
         .unwrap();
     assert!(!Arc::ptr_eq(&first, &second));
     let again = cache
-        .plpgsql_body(&function, &function.def, Some(10), |_| {
-            panic!("same relation")
-        })
+        .plpgsql_body(
+            &function,
+            &function.def,
+            Some(10),
+            &ProductionControl::uncontrolled(),
+            |_| panic!("same relation"),
+        )
         .unwrap();
     assert!(Arc::ptr_eq(&first, &again));
 }
@@ -61,9 +110,21 @@ fn replacement_and_rollback_evict_dead_versions_without_resurrecting_their_prepa
     let function = routine();
     let cache = SessionRoutineBodies::default();
     let original = cache
-        .plpgsql_body(&function, &function.def, None, compile)
+        .plpgsql_body(
+            &function,
+            &function.def,
+            None,
+            &ProductionControl::uncontrolled(),
+            compile,
+        )
         .unwrap();
-    let preparation = cache.plpgsql_preparations(&function.def, parsed(&original));
+    let preparation = cache
+        .plpgsql_preparations(
+            &function.def,
+            parsed(&original),
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap();
     let weak = Arc::downgrade(&preparation);
     drop(preparation);
     let mut definition = function.def.clone();
@@ -74,7 +135,13 @@ fn replacement_and_rollback_evict_dead_versions_without_resurrecting_their_prepa
         .unwrap();
     assert!(weak.upgrade().is_none());
     let rolled_back = cache
-        .plpgsql_body(&function, &function.def, None, compile)
+        .plpgsql_body(
+            &function,
+            &function.def,
+            None,
+            &ProductionControl::uncontrolled(),
+            compile,
+        )
         .unwrap();
     assert!(!Arc::ptr_eq(&original, &rolled_back));
     assert!(!parsed(&original)
@@ -86,9 +153,63 @@ fn anonymous_activation_preparations_are_not_retained_by_the_session() {
     let function = routine();
     let cache = SessionRoutineBodies::default();
     let body = compile(&function.def).unwrap();
-    let preparation = cache.plpgsql_preparations(&function.def, parsed(&body));
+    let preparation = cache
+        .plpgsql_preparations(
+            &function.def,
+            parsed(&body),
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap();
     let weak = Arc::downgrade(&preparation);
     drop(preparation);
     assert!(weak.upgrade().is_none());
     assert!(cache.compiled.lock().is_empty());
+}
+
+#[test]
+fn specialization_admits_keys_nodes_and_observers_and_reuses_their_owners() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let function = routine();
+    let cache = SessionRoutineBodies::default();
+    cache
+        .retain(&function, compile(&function.def).unwrap())
+        .unwrap();
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let occupied = budget
+        .reserve(budget.available() - OwnedMap::<usize, PreparedBody>::entry_bytes() + 1)
+        .unwrap();
+    let rejected = cache.plpgsql_body(&function, &function.def, None, &control, |_| {
+        panic!("validator is already retained")
+    });
+    let error = match rejected {
+        Err(error) => error,
+        Ok(_) => panic!("specialization must be rejected before publication"),
+    };
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(budget.used(), occupied.bytes());
+    assert!(cache.compiled.lock()[&[2; 16]].plpgsql.is_empty());
+    drop(occupied);
+    let body = cache
+        .plpgsql_body(&function, &function.def, None, &control, |_| {
+            panic!("validator is already retained")
+        })
+        .unwrap();
+    let preparation = cache
+        .plpgsql_preparations(&function.def, parsed(&body), &control)
+        .unwrap();
+    let retained = budget.used();
+    assert!(retained > 0);
+    let repeated = cache
+        .plpgsql_body(&function, &function.def, None, &control, |_| {
+            panic!("matching specialization")
+        })
+        .unwrap();
+    assert!(Arc::ptr_eq(&body, &repeated));
+    assert_eq!(budget.used(), retained);
+    drop(cache);
+    assert!(budget.used() > 0 && budget.used() < retained);
+    drop(preparation);
+    assert_eq!(budget.used(), 0);
 }

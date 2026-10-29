@@ -18,8 +18,26 @@ pub trait CatalogSession: Sync {
     fn current_role(&self) -> RoleReference;
     fn temporary_schema_name(&self) -> String;
     fn relation_name_resolution(&self) -> RelationNameResolution;
+    /// Native sessions admit copies directly from locked session state; external services may supply their existing owned snapshot.
+    fn relation_name_resolution_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationNameResolution>, SQLError> {
+        self.relation_name_resolution().copy_with_control(control)
+    }
     /// The canonical name of the parameter `name` refers to and its value as `SHOW` reports it.
     fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError>;
+    /// Describe a SHOW column without constructing its current setting. External services preserve their existing resolution callback.
+    fn parameter_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        control.check()?;
+        let (name, _) = self.show_parameter(name)?;
+        Ok(control.copy_text(&name)?)
+    }
+
     /// Every parameter that `SHOW ALL` and `pg_settings` report, in name order.
     fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting>;
     /// Native sessions override this boundary to read only selected planning parameters. An external implementation may supply its existing settings snapshot.

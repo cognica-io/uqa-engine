@@ -54,3 +54,20 @@ impl Deref for LockedSearchPath<'_> {
         &self.path
     }
 }
+
+/// Lend effective names while the caller retains the session read guard.
+pub(crate) struct BorrowedSearchPath<'a>(pub(crate) &'a SessionStateSnapshot);
+
+impl uqa_sql::catalog::resolution::candidates::SearchPathView for BorrowedSearchPath<'_> {
+    fn len(&self) -> usize {
+        self.0.search_path.len()
+    }
+    fn schema(&self, index: usize) -> &str {
+        let schema = &self.0.search_path[index];
+        if schema == "$user" {
+            &self.0.authorization.current().name
+        } else {
+            schema
+        }
+    }
+}

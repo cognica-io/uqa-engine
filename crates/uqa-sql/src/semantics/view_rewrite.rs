@@ -27,14 +27,20 @@ pub mod context;
 use context::{stored_view_schema, ViewRewriteContext};
 
 mod captured_projection;
+mod columns;
+pub use columns::relation_columns_with_control;
 mod correlation;
 pub use captured_projection::{capture_view_projection, CapturedViewProjection};
+pub use captured_projection::{capture_view_projection_owned, OwnedCapturedViewProjection};
 mod deferred;
 pub use deferred::{
-    bind_outer_rewrite_scope, resolve_outer_expression_rewrites, resolve_outer_rewrites,
-    resolve_outer_source_rewrites, resolve_outer_sources, DeferredOuterRewrite,
+    bind_outer_rewrite_scope, bind_outer_rewrite_scope_with_control,
+    resolve_outer_expression_rewrites, resolve_outer_rewrites, resolve_outer_rewrites_owned,
+    resolve_outer_source_rewrites, resolve_outer_sources, resolve_outer_sources_owned,
+    DeferredOuterRewrite,
 };
 mod layer_privileges;
+pub mod production;
 mod returning;
 mod rewrite_insert;
 mod rewrite_merge;
@@ -196,50 +202,20 @@ pub fn relation_columns(
     services: ViewRewriteContext<'_>,
     relation: &str,
 ) -> Result<Vec<String>, SQLError> {
-    if let Some(relation) = crate::catalog::VirtualRelation::from_qualified_name(relation) {
-        return Ok(relation
-            .schema()
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect());
-    }
-    if let Some(view) = services.catalog.view_definition(relation)? {
-        let schema = stored_view_schema(services, &view)?;
-        return Ok(schema
-            .columns()
-            .iter()
-            .enumerate()
-            .map(|(position, column)| {
-                schema
-                    .public_name(position)
-                    .map_or_else(|| column.clone(), str::to_string)
-            })
-            .collect());
-    }
-    let definitions = services
-        .catalog
-        .try_describe_table(relation)
-        .map_err(|error| SQLError::Internal(format!("describe view source `{relation}`: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
-    if definitions.is_empty() {
-        return services
-            .catalog
-            .try_table_columns(relation)
-            .map_err(|error| {
-                SQLError::Internal(format!("describe view source `{relation}`: {error}"))
-            });
-    }
-    Ok(definitions
-        .into_iter()
-        .map(|definition| definition.name)
-        .collect())
+    Ok(relation_columns_with_control(
+        services,
+        relation,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary view source columns"))
 }
 
 fn source_qualifier_matches(qualifier: &str, source_qualifier: &str, source_name: &str) -> bool {
     qualifier == source_qualifier
         || qualifier == source_name
-        || RelationIdentity::from_legacy_name(source_name)
-            .is_ok_and(|identity| qualifier == identity.name)
+        || RelationIdentity::borrowed_reference(source_name)
+            .is_some_and(|identity| identity.name == uqa_core::RelationName::decoded(qualifier))
 }
 
 fn direct_source_column(
@@ -393,12 +369,12 @@ fn view_query_shape_from_definition(
         RelationalPlan::SetOp { .. } => {
             return Ok(ViewQueryShape::NotUpdatable(
                 NotUpdatableReason::SetOperation,
-            ))
+            ));
         }
         RelationalPlan::Values { .. } => {
             return Ok(ViewQueryShape::NotUpdatable(
                 NotUpdatableReason::NotSingleRelation,
-            ))
+            ));
         }
     };
     if let Some(reason) = query_block_restriction(services, &definition.query, block) {

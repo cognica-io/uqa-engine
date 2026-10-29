@@ -23,6 +23,99 @@ use uqa_sql::{
 };
 
 impl ViewRewriteCatalog for Engine {
+    fn with_view_definition_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(
+            Option<uqa_sql::catalog::view::ViewRewriteDefinitionRef<'_>>,
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        if Engine::with_view_definition_with_control(self, name, control, |_, view| {
+            read(Some(view.rewrite_definition_ref()))
+        })?
+        .is_none()
+        {
+            read(None)?;
+        }
+        Ok(())
+    }
+    fn try_resolve_view_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
+        Engine::try_resolve_view_name_with_control(self, name, control)
+    }
+    fn visit_rules_with_control(
+        &self,
+        name: &str,
+        event: RuleEvent,
+        reverse: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        visit: &mut dyn FnMut(&StoredRule) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        uqa_sql::semantics::rules::RuleCatalog::visit_rules_with_control(
+            self, name, event, reverse, control, visit,
+        )
+    }
+    fn target_view_kind_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<StoredViewKind>, SQLError> {
+        self.mutation_view_kind_with_control(name, control)
+    }
+    fn has_trigger_definition_with_control(
+        &self,
+        name: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        row: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        let relation = self
+            .event_analysis_context()
+            .resolve_trigger_table_with_control(name, control)?;
+        let triggers = self.query_catalog_snapshot.as_ref().map_or_else(
+            || self.durable.triggers.snapshot(),
+            |snapshot| snapshot.triggers.clone(),
+        );
+        uqa_sql::catalog::events::selection::has_trigger_definition_with_control(
+            &triggers, &relation, timing, event, row, control,
+        )
+    }
+    fn binding_scope_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::ControlledBindingSnapshot, SQLError> {
+        let scope =
+            crate::capabilities::query_scope::new_for_current_routine_with_control(self, control)?;
+        uqa_execution::query::binding::binding_snapshot_with_control(&scope, control)
+    }
+    fn restored_view_scope_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::ControlledBindingContext<'static>, SQLError> {
+        use uqa_sql::binding::production::{
+            BindingMap, BindingNameSet, BindingResolution, ControlledBindingContext,
+        };
+        let catalog = control
+            .finish(
+                self.restored_catalog_read_view_with_control(control)?,
+                control.empty_reservation(),
+            )?
+            .into_shared(control)?;
+        let resolution = uqa_execution::catalog::services::CatalogSession::relation_name_resolution_with_control(self, control)?;
+        Ok(ControlledBindingContext {
+            catalog,
+            resolution: BindingResolution::from_produced(resolution),
+            ctes: BindingMap::new(),
+            deferred_ctes: BindingMap::new(),
+            non_returning_ctes: BindingNameSet::new(),
+            scalar_subqueries: &[],
+        })
+    }
     fn view_definition(&self, name: &str) -> Result<Option<ViewRewriteDefinition>, SQLError> {
         Ok(Engine::view_definition(self, name)?.map(|definition| definition.rewrite_definition()))
     }
@@ -94,6 +187,41 @@ impl Engine {
     }
 }
 impl ViewPrivilegeCatalog for Engine {
+    fn with_view_definition_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(Option<&StoredView>) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        if Engine::with_view_definition_with_control(self, name, control, |_, view| {
+            read(Some(view))
+        })?
+        .is_none()
+        {
+            read(None)?;
+        }
+        Ok(())
+    }
+    fn ensure_query_select_with_control(
+        &self,
+        query: &uqa_sql::plan::QueryPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_current_routine_with_control(self, control)?;
+        uqa_execution::query::privileges::ensure_select_privileges_for_query(query, &scope)
+    }
+    fn bound_role_with_control(
+        &self,
+        identity: uqa_sql::catalog::roles::RoleIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RoleReference>, SQLError> {
+        let role = RoleReference::from_identity_with_control(
+            identity,
+            &self.durable.roles.read(),
+            control,
+        )?;
+        Ok(control.finish(role, control.empty_reservation())?)
+    }
     fn ensure_query_select(&self, query: &uqa_sql::plan::QueryPlan) -> Result<(), SQLError> {
         let scope = super::query_scope::new_for_current_routine(self);
         uqa_execution::query::privileges::ensure_select_privileges_for_query(query, &scope)

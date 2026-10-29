@@ -18,8 +18,13 @@ pub(in crate::routines::inlining) fn can_duplicate_with_control(
     expression: &ScalarExpr,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    let properties =
-        inspect_with_control(context, expression, &[], &RowSchema::default(), control)?;
+    let properties = inspect_with_control(
+        context,
+        expression,
+        &[],
+        &RowSchema::empty_with_control(control)?,
+        control,
+    )?;
     Ok(!properties.subquery
         && properties.cost <= 10.0
         && properties.volatility != FunctionVolatility::Volatile)

@@ -9,8 +9,8 @@
 use crate::{ast::FunctionBinding, ColumnType, SQLError, ScalarExpr};
 use uqa_core::memory::{MemoryReservation, Produced, ProductionControl, ProductionString};
 
-mod fields;
 mod arguments;
+mod fields;
 pub(super) use arguments::Arguments;
 mod errors;
 pub use fields::FunctionBindingParts;
