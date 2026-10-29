@@ -435,3 +435,87 @@ fn case_fallback_rejects_foreign_or_uncontrolled_replacements_without_leaking() 
         assert_eq!(foreign.used(), 0);
     }
 }
+
+#[test]
+fn child_replacement_returns_both_exact_owners_without_allocating_capacity() {
+    for (source, children) in fixtures::child_shapes() {
+        let budget = MemoryBudget::new(1 << 20);
+        let reference_budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let index = children.len() / 2;
+        let expected = children[index]
+            .copy_for_rewrite(&ProductionControl::new(&reference_budget, &token, &token))
+            .unwrap();
+        let input = source.copy_for_rewrite(&control).unwrap();
+        let replacement = text(257).copy_for_rewrite(&control).unwrap();
+        let sibling = budget.reserve(budget.available()).unwrap();
+        let before = budget.used();
+        let mut result = None;
+        let measured = allocation_counter::measure(|| {
+            result = Some(input.replace_child(index, replacement, &control).unwrap());
+        });
+        let (parent, previous) = result.unwrap();
+        assert_eq!(measured.count_total, 0);
+        assert_eq!(measured.bytes_current, 0);
+        assert_eq!(budget.used(), before);
+        assert_eq!(*previous, children[index]);
+        assert_eq!(previous.reserved_bytes(), expected.reserved_bytes());
+        assert_eq!(
+            parent.reserved_bytes() + previous.reserved_bytes() + sibling.bytes(),
+            before
+        );
+        let selected = parent.select_child(index);
+        assert_eq!(*selected, text(257));
+        assert_eq!(
+            budget.used(),
+            sibling.bytes() + 257 + previous.reserved_bytes()
+        );
+        drop(previous);
+        assert_eq!(budget.used(), sibling.bytes() + 257);
+        drop((selected, sibling, expected));
+        assert_eq!(budget.used(), 0);
+        assert_eq!(reference_budget.used(), 0);
+    }
+}
+
+#[test]
+fn child_replacement_rejects_cancellation_and_mixed_ownership_without_leaking() {
+    for mode in 0..4 {
+        let budget = MemoryBudget::new(1 << 20);
+        let foreign = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let input = case(Some(text(8192))).copy_for_rewrite(&control).unwrap();
+        let replacement = match mode {
+            2 => text(1024)
+                .copy_for_rewrite(&ProductionControl::new(&foreign, &original, &invoking))
+                .unwrap(),
+            3 => OwnedScalarExpr::uncontrolled(text(1024)),
+            _ => text(1024).copy_for_rewrite(&control).unwrap(),
+        };
+        let sibling = budget.reserve(37).unwrap();
+        let foreign_sibling = foreign.reserve(17).unwrap();
+        if mode == 0 {
+            original.cancel();
+        }
+        if mode == 1 {
+            invoking.cancel();
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            input.replace_child(0, replacement, &control)
+        }));
+        if mode < 2 {
+            let error: crate::SQLError = result.unwrap().unwrap_err().into();
+            assert_eq!(error.sqlstate(), Some("57014"));
+        } else {
+            assert!(result.is_err());
+        }
+        assert_eq!(budget.used(), sibling.bytes());
+        assert_eq!(foreign.used(), foreign_sibling.bytes());
+        drop((sibling, foreign_sibling));
+        assert_eq!(budget.used(), 0);
+        assert_eq!(foreign.used(), 0);
+    }
+}

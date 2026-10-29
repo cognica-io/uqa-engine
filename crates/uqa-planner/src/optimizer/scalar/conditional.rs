@@ -8,11 +8,13 @@
 
 use std::collections::VecDeque;
 
-use uqa_sql::ast::BinaryOp;
-use uqa_sql::expr::eval_value_comparison_truth_with_engine;
+use uqa_core::memory::ProductionControl;
+use uqa_sql::plan::OwnedScalarExpr;
+
+mod owned;
 
 use super::constants::literal_value_with_control;
-use super::{optimize_optional, optimize_scalar, OptimizerConfig, SQLError, ScalarExpr, Value};
+use super::{optimize_scalar, OptimizerConfig, SQLError, ScalarExpr, Value};
 
 pub(super) fn optimize_boolean(
     items: Vec<ScalarExpr>,
@@ -78,117 +80,42 @@ pub(super) fn optimize_boolean(
 }
 
 pub(super) fn optimize_case(
-    base: Option<Box<ScalarExpr>>,
-    mut when: Vec<(ScalarExpr, ScalarExpr)>,
-    else_branch: Option<Box<ScalarExpr>>,
+    expression: ScalarExpr,
     config: &OptimizerConfig,
 ) -> Result<ScalarExpr, SQLError> {
-    let base = optimize_optional(base, config)?;
-    let mut kept = 0;
-    for index in 0..when.len() {
-        let (condition, result) = std::mem::replace(
-            &mut when[index],
-            (
-                ScalarExpr::Literal(Value::Null),
-                ScalarExpr::Literal(Value::Null),
-            ),
-        );
-        let condition = optimize_scalar(condition, config)?;
-        let matched = match (
-            base.as_deref(),
-            literal_value_with_control(&condition, &config.production)?.as_deref(),
-        ) {
-            (None, Some(Value::Bool(value))) => Some(*value),
-            (None, Some(Value::Null)) => Some(false),
-            (Some(base), Some(condition)) => literal_value_with_control(base, &config.production)?
-                .as_deref()
-                .map(|base| {
-                    eval_value_comparison_truth_with_engine(
-                        BinaryOp::Equal,
-                        base,
-                        condition,
-                        &config.production,
-                        None,
-                        None,
-                    )
-                })
-                .transpose()?
-                .map(|value| value == Some(true)),
-            _ => None,
-        };
-        if config.coerced_conditionals {
-            if matched == Some(false) {
-                continue;
-            }
-            let result = optimize_scalar(result, config)?;
-            if matched == Some(true) {
-                when.truncate(kept);
-                return Ok(if kept == 0 {
-                    result
-                } else {
-                    let else_branch = match else_branch {
-                        Some(mut branch) => {
-                            *branch = result;
-                            branch
-                        }
-                        None => Box::new(result),
-                    };
-                    ScalarExpr::Case {
-                        base,
-                        when,
-                        else_branch: Some(else_branch),
-                    }
-                });
-            }
-            when[kept] = (condition, result);
-            kept += 1;
-            continue;
-        }
-        // Retain unreachable arms for schema binding: their types still participate in CASE's common result type, but their values do not.
-        let result = if matched == Some(false) {
-            result
-        } else {
-            optimize_scalar(result, config)?
-        };
-        when[kept] = (condition, result);
-        kept += 1;
-        if matched == Some(true) {
-            return Ok(ScalarExpr::Case {
-                base,
-                when,
-                else_branch,
-            });
-        }
-    }
-    when.truncate(kept);
-    if config.coerced_conditionals && kept == 0 {
-        return Ok(optimize_optional(else_branch, config)?
-            .map_or(ScalarExpr::Literal(Value::Null), |value| *value));
-    }
-    Ok(ScalarExpr::Case {
-        base,
-        when,
-        else_branch: optimize_optional(else_branch, config)?,
-    })
+    let storage = ProductionControl::uncontrolled();
+    let output = owned::optimize_case(
+        OwnedScalarExpr::uncontrolled(expression),
+        config,
+        &storage,
+        |child| optimize_ordinary_child(child, config),
+    )?;
+    Ok(output.finish(&storage)?.into_parts().0)
 }
 
 pub(super) fn optimize_coalesce(
-    mut args: Vec<ScalarExpr>,
+    expression: ScalarExpr,
     config: &OptimizerConfig,
-) -> Result<Vec<ScalarExpr>, SQLError> {
-    for index in 0..args.len() {
-        let argument = std::mem::replace(&mut args[index], ScalarExpr::Literal(Value::Null));
-        let argument = optimize_scalar(argument, config)?;
-        let stops = literal_value_with_control(&argument, &config.production)?
-            .as_deref()
-            .is_some_and(|value| !matches!(value, Value::Null));
-        args[index] = argument;
-        if stops {
-            if config.coerced_conditionals {
-                args.truncate(index + 1);
-            }
-            break;
-        }
-    }
-    Ok(args)
+) -> Result<ScalarExpr, SQLError> {
+    let storage = ProductionControl::uncontrolled();
+    let output = owned::optimize_coalesce(
+        OwnedScalarExpr::uncontrolled(expression),
+        config,
+        &storage,
+        |child| optimize_ordinary_child(child, config),
+    )?;
+    Ok(output.finish(&storage)?.into_parts().0)
+}
+
+// Existing native mutable plans enter as ordinary storage. New constant payloads keep their separate production owners; moving the complete scalar pipeline to admitted input remains a distinct boundary.
+fn optimize_ordinary_child(
+    child: OwnedScalarExpr,
+    config: &OptimizerConfig,
+) -> Result<OwnedScalarExpr, SQLError> {
+    let (expression, _) = child
+        .finish(&ProductionControl::uncontrolled())?
+        .into_parts();
+    Ok(OwnedScalarExpr::uncontrolled(optimize_scalar(
+        expression, config,
+    )?))
 }

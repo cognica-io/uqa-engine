@@ -10,6 +10,26 @@ use super::{children, OwnedScalarExpr, Result, ScalarExpr};
 use uqa_core::{memory::ProductionControl, Value};
 
 impl OwnedScalarExpr {
+    /// Replace one immediate child and return the previous child with its complete independent owner. The parent retains the same box or vector slot; neither child is copied or implicitly discarded.
+    pub fn replace_child(
+        mut self,
+        index: usize,
+        replacement: Self,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, Self)> {
+        self.assert_owner(control);
+        replacement.assert_owner(control);
+        control.check()?;
+        let previous = self.take_child(index);
+        let Self { expression, memory } = replacement;
+        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
+        if let Some(parent) = &mut self.memory {
+            parent.children[index] = memory;
+        }
+        control.check()?;
+        Ok((self, previous))
+    }
+
     /// Exchange two immediate children without changing either container or payload ownership. Both indices use the same ordering as `map_child`.
     pub fn swap_children(
         mut self,

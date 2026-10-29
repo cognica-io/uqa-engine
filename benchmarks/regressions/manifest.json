@@ -29129,6 +29129,123 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "child_replacement_returns_both_exact_owners_without_allocating_capacity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Replace an immediate child in every scalar container while a sibling occupies the entire remaining allowance.",
+      "invariant": "Allocate no capacity, return the previous independent owner, retain the original parent storage and release each payload exactly with its owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "child_replacement_rejects_cancellation_and_mixed_ownership_without_leaking",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Replace an admitted child after either cancellation or with an ordinary or foreign-allowance owner.",
+      "invariant": "Reject before publication, preserve independent sibling reservations and release every private input on error or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "admitted_case_compacts_selected_arms_and_reuses_the_else_owner_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/owned/tests.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Simplify an admitted searched CASE with false arms, an unknown prefix, a true arm and large unreachable payloads.",
+      "invariant": "Preserve exact lazy callback order and parent buffer identities; allocate nothing and release discarded payload reservations with their storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "uncoerced_case_retains_unvisited_type_arms_and_their_exact_owners",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/owned/tests.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Simplify the same CASE before common-type binding.",
+      "invariant": "Retain all unreachable type arms and their exact owners without visiting their values or changing lazy callback order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "simple_case_rewrites_the_base_first_and_moves_only_the_matched_result",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/owned/tests.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Rewrite the base and a matching condition of an admitted simple CASE with NULL and unreachable arms.",
+      "invariant": "Visit the base first, use the existing NULL/comparison semantics and return only the selected payload and its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "exhausted_case_selects_else_or_null_and_releases_all_parent_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/owned/tests.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Discard all false or NULL CASE arms with and without ELSE while a sibling occupies the remaining allowance.",
+      "invariant": "Never evaluate discarded results, select ELSE or inline NULL without new capacity and retire all parent allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "selected_case_fallback_rejects_unadmitted_box_and_recovers_without_copying_results",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/owned/tests.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Select a true CASE arm after an unknown prefix when no ELSE box exists and the request allowance is exhausted.",
+      "invariant": "Reject the new box before allocation with 53200, release private inputs while preserving siblings, then recover with exact allocator/reservation equality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "coalesce_keeps_metadata_owners_and_retains_unbound_type_arms_without_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/owned/tests.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Rewrite admitted COALESCE argument IR with ordering/filter metadata before and after common-type binding.",
+      "invariant": "Stop at the first known non-NULL argument, retire only unreachable bound arguments and preserve original argument/filter storage and independent metadata owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "conditional_callback_error_unwind_and_cancellation_release_every_private_owner",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/owned/tests.rs",
+      "capability": "Conditional scalar ownership through lazy rewriting",
+      "workload": "Fail the second CASE or COALESCE child callback by SQL error, unwind or either cancellation owner.",
+      "invariant": "Stop immediately and release completed, current and unvisited private owners without changing an independent sibling reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

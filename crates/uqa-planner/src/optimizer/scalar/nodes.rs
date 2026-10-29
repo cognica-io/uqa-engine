@@ -104,27 +104,36 @@ pub(super) fn optimize_call(
     for order in &mut order_by {
         optimize_scalar_slot(&mut order.expr, config)?;
     }
-    let args = if binding.as_ref().is_some_and(|binding| {
+    let row_distinct = binding.as_ref().is_some_and(|binding| {
         binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::RowDistinct)
-    }) {
+    });
+    let coalesce = !row_distinct && constants::is_coalesce(&name, binding.as_ref());
+    let args = if row_distinct {
         // PostgreSQL simplifies the generated disjunction in order, including an unreachable set-returning field after a constant true comparison.
         match optimize_boolean(args, false, config)? {
             ScalarExpr::Or(items) => items,
             simplified => return Ok(simplified),
         }
-    } else if constants::is_coalesce(&name, binding.as_ref()) {
-        optimize_coalesce(args, config)?
+    } else if coalesce {
+        args
     } else {
         optimize_list(args, config)?
     };
-    let optimized = ScalarExpr::Func {
+    let mut optimized = ScalarExpr::Func {
         order_syntax,
         name,
         binding,
         args,
         distinct,
         order_by,
-        filter: optimize_optional(filter, config)?,
+        filter,
     };
+    if coalesce {
+        optimized = optimize_coalesce(optimized, config)?;
+    }
+    let ScalarExpr::Func { filter, .. } = &mut optimized else {
+        unreachable!("function argument optimization preserves its call");
+    };
+    *filter = optimize_optional(filter.take(), config)?;
     finish_scalar(optimized, false, false, config, None)
 }

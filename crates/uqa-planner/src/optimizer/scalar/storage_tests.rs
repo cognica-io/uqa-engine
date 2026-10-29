@@ -109,7 +109,19 @@ fn coalesce_reuses_arguments_and_keeps_unbound_type_arms() {
             invalid_cast(),
         ];
         let buffer = args.as_ptr();
-        let output = optimize_coalesce(args, &config).unwrap();
+        let input = ScalarExpr::Func {
+            order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
+            name: "coalesce".into(),
+            binding: None,
+            args,
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        };
+        let ScalarExpr::Func { args: output, .. } = optimize_coalesce(input, &config).unwrap()
+        else {
+            panic!("coalesce call");
+        };
         assert_eq!(output.as_ptr(), buffer);
         assert_eq!(output.len(), if coerced { 3 } else { 4 });
         assert_eq!(output[2], ScalarExpr::Literal(Value::Bool(true)));
@@ -127,7 +139,15 @@ fn simple_case_moves_base_and_else_boxes_without_changing_arm_order() {
     let branch_buffer = std::ptr::from_ref(branch.as_ref());
     let when = vec![(column(), column()), (column(), column())];
     let when_buffer = when.as_ptr();
-    let output = optimize_case(Some(base), when, Some(branch), &config()).unwrap();
+    let output = optimize_case(
+        ScalarExpr::Case {
+            base: Some(base),
+            when,
+            else_branch: Some(branch),
+        },
+        &config(),
+    )
+    .unwrap();
     let ScalarExpr::Case {
         base,
         when,

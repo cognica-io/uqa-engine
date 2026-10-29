@@ -193,11 +193,7 @@ fn optimize_noncall_scalar(
                 modifiers,
             }
         }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => optimize_case(base, when, else_branch, config)?,
+        expression @ ScalarExpr::Case { .. } => optimize_case(expression, config)?,
         ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
             implicit,
             expr: optimize_box(expr, config)?,
