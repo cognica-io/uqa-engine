@@ -8,9 +8,33 @@
 
 use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::plan::scalar::resources::{Control, Lowering};
-use uqa_core::memory::{BudgetedVec, ProductionControl};
+use uqa_core::{
+    memory::{BudgetedVec, ProductionControl},
+    Value,
+};
 
 impl OwnedScalarExpr {
+    /// Construct an unbound typed NULL, admitting the declared type name before copying it. This storage constructor performs no type resolution or value evaluation.
+    pub fn typed_null(ty: &str, control: &ProductionControl<'_>) -> Result<Self> {
+        let (ty, memory) = control.copy_text(ty)?.into_parts();
+        let output = Self {
+            expression: ScalarExpr::TypedLiteral {
+                value: Value::Null,
+                ty,
+                bound_type: None,
+                collation_oid: None,
+                composite_source: None,
+                parameter_index: None,
+            },
+            memory: memory.map(|direct| ScalarMemory {
+                children: BudgetedVec::new(direct.budget()),
+                direct,
+            }),
+        };
+        control.check()?;
+        Ok(output)
+    }
+
     /// Build AND or OR from already owned children. The destination vector and ownership metadata reserve before allocation; input payloads move without copying or changing their allowance.
     pub fn boolean(
         children: impl ExactSizeIterator<Item = Self>,

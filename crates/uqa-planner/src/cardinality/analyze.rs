@@ -14,9 +14,8 @@ use uqa_core::{
 };
 use uqa_sql::SQLError;
 
-mod buffer;
 mod distribution;
-use buffer::Buffer;
+use crate::scratch::Buffer;
 use distribution::Distribution;
 
 #[cfg(test)]

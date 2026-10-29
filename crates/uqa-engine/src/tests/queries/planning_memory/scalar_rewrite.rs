@@ -112,3 +112,72 @@ fn native_scalar_merge_admits_scratch_and_moves_original_payload(#[case] provide
     drop(engine);
     assert_eq!(memory.used(), 0);
 }
+
+fn wide_boolean() -> ScalarExpr {
+    ScalarExpr::And(vec![
+        ScalarExpr::And(
+            (0..4096)
+                .map(|index| ScalarExpr::Column(format!("column_{index}").into()))
+                .collect(),
+        ),
+        ScalarExpr::Column("tail".into()),
+    ])
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_boolean_flattening_admits_scratch_and_recovers(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("boolean-rewrite.db"));
+    engine.sql("SELECT 1", &[]).unwrap();
+    let retention = engine.query_retention_control().unwrap();
+    let memory = retention.memory();
+    let baseline = memory.used();
+    let occupied = memory.reserve(memory.available()).unwrap();
+    let mut expression = wide_boolean();
+    let mut result = None;
+    let allocated = allocation_counter::measure(|| {
+        result = Some(optimize_catalog_scalar(
+            &engine.statement_planning_context(),
+            &mut expression,
+        ));
+    });
+    assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("53200"));
+    assert!(
+        allocated.bytes_total < 16 * 1024,
+        "{provider:?}: {allocated:?}"
+    );
+    assert_eq!(memory.used(), baseline + occupied.bytes());
+    drop((expression, occupied));
+
+    let mut expression = wide_boolean();
+    engine.cancel();
+    assert_eq!(
+        optimize_catalog_scalar(&engine.statement_planning_context(), &mut expression)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    drop(expression);
+    assert_eq!(memory.used(), baseline);
+    engine.reset_cancellation();
+
+    let mut expression = wide_boolean();
+    optimize_catalog_scalar(&engine.statement_planning_context(), &mut expression).unwrap();
+    let ScalarExpr::And(items) = &expression else {
+        panic!("flattened conjunction")
+    };
+    assert_eq!(items.len(), 4097);
+    for (index, item) in items[..4096].iter().enumerate() {
+        assert_eq!(item, &ScalarExpr::Column(format!("column_{index}").into()));
+    }
+    assert_eq!(items.last(), Some(&ScalarExpr::Column("tail".into())));
+    assert_eq!(memory.used(), baseline);
+    drop(expression);
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(memory.used(), 0);
+}

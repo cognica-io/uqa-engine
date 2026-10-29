@@ -88,6 +88,23 @@ impl OwnedScalarExpr {
         self.memory.as_ref().map_or(0, ScalarMemory::reserved_bytes)
     }
 
+    /// Rewrite a complete scalar owner. The callback may replace or select the root, but both its input and output must retain this production scope. Failure destroys all private inputs before returning.
+    pub fn rewrite<E>(
+        self,
+        control: &ProductionControl<'_>,
+        rewrite: impl FnOnce(Self) -> std::result::Result<Self, E>,
+    ) -> std::result::Result<Self, E>
+    where
+        E: From<CatalogRetentionError>,
+    {
+        self.assert_owner(control);
+        control.check().map_err(CatalogRetentionError::from)?;
+        let output = rewrite(self)?;
+        output.assert_owner(control);
+        control.check().map_err(CatalogRetentionError::from)?;
+        Ok(output)
+    }
+
     /// Number of immediate scalar children, in copy order: call arguments, ordering keys and filter; window arguments, partition keys, ordering keys, frame bounds and filter; CASE base, condition/result pairs and ELSE.
     pub fn child_count(&self) -> usize {
         children::count(&self.expression)

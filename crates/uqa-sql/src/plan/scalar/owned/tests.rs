@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod construction;
 mod edits;
 mod fixtures;
 

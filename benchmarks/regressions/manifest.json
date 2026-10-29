@@ -29246,6 +29246,178 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_null_admits_only_its_type_name_and_freezes_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/construction.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Construct typed NULL with short and 1 MiB type names under exact allowances.",
+      "invariant": "Admit the name before copying, match exact retained allocation and freeze without changing its payload pointer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_null_rejects_large_names_and_both_cancellations_before_allocating",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/construction.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Construct a 4 MiB type name with 128 bytes allowed or either scope cancelled.",
+      "invariant": "Allocate no payload before 53200 or 57014 and preserve the independent sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "whole_scalar_rewriting_preserves_selected_owners_and_rejects_invalid_results",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/construction.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Rewrite a complete scalar by selecting a child, failing, unwinding, cancelling or returning a foreign/ordinary owner.",
+      "invariant": "Validate ownership at the rewrite boundary and release all private inputs and invalid outputs without changing siblings.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "boolean_flattening_preserves_short_circuit_order_and_unvisited_structure",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Rewrite nested AND/OR before a decisive constant with simplification enabled and disabled.",
+      "invariant": "Preserve exact callback order; stop before unreachable children and retain untouched pending structure when simplification is disabled.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "boolean_rewriting_preserves_three_valued_results_and_typed_null_ownership",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Evaluate all three-valued triples through nested AND/OR with both simplification modes.",
+      "invariant": "Match the independent truth-table interpretation and retain exactly seven type-name bytes for a simplified NULL.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "boolean_flattening_moves_large_payloads_and_freezes_exact_survivors",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Flatten an admitted conjunction containing a 4 MiB column name, neutral constant and NULL.",
+      "invariant": "Move payload addresses unchanged, bound workspace, match exact live allocator/reservation deltas and freeze only surviving owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "boolean_partial_scratch_rejection_releases_prefix_and_unvisited_ancestors",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Exhaust the remaining allowance after the second reached child of nested conjunctions.",
+      "invariant": "Reject further scratch growth with 53200, release rewritten and unvisited owners, preserve siblings and recover the complete ordered output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "boolean_destination_rejection_releases_completed_scratch_and_selected_children",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Exhaust the remaining allowance after visiting the last child while existing scratch slots still suffice.",
+      "invariant": "Reject the admitted destination before allocation and release the completed temporary buffer and all selected children.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "boolean_callback_failure_unwind_and_cancellation_release_every_private_owner",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Fail the second reached boolean child with SQL error, unwind or either cancellation scope.",
+      "invariant": "Stop after exactly two callbacks and release all private traversal/output owners while preserving an independent sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ordinary_boolean_input_keeps_payloads_while_request_scratch_is_admitted",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Rewrite ordinary input containing a 4 MiB name under a 16 KiB workspace allowance.",
+      "invariant": "Preserve ordinary input ownership, avoid payload copies and return every temporary reservation before publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "boolean_dispatch_preserves_opposite_nodes_and_callback_created_conjunctions",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Rewrite opposite boolean nodes and callbacks that create new same-operator children.",
+      "invariant": "Flatten only original same-operator nodes; preserve original callback dispatch and newly produced nested structure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "narrow_boolean_flattening_retires_parent_owners_without_heap_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/conditional/boolean/tests.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Flatten 128 single-child conjunctions while a sibling occupies all remaining allowance.",
+      "invariant": "Use no heap scratch, retire exhausted parent owners immediately and return the correct inline identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_boolean_flattening_admits_scratch_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scalar_rewrite.rs",
+      "capability": "Boolean scalar ownership and bounded flattening",
+      "workload": "Flatten 4,096 nested boolean terms through the native catalog-scalar planner on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Reject exhausted workspace before wide growth, preserve 53200 and 57014, return sibling allowances and recover the original ordered terms.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

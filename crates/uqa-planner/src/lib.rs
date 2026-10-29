@@ -55,6 +55,7 @@ pub mod join_order;
 pub mod optimizer;
 pub mod plan_cost;
 mod planning_resources;
+mod scratch;
 pub use planning_resources::PlanningResources;
 pub mod query_optimizer;
 pub mod statement_planning;
