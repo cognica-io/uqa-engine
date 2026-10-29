@@ -14,6 +14,30 @@ pub(crate) struct CallInputTypes<'a> {
 }
 
 impl<'a> CallInputTypes<'a> {
+    pub(crate) fn new_with_control(
+        schema: &'a dyn ScalarTypeSchema,
+        observations: impl Iterator<Item = (&'a ScalarExpr, Option<&'a ColumnType>)>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, crate::SQLError> {
+        let mut output = uqa_core::memory::ProductionVec::new(*control);
+        output.reserve(observations.size_hint().0)?;
+        for observation in observations {
+            output.push_copy(observation)?;
+        }
+        let mut output = output.finish()?;
+        output
+            .as_mut_slice()
+            .sort_unstable_by_key(|(expression, _)| identity(expression));
+        let (observations, memory) = output.into_parts();
+        Ok(control.finish(
+            Self {
+                schema,
+                observations,
+            },
+            memory,
+        )?)
+    }
+
     pub(crate) fn new(
         schema: &'a dyn ScalarTypeSchema,
         mut observations: Vec<(&'a ScalarExpr, Option<&'a ColumnType>)>,

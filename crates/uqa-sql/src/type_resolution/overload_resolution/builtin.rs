@@ -91,7 +91,7 @@ fn binding_matches(
     Ok(true)
 }
 
-fn match_builtin(
+pub(crate) fn match_builtin(
     builtin: &BuiltinFunctionOverload,
     call: RoutineCallDescriptor<'_>,
     control: &ProductionControl<'_>,

@@ -26,7 +26,7 @@ pub fn parse_regobject_name(input: &str) -> Option<Vec<String>> {
         })
 }
 
-pub(crate) fn parse_regobject_name_with_control(
+pub fn parse_regobject_name_with_control(
     input: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Vec<String>>>, ValueRetentionError> {

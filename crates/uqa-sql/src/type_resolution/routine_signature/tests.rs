@@ -7,7 +7,9 @@
 use crate::ast::{ColumnType, RangeSubtype};
 
 use super::*;
-use crate::type_resolution::rank_function_matches;
+use crate::type_resolution::{canonical_column_type_name, rank_function_matches};
+
+mod ownership;
 
 fn parameter(type_name: &str) -> RoutineParameterDescriptor {
     RoutineParameterDescriptor {

@@ -25,6 +25,19 @@ pub(crate) use types::type_by_oid_with_control;
 pub(crate) struct ValueCompositeCatalog<'a>(pub(crate) Option<&'a dyn SQLValueCatalog>);
 
 impl super::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
+    fn composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<super::composites::OwnedCompositeTypeDescriptor>> {
+        control.check()?;
+        self.0
+            .ok_or_else(|| {
+                crate::SQLError::Internal("composite operator lookup has no catalog".into())
+            })?
+            .value_composite_type_with_control(oid, control)
+    }
+
     fn composite_type(
         &self,
         oid: u32,
@@ -93,6 +106,22 @@ pub trait SQLValueCatalog {
         _oid: u32,
     ) -> Result<Option<Arc<super::composites::CompositeTypeDescriptor>>> {
         Ok(None)
+    }
+
+    fn value_composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<super::composites::OwnedCompositeTypeDescriptor>> {
+        control.check()?;
+        self.value_composite_type(oid)?
+            .map(|descriptor| {
+                super::composites::OwnedCompositeTypeDescriptor::from_produced(
+                    descriptor.clone_with_control(control)?,
+                    control,
+                )
+            })
+            .transpose()
     }
 
     /// The session's comparison support functions, shared by declared type across nested array and record calls. Pure catalog readers do not own runtime state.
@@ -194,6 +223,19 @@ impl SQLValueCatalog for EngineValueCatalog<'_> {
         self.0
             .composite_types()
             .map(|catalog| catalog.composite_type(oid))
+            .transpose()
+            .map(Option::flatten)
+    }
+
+    fn value_composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<super::composites::OwnedCompositeTypeDescriptor>> {
+        control.check()?;
+        self.0
+            .composite_types()
+            .map(|catalog| catalog.composite_type_with_control(oid, control))
             .transpose()
             .map(Option::flatten)
     }

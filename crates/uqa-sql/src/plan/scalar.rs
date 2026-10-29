@@ -14,19 +14,39 @@ use crate::schema::retention::CatalogRetentionError;
 use resources::{Control, Lowering, Result};
 use source::{Node, Source};
 use uqa_core::{
-    memory::{Budgeted, MemoryBudget},
+    memory::{Budgeted, MemoryBudget, Produced, ProductionControl},
     CancellationToken,
 };
 
 mod binding;
 mod copy;
 mod owned;
+pub(crate) use owned::ScalarMemory;
 pub use owned::{OwnedScalarChildren, OwnedScalarExpr};
 mod resources;
 mod source;
 mod window;
 
 impl super::ExpressionPlan {
+    /// Lower a borrowed scalar-only expression with destination admission. A query child is reported before publication so callers can decline scalar-only transformations without constructing an unowned query arena.
+    pub fn lower_scalar_with_control(
+        expression: &Expr,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<ScalarExpr>> {
+        control.check()?;
+        let mut lowering = Lowering {
+            control: control.budget().map(|_| Control::from_production(*control)),
+            owned_children: None,
+        };
+        let scalar = lowering.expression(
+            Source::Borrowed(expression),
+            &super::NoRegisteredAggregates,
+            &mut Vec::new(),
+        )?;
+        let memory = lowering.control.map(|control| control.memory);
+        Ok(control.finish(scalar, memory)?)
+    }
+
     /// Lower a borrowed, validated column expression directly into admitted scalar IR. Destination strings, value payloads, bindings, vector capacities and boxes acquire the supplied allowance before allocation, and the result retains those leases. Both the retained definition's original cancellation and the invoking reader's cancellation remain active during lowering. This controls AST-to-IR production only; subsequent type binding and evaluation require their own resource contracts. Query children violate the validated column-expression invariant.
     pub fn lower_column_budgeted(
         expression: &Expr,

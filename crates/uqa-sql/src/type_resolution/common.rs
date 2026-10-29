@@ -17,6 +17,8 @@ use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 use super::FunctionTypeResolver;
 
 mod inputs;
+mod signature;
+pub use signature::function_call_argument_signature_with_control;
 pub use inputs::select_common_input_type;
 pub(crate) use inputs::select_common_input_type_in_with_control;
 pub(super) use inputs::{select_common_input_type_with_control, CommonInputType};
@@ -61,23 +63,9 @@ pub fn function_call_argument_signature(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<FunctionCallArgumentSignature, SQLError> {
-    let call_arguments = scalar_call_arguments(arguments)?;
-    let explicit_variadic = call_arguments
-        .iter()
-        .any(|argument| argument.explicit_variadic);
-    let mut argument_names = Vec::with_capacity(call_arguments.len());
-    let mut argument_types = Vec::with_capacity(call_arguments.len());
-    for argument in call_arguments {
-        argument_names.push(argument.name.map(str::to_string));
-        let argument_type =
-            common_context_expression_type(argument.value, schema, params, resolver)?;
-        argument_types.push(effective_overload_argument_type_with_params(
-            argument.value,
-            argument_type,
-            params,
-        ));
-    }
-    Ok((argument_names, argument_types, explicit_variadic))
+    Ok(function_call_argument_signature_with_control(
+        arguments, schema, params, resolver, &ProductionControl::uncontrolled(),
+    )?.into_uncontrolled().expect("ordinary call signature"))
 }
 
 pub(super) fn local_routine_name(name: &str) -> String {

@@ -6,6 +6,7 @@
 
 //! Destination admission for complete SQL syntax and executable query/mutation copies.
 
+use super::mutable::memory::{RewriteField, RewriteMemory};
 use super::{CommandPlan, ExpressionPlan, PlanRef, QueryPlan, UnifiedPlan};
 use crate::{catalog::roles::RoleReference, SQLError, ScalarExpr};
 use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, ProductionControl};
@@ -13,11 +14,26 @@ use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, Produ
 mod command;
 mod query;
 mod source;
+mod specialization;
 mod syntax;
+pub(crate) use specialization::copy_specialized_function;
 #[cfg(test)]
 mod tests;
 
 type Result<T> = std::result::Result<T, SQLError>;
+
+/// Copy retained SQL syntax through its owning constructors, admitting each destination before allocation.
+pub(crate) fn copy_syntax_with_control<T: syntax::SyntaxCopy + Clone>(
+    value: &T,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<T>> {
+    control.check()?;
+    let Some(mut copying) = Copying::new(*control) else {
+        return Ok(control.finish(value.clone(), None)?);
+    };
+    let value = value.copy_syntax(&mut copying)?;
+    copying.finish(value)
+}
 
 impl super::CtePlan {
     /// Copy a complete CTE declaration under the selected allowance and cancellation scopes.
@@ -119,13 +135,59 @@ fn require_mutation(command: &CommandPlan) -> Result<()> {
 pub(crate) struct Copying<'a> {
     control: ProductionControl<'a>,
     memory: MemoryReservation,
+    fields: Option<BudgetedVec<RewriteField>>,
 }
+
+mod owned_scalar;
 
 impl<'a> Copying<'a> {
     fn new(control: ProductionControl<'a>) -> Option<Self> {
-        control
-            .empty_reservation()
-            .map(|memory| Self { control, memory })
+        control.empty_reservation().map(|memory| Self {
+            control,
+            memory,
+            fields: None,
+        })
+    }
+
+    pub(super) fn for_rewrite(control: ProductionControl<'a>) -> Option<Self> {
+        let mut copying = Self::new(control)?;
+        copying.fields = Some(BudgetedVec::new(
+            control.budget().expect("controlled rewrite"),
+        ));
+        Some(copying)
+    }
+
+    pub(super) fn into_rewrite_memory(self) -> RewriteMemory {
+        RewriteMemory::Fields {
+            direct: self.memory,
+            fields: self.fields.expect("mutable copy records fields"),
+        }
+    }
+
+    fn field<T>(
+        &mut self,
+        name: &'static str,
+        copy: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let Some(fields) = &mut self.fields else {
+            return copy(self);
+        };
+        self.control.check()?;
+        fields.reserve(1)?;
+        let mut child = Self::for_rewrite(self.control).expect("controlled rewrite");
+        let value = copy(&mut child)?;
+        self.fields
+            .as_mut()
+            .expect("mutable copy")
+            .push(RewriteField {
+                name,
+                memory: Some(child.into_rewrite_memory()),
+            })?;
+        Ok(value)
+    }
+
+    pub(super) fn command_syntax(&mut self, command: &CommandPlan) -> Result<CommandPlan> {
+        syntax::SyntaxCopy::copy_syntax(command, self)
     }
 
     fn check(&self) -> Result<()> {
@@ -152,7 +214,7 @@ impl<'a> Copying<'a> {
         output.reserve(items.len())?;
         for item in items {
             self.check()?;
-            output.push(copy(self, item)?)?;
+            output.push(self.field("item", |copying| copy(copying, item))?)?;
         }
         let (output, memory) = output.into_parts();
         self.memory.absorb(memory);
@@ -195,6 +257,22 @@ impl<'a> Copying<'a> {
     }
 
     fn scalar(&mut self, expression: &ScalarExpr) -> Result<ScalarExpr> {
+        if let Some(fields) = &mut self.fields {
+            self.control.check()?;
+            fields.reserve(1)?;
+            let copied = expression.copy_for_rewrite(&self.control)?;
+            let (expression, memory) = copied.into_rewrite_parts();
+            self.fields
+                .as_mut()
+                .expect("mutable copy")
+                .push(RewriteField {
+                    name: "scalar",
+                    memory: Some(RewriteMemory::Scalar(
+                        memory.expect("controlled scalar copy"),
+                    )),
+                })?;
+            return Ok(expression);
+        }
         let output = expression.clone_with_control(&self.control)?;
         Ok(self.take(output))
     }
@@ -221,7 +299,9 @@ impl<'a> Copying<'a> {
     fn expression(&mut self, expression: &ExpressionPlan) -> Result<ExpressionPlan> {
         Ok(ExpressionPlan {
             scalar: self.scalar(&expression.scalar)?,
-            subqueries: self.map(expression.subqueries.iter(), Self::query)?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(expression.subqueries.iter(), Self::query)
+            })?,
         })
     }
 

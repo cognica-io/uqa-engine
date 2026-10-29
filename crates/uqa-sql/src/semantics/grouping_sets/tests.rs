@@ -8,6 +8,8 @@ use super::*;
 use crate::plan::{RelationalPlan, UnifiedPlan};
 use crate::routines::RoutineResolution;
 
+mod ownership;
+
 struct Catalog;
 
 impl FunctionTypeResolver for Catalog {

@@ -11,7 +11,9 @@ use super::{
     SchemaLayoutResult, SchemaMap,
 };
 use crate::catalog::type_metadata::pg_type_collation_oid;
-use std::collections::BTreeMap;
+use uqa_core::memory::OwnedMap as BTreeMap;
+
+mod production;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Collations(Option<Box<Bindings>>);
@@ -22,6 +24,7 @@ struct Bindings {
     aliases: BTreeMap<ColumnIdentity, u32>,
     internal: BTreeMap<InternalColumnRef, u32>,
     virtual_columns: BTreeMap<ColumnIdentity, u32>,
+    _memory: super::production::lease::SchemaMemory,
 }
 
 /// A selected collation belongs to a logical identity even when its physical value is NULL or shared with another identity.

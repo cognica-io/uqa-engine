@@ -13,10 +13,12 @@ use crate::SQLError;
 use super::oids::stable_oid;
 
 mod builtins;
+mod production;
 pub use builtins::{
     builtin_array_element, builtin_scalar_type, builtin_scalar_type_by_name, builtin_type_name,
     pg_type_name,
 };
+pub use production::routine_type_oid_with_control;
 
 pub fn catalog_type_name(oid: i64) -> &'static str {
     match oid {
@@ -176,17 +178,11 @@ pub fn routine_pseudo_type_name(oid: i64) -> Option<&'static str> {
 }
 
 pub fn routine_type_oid(type_name: &str) -> i64 {
-    let canonical = canonical_routine_type_name(type_name);
-    let pseudo_type_oid = ROUTINE_PSEUDO_TYPES
-        .iter()
-        .find_map(|(name, oid)| (*name == canonical).then_some(*oid));
-    if let Some(oid) = pseudo_type_oid {
-        return oid;
-    }
-    if let Ok(column_type) = ColumnType::from_sql_name(&canonical) {
-        return pg_type_oid(&column_type);
-    }
-    stable_oid("type", &canonical)
+    routine_type_oid_with_control(
+        type_name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine type identity observation")
 }
 
 pub fn routine_variadic_element_oid(type_name: &str) -> Result<i64, SQLError> {

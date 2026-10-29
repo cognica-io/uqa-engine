@@ -17,6 +17,9 @@ use uqa_core::catalog_schema::{SchemaAclEntry, SchemaPrivileges};
 use super::SchemaSecurity;
 use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
 
+mod production;
+pub use production::{role_has_schema_privilege_with_control, SchemaPrivilegeView};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SchemaAclPrivilege {
     Usage,

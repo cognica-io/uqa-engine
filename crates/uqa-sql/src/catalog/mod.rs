@@ -18,6 +18,8 @@ pub mod oids;
 pub mod resolution;
 pub mod result_type;
 pub mod type_metadata;
+mod type_production;
+pub use type_production::system_catalog_domain_with_control;
 
 /// Namespace of the Apache AGE catalog relations, types, and functions.
 pub const AG_CATALOG_SCHEMA: &str = "ag_catalog";
@@ -721,15 +723,8 @@ impl VirtualRelation {
     }
 }
 
-fn ag_catalog_domain(name: &str, base: ColumnType) -> ColumnType {
-    ColumnType::Domain {
-        collation_oid: None,
-        schema: AG_CATALOG_SCHEMA.into(),
-        name: name.into(),
-        oid: ag_catalog_type_oid(name),
-        array_oid: None,
-        base: Box::new(base),
-    }
+fn ag_catalog_domain(name: &str) -> ColumnType {
+    system_catalog_domain(ag_catalog_type_oid(name)).expect("AGE catalog type declaration")
 }
 
 /// Stable OID of an `ag_catalog` type; the extension assigns these from
@@ -741,22 +736,22 @@ pub fn ag_catalog_type_oid(name: &str) -> u32 {
 
 /// AGE `label_id`: `int NOT NULL CHECK (VALUE > 0 AND VALUE <= 65535)`.
 pub fn ag_label_id() -> ColumnType {
-    ag_catalog_domain("label_id", ColumnType::Integer)
+    ag_catalog_domain("label_id")
 }
 
 /// AGE `label_kind`: `"char" NOT NULL CHECK (VALUE = 'v' OR VALUE = 'e')`.
 pub fn ag_label_kind() -> ColumnType {
-    ag_catalog_domain("label_kind", ColumnType::InternalChar)
+    ag_catalog_domain("label_kind")
 }
 
 /// Internal type carrier for AGE's fixed-width `graphid` base type.
 pub fn age_graphid() -> ColumnType {
-    ag_catalog_domain("graphid", ColumnType::BigInteger)
+    ag_catalog_domain("graphid")
 }
 
 /// Internal type carrier for AGE's JSONB-shaped `agtype` base type.
 pub fn age_agtype() -> ColumnType {
-    ag_catalog_domain("agtype", ColumnType::JsonB)
+    ag_catalog_domain("agtype")
 }
 
 pub fn ag_catalog_domains() -> Vec<ColumnType> {
@@ -766,47 +761,36 @@ pub fn ag_catalog_domains() -> Vec<ColumnType> {
 /// The fixed system catalog domain with this OID: the `information_schema` domains and the AGE catalog types.
 #[must_use]
 pub fn system_catalog_domain(oid: u32) -> Option<ColumnType> {
-    information_schema_domains()
-        .into_iter()
-        .chain(ag_catalog_domains())
-        .chain([age_graphid(), age_agtype()])
-        .find(|ty| matches!(ty, ColumnType::Domain { oid: domain_oid, .. } if *domain_oid == oid))
+    system_catalog_domain_with_control(oid, &uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("ordinary system domain projection cannot be cancelled or limited")
+        .map(|ty| {
+            ty.into_uncontrolled()
+                .expect("ordinary system domain projection")
+        })
 }
 
 fn array(element: ColumnType) -> ColumnType {
     ColumnType::Array(Box::new(element))
 }
 
-/// An `information_schema` domain; initdb assigned each domain's array type the preceding OID.
-fn information_schema_domain(name: &str, oid: u32, base: ColumnType) -> ColumnType {
-    ColumnType::Domain {
-        collation_oid: None,
-        schema: "information_schema".into(),
-        name: name.into(),
-        oid,
-        array_oid: Some(oid - 1),
-        base: Box::new(base),
-    }
-}
-
 fn cardinal_number() -> ColumnType {
-    information_schema_domain("cardinal_number", 13_307, ColumnType::Integer)
+    system_catalog_domain(13_307).expect("cardinal_number catalog declaration")
 }
 
 fn character_data() -> ColumnType {
-    information_schema_domain("character_data", 13_310, ColumnType::Varchar(None))
+    system_catalog_domain(13_310).expect("character_data catalog declaration")
 }
 
 fn sql_identifier() -> ColumnType {
-    information_schema_domain("sql_identifier", 13_312, ColumnType::Name)
+    system_catalog_domain(13_312).expect("sql_identifier catalog declaration")
 }
 
 fn time_stamp() -> ColumnType {
-    information_schema_domain("time_stamp", 13_318, ColumnType::TimestampTz)
+    system_catalog_domain(13_318).expect("time_stamp catalog declaration")
 }
 
 fn yes_or_no() -> ColumnType {
-    information_schema_domain("yes_or_no", 13_320, ColumnType::Varchar(Some(3)))
+    system_catalog_domain(13_320).expect("yes_or_no catalog declaration")
 }
 
 pub fn information_schema_domains() -> Vec<ColumnType> {

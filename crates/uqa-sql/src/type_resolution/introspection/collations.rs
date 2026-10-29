@@ -48,14 +48,14 @@ impl Binder<'_, '_> {
                 self.schema,
                 self.params,
                 self.resolver,
-                &self.control,
+                &self.context.control,
             )?;
             crate::catalog::collations::expression::select_with_control(
                 name,
                 oid,
                 ty.as_deref(),
                 self.resolver,
-                &self.control,
+                &self.context.control,
             )
         })();
         let selected = if self.literal_binding == LiteralBinding::Ordinary {

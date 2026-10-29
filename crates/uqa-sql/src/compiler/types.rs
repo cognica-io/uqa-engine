@@ -14,6 +14,7 @@ use pg_query::NodeEnum;
 
 use crate::ast::{ColumnType, IntervalFields, RangeSubtype};
 use crate::error::{Result, SQLError};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 use super::tree::extract_string;
 
@@ -23,7 +24,7 @@ pub(crate) use declarations::compile_retained_type_declaration;
 pub(crate) use declarations::compile_retained_type_reference;
 pub(super) use declarations::preserve_alter_type_declaration;
 pub use object_names::parse_regobject_name;
-pub(crate) use object_names::parse_regobject_name_with_control;
+pub use object_names::parse_regobject_name_with_control;
 
 /// Parser-normalized type identity used by `PostgreSQL`'s `regtype` and `regprocedure` input functions. Components retain the parser's distinction between aliases such as unquoted `integer` (normalized to `pg_catalog.int4`) and a quoted type named `"integer"`. Modifier values do not participate in OID lookup; their presence is retained for declaration validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +72,52 @@ pub fn parse_regtype_name(input: &str) -> Result<Option<ParsedRegtypeName>> {
 }
 
 fn parse_regtype_name_text(input: &str) -> Result<Option<ParsedRegtypeName>> {
+    parse_regtype_name_text_with_control(input, &ProductionControl::uncontrolled()).map(|parsed| {
+        parsed.map(|parsed| {
+            parsed
+                .into_uncontrolled()
+                .expect("ordinary type-name parsing")
+        })
+    })
+}
+
+/// Copy a previously parsed name or project a parser-owned result into admitted SQL metadata. The process cache keeps its existing independent ownership; a new request-owned projection is not retained in that global cache.
+pub fn parse_regtype_name_with_control(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ParsedRegtypeName>>> {
+    control.check()?;
+    if let Ok(names) = PARSED_TYPE_NAMES.read() {
+        if let Some(parsed) = names.get(input) {
+            return parsed
+                .as_ref()
+                .map(|parsed| {
+                    let mut names = ProductionVec::new(*control);
+                    names.reserve(parsed.names.len())?;
+                    for name in &parsed.names {
+                        names.push_produced(control.copy_text(name)?)?;
+                    }
+                    let (names, memory) = names.finish()?.into_parts();
+                    Ok(control.finish(
+                        ParsedRegtypeName {
+                            names,
+                            array_dimensions: parsed.array_dimensions,
+                            has_type_modifiers: parsed.has_type_modifiers,
+                        },
+                        memory,
+                    )?)
+                })
+                .transpose();
+        }
+    }
+    parse_regtype_name_text_with_control(input, control)
+}
+
+fn parse_regtype_name_text_with_control(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ParsedRegtypeName>>> {
+    control.check()?;
     if input.bytes().all(scanner_isspace) {
         return Ok(None);
     }
@@ -81,35 +128,41 @@ fn parse_regtype_name_text(input: &str) -> Result<Option<ParsedRegtypeName>> {
     let Some(NodeEnum::List(names)) = raw.stmt.as_ref().and_then(|node| node.node.as_ref()) else {
         return Ok(None);
     };
-    let names = names
-        .items
-        .iter()
-        .map(extract_string)
-        .collect::<Result<Vec<_>>>()?;
-    if names.is_empty() {
+    let mut projected_names = ProductionVec::new(*control);
+    projected_names.reserve(names.items.len())?;
+    for name in &names.items {
+        let Some(NodeEnum::String(name)) = name.node.as_ref() else {
+            return Err(SQLError::Internal("expected type-name string node".into()));
+        };
+        projected_names.push_produced(control.copy_text(&name.sval)?)?;
+    }
+    if projected_names.is_empty() {
         return Ok(None);
     }
     let scanned = crate::parser::scan(input)?;
-    let tokens = scanned
-        .tokens
-        .iter()
-        .filter_map(|token| pg_query::protobuf::Token::try_from(token.token).ok())
-        .collect::<Vec<_>>();
-    if tokens.contains(&pg_query::protobuf::Token::Setof) {
-        return Ok(None);
+    let mut bracket_dimensions = 0;
+    let mut array = false;
+    let mut has_type_modifiers = false;
+    for token in &scanned.tokens {
+        control.check()?;
+        match pg_query::protobuf::Token::try_from(token.token).ok() {
+            Some(pg_query::protobuf::Token::Setof) => return Ok(None),
+            Some(pg_query::protobuf::Token::Ascii91) => bracket_dimensions += 1,
+            Some(pg_query::protobuf::Token::Array) => array = true,
+            Some(pg_query::protobuf::Token::Ascii40) => has_type_modifiers = true,
+            _ => {}
+        }
     }
-    let bracket_dimensions = tokens
-        .iter()
-        .filter(|token| **token == pg_query::protobuf::Token::Ascii91)
-        .count();
-    let array_dimensions = bracket_dimensions.max(usize::from(
-        tokens.contains(&pg_query::protobuf::Token::Array),
-    ));
-    Ok(Some(ParsedRegtypeName {
-        names,
-        array_dimensions,
-        has_type_modifiers: tokens.contains(&pg_query::protobuf::Token::Ascii40),
-    }))
+    let array_dimensions = bracket_dimensions.max(usize::from(array));
+    let (names, memory) = projected_names.finish()?.into_parts();
+    Ok(Some(control.finish(
+        ParsedRegtypeName {
+            names,
+            array_dimensions,
+            has_type_modifiers,
+        },
+        memory,
+    )?))
 }
 
 /// Parse one routine-name string with either an omitted signature (`regproc`) or an exact signature (`regprocedure`). The caller owns the soft-error and cross-database policy because the two SQL input functions intentionally differ from ordinary DDL.

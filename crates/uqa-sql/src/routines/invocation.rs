@@ -75,14 +75,28 @@ pub fn specialized_definition(
     definition: &CreateFunction,
     invocation: &RoutineInvocationBinding,
 ) -> Result<Option<CreateFunction>, SQLError> {
-    if invocation.parameter_types.len() != definition.params.len() {
-        return Err(SQLError::Internal(format!(
-            "routine `{}` has {} concrete parameter types for {} parameters",
-            definition.name,
-            invocation.parameter_types.len(),
-            definition.params.len()
-        )));
-    }
+    specialized_definition_with_control(
+        definition,
+        invocation,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|definition| {
+        definition.map(|definition| {
+            definition
+                .into_uncontrolled()
+                .expect("ordinary specialized definition")
+        })
+    })
+}
+
+/// Construct a concrete declaration with every replacement type selected before destination allocation. Unchanged declarations retain their caller's original owner.
+pub fn specialized_definition_with_control(
+    definition: &CreateFunction,
+    invocation: &RoutineInvocationBinding,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<CreateFunction>>, SQLError> {
+    control.check()?;
+    validate_specialized_definition(definition, invocation)?;
     let parameters_match = definition
         .params
         .iter()
@@ -95,6 +109,10 @@ pub fn specialized_definition(
     };
     if parameters_match && return_type_matches {
         return Ok(None);
+    }
+    if control.budget().is_some() {
+        return crate::plan::copy::copy_specialized_function(definition, invocation, control)
+            .map(Some);
     }
     let mut specialized = definition.clone();
     for (parameter, type_name) in specialized
@@ -112,7 +130,22 @@ pub fn specialized_definition(
             FunctionReturns::None | FunctionReturns::Table => {}
         }
     }
-    Ok(Some(specialized))
+    Ok(Some(control.finish(specialized, None)?))
+}
+
+pub(crate) fn validate_specialized_definition(
+    definition: &CreateFunction,
+    invocation: &RoutineInvocationBinding,
+) -> Result<(), SQLError> {
+    if invocation.parameter_types.len() != definition.params.len() {
+        return Err(SQLError::Internal(format!(
+            "routine `{}` has {} concrete parameter types for {} parameters",
+            definition.name,
+            invocation.parameter_types.len(),
+            definition.params.len()
+        )));
+    }
+    Ok(())
 }
 
 pub fn runtime_record_column_type(value: &Value) -> Option<crate::ast::ColumnType> {

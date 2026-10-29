@@ -16,16 +16,22 @@ impl Copying<'_> {
     ) -> Result<AssignmentTarget<ScalarExpr>> {
         Ok(AssignmentTarget {
             column: self.text(&target.column)?,
-            indirection: self.map(target.indirection.iter(), |copying, step| {
-                Ok(match step {
-                    AssignmentStep::Field(field) => AssignmentStep::Field(copying.text(field)?),
-                    AssignmentStep::Index(index) => {
-                        AssignmentStep::Index(copying.scalar_box(index)?)
-                    }
-                    AssignmentStep::Slice { lower, upper } => AssignmentStep::Slice {
-                        lower: copying.optional_scalar_box(lower.as_deref())?,
-                        upper: copying.optional_scalar_box(upper.as_deref())?,
-                    },
+            indirection: self.field("indirection", |copying| {
+                copying.map(target.indirection.iter(), |copying, step| {
+                    Ok(match step {
+                        AssignmentStep::Field(field) => AssignmentStep::Field(copying.text(field)?),
+                        AssignmentStep::Index(index) => AssignmentStep::Index(
+                            copying.field("index", |copying| copying.scalar_box(index))?,
+                        ),
+                        AssignmentStep::Slice { lower, upper } => AssignmentStep::Slice {
+                            lower: copying.field("lower", |copying| {
+                                copying.optional_scalar_box(lower.as_deref())
+                            })?,
+                            upper: copying.field("upper", |copying| {
+                                copying.optional_scalar_box(upper.as_deref())
+                            })?,
+                        },
+                    })
                 })
             })?,
         })
@@ -33,39 +39,53 @@ impl Copying<'_> {
 
     pub(super) fn assignment(&mut self, assignment: &AssignmentPlan) -> Result<AssignmentPlan> {
         Ok(AssignmentPlan {
-            target: match &assignment.target {
-                AssignmentTargets::Single(target) => {
-                    AssignmentTargets::Single(self.assignment_target(target)?)
-                }
-                AssignmentTargets::Multiple(group) => {
-                    AssignmentTargets::Multiple(MultipleAssignmentTargets {
-                        targets: self.map(group.targets.iter(), Self::assignment_target)?,
-                        source_positions: self
-                            .map(group.source_positions.iter(), |_, position| Ok(*position))?,
-                        source_width: group.source_width,
-                    })
-                }
-            },
-            value: self.scalar(&assignment.value)?,
+            target: self.field("target", |copying| {
+                Ok(match &assignment.target {
+                    AssignmentTargets::Single(target) => {
+                        AssignmentTargets::Single(copying.assignment_target(target)?)
+                    }
+                    AssignmentTargets::Multiple(group) => {
+                        AssignmentTargets::Multiple(MultipleAssignmentTargets {
+                            targets: copying.field("targets", |copying| {
+                                copying.map(group.targets.iter(), Self::assignment_target)
+                            })?,
+                            source_positions: copying
+                                .map(group.source_positions.iter(), |_, position| Ok(*position))?,
+                            source_width: group.source_width,
+                        })
+                    }
+                })
+            })?,
+            value: self.field("value", |copying| copying.scalar(&assignment.value))?,
         })
     }
 
     pub(super) fn conflict(&mut self, conflict: &ConflictPlan) -> Result<ConflictPlan> {
         Ok(ConflictPlan {
-            predicate: self.optional_scalar_box(conflict.predicate.as_deref())?,
+            predicate: self.field("predicate", |copying| {
+                copying.optional_scalar_box(conflict.predicate.as_deref())
+            })?,
             constraint: self.optional_text(conflict.constraint.as_deref())?,
             conflict_columns: self.texts(&conflict.conflict_columns)?,
-            expressions: self.map(conflict.expressions.iter(), Self::scalar)?,
-            action: match &conflict.action {
-                ConflictActionPlan::Nothing => ConflictActionPlan::Nothing,
-                ConflictActionPlan::Update {
-                    assignments,
-                    predicate,
-                } => ConflictActionPlan::Update {
-                    assignments: self.map(assignments.iter(), Self::assignment)?,
-                    predicate: self.optional_scalar_box(predicate.as_deref())?,
-                },
-            },
+            expressions: self.field("expressions", |copying| {
+                copying.map(conflict.expressions.iter(), Self::scalar)
+            })?,
+            action: self.field("action", |copying| {
+                Ok(match &conflict.action {
+                    ConflictActionPlan::Nothing => ConflictActionPlan::Nothing,
+                    ConflictActionPlan::Update {
+                        assignments,
+                        predicate,
+                    } => ConflictActionPlan::Update {
+                        assignments: copying.field("assignments", |copying| {
+                            copying.map(assignments.iter(), Self::assignment)
+                        })?,
+                        predicate: copying.field("predicate", |copying| {
+                            copying.optional_scalar_box(predicate.as_deref())
+                        })?,
+                    },
+                })
+            })?,
         })
     }
 
@@ -75,22 +95,34 @@ impl Copying<'_> {
                 condition,
                 assignments,
             } => MergeWhenPlan::UpdateMatched {
-                condition: self.optional_scalar(condition.as_ref())?,
-                assignments: self.map(assignments.iter(), Self::assignment)?,
+                condition: self.field("condition", |copying| {
+                    copying.optional_scalar(condition.as_ref())
+                })?,
+                assignments: self.field("assignments", |copying| {
+                    copying.map(assignments.iter(), Self::assignment)
+                })?,
             },
             MergeWhenPlan::DeleteMatched { condition } => MergeWhenPlan::DeleteMatched {
-                condition: self.optional_scalar(condition.as_ref())?,
+                condition: self.field("condition", |copying| {
+                    copying.optional_scalar(condition.as_ref())
+                })?,
             },
             MergeWhenPlan::UpdateNotMatchedBySource {
                 condition,
                 assignments,
             } => MergeWhenPlan::UpdateNotMatchedBySource {
-                condition: self.optional_scalar(condition.as_ref())?,
-                assignments: self.map(assignments.iter(), Self::assignment)?,
+                condition: self.field("condition", |copying| {
+                    copying.optional_scalar(condition.as_ref())
+                })?,
+                assignments: self.field("assignments", |copying| {
+                    copying.map(assignments.iter(), Self::assignment)
+                })?,
             },
             MergeWhenPlan::DeleteNotMatchedBySource { condition } => {
                 MergeWhenPlan::DeleteNotMatchedBySource {
-                    condition: self.optional_scalar(condition.as_ref())?,
+                    condition: self.field("condition", |copying| {
+                        copying.optional_scalar(condition.as_ref())
+                    })?,
                 }
             }
             MergeWhenPlan::InsertNotMatched {
@@ -99,20 +131,28 @@ impl Copying<'_> {
                 overriding,
                 values,
             } => MergeWhenPlan::InsertNotMatched {
-                condition: self.optional_scalar(condition.as_ref())?,
+                condition: self.field("condition", |copying| {
+                    copying.optional_scalar(condition.as_ref())
+                })?,
                 columns: self.map(columns.iter(), Self::assignment_target)?,
                 overriding: *overriding,
-                values: self.map(values.iter(), Self::scalar)?,
+                values: self.field("values", |copying| copying.map(values.iter(), Self::scalar))?,
             },
             MergeWhenPlan::NothingMatched { condition } => MergeWhenPlan::NothingMatched {
-                condition: self.optional_scalar(condition.as_ref())?,
+                condition: self.field("condition", |copying| {
+                    copying.optional_scalar(condition.as_ref())
+                })?,
             },
             MergeWhenPlan::NothingNotMatched { condition } => MergeWhenPlan::NothingNotMatched {
-                condition: self.optional_scalar(condition.as_ref())?,
+                condition: self.field("condition", |copying| {
+                    copying.optional_scalar(condition.as_ref())
+                })?,
             },
             MergeWhenPlan::NothingNotMatchedBySource { condition } => {
                 MergeWhenPlan::NothingNotMatchedBySource {
-                    condition: self.optional_scalar(condition.as_ref())?,
+                    condition: self.field("condition", |copying| {
+                        copying.optional_scalar(condition.as_ref())
+                    })?,
                 }
             }
         })

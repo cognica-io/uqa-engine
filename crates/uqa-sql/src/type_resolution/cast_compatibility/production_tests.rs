@@ -94,3 +94,48 @@ fn cast_compatibility_propagates_quota_and_cancellation_without_false_rejection(
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn assignment_coercion_reuses_catalog_selection_and_releases_type_scratch() {
+    let budget = MemoryBudget::new(64 * 1024);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (source, target, expected) in [
+        (ColumnType::Integer, ColumnType::SmallInteger, true),
+        (ColumnType::TimestampTz, ColumnType::Time, true),
+        (ColumnType::JsonB, ColumnType::Json, true),
+        (ColumnType::Date, ColumnType::Integer, false),
+        (
+            ColumnType::Array(Box::new(ColumnType::Integer)),
+            ColumnType::Array(Box::new(ColumnType::Text)),
+            true,
+        ),
+    ] {
+        assert_eq!(
+            assignment_type_compatible_with_control(&source, &target, &control).unwrap(),
+            expected
+        );
+        assert_eq!(budget.used(), 0);
+    }
+    let named = ColumnType::Named("n".repeat(1 << 20));
+    for cancel in 0..3 {
+        let budget = MemoryBudget::new(4096);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let sibling = budget.reserve(17).unwrap();
+        if cancel == 1 {
+            original.cancel();
+        }
+        if cancel == 2 {
+            invoking.cancel();
+        }
+        let error = assignment_type_compatible_with_control(&named, &ColumnType::Text, &control)
+            .unwrap_err();
+        assert_eq!(
+            error.sqlstate(),
+            Some(if cancel == 0 { "53200" } else { "57014" })
+        );
+        assert_eq!(budget.used(), sibling.bytes());
+    }
+}

@@ -8,7 +8,10 @@
 
 mod catalog;
 mod volatility;
-pub use volatility::{cast_volatility, immutable_cast_type, pg_catalog_builtin_type};
+pub use volatility::{
+    cast_volatility, cast_volatility_with_control, immutable_cast_type, pg_catalog_builtin_type,
+    pg_catalog_builtin_type_with_control,
+};
 
 use crate::ast::ColumnType;
 use crate::SQLError;
@@ -135,22 +138,39 @@ pub(super) fn validate_explicit_cast_with_control(
 /// at the value conversion boundary; array coercion applies element by element.
 #[must_use]
 pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> bool {
-    let source = base_type(source).without_type_modifiers();
-    let target = base_type(target).without_type_modifiers();
-    if source == target
+    assignment_type_compatible_with_control(source, target, &ProductionControl::uncontrolled())
+        .expect("ordinary assignment coercion compatibility")
+}
+
+/// Select assignment coercion while temporary type normalization and canonical identities retain the invoking allowance.
+pub fn assignment_type_compatible_with_control(
+    source: &ColumnType,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    control.check()?;
+    let source = base_type(source).without_type_modifiers_with_control(control)?;
+    let target = base_type(target).without_type_modifiers_with_control(control)?;
+    if *source == *target
         || is_string_io_type(&target)
         || embedding_input_compatible(&source, &target)
         || record_coercion(&source, &target)
     {
-        return true;
+        return Ok(true);
     }
-    if let (ColumnType::Array(source), ColumnType::Array(target)) = (&source, &target) {
-        return assignment_type_compatible(array_element(source), array_element(target));
+    if let (ColumnType::Array(source), ColumnType::Array(target)) = (&*source, &*target) {
+        return assignment_type_compatible_with_control(
+            array_element(source),
+            array_element(target),
+            control,
+        );
     }
-    let source = super::canonical_column_type_name(&source);
-    let target = super::canonical_column_type_name(&target);
+    let source =
+        super::overload_resolution::canonical_column_type_name_with_control(&source, control)?;
+    let target =
+        super::overload_resolution::canonical_column_type_name_with_control(&target, control)?;
     if super::routine_type_accepts_implicit_cast(&source, &target) {
-        return true;
+        return Ok(true);
     }
     let numeric = |name: &str| {
         matches!(
@@ -158,7 +178,7 @@ pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> b
             "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
         )
     };
-    (numeric(&source) && numeric(&target))
+    Ok((numeric(&source) && numeric(&target))
         || matches!(
             (source.as_str(), target.as_str()),
             ("timestamp", "date" | "time")
@@ -178,7 +198,7 @@ pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> b
                         | "regtype",
                     "int4" | "int8"
                 )
-        )
+        ))
 }
 
 /// `can_coerce_type` coerces an anonymous record to any composite type attribute by attribute, and any composite value is a record.

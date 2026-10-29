@@ -59,6 +59,11 @@ impl RetainedConstantValue {
         Self { source, index }
     }
 
+    /// Compare immutable source identity without decoding either value.
+    pub fn shares_value_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.source, &other.source) && self.index == other.index
+    }
+
     pub fn read(&self) -> Result<Value, SQLError> {
         crate::expr::check_statement_cancellation()?;
         let value = self.source.read(self.index)?;
@@ -101,7 +106,7 @@ impl fmt::Debug for RetainedConstantValue {
 
 impl PartialEq for RetainedConstantValue {
     fn eq(&self, other: &Self) -> bool {
-        if Arc::ptr_eq(&self.source, &other.source) && self.index == other.index {
+        if self.shares_value_with(other) {
             return true;
         }
         if let (Some(left), Some(right)) = (self.resident_value(), other.resident_value()) {
@@ -312,6 +317,19 @@ impl uqa_core::memory::ObserveAllocations for RetainedScalarLiteral {
 /// Planner supplies a successfully evaluated constant; execution supplies its bounded storage implementation.
 pub trait ConstantValueStorage: fmt::Debug + Send + Sync {
     fn retain(&self, value: Value) -> Result<RetainedConstantValue, SQLError>;
+
+    /// Transfer an evaluated owner through the storage boundary. Native stores override this callback to admit encoding workspace and enforce cancellation inside atomic publication; the default adapts an external storage implementation.
+    fn retain_produced(
+        &self,
+        value: Produced<Value>,
+        control: &ProductionControl<'_>,
+    ) -> Result<RetainedConstantValue, SQLError> {
+        control.check()?;
+        let (value, memory) = value.into_parts();
+        let retained = self.retain(value);
+        drop(memory);
+        retained
+    }
 }
 
 #[cfg(test)]

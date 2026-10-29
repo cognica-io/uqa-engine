@@ -9,35 +9,10 @@
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
-
-use crate::ast::{ColumnType, FunctionBinding, FunctionReturns};
-use crate::type_resolution::{
-    builtin_binding_matches, builtin_name_matches, match_builtin_function_call,
-    rank_function_matches, BuiltinFunctionOverload, FunctionTypeResolver, RankedFunctionMatch,
-    ResolvedFunctionOverload, RoutineSignatureMatchError,
-};
-use crate::SQLError;
-
 use super::RoutineOverloadContext;
-use super::SQLUserFunction;
-use super::{
-    retain_earliest_effective_signatures, static_function_match, static_function_return_type,
-    static_signature_error, RoutineCallKind, StaticFunctionMatch,
-};
-
-enum FunctionTarget {
-    User(StaticFunctionMatch),
-    Builtin(BuiltinFunctionOverload),
-}
-
-struct FunctionMatch {
-    target: FunctionTarget,
-    argument_types: Vec<String>,
-    raw_exact_matches: usize,
-    exact_matches: usize,
-    preferred_matches: usize,
-}
+use crate::ast::{ColumnType, FunctionBinding};
+use crate::type_resolution::{BuiltinFunctionOverload, ResolvedFunctionOverload};
+use crate::SQLError;
 
 #[derive(Clone, Copy)]
 enum ResolutionContext {
@@ -53,29 +28,6 @@ struct ResolutionRequest<'a> {
     explicit_variadic: bool,
     builtins: &'a [BuiltinFunctionOverload],
     context: ResolutionContext,
-}
-
-struct UserCandidateSet {
-    candidates: Vec<FunctionMatch>,
-    match_error: Option<RoutineSignatureMatchError>,
-}
-
-impl RankedFunctionMatch for FunctionMatch {
-    fn argument_types(&self) -> &[String] {
-        &self.argument_types
-    }
-
-    fn raw_exact_matches(&self) -> usize {
-        self.raw_exact_matches
-    }
-
-    fn exact_matches(&self) -> usize {
-        self.exact_matches
-    }
-
-    fn preferred_matches(&self) -> usize {
-        self.preferred_matches
-    }
 }
 
 pub(super) fn resolve(
@@ -128,352 +80,30 @@ fn resolve_in_context(
     request: &ResolutionRequest<'_>,
     binding: Option<&FunctionBinding>,
 ) -> Result<ResolvedFunctionOverload, SQLError> {
-    if let Some(binding) = binding {
-        return resolve_bound(request, binding);
-    }
-    let users = request
-        .resolver
-        .catalog
-        .lookup_sql_routine_candidates(request.name)?
-        .unwrap_or_default();
-    let builtins = request
-        .builtins
-        .iter()
-        .filter(|builtin| builtin_name_matches(request.name, &builtin.name))
-        .cloned()
-        .collect::<Vec<_>>();
-    resolve_candidates(request, users, builtins)
-}
-
-fn resolve_bound(
-    request: &ResolutionRequest<'_>,
-    binding: &FunctionBinding,
-) -> Result<ResolvedFunctionOverload, SQLError> {
-    if !binding.builtin {
-        if matches!(request.context, ResolutionContext::Scalar) {
-            return <RoutineOverloadContext<'_> as FunctionTypeResolver>::resolve_function_overload(
-                request.resolver,
-                request.name,
-                Some(binding),
-                request.argument_names,
-                request.argument_types,
-                request.explicit_variadic,
-            )?
-            .ok_or_else(|| bound_function_resolution_error(binding));
-        }
-        let function = request
-            .resolver
-            .resolve_static_sql_function(
-                request.name,
-                Some(binding),
-                request.argument_names,
-                request.argument_types,
-                request.explicit_variadic,
-            )?
-            .ok_or_else(|| bound_function_resolution_error(binding))?;
-        return Ok(ResolvedFunctionOverload {
-            binding: binding.clone(),
-            return_type: table_function_return_type(
-                request.resolver,
-                request.name,
-                &function.def,
-                binding.invocation.as_deref(),
-            )?,
-            exact_matches: 0,
-            known_arguments: request.argument_types.iter().flatten().count(),
-            preferred_matches: 0,
-            precedes_pg_catalog: request
-                .resolver
-                .user_function_precedes_pg_catalog(&function.def.name),
-        });
-    }
-    let builtin = request
-        .builtins
-        .iter()
-        .find(|builtin| builtin_binding_matches(builtin, binding))
-        .ok_or_else(|| bound_function_resolution_error(binding))?;
-    let matched = builtin_function_match(
-        builtin.clone(),
-        request.argument_names,
-        request.argument_types,
-        request.explicit_variadic,
-    )
-    .ok_or_else(|| bound_function_resolution_error(binding))?;
-    let mut resolved = resolved_builtin_overload(builtin, request)?;
-    resolved.exact_matches = matched.exact_matches;
-    resolved.preferred_matches = matched.preferred_matches;
-    Ok(resolved)
-}
-
-fn resolve_candidates(
-    request: &ResolutionRequest<'_>,
-    users: Vec<Arc<SQLUserFunction>>,
-    builtins: Vec<BuiltinFunctionOverload>,
-) -> Result<ResolvedFunctionOverload, SQLError> {
-    let UserCandidateSet {
-        mut candidates,
-        match_error,
-    } = collect_user_candidates(request, users);
-    let mut builtin_candidates = builtins
-        .into_iter()
-        .filter_map(|builtin| {
-            builtin_function_match(
-                builtin,
-                request.argument_names,
-                request.argument_types,
-                request.explicit_variadic,
-            )
-        })
-        .collect::<Vec<_>>();
-    apply_catalog_shadowing(
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let selected = super::production::combined::resolve(
         request.resolver,
-        &mut candidates,
-        &mut builtin_candidates,
-        request.explicit_variadic,
-    );
-    candidates.extend(builtin_candidates);
-    if candidates.is_empty() {
-        if let Some(error) = match_error {
-            return Err(static_signature_error(
-                RoutineCallKind::Function,
-                request.name,
-                error,
-            ));
-        }
-        return Err(resolution_error(
-            "42883",
-            request.name,
-            request.argument_names,
-            request.argument_types,
-            "does not exist",
-        ));
-    }
-    if !rank_function_matches(&mut candidates, request.argument_types) || candidates.len() != 1 {
-        return Err(resolution_error(
-            "42725",
-            request.name,
-            request.argument_names,
-            request.argument_types,
-            "is not unique",
-        ));
-    }
-    let selected = candidates
-        .pop()
-        .ok_or_else(|| SQLError::Internal("resolved function candidate disappeared".into()))?;
-    resolve_selected_candidate(request, selected)
-}
-
-fn collect_user_candidates(
-    request: &ResolutionRequest<'_>,
-    users: Vec<Arc<SQLUserFunction>>,
-) -> UserCandidateSet {
-    let mut matched_users = Vec::new();
-    let mut match_error = None;
-    let catalog = request.resolver.catalog.routine_type_snapshot();
-    for function in users {
-        match static_function_match(
-            &catalog,
-            function.clone(),
-            request.argument_names,
-            request.argument_types,
-            request.explicit_variadic,
-        ) {
-            Ok(Some(matched)) => matched_users.push(matched),
-            Ok(None) => {}
-            Err(error) => {
-                match_error.get_or_insert(error);
-            }
-        }
-    }
-    retain_earliest_effective_signatures(&mut matched_users);
-    let candidates = matched_users
-        .into_iter()
-        .map(|matched| FunctionMatch {
-            argument_types: matched.argument_types.clone(),
-            raw_exact_matches: matched.raw_exact_matches,
-            exact_matches: matched.exact_matches,
-            preferred_matches: matched.preferred_matches,
-            target: FunctionTarget::User(matched),
-        })
-        .collect::<Vec<_>>();
-    UserCandidateSet {
-        candidates,
-        match_error,
-    }
-}
-
-fn apply_catalog_shadowing(
-    resolver: &RoutineOverloadContext<'_>,
-    user_candidates: &mut Vec<FunctionMatch>,
-    builtin_candidates: &mut Vec<FunctionMatch>,
-    explicit_variadic: bool,
-) {
-    let builtin_signatures = builtin_candidates
-        .iter()
-        .map(|candidate| candidate.argument_types.clone())
-        .collect::<Vec<_>>();
-    let precedes_builtin = |matched: &StaticFunctionMatch| {
-        resolver.user_function_precedes_pg_catalog(&matched.function.def.name)
-            || !explicit_variadic
-                && matched.function.def.name.starts_with("pg_catalog.")
-                && matches!(matched.invocation.variadic_mode, crate::ast::RoutineVariadicMode::None)
-                && builtin_candidates.iter().any(|candidate| {
-                    candidate.argument_types == matched.argument_types
-                        && matches!(&candidate.target, FunctionTarget::Builtin(builtin) if builtin.variadic)
-                })
-    };
-    let user_signatures_preceding_pg_catalog = user_candidates
-        .iter()
-        .filter_map(|candidate| match &candidate.target {
-            FunctionTarget::User(matched) if precedes_builtin(matched) => {
-                Some(candidate.argument_types.clone())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    builtin_candidates.retain(|candidate| {
-        !user_signatures_preceding_pg_catalog.contains(&candidate.argument_types)
-    });
-    user_candidates.retain(|candidate| {
-        let FunctionTarget::User(_) = &candidate.target else {
-            return true;
-        };
-        user_signatures_preceding_pg_catalog.contains(&candidate.argument_types)
-            || !builtin_signatures.contains(&candidate.argument_types)
-    });
-}
-
-fn resolve_selected_candidate(
-    request: &ResolutionRequest<'_>,
-    selected: FunctionMatch,
-) -> Result<ResolvedFunctionOverload, SQLError> {
-    if let FunctionTarget::User(matched) = &selected.target {
-        super::ensure_routine_kind(
-            request.name,
-            request.argument_names,
-            request.argument_types,
-            RoutineCallKind::Function,
-            &matched.function.def,
-        )?;
-    }
-    if let FunctionTarget::User(matched) = &selected.target {
-        super::check_selected_default_types(
-            request.resolver.catalog,
-            RoutineCallKind::Function,
-            request.name,
-            matched,
-        )?;
-    }
-    let known_arguments = request.argument_types.iter().flatten().count();
-    match selected.target {
-        FunctionTarget::User(matched) => Ok(ResolvedFunctionOverload {
-            binding: matched.binding(),
-            return_type: match request.context {
-                ResolutionContext::Scalar => static_function_return_type(
-                    request.resolver,
-                    request.name,
-                    &matched.function.def,
-                    Some(&matched.invocation),
-                )?,
-                ResolutionContext::Table => table_function_return_type(
-                    request.resolver,
-                    request.name,
-                    &matched.function.def,
-                    Some(&matched.invocation),
-                )?,
-            },
-            exact_matches: selected.exact_matches,
-            known_arguments,
-            preferred_matches: selected.preferred_matches,
-            precedes_pg_catalog: request
-                .resolver
-                .user_function_precedes_pg_catalog(&matched.function.def.name),
-        }),
-        FunctionTarget::Builtin(builtin) => {
-            let mut resolved = resolved_builtin_overload(&builtin, request)?;
-            resolved.exact_matches = selected.exact_matches;
-            resolved.preferred_matches = selected.preferred_matches;
-            Ok(resolved)
-        }
-    }
-}
-
-fn table_function_return_type(
-    resolver: &RoutineOverloadContext<'_>,
-    name: &str,
-    definition: &crate::ast::CreateFunction,
-    invocation: Option<&crate::ast::RoutineInvocationBinding>,
-) -> Result<ColumnType, SQLError> {
-    if matches!(definition.returns, FunctionReturns::Table) {
-        Ok(ColumnType::Record)
-    } else {
-        static_function_return_type(resolver, name, definition, invocation)
-    }
-}
-
-fn builtin_function_match(
-    builtin: BuiltinFunctionOverload,
-    argument_names: &[Option<String>],
-    argument_types: &[Option<ColumnType>],
-    explicit_variadic: bool,
-) -> Option<FunctionMatch> {
-    let matched = match_builtin_function_call(
-        builtin,
-        crate::type_resolution::RoutineCallDescriptor {
-            argument_names,
-            argument_types,
-            explicit_variadic,
-        },
-    )?;
-    Some(FunctionMatch {
-        target: FunctionTarget::Builtin(matched.overload),
-        argument_types: matched.argument_types,
-        raw_exact_matches: matched.raw_exact_matches,
-        exact_matches: matched.exact_matches,
-        preferred_matches: matched.preferred_matches,
-    })
-}
-
-fn resolved_builtin_overload(
-    builtin: &BuiltinFunctionOverload,
-    request: &ResolutionRequest<'_>,
-) -> Result<ResolvedFunctionOverload, SQLError> {
-    crate::type_resolution::resolve_local_builtin_call_with_control(
-        &builtin.name,
-        None,
+        request.name,
+        binding,
         crate::type_resolution::RoutineCallDescriptor {
             argument_names: request.argument_names,
             argument_types: request.argument_types,
             explicit_variadic: request.explicit_variadic,
         },
-        std::slice::from_ref(builtin),
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
-    .map(|selected| {
-        selected
-            .into_uncontrolled()
-            .expect("ordinary builtin resolution has no reservation")
-    })
-}
-
-fn bound_function_resolution_error(binding: &FunctionBinding) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!(
-            "bound function {}({}) does not exist",
-            binding.name,
-            binding.argument_types.join(", ")
-        ),
+        request.builtins,
+        &control,
+    )?
+    .into_uncontrolled()
+    .expect("ordinary combined overload resolution");
+    if matches!(request.context, ResolutionContext::Table) {
+        if let Some(binding) = binding.filter(|binding| !binding.builtin) {
+            return Ok(ResolvedFunctionOverload {
+                binding: binding.clone(),
+                exact_matches: 0,
+                preferred_matches: 0,
+                ..selected
+            });
+        }
     }
-}
-
-fn resolution_error(
-    sqlstate: &str,
-    name: &str,
-    argument_names: &[Option<String>],
-    argument_types: &[Option<ColumnType>],
-    suffix: &str,
-) -> SQLError {
-    let arguments = super::static_routine_argument_types(argument_names, argument_types);
-    SQLError::function_call_resolution(sqlstate, &format!("{name}({arguments})"), suffix)
+    Ok(selected)
 }

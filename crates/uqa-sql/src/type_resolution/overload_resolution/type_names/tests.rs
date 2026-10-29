@@ -181,3 +181,5 @@ fn builtin_scalar_overload_names_retain_exact_reservations() {
     drop(name);
     assert_eq!(budget.used(), 0);
 }
+
+mod production;

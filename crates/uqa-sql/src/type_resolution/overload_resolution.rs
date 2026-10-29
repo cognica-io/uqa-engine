@@ -47,10 +47,8 @@ pub use signature::match_function_signature;
 pub(super) use signature::{match_signature_with_control, SignatureParameters};
 
 mod type_names;
-pub(super) use type_names::{
-    builtin_canonical_type_name, canonical_column_type_name_with_control,
-    canonical_routine_type_name_with_control,
-};
+pub use type_names::canonical_routine_type_name_with_control;
+pub(super) use type_names::{builtin_canonical_type_name, canonical_column_type_name_with_control};
 pub use type_names::{
     canonical_column_type_name, canonical_routine_type_name, parse_enum_type_identity,
 };
@@ -199,8 +197,10 @@ pub(super) fn canonical_type_is_preferred(type_name: &str) -> bool {
 }
 
 mod ranking;
+pub(crate) use builtin::match_builtin as match_builtin_with_control;
+pub(crate) use candidates::{Candidates, RankingCandidates};
 pub use ranking::rank_function_matches;
-pub(super) use ranking::rank_function_matches_with_control;
+pub(crate) use ranking::rank_function_matches_with_control;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchedBuiltinFunction {

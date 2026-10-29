@@ -13,10 +13,15 @@ use uqa_core::{
     Value,
 };
 
+mod call;
 mod children;
 mod construction;
+mod constructors;
 mod edit;
+mod generated;
 mod iteration;
+mod literals;
+mod selection;
 pub use iteration::OwnedScalarChildren;
 
 /// A scalar expression whose child allocations can be transferred or discarded independently. The expression is read-only outside this owner's consuming operations; replacing raw IR through a mutable dereference would separate allocations from their reservations.
@@ -29,13 +34,13 @@ pub struct OwnedScalarExpr {
 
 /// Direct allocations include this node's names, types, values, child boxes and child-vector buffers. Each child's payload has its own owner; the metadata vector also admits its actual capacity before allocation.
 #[derive(Debug)]
-pub(super) struct ScalarMemory {
+pub(crate) struct ScalarMemory {
     pub(super) direct: MemoryReservation,
     pub(super) children: BudgetedVec<Option<Self>>,
 }
 
 impl ScalarMemory {
-    fn reserved_bytes(&self) -> usize {
+    pub(crate) fn reserved_bytes(&self) -> usize {
         self.direct.bytes()
             + self.children.capacity() * size_of::<Option<Self>>()
             + self
@@ -46,7 +51,7 @@ impl ScalarMemory {
                 .sum::<usize>()
     }
 
-    fn into_reservation(self) -> MemoryReservation {
+    pub(crate) fn into_reservation(self) -> MemoryReservation {
         let Self {
             mut direct,
             mut children,
@@ -61,6 +66,14 @@ impl ScalarMemory {
 }
 
 impl OwnedScalarExpr {
+    pub(crate) fn into_rewrite_parts(self) -> (ScalarExpr, Option<ScalarMemory>) {
+        (self.expression, self.memory)
+    }
+
+    pub(crate) fn from_rewrite_parts(expression: ScalarExpr, memory: Option<ScalarMemory>) -> Self {
+        Self { expression, memory }
+    }
+
     /// Move an ordinary scalar without claiming that its existing allocations were admitted. Controlled construction uses `ScalarExpr::copy_for_rewrite` instead.
     pub fn uncontrolled(expression: ScalarExpr) -> Self {
         Self {

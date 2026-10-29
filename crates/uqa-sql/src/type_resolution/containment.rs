@@ -6,6 +6,9 @@
 
 //! `PostgreSQL` containment-operator type resolution and unknown-literal coercion.
 
+mod owned;
+pub(super) use owned::bind_owned_call;
+
 use super::call::{BindingCall, InferType};
 use crate::ast::ColumnType;
 use crate::{SQLError, SQLParam};
@@ -145,6 +148,21 @@ fn prepare_cast(
     infer: &mut InferType<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<(usize, String)>>, SQLError> {
+    let Some(prepared) = select_cast(args, infer, control)? else {
+        return Ok(None);
+    };
+    let extra = control.reserve(size_of::<ScalarExpr>())?;
+    let (prepared, memory) = prepared.into_parts();
+    Ok(Some(
+        control.finish(prepared, control.combine(memory, extra))?,
+    ))
+}
+
+fn select_cast(
+    args: &[ScalarExpr],
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<(usize, String)>>, SQLError> {
     control.check()?;
     if args.len() != 2 {
         return Ok(None);
@@ -169,11 +187,8 @@ fn prepare_cast(
         return Ok(None);
     }
     let ty = target.catalog_name_with_control(control)?;
-    let extra = control.reserve(size_of::<ScalarExpr>())?;
     let (ty, memory) = ty.into_parts();
-    Ok(Some(
-        control.finish((index, ty), control.combine(memory, extra))?,
-    ))
+    Ok(Some(control.finish((index, ty), memory)?))
 }
 
 fn argument_type<'a>(

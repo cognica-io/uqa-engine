@@ -24,10 +24,6 @@ pub(super) fn scalar_type_inner_with_control(
     resolver: Option<&dyn FunctionTypeResolver>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    assert!(
-        control.budget().is_none() || resolver.is_none(),
-        "controlled type inference cannot invoke an unowned catalog resolver"
-    );
     control.check()?;
     if let Some(ty) = schema.observed_expression_type(expression) {
         return copy_type(ty, control);
@@ -93,10 +89,12 @@ pub(super) fn scalar_type_inner_with_control(
             ..
         } => {
             if let Some(resolver) = resolver {
-                let ty = resolver.resolve_type_name(&binding.ty)?.ok_or_else(|| {
-                    SQLError::Internal("composite constructor type disappeared".into())
-                })?;
-                Ok(Some(control.finish(ty, None)?))
+                let ty = resolver
+                    .resolve_type_name_with_control(&binding.ty, control)?
+                    .ok_or_else(|| {
+                        SQLError::Internal("composite constructor type disappeared".into())
+                    })?;
+                Ok(Some(ty))
             } else if let Some(ty) = bound_type {
                 copy_type(Some(ty), control)
             } else {
@@ -146,12 +144,12 @@ pub(super) fn scalar_type_inner_with_control(
             let candidate = resolver
                 .zip(schema.physical_schema())
                 .map(|(resolver, schema)| {
-                    resolver.resolve_scalar_subquery_type(*subquery, schema, params)
+                    resolver.resolve_scalar_subquery_type_with_control(
+                        *subquery, schema, params, control,
+                    )
                 })
                 .transpose()?
-                .flatten()
-                .map(|ty| control.finish(ty, None))
-                .transpose()?;
+                .flatten();
             operators::binary_result_type_with_control(
                 crate::ast::BinaryOp::Equal,
                 needle.as_deref(),
@@ -181,10 +179,9 @@ pub(super) fn scalar_type_inner_with_control(
             resolver
                 .zip(schema.physical_schema())
                 .map_or(Ok(None), |(resolver, schema)| {
-                    resolver
-                        .resolve_scalar_subquery_type(*subquery, schema, params)?
-                        .map(|ty| control.finish(ty, None).map_err(Into::into))
-                        .transpose()
+                    resolver.resolve_scalar_subquery_type_with_control(
+                        *subquery, schema, params, control,
+                    )
                 })
         }
         ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => copy_type(
@@ -246,38 +243,41 @@ pub(super) fn field_selection_type(
         origin = expr;
     }
     if let ScalarExpr::Row(expressions) = origin {
-        let items = expressions
-            .iter()
-            .map(|item| {
-                scalar_type_inner_with_control(item, schema, params, resolver, control)
-                    .map(|ty| ty.map(|ty| (*ty).clone()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut items = uqa_core::memory::ProductionVec::new(*control);
+        items.reserve(expressions.len())?;
+        for item in expressions {
+            let ty = scalar_type_inner_with_control(item, schema, params, resolver, control)?;
+            items.push_produced(control.finish(ty, control.empty_reservation())?)?;
+        }
+        let items = items.finish()?;
         if !std::ptr::eq(origin, base) {
-            let observed = super::function_inputs::CallInputTypes::new(
+            let observed = super::function_inputs::CallInputTypes::new_with_control(
                 schema,
                 expressions
                     .iter()
-                    .zip(&items)
-                    .map(|(item, ty)| (item, ty.as_ref()))
-                    .collect(),
-            );
-            // Validate casts in their original inner-to-outer order using the field types already observed above.
-            let ty = scalar_type_inner_with_control(base, &observed, params, resolver, control)?;
+                    .zip(items.iter())
+                    .map(|(item, ty)| (item, ty.as_deref())),
+                control,
+            )?;
+            // Preserve validation of casts from inner to outer using the original field observations.
+            let ty = scalar_type_inner_with_control(base, &*observed, params, resolver, control)?;
             if ty.as_deref() != Some(&ColumnType::Record) {
-                return copy_type(
-                    field_selection::value_field_type(ty.as_deref(), field, resolver)?.as_ref(),
+                return field_selection::value_field_type_with_control(
+                    ty.as_deref(),
+                    field,
+                    resolver,
                     control,
                 );
             }
         }
-        return copy_type(
-            field_selection::row_field_type(&items, field)?.as_ref(),
-            control,
-        );
+        let position = field_selection::anonymous_field_position(field, items.len())
+            .ok_or_else(|| field_selection::undefined_record_field(field))?;
+        return copy_type(items[position].as_deref(), control);
     }
-    if let Some(field_type) = field_selection::constant_field_type(base, field) {
-        return copy_type(field_type?.as_ref(), control);
+    if let Some(field_type) =
+        field_selection::constant_field_type_with_control(base, field, control)
+    {
+        return field_type;
     }
     let ty = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
     let record = ty.as_deref() == Some(&ColumnType::Record);
@@ -304,10 +304,7 @@ pub(super) fn field_selection_type(
     if record && field_selection::is_column_reference(reference) {
         return Err(field_selection::unregistered_record());
     }
-    copy_type(
-        field_selection::value_field_type(ty.as_deref(), field, resolver)?.as_ref(),
-        control,
-    )
+    field_selection::value_field_type_with_control(ty.as_deref(), field, resolver, control)
 }
 
 pub(super) fn resolved_type_name(
@@ -316,9 +313,8 @@ pub(super) fn resolved_type_name(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     if let Some(resolver) = resolver {
-        if let Some(ty) = resolver.resolve_type_name(name)? {
-            control.check()?;
-            return control.finish(ty, None).map(Some).map_err(Into::into);
+        if let Some(ty) = resolver.resolve_type_name_with_control(name, control)? {
+            return Ok(Some(ty));
         }
         control.check()?;
     }

@@ -11,6 +11,7 @@ use crate::SQLError;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 pub use uqa_core::catalog_role::RoleIdentity;
+use uqa_core::memory::ProductionControl;
 
 /// A selected role keeps its incarnation even if another role later reuses its name or OID.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +100,17 @@ impl RoleSubject for RoleReference {
             Self::Bound(role) => role.role_definition(roles),
         }
     }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        match self {
+            Self::Named(name) => name.role_definition_with_control(roles, control),
+            Self::Bound(role) => role.role_definition_with_control(roles, control),
+        }
+    }
 }
 
 impl RoleBinding {
@@ -161,6 +173,18 @@ pub trait RoleSubject {
         &self,
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition>;
+
+    /// Native captured identities poll while searching a renamed incarnation. External subjects retain their existing lookup semantics.
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        control.check()?;
+        let role = self.role_definition(roles);
+        control.check()?;
+        Ok(role)
+    }
 }
 
 impl<T: RoleSubject + ?Sized> RoleSubject for Arc<T> {
@@ -172,6 +196,14 @@ impl<T: RoleSubject + ?Sized> RoleSubject for Arc<T> {
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition> {
         self.as_ref().role_definition(roles)
+    }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        self.as_ref().role_definition_with_control(roles, control)
     }
 }
 
@@ -185,6 +217,14 @@ impl<T: RoleSubject + ?Sized> RoleSubject for &T {
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition> {
         (*self).role_definition(roles)
+    }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        (*self).role_definition_with_control(roles, control)
     }
 }
 
@@ -241,6 +281,27 @@ impl RoleSubject for RoleBinding {
             .filter(|role| self.matches_definition(role))
             .or_else(|| roles.values().find(|role| self.matches_definition(role)))
     }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        control.check()?;
+        if let Some(role) = roles
+            .get(&self.name)
+            .filter(|role| self.matches_definition(role))
+        {
+            return Ok(Some(role));
+        }
+        for role in roles.values() {
+            control.check()?;
+            if self.matches_definition(role) {
+                return Ok(Some(role));
+            }
+        }
+        Ok(None)
+    }
 }
 
 impl RoleSubject for RoleIdentity {
@@ -256,6 +317,24 @@ impl RoleSubject for RoleIdentity {
             return None;
         }
         roles.values().find(|role| role.identity() == *self)
+    }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        control.check()?;
+        if !self.is_valid() {
+            return Ok(None);
+        }
+        for role in roles.values() {
+            control.check()?;
+            if role.identity() == *self {
+                return Ok(Some(role));
+            }
+        }
+        Ok(None)
     }
 }
 

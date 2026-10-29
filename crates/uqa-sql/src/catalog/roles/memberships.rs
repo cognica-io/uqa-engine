@@ -14,6 +14,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use uqa_core::Value;
 
 pub mod command;
+mod production;
+pub use production::role_inherits_with_control;
 mod grants;
 #[cfg(test)]
 pub(crate) mod test_support;

@@ -9,7 +9,7 @@
 use super::{Copying, Result};
 use uqa_core::memory::{OwnedMap, OwnedSet};
 
-pub(super) trait SyntaxCopy: Sized {
+pub(crate) trait SyntaxCopy: Sized {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self>;
 }
 
@@ -18,7 +18,7 @@ macro_rules! syntax_struct {
         impl SyntaxCopy for $ty {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
-                Ok(Self { $($field: self.$field.copy_syntax(copying)?),* })
+                Ok(Self { $($field: copying.field(stringify!($field), |copying| self.$field.copy_syntax(copying))?),* })
             }
         }
     };
@@ -31,7 +31,7 @@ macro_rules! syntax_enum {
                 copying.check()?;
                 Ok(match self {
                     $(Self::$variant $(($($item),+))? $({$($field),*})? =>
-                        Self::$variant $(($($item.copy_syntax(copying)?),+))? $({$($field: $field.copy_syntax(copying)?),*})?),*
+                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| $field.copy_syntax(copying))?),*})?),*
                 })
             }
         }

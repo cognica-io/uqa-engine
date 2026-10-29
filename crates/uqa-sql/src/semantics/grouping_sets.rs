@@ -76,19 +76,32 @@ impl AnalyzedGroupingSets {
 
     /// Remove only sets that were equal before optimization, preserving multiplicity when distinct expressions later fold to the same value.
     pub fn apply(self, block: &mut QueryBlockPlan) -> Result<(), SQLError> {
+        self.apply_with_retention(block, |sets, keep| {
+            let mut index = 0;
+            sets.retain(|_| {
+                let retained = keep(index);
+                index += 1;
+                retained
+            });
+        })
+    }
+
+    pub(crate) fn apply_with_retention(
+        self,
+        block: &mut QueryBlockPlan,
+        retain: impl FnOnce(&mut Vec<Vec<ScalarExpr>>, &mut dyn FnMut(usize) -> bool),
+    ) -> Result<(), SQLError> {
         if !block.group_distinct || block.grouping_sets.len() != self.original_count {
             return Err(SQLError::Internal(
                 "analyzed grouping selection lost its original sets".into(),
             ));
         }
         let mut retained = self.retained.into_iter().peekable();
-        let mut index = 0;
-        block.grouping_sets.retain(|_| {
+        retain(&mut block.grouping_sets, &mut |index| {
             let keep = retained.peek() == Some(&index);
             if keep {
                 retained.next();
             }
-            index += 1;
             keep
         });
         block.group_distinct = false;

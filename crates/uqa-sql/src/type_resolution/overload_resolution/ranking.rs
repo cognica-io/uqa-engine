@@ -35,7 +35,7 @@ pub fn rank_function_matches<T: RankedFunctionMatch>(
     clippy::too_many_lines,
     reason = "candidate ranking preserves exactness, preferred types and unknown-position ordering"
 )]
-pub(in crate::type_resolution) fn rank_function_matches_with_control<T: RankedFunctionMatch>(
+pub(crate) fn rank_function_matches_with_control<T: RankedFunctionMatch>(
     candidates: &mut Vec<T>,
     argument_types: &[Option<ColumnType>],
     control: &ProductionControl<'_>,

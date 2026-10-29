@@ -136,14 +136,14 @@ fn optional_error(error: SQLError, control: &ProductionControl<'_>) -> Result<()
     }
 }
 
-struct Signature {
-    names: Produced<Vec<Option<String>>>,
-    original: Produced<Vec<Option<ColumnType>>>,
-    effective: Produced<Vec<Option<ColumnType>>>,
-    explicit_variadic: bool,
+pub(super) struct Signature {
+    pub(super) names: Produced<Vec<Option<String>>>,
+    pub(super) original: Produced<Vec<Option<ColumnType>>>,
+    pub(super) effective: Produced<Vec<Option<ColumnType>>>,
+    pub(super) explicit_variadic: bool,
 }
 
-fn signature(
+pub(super) fn signature(
     arguments: &[ScalarExpr],
     params: &[SQLParam],
     infer: &mut InferType<'_>,

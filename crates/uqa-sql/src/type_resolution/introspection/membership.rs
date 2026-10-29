@@ -32,9 +32,9 @@ impl Binder<'_, '_> {
                 });
             }
         }
-        let mut positions = ProductionVec::new(self.control);
+        let mut positions = ProductionVec::new(self.context.control);
         for (index, item) in list.iter().enumerate() {
-            self.control.check()?;
+            self.context.control.check()?;
             if !crate::semantics::references_current_row(item, self.schema.physical_schema()) {
                 positions.push_copy(index)?;
             }
@@ -62,7 +62,7 @@ impl Binder<'_, '_> {
         let shape = MembershipShape {
             array_items: positions,
         };
-        let rewritten = rewrite(value, list, negated, &shape, &self.control)?;
+        let rewritten = rewrite(value, list, negated, &shape, &self.context.control)?;
         let mut expression = self.retain(rewritten);
         self.coerce_membership_operands(&mut expression)?;
         Ok(expression)

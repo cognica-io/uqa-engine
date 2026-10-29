@@ -10,17 +10,20 @@ use crate::ast::{ColumnType, InternalColumnRef};
 use std::collections::{HashMap, HashSet};
 
 /// Lookup maps keyed by column names and identities. Name binding constructs and probes these maps for every column of every bound schema, so they hash with `ahash` instead of the standard library's `SipHash` default.
-pub(crate) type SchemaMap<K, V> = HashMap<K, V, ahash::RandomState>;
-pub(crate) type SchemaSet<T> = HashSet<T, ahash::RandomState>;
+pub(crate) use lookup_map::SchemaMap;
+pub(crate) use lookup_set::SchemaSet;
 use std::sync::Arc;
 
 mod collations;
 mod identity_lookup;
 mod input_slots;
 mod lateral;
+mod lookup_map;
+mod lookup_set;
 mod name_binding;
 mod open_columns;
 mod outer_scope;
+mod production;
 mod record_fields;
 mod relation_presence;
 mod relation_types;
@@ -113,6 +116,7 @@ struct SchemaIndex {
     ambiguous_qualified: SchemaSet<ColumnIdentity>,
     /// Static type metadata stays behind a cold pointer so declared SQL identities do not enlarge or displace the cache-hot row lookup fields above.
     cold: Box<SchemaColdMetadata>,
+    _memory: production::lease::SchemaMemory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

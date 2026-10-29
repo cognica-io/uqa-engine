@@ -12,6 +12,8 @@ use uqa_core::{
     ValueRetentionError,
 };
 
+mod production;
+
 impl CompositeTypeDescriptor {
     /// Capture an expanded record's field binding without reading any tuple payload. Dropped physical positions retain their original width and alignment.
     pub fn expand_record_with_control(

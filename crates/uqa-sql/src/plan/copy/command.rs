@@ -45,26 +45,32 @@ impl Copying<'_> {
             include_descendants: plan.include_descendants,
             columns: self.map(plan.columns.iter(), Self::assignment_target)?,
             overriding: plan.overriding,
-            ctes: self.map(plan.ctes.iter(), Self::cte)?,
-            rows: self.rows(&plan.rows)?,
-            source: plan
-                .source
-                .as_ref()
-                .map(|source| self.boxed(|copying| copying.query(source)))
-                .transpose()?,
+            ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
+            rows: self.field("rows", |copying| copying.rows(&plan.rows))?,
+            source: self.field("source", |copying| {
+                plan.source
+                    .as_ref()
+                    .map(|source| copying.boxed(|copying| copying.query(source)))
+                    .transpose()
+            })?,
             rule_values_input: plan
                 .rule_values_input
                 .as_ref()
                 .map(|input| self.rule_values(input))
                 .transpose()?,
-            on_conflict: plan
-                .on_conflict
-                .as_ref()
-                .map(|conflict| self.conflict(conflict))
-                .transpose()?,
-            returning: self.map(plan.returning.iter(), Self::projection)?,
+            on_conflict: self.field("on_conflict", |copying| {
+                plan.on_conflict
+                    .as_ref()
+                    .map(|conflict| copying.conflict(conflict))
+                    .transpose()
+            })?,
+            returning: self.field("returning", |copying| {
+                copying.map(plan.returning.iter(), Self::projection)
+            })?,
             returning_aliases: self.returning_aliases(&plan.returning_aliases)?,
-            subqueries: self.map(plan.subqueries.iter(), Self::query)?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(plan.subqueries.iter(), Self::query)
+            })?,
             view_checks: self.map(plan.view_checks.iter(), Self::view_check)?,
             view_rule_relations: self.texts(&plan.view_rule_relations)?,
             view_rule_insert_plans: self.map(
@@ -95,17 +101,26 @@ impl Copying<'_> {
             target_qualifier: self.text(&plan.target_qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
-            assignments: self.map(plan.assignments.iter(), Self::assignment)?,
-            predicate: self.optional_scalar(plan.predicate.as_ref())?,
-            ctes: self.map(plan.ctes.iter(), Self::cte)?,
-            source: plan
-                .source
-                .as_ref()
-                .map(|source| self.boxed(|copying| copying.source(source)))
-                .transpose()?,
-            returning: self.map(plan.returning.iter(), Self::projection)?,
+            assignments: self.field("assignments", |copying| {
+                copying.map(plan.assignments.iter(), Self::assignment)
+            })?,
+            predicate: self.field("predicate", |copying| {
+                copying.optional_scalar(plan.predicate.as_ref())
+            })?,
+            ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
+            source: self.field("source", |copying| {
+                plan.source
+                    .as_ref()
+                    .map(|source| copying.boxed(|copying| copying.source(source)))
+                    .transpose()
+            })?,
+            returning: self.field("returning", |copying| {
+                copying.map(plan.returning.iter(), Self::projection)
+            })?,
             returning_aliases: self.returning_aliases(&plan.returning_aliases)?,
-            subqueries: self.map(plan.subqueries.iter(), Self::query)?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(plan.subqueries.iter(), Self::query)
+            })?,
             view_checks: self.map(plan.view_checks.iter(), Self::view_check)?,
             view_rule_relations: self.texts(&plan.view_rule_relations)?,
             view_rule_update_plans: self.map(
@@ -136,16 +151,23 @@ impl Copying<'_> {
             target_qualifier: self.text(&plan.target_qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
-            predicate: self.optional_scalar(plan.predicate.as_ref())?,
-            ctes: self.map(plan.ctes.iter(), Self::cte)?,
-            source: plan
-                .source
-                .as_ref()
-                .map(|source| self.boxed(|copying| copying.source(source)))
-                .transpose()?,
-            returning: self.map(plan.returning.iter(), Self::projection)?,
+            predicate: self.field("predicate", |copying| {
+                copying.optional_scalar(plan.predicate.as_ref())
+            })?,
+            ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
+            source: self.field("source", |copying| {
+                plan.source
+                    .as_ref()
+                    .map(|source| copying.boxed(|copying| copying.source(source)))
+                    .transpose()
+            })?,
+            returning: self.field("returning", |copying| {
+                copying.map(plan.returning.iter(), Self::projection)
+            })?,
             returning_aliases: self.returning_aliases(&plan.returning_aliases)?,
-            subqueries: self.map(plan.subqueries.iter(), Self::query)?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(plan.subqueries.iter(), Self::query)
+            })?,
             view_rule_relations: self.texts(&plan.view_rule_relations)?,
             view_rule_returning: plan
                 .view_rule_returning
@@ -157,7 +179,7 @@ impl Copying<'_> {
 
     pub(super) fn merge(&mut self, plan: &MergePlan) -> Result<MergePlan> {
         Ok(MergePlan {
-            ctes: self.map(plan.ctes.iter(), Self::cte)?,
+            ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
             target: self.text(&plan.target)?,
             statement_privilege_subject: self.role(plan.statement_privilege_subject.as_ref())?,
             target_privilege_subject: self.role(plan.target_privilege_subject.as_ref())?,
@@ -165,12 +187,22 @@ impl Copying<'_> {
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
             target_predicate: self.optional_scalar(plan.target_predicate.as_ref())?,
-            source: self.boxed(|copying| copying.source(&plan.source))?,
-            join_condition: self.scalar(&plan.join_condition)?,
-            when_clauses: self.map(plan.when_clauses.iter(), Self::merge_when)?,
-            returning: self.map(plan.returning.iter(), Self::projection)?,
+            source: self.field("source", |copying| {
+                copying.boxed(|copying| copying.source(&plan.source))
+            })?,
+            join_condition: self.field("join_condition", |copying| {
+                copying.scalar(&plan.join_condition)
+            })?,
+            when_clauses: self.field("when_clauses", |copying| {
+                copying.map(plan.when_clauses.iter(), Self::merge_when)
+            })?,
+            returning: self.field("returning", |copying| {
+                copying.map(plan.returning.iter(), Self::projection)
+            })?,
             returning_aliases: self.returning_aliases(&plan.returning_aliases)?,
-            subqueries: self.map(plan.subqueries.iter(), Self::query)?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(plan.subqueries.iter(), Self::query)
+            })?,
             view_checks: self.map(plan.view_checks.iter(), Self::view_check)?,
         })
     }

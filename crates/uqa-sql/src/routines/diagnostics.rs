@@ -8,6 +8,9 @@
 
 use crate::ast::CreateFunction;
 
+mod production;
+pub use production::sql_context_with_control;
+
 pub enum SQLRoutineStage {
     Inlining,
     Startup,
@@ -15,13 +18,12 @@ pub enum SQLRoutineStage {
 }
 
 pub fn sql_context(definition: &CreateFunction, stage: SQLRoutineStage) -> String {
-    let name = crate::compiler::parse_regobject_name(&definition.name)
-        .and_then(|mut names| names.pop())
-        .unwrap_or_else(|| definition.name.clone());
-    let stage = match stage {
-        SQLRoutineStage::Inlining => "during inlining".to_string(),
-        SQLRoutineStage::Startup => "during startup".to_string(),
-        SQLRoutineStage::Statement(position) => format!("statement {position}"),
-    };
-    format!("SQL function \"{name}\" {stage}")
+    sql_context_with_control(
+        definition,
+        stage,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine context")
+    .into_uncontrolled()
+    .expect("ordinary routine context has no reservation")
 }

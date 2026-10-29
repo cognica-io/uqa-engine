@@ -26,7 +26,7 @@ impl ColumnType {
     }
 
     /// Copy a domain's names and base type, charging the boxed base.
-    fn domain_with_control(
+    pub(crate) fn domain_with_control(
         schema: &str,
         name: &str,
         oid: u32,

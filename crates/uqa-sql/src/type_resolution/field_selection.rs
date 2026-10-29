@@ -122,13 +122,80 @@ pub fn anonymous_field_position(field: &str, width: usize) -> Option<usize> {
         .filter(|position| *position < width)
 }
 
-/// The type of a field of a value of type `base`, for expressions that are neither whole-row references nor row constructors. `None` is an unresolved type: a dynamic document value, or a catalog that binding cannot consult.
-pub fn value_field_type(
+/// Copy only the selected attribute while its immutable catalog descriptor is borrowed.
+pub(crate) fn value_field_type_with_control(
     base: Option<&ColumnType>,
     field: &str,
     resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<ColumnType>, SQLError> {
-    value_field_metadata(base, field, resolver).map(|selected| selected.map(|(ty, _)| ty))
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    let Some(base) = base else {
+        return Ok(None);
+    };
+    let mut composite = base;
+    while let ColumnType::Domain { base, .. } = composite {
+        composite = base;
+    }
+    match composite {
+        ColumnType::Composite(reference) => {
+            let Some(catalog) = resolver.and_then(FunctionTypeResolver::composite_types) else {
+                return Ok(None);
+            };
+            let descriptor = crate::expr::composites::descriptor(Some(catalog), reference.oid)?;
+            let (_, attribute) = descriptor
+                .attribute(field)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42703".into(),
+                    message: format!(
+                        "column \"{field}\" not found in data type {}",
+                        base.display_name()
+                    ),
+                })?;
+            attribute
+                .ty
+                .clone_with_control(control)
+                .map(Some)
+                .map_err(Into::into)
+        }
+        ColumnType::Record => Err(undefined_record_field(field)),
+        other => Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!(
+                "column notation .{field} applied to type {}, which is not a composite type",
+                other.display_name()
+            ),
+        }),
+    }
+}
+
+pub(crate) fn constant_field_type_with_control(
+    expression: &crate::ScalarExpr,
+    field: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Option<Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError>> {
+    let value = match expression {
+        crate::ScalarExpr::Literal(value) => value,
+        crate::ScalarExpr::RetainedLiteral(literal) if literal.declaration.is_none() => {
+            literal.value.resident_value()?
+        }
+        _ => return None,
+    };
+    match value {
+        uqa_core::Value::Row(values) => Some((|| {
+            let position = anonymous_field_position(field, values.len())
+                .ok_or_else(|| undefined_record_field(field))?;
+            super::common::value_type_with_control(&values[position], control)
+        })()),
+        uqa_core::Value::Record(fields) => Some((|| {
+            let (_, value) = fields
+                .iter()
+                .find(|(name, _)| name.as_str() == field)
+                .ok_or_else(|| undefined_record_field(field))?;
+            super::common::value_type_with_control(value, control)
+        })()),
+        _ => None,
+    }
 }
 
 /// Select type and declaration collation together from one catalog generation.
@@ -192,55 +259,6 @@ pub(crate) fn value_field_selection(
             ),
         }),
     }
-}
-
-/// Borrow an undeclared folded row from either literal owner without decoding spill storage. Declared literals resolve fields through their bound SQL type.
-pub(crate) fn constant_field_type(
-    expression: &crate::ScalarExpr,
-    field: &str,
-) -> Option<Result<Option<ColumnType>, SQLError>> {
-    let value = match expression {
-        crate::ScalarExpr::Literal(value) => value,
-        crate::ScalarExpr::RetainedLiteral(literal) if literal.declaration.is_none() => {
-            literal.value.resident_value()?
-        }
-        _ => return None,
-    };
-    literal_field_type(value, field)
-}
-
-/// The field of a folded row constant: an anonymous row's `fN` field or a named record's field.
-pub fn literal_field_type(
-    value: &uqa_core::Value,
-    field: &str,
-) -> Option<Result<Option<ColumnType>, SQLError>> {
-    match value {
-        uqa_core::Value::Row(values) => Some(row_field_type(
-            &values
-                .iter()
-                .map(super::common::value_type)
-                .collect::<Vec<_>>(),
-            field,
-        )),
-        uqa_core::Value::Record(fields) => Some(
-            fields
-                .iter()
-                .find(|(name, _)| name.as_str() == field)
-                .map(|(_, value)| super::common::value_type(value))
-                .ok_or_else(|| undefined_record_field(field)),
-        ),
-        _ => None,
-    }
-}
-
-/// The type of an anonymous row constructor's field, given the types of its items.
-pub fn row_field_type(
-    items: &[Option<ColumnType>],
-    field: &str,
-) -> Result<Option<ColumnType>, SQLError> {
-    anonymous_field_position(field, items.len())
-        .map(|position| items[position].clone())
-        .ok_or_else(|| undefined_record_field(field))
 }
 
 #[cfg(test)]

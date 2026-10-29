@@ -9,6 +9,9 @@
 
 mod arguments;
 mod operators;
+mod owned;
+mod owned_arguments;
+mod owned_substitution;
 mod properties;
 mod table;
 use std::sync::Arc;
@@ -41,6 +44,21 @@ pub trait RoutinePlanExpressions {
         &self,
         expression: &ScalarExpr,
     ) -> Result<uqa_core::Value, SQLError>;
+
+    /// External evaluators may return an independently owned value. Native evaluators override this boundary and admit their result while evaluating it.
+    fn evaluate_constant_routine_with_control(
+        &self,
+        expression: &ScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_core::Value>, SQLError> {
+        control.check()?;
+        let value = self.evaluate_constant_routine(expression)?;
+        if control.budget().is_none() {
+            Ok(control.finish(value, None)?)
+        } else {
+            Ok(control.copy_value(&value)?)
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -79,6 +97,15 @@ impl RoutineInliningContext<'_> {
         schema: &crate::RowSchema,
     ) -> Result<crate::ast::FunctionVolatility, SQLError> {
         properties::volatility(self, expression, schema)
+    }
+
+    pub fn expression_volatility_with_control(
+        &self,
+        expression: &ScalarExpr,
+        schema: &crate::RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::ast::FunctionVolatility, SQLError> {
+        properties::volatility_with_control(self, expression, schema, control)
     }
 
     /// Try the selected routine only; a same-named overload cannot replace it.
@@ -310,69 +337,22 @@ impl RoutineInliningContext<'_> {
         binding: &FunctionBinding,
         arguments: &[ScalarExpr],
     ) -> Result<Option<(FunctionBinding, Vec<ScalarExpr>)>, SQLError> {
-        let Some(function) = self.selected_function(binding) else {
-            return Ok(None);
-        };
-        let Some(invocation) = binding.invocation.as_deref() else {
-            return Ok(None);
-        };
-        let specialized = super::invocation::specialized_definition(&function.def, invocation)?;
-        let definition = specialized.as_ref().unwrap_or(&function.def);
-        let Some(mut arguments) = arguments::prepare(self, definition, invocation, arguments)?
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        let Some((selected, arguments)) =
+            self.materialized_owned_arguments(binding, arguments, &control)?
         else {
             return Ok(None);
         };
-        let mut selected = binding.clone();
-        let invocation = selected.invocation.as_mut().expect("selected invocation");
-        invocation.argument_positions = definition
-            .params
-            .iter()
-            .enumerate()
-            .filter_map(|(index, parameter)| {
-                super::body_parameters::is_sql_body_parameter(parameter).then_some(index)
-            })
-            .collect();
-        invocation.argument_targets = invocation
-            .argument_positions
-            .iter()
-            .map(|index| invocation.parameter_types[*index].clone())
-            .collect();
-        invocation.argument_sources = invocation
-            .argument_targets
-            .iter()
-            .cloned()
-            .map(Some)
-            .collect();
-        if let crate::ast::RoutineVariadicMode::Expanded { parameter_index } =
-            invocation.variadic_mode
-        {
-            invocation.variadic_mode =
-                crate::ast::RoutineVariadicMode::Explicit { parameter_index };
-        }
-        if let crate::ast::RoutineVariadicMode::Explicit { parameter_index } =
-            invocation.variadic_mode
-        {
-            let position = invocation
-                .argument_positions
-                .iter()
-                .position(|index| *index == parameter_index)
-                .ok_or_else(|| SQLError::Internal("variadic call lost its argument".into()))?;
-            let value = std::mem::replace(
-                &mut arguments[position],
-                ScalarExpr::Literal(uqa_core::Value::Null),
-            );
-            let marker =
-                FunctionBinding::dispatched(crate::ast::FunctionDispatch::VariadicArgument);
-            arguments[position] = ScalarExpr::Func {
-                name: marker.name.clone(),
-                binding: Some(marker),
-                args: vec![value],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-                order_syntax: crate::ast::FunctionCallSyntax::Ordinary,
-            };
-        }
+        let selected = selected
+            .into_uncontrolled()
+            .expect("ordinary selected binding");
+        let arguments = arguments
+            .finish(&control)?
+            .into_uncontrolled()
+            .expect("ordinary call arguments");
+        let ScalarExpr::Or(arguments) = arguments else {
+            unreachable!("routine argument container");
+        };
         Ok(Some((selected, arguments)))
     }
 

@@ -390,6 +390,7 @@ impl RowSchema {
                     local_width,
                     lateral_restrictions,
                 }),
+                _memory: super::production::lease::SchemaMemory::default(),
             }),
         }
     }

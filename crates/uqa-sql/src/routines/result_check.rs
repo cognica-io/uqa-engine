@@ -10,12 +10,15 @@ use super::declaration::RoutineTypeCatalog;
 use crate::{
     ast::{ColumnType, CreateFunction, FunctionReturns},
     binding::statements::AnalyzedResult,
-    expr::composites,
-    type_resolution::canonical_routine_type_name,
     SQLError,
 };
 
 mod anonymous;
+mod production;
+pub use production::{
+    declared_sql_function_result_with_control, sql_function_composite_columns_with_control,
+    sql_function_result_layout_with_control,
+};
 pub(crate) mod retention;
 pub use anonymous::{
     validate_anonymous_record_result, validate_procedural_record_identity,
@@ -63,87 +66,17 @@ pub fn sql_function_result_layout(
     def: &CreateFunction,
     last: Option<&AnalyzedResult>,
 ) -> Result<SQLFunctionResultLayout, SQLError> {
-    let mut layout = declared_sql_function_result(types, def)?;
-    if layout.kind == SQLFunctionResultKind::Void {
-        return Ok(layout);
-    }
-    let mismatch = |detail: String| -> Result<SQLError, SQLError> {
-        Ok(SQLError::Diagnostic {
-            sqlstate: "42P13".into(),
-            message: format!(
-                "return type mismatch in function declared to return {}",
-                types.format_type(&layout.declared_type)?
-            ),
-            detail: Some(detail),
-            hint: None,
-        })
-    };
-    let Some(columns) = last.and_then(AnalyzedResult::column_types) else {
-        return Err(mismatch(
-            "Function's final statement must be SELECT or INSERT/UPDATE/DELETE/MERGE RETURNING."
-                .into(),
-        )?);
-    };
-    if let [actual] = columns {
-        layout.source_record = last
-            .and_then(|result| result.record_fields(0))
-            .map(|fields| fields.to_vec())
-            .or(sql_function_composite_columns(types, actual.as_ref())?);
-    }
-    if layout.kind == SQLFunctionResultKind::Value {
-        let [actual] = columns else {
-            return Err(mismatch(
-                "Final statement must return exactly one column.".into(),
-            )?);
-        };
-        if let Some(actual) = actual {
-            if !crate::assignment_type_compatible(actual, &layout.declared_type) {
-                return Err(mismatch(format!(
-                    "Actual return type is {}.",
-                    types.format_type(actual)?
-                ))?);
-            }
-        }
-        return Ok(layout);
-    }
-    if !def.is_procedure {
-        if let [Some(actual)] = columns {
-            if crate::assignment_type_compatible(actual, &layout.declared_type) {
-                layout.kind = SQLFunctionResultKind::Value;
-                if matches!(actual, ColumnType::Record)
-                    && matches!(layout.declared_type, ColumnType::Composite(_))
-                {
-                    if let Some(source) = &layout.source_record {
-                        check_composite_assignment(types, source, &layout)?;
-                    }
-                }
-                return Ok(layout);
-            }
-        }
-    }
-    if let Some(expected) = &layout.columns {
-        for (position, actual) in columns.iter().enumerate() {
-            let Some(expected) = expected.get(position) else {
-                return Err(mismatch(
-                    "Final statement returns too many columns.".into(),
-                )?);
-            };
-            if let Some(actual) = actual {
-                if !crate::assignment_type_compatible(actual, &expected.ty) {
-                    return Err(mismatch(format!(
-                        "Final statement returns {} instead of {} at column {}.",
-                        types.format_type(actual)?,
-                        types.format_type(&expected.ty)?,
-                        position + 1
-                    ))?);
-                }
-            }
-        }
-        if columns.len() < expected.len() {
-            return Err(mismatch("Final statement returns too few columns.".into())?);
-        }
-    }
-    Ok(layout)
+    sql_function_result_layout_with_control(
+        types,
+        def,
+        last,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|layout| {
+        layout
+            .into_uncontrolled()
+            .expect("ordinary function result layout")
+    })
 }
 
 /// Resolve the result declaration independently of a final statement.
@@ -151,104 +84,16 @@ pub fn declared_sql_function_result(
     types: &dyn RoutineTypeCatalog,
     def: &CreateFunction,
 ) -> Result<SQLFunctionResultLayout, SQLError> {
-    let mut outputs = def.output_params();
-    if def.is_procedure || outputs.clone().nth(1).is_some() {
-        let columns = outputs
-            .map(|parameter| {
-                Ok(SQLFunctionResultColumn {
-                    name: parameter.name.clone(),
-                    ty: types.resolve_catalog_column_type_name(&parameter.type_name)?,
-                })
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?;
-        return Ok(SQLFunctionResultLayout {
-            kind: if columns.is_empty() {
-                SQLFunctionResultKind::Void
-            } else {
-                SQLFunctionResultKind::Tuple
-            },
-            declared_type: ColumnType::Record,
-            source_record: None,
-            columns: Some(columns),
-        });
-    }
-    let type_name = match (outputs.next(), &def.returns) {
-        (Some(parameter), _) => parameter.type_name.as_str(),
-        (None, FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) => {
-            type_name.as_str()
-        }
-        (None, FunctionReturns::None | FunctionReturns::Table) => "void",
-    };
-    let declared_type = match canonical_routine_type_name(type_name).as_str() {
-        "void" => ColumnType::Void,
-        "record" => ColumnType::Record,
-        _ => types.resolve_catalog_column_type_name(type_name)?,
-    };
-    let (kind, columns) = match &declared_type {
-        ColumnType::Void => (SQLFunctionResultKind::Void, None),
-        ColumnType::Record => (SQLFunctionResultKind::Tuple, None),
-        ColumnType::Composite(reference) => {
-            let descriptor = composites::descriptor(types.composite_types(), reference.oid)?;
-            let columns = descriptor
-                .attributes
-                .iter()
-                .map(|attribute| SQLFunctionResultColumn {
-                    name: attribute.name.clone(),
-                    ty: attribute.ty.clone(),
-                })
-                .collect();
-            (SQLFunctionResultKind::Tuple, Some(columns))
-        }
-        _ => (SQLFunctionResultKind::Value, None),
-    };
-    Ok(SQLFunctionResultLayout {
-        kind,
-        declared_type,
-        source_record: None,
-        columns,
+    declared_sql_function_result_with_control(
+        types,
+        def,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|layout| {
+        layout
+            .into_uncontrolled()
+            .expect("ordinary function declaration layout")
     })
-}
-
-fn check_composite_assignment(
-    types: &dyn RoutineTypeCatalog,
-    source: &[Option<ColumnType>],
-    layout: &SQLFunctionResultLayout,
-) -> Result<(), SQLError> {
-    let target = layout.columns.as_deref().unwrap_or_default();
-    let detail = match source.len().cmp(&target.len()) {
-        std::cmp::Ordering::Less => Some("Input has too few columns.".into()),
-        std::cmp::Ordering::Greater => Some("Input has too many columns.".into()),
-        std::cmp::Ordering::Equal => source
-            .iter()
-            .zip(target)
-            .enumerate()
-            .find_map(|(index, (source, target))| {
-                source
-                    .as_ref()
-                    .filter(|source| !crate::assignment_type_compatible(source, &target.ty))
-                    .map(|source| {
-                        Ok::<_, SQLError>(format!(
-                            "Cannot cast type {} to {} in column {}.",
-                            types.format_type(source)?,
-                            types.format_type(&target.ty)?,
-                            index + 1
-                        ))
-                    })
-            })
-            .transpose()?,
-    };
-    if let Some(detail) = detail {
-        return Err(SQLError::Diagnostic {
-            sqlstate: "42846".into(),
-            message: format!(
-                "cannot cast type record to {}",
-                types.format_type(&layout.declared_type)?
-            ),
-            detail: Some(detail),
-            hint: None,
-        });
-    }
-    Ok(())
 }
 
 /// Read the live descriptor of a named row value. An anonymous row's descriptor must come from expression analysis, rather than inspecting its values.
@@ -256,20 +101,18 @@ pub fn sql_function_composite_columns(
     types: &dyn RoutineTypeCatalog,
     source: Option<&ColumnType>,
 ) -> Result<Option<Vec<Option<ColumnType>>>, SQLError> {
-    match source {
-        Some(ColumnType::Composite(reference)) => {
-            let descriptor = composites::descriptor(types.composite_types(), reference.oid)?;
-            Ok(Some(
-                descriptor
-                    .attributes
-                    .iter()
-                    .map(|attribute| Some(attribute.ty.clone()))
-                    .collect(),
-            ))
-        }
-        Some(ColumnType::Domain { base, .. }) => sql_function_composite_columns(types, Some(base)),
-        _ => Ok(None),
-    }
+    sql_function_composite_columns_with_control(
+        types,
+        source,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|columns| {
+        columns.map(|columns| {
+            columns
+                .into_uncontrolled()
+                .expect("ordinary composite result columns")
+        })
+    })
 }
 
 /// A whole returned record must match the caller's tuple descriptor; its fields are not assignment-coerced as independently selected columns are.

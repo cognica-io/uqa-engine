@@ -7,7 +7,11 @@
 //! One registry and binding path for implemented fixed-signature `PostgreSQL` built-ins.
 
 mod binding;
+mod owned;
+pub(super) use owned::bind_owned_call;
+mod production;
 pub(super) use binding::bind_call_in_place_with_control;
+pub(super) use production::{overloads_with_control, resolve_overload_with_control};
 mod registry;
 mod regular_expressions;
 mod selected;
@@ -125,44 +129,6 @@ pub fn fixed_builtin_return_type_with_control(
         .transpose()
 }
 
-pub(super) fn resolve_type(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-    explicit_variadic: bool,
-    params: &[SQLParam],
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<ColumnType>, SQLError> {
-    let argument_names = argument_names(args);
-    let argument_types = effective_argument_types(args, argument_types, params);
-    if resolver.is_none() {
-        return resolve_return_type_with_control(
-            name,
-            binding,
-            &argument_names,
-            &argument_types,
-            explicit_variadic,
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )
-        .map(|ty| {
-            Some(
-                ty.into_uncontrolled()
-                    .expect("ordinary fixed result type has no reservation"),
-            )
-        });
-    }
-    resolve_overload(
-        name,
-        binding,
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-        resolver,
-    )
-    .map(|overload| Some(overload.return_type))
-}
-
 /// Infer the selected result directly from the borrowed descriptor without constructing an unused execution binding.
 pub(super) fn resolve_return_type_with_control(
     name: &str,
@@ -195,51 +161,13 @@ pub(super) fn resolve_overload(
     explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedFunctionOverload, SQLError> {
-    crate::expr::validate_named_argument_order(argument_names.iter().map(Option::as_deref))?;
-    if let Some(resolver) = resolver {
-        let builtins = overloads(name).ok_or_else(|| {
-            super::function_resolution_error(
-                "42883",
-                name,
-                argument_names,
-                argument_types,
-                "does not exist",
-            )
-        })?;
-        if let Some(selected) = resolver.resolve_function_overload_with_builtins(
-            name,
-            binding,
-            argument_names,
-            argument_types,
-            explicit_variadic,
-            &builtins,
-        )? {
-            if let Some(overload) = builtins.iter().find(|overload| {
-                selected.binding.builtin
-                    && overload.argument_types.contains(&ColumnType::AnyArray)
-                    && builtin_binding_matches(overload, &selected.binding)
-            }) {
-                if let Some(matched) = match_builtin_function_overload(
-                    overload.clone(),
-                    argument_names,
-                    argument_types,
-                ) {
-                    validate_polymorphic_arguments(
-                        &overload.argument_types,
-                        argument_types,
-                        &matched.argument_positions,
-                    )?;
-                }
-            }
-            return Ok(selected);
-        }
-    }
-    selection::resolve_overload_with_control(
+    resolve_overload_with_control(
         name,
         binding,
         argument_names,
         argument_types,
         explicit_variadic,
+        resolver,
         &uqa_core::memory::ProductionControl::uncontrolled(),
     )
     .map(|selected| {
@@ -607,28 +535,13 @@ fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
 }
 
 pub(crate) fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
-    let (name, signatures) = registry::lookup(name)?;
-    Some(
-        signatures
-            .iter()
-            .map(|signature| BuiltinFunctionOverload {
-                variadic: false,
-                name: format!("pg_catalog.{name}"),
-                argument_names: if signature.argument_names.is_empty() {
-                    vec![None; signature.argument_types.len()]
-                } else {
-                    signature
-                        .argument_names
-                        .iter()
-                        .map(|name| Some((*name).into()))
-                        .collect()
-                },
-                argument_types: signature.argument_types.to_vec(),
-                default_arguments: signature.default_arguments,
-                return_type: signature.return_type.clone(),
-            })
-            .collect(),
-    )
+    overloads_with_control(name, &uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("ordinary builtin descriptors cannot be cancelled or limited")
+        .map(|overloads| {
+            overloads
+                .into_uncontrolled()
+                .expect("ordinary builtin descriptors")
+        })
 }
 
 #[cfg(test)]

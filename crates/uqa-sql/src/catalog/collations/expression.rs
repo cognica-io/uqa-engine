@@ -143,14 +143,10 @@ pub(crate) fn select_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<u32, SQLError> {
     control.check()?;
-    assert!(
-        catalog.is_none() || control.budget().is_none(),
-        "catalog callbacks are resolved outside retained generated inference"
-    );
     if let Some(ty) = ty.filter(|ty| !crate::schema::composites::type_is_collatable(ty)) {
         let ty = ty.without_type_modifiers_with_control(control)?;
         let name = match catalog {
-            Some(catalog) => control.finish(catalog.format_type_name(&ty)?, None)?,
+            Some(catalog) => catalog.format_type_name_with_control(&ty, control)?,
             None => ty.display_name_with_control(control)?,
         };
         return Err(diagnostic(
@@ -163,7 +159,7 @@ pub(crate) fn select_with_control(
         return valid_oid(oid);
     }
     if let Some(oid) = catalog
-        .map(|catalog| catalog.resolve_collation_name(name))
+        .map(|catalog| catalog.resolve_collation_name_with_control(name, control))
         .transpose()?
         .flatten()
     {

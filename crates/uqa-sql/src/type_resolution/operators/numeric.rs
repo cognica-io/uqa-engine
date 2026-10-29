@@ -44,7 +44,9 @@ pub(in crate::type_resolution) fn bind_call(
 }
 
 mod binding;
+mod owned;
 pub(in crate::type_resolution) use binding::bind_call_in_place_with_control;
+pub(in crate::type_resolution) use owned::bind_owned_call;
 
 mod production;
 pub use production::numeric_operator_types_with_control;

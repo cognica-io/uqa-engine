@@ -9,6 +9,14 @@
 use crate::{ast::FunctionBinding, ColumnType, SQLError, ScalarExpr};
 use uqa_core::memory::{MemoryReservation, Produced, ProductionControl, ProductionString};
 
+mod fields;
+mod arguments;
+pub(super) use arguments::Arguments;
+mod errors;
+pub use fields::FunctionBindingParts;
+mod owned;
+pub use owned::OwnedBindingCall;
+
 /// Every moved Func field keeps its incoming reservation until its replacement is returned or destroyed, including decorations whose payloads may share that lease.
 #[derive(Debug)]
 pub(super) struct BindingCall {

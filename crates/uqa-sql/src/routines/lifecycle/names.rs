@@ -9,6 +9,11 @@
 use crate::catalog::roles::RoleReference;
 use crate::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_core::RelationIdentity;
+mod production;
+pub use production::{
+    require_routine_schema_usage_with_control, routine_lookup_keys_with_control,
+    routine_volatility_lookup_keys_with_control,
+};
 
 /// Immutable routine address and declared input types, independent of invocation coercions.
 pub struct RoutineCatalogIdentity {
@@ -22,10 +27,62 @@ pub trait RoutineNameCatalog {
     fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
     fn current_role(&self) -> RoleReference;
     fn search_path(&self) -> Vec<String>;
+    fn search_path_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<String>>, SQLError> {
+        control.check()?;
+        let path = self.search_path();
+        if control.budget().is_none() {
+            return Ok(control.finish(path, None)?);
+        }
+        crate::plan::copy::copy_syntax_with_control(&path, control)
+    }
     /// The canonical name of this session's temporary namespace after its allocation.
     fn temporary_schema(&self) -> Option<String>;
+    fn temporary_schema_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
+        control.check()?;
+        self.temporary_schema()
+            .map(|name| {
+                if control.budget().is_none() {
+                    Ok(control.finish(name, None)?)
+                } else {
+                    control.copy_text(&name).map_err(Into::into)
+                }
+            })
+            .transpose()
+    }
+    fn schema_exists_with_control(
+        &self,
+        schema: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        Ok(self.schema_security(schema).is_some())
+    }
     fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
     fn schema_has_usage(&self, schema: &str, role: &RoleReference) -> bool;
+    fn require_schema_usage_with_control(
+        &self,
+        schema: &str,
+        role: &RoleReference,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.require_schema_usage(schema, role)
+    }
+    fn schema_has_usage_with_control(
+        &self,
+        schema: &str,
+        role: &RoleReference,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        Ok(self.schema_has_usage(schema, role))
+    }
     /// `format_type_be` of a routine argument type: a user-defined type, recorded by identity, is spelled by its current name.
     fn routine_type_display(&self, type_name: &str) -> String;
     /// `format_procedure` of an existing routine, including search-path qualification and its current input type names. Call before retaining the routine registry's write guard.
@@ -36,43 +93,15 @@ pub fn routine_lookup_keys(
     catalog: &dyn RoutineNameCatalog,
     name: &str,
 ) -> Result<Vec<String>, SQLError> {
-    let (schema, local_name) =
-        RelationIdentity::parse_reference(name).map_err(|error| SQLError::Routine {
-            sqlstate: "42602".into(),
-            message: format!("invalid routine name `{name}`: {error}"),
-        })?;
-    if let Some(schema) = schema {
-        let schema = if schema == "pg_temp" {
-            catalog.temporary_schema().unwrap_or(schema)
-        } else {
-            schema
-        };
-        if catalog.schema_security(&schema).is_none() {
-            return Err(SQLError::Routine {
-                sqlstate: "3F000".into(),
-                message: format!("schema \"{schema}\" does not exist"),
-            });
-        }
-        catalog.require_schema_usage(&schema, &catalog.current_role())?;
-        return Ok(vec![
-            RelationIdentity::new(schema, local_name).qualified_name()
-        ]);
-    }
-    let current_user = catalog.current_role();
-    let mut search_path = catalog.search_path();
-    if !search_path.iter().any(|schema| schema == "pg_catalog") {
-        search_path.insert(0, "pg_catalog".into());
-    }
-    Ok(search_path
-        .into_iter()
-        .filter(|schema| {
-            schema != "pg_temp"
-                && !crate::catalog::temporary_namespace::is_temporary_schema_name(schema)
-                && catalog.schema_security(schema).is_some()
-                && catalog.schema_has_usage(schema, &current_user)
-        })
-        .map(|schema| RelationIdentity::new(schema, &local_name).qualified_name())
-        .collect())
+    routine_lookup_keys_with_control(
+        catalog,
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|keys| {
+        keys.into_uncontrolled()
+            .expect("ordinary routine namespace keys")
+    })
 }
 
 /// Catalog command lookup includes implicit `pg_catalog` in `PostgreSQL`'s search-path position.

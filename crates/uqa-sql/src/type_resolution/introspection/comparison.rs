@@ -8,47 +8,12 @@
 
 use super::{Binder, BindingCall, ColumnType, Produced, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionDispatch};
-use crate::type_resolution::{common::base_type, operators::binary_operator_types_with_control};
+use crate::type_resolution::common::base_type;
 use uqa_core::Value;
 
 pub(super) use crate::type_resolution::common::unknown_input;
 
 impl Binder<'_, '_> {
-    /// Selected operand and result types for a binary operator before its inputs are coerced.
-    pub(super) fn binary_operand_types(
-        &self,
-        op: BinaryOp,
-        left: &ScalarExpr,
-        right: &ScalarExpr,
-    ) -> Result<Option<Produced<[ColumnType; 3]>>, SQLError> {
-        let left_type = self.common_context(left)?;
-        let right_type = self.common_context(right)?;
-        self.operator_types(op, left, left_type, right, right_type)
-    }
-
-    fn operator_types(
-        &self,
-        op: BinaryOp,
-        left: &ScalarExpr,
-        left_type: Option<Produced<ColumnType>>,
-        right: &ScalarExpr,
-        right_type: Option<Produced<ColumnType>>,
-    ) -> Result<Option<Produced<[ColumnType; 3]>>, SQLError> {
-        // A schema-less column is a dynamic carrier, not a PostgreSQL unknown literal. Its runtime value cannot be narrowed using only the other operand.
-        if (left_type.is_none() && !unknown_input(left))
-            || (right_type.is_none() && !unknown_input(right))
-        {
-            return Ok(None);
-        }
-        binary_operator_types_with_control(
-            op,
-            left_type.as_deref(),
-            right_type.as_deref(),
-            &self.control,
-        )
-        .map(Some)
-    }
-
     /// Coerce one operand to the argument type its selected operator declares. An `unknown` literal already carries text, so a text target needs no conversion.
     pub(super) fn operand_cast(
         &mut self,
@@ -162,14 +127,14 @@ impl Binder<'_, '_> {
             None => None,
             Some(ty) if crate::type_resolution::array_element_type(ty).is_some() => {
                 crate::type_resolution::array_element_type(ty)
-                    .map(|element| element.clone_with_control(&self.control))
+                    .map(|element| element.clone_with_control(&self.context.control))
                     .transpose()?
             }
             Some(_) => return Ok(()),
         };
         let element = element_type
             .as_deref()
-            .map(|element| element.clone_with_control(&self.control))
+            .map(|element| element.clone_with_control(&self.context.control))
             .transpose()?;
         let Some(types) = self
             .semantic(self.operator_types(op, value, value_type, array, element_type))?
@@ -184,8 +149,8 @@ impl Binder<'_, '_> {
             .is_some_and(|element| *element != types[1]);
         if array_type.is_none() || relabel {
             let array_target = ColumnType::array_with_control(
-                types[1].clone_with_control(&self.control)?,
-                &self.control,
+                types[1].clone_with_control(&self.context.control)?,
+                &self.context.control,
             )?;
             self.common_cast(array, &array_target)?;
         }
@@ -193,7 +158,7 @@ impl Binder<'_, '_> {
     }
 }
 
-fn comparison_operator(operator: &str) -> Option<BinaryOp> {
+pub(super) fn comparison_operator(operator: &str) -> Option<BinaryOp> {
     Some(match operator {
         "=" => BinaryOp::Equal,
         "<>" | "!=" => BinaryOp::NotEqual,

@@ -7,6 +7,7 @@
 //! Type names stream into the caller's ordinary or admitted destination without intermediate owned names.
 
 use super::ColumnType;
+mod production;
 use std::fmt;
 use uqa_core::{
     memory::{Produced, ProductionControl},
@@ -37,26 +38,14 @@ impl ColumnType {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
-        control.format(format_args!(
-            "{}",
-            TypeName {
-                ty: self,
-                regtype: false
-            }
-        ))
+        production::name(self, false, control)
     }
 
     pub fn regtype_name_with_control(
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
-        control.format(format_args!(
-            "{}",
-            TypeName {
-                ty: self,
-                regtype: true
-            }
-        ))
+        production::name(self, true, control)
     }
 }
 

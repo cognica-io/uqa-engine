@@ -28,6 +28,12 @@ pub(crate) mod copy;
 pub mod input_projection;
 mod memory;
 mod model;
+mod mutable;
+pub use mutable::{
+    CommandAssignmentSlot, CommandQuerySlot, CommandScalarSlot, MutableCommandPlan,
+    MutableExecutablePlan, MutableQueryPlan, MutableSourcePlan, QueryChildSlot, QueryScalarSlot,
+    SourceChildSlot, SourceScalarSlot,
+};
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
 mod owned;

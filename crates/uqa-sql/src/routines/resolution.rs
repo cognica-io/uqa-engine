@@ -6,47 +6,27 @@
 
 //! Static routine signature matching, invocation binding, and declared return-type resolution.
 
+mod catalog;
+pub use catalog::{RoutineOverloadCatalog, RoutineTypeSnapshot};
 mod combined_overloads;
+mod production;
+pub use production::search_path_precedes_pg_catalog;
 
 use super::{
     declaration::RoutineTypeCatalog, routine_signature_types, SQLUserFunction, StaticFunctionMatch,
 };
 use crate::type_resolution::{
-    canonical_routine_type_name, match_routine_candidate, rank_function_matches,
-    BuiltinFunctionOverload, FunctionTypeResolver, MatchedRoutineSignature,
-    ResolvedFunctionOverload, RoutineCallDescriptor, RoutineParameterDescriptor,
+    canonical_routine_type_name, rank_function_matches, BuiltinFunctionOverload,
+    FunctionTypeResolver, ResolvedFunctionOverload, RoutineCallDescriptor,
     RoutineSignatureMatchError,
 };
 use crate::{
-    ast::{
-        ColumnType, CreateFunction, FunctionBinding, FunctionParamMode, FunctionReturns,
-        RoutineInvocationBinding, RoutineVariadicMode,
-    },
-    catalog::domain::StoredDomain,
+    ast::{ColumnType, CreateFunction, FunctionBinding, RoutineVariadicMode},
     SQLError,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
 
-/// The original immutable domain allocation captured for one signature-matching pass.
-pub type RoutineTypeSnapshot = Arc<BTreeMap<String, StoredDomain>>;
-pub trait RoutineOverloadCatalog: RoutineTypeCatalog + Send + Sync {
-    fn routine_type_snapshot(&self) -> RoutineTypeSnapshot;
-    fn routine_search_path(&self) -> Vec<String>;
-    fn has_registered_scalar_function(&self, name: &str) -> bool;
-    fn lookup_sql_routine_candidates(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError>;
-    fn lookup_bound_sql_routine_candidates_by_binding(
-        &self,
-        binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>>;
-    fn lookup_bound_sql_functions_by_binding(
-        &self,
-        binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>>;
-}
 pub struct RoutineOverloadContext<'a> {
     pub catalog: &'a dyn RoutineOverloadCatalog,
 }
@@ -56,8 +36,25 @@ impl FunctionTypeResolver for RoutineOverloadContext<'_> {
         self.catalog.format_type(ty)
     }
 
+    fn format_type_name_with_control(
+        &self,
+        ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.catalog.format_type_with_control(ty, control)
+    }
+
     fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
         self.catalog.composite_types()
+    }
+
+    fn has_untyped_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.catalog
+            .has_registered_scalar_function_with_control(name, control)
     }
 
     fn has_untyped_function(&self, name: &str) -> bool {
@@ -67,6 +64,16 @@ impl FunctionTypeResolver for RoutineOverloadContext<'_> {
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
         self.catalog
             .resolve_catalog_column_type_name(name)
+            .map(Some)
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        self.catalog
+            .resolve_catalog_column_type_name_with_control(name, control)
             .map(Some)
     }
 
@@ -92,6 +99,79 @@ impl FunctionTypeResolver for RoutineOverloadContext<'_> {
         .map(|resolved| resolved.map(|resolved| resolved.return_type))
     }
 
+    fn resolve_function_type_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        self.resolve_function_overload_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )?
+        .map(|result| {
+            result
+                .return_type
+                .clone_with_control(control)
+                .map_err(Into::into)
+        })
+        .transpose()
+    }
+
+    fn resolve_function_overload_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        production::selection::resolve(
+            self,
+            name,
+            binding,
+            RoutineCallDescriptor {
+                argument_names,
+                argument_types,
+                explicit_variadic,
+            },
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_builtins_and_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+        builtins: &[BuiltinFunctionOverload],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        production::combined::resolve(
+            self,
+            name,
+            binding,
+            RoutineCallDescriptor {
+                argument_names,
+                argument_types,
+                explicit_variadic,
+            },
+            builtins,
+            control,
+        )
+        .map(Some)
+    }
+
     fn resolve_function_overload(
         &self,
         name: &str,
@@ -100,31 +180,21 @@ impl FunctionTypeResolver for RoutineOverloadContext<'_> {
         argument_types: &[Option<ColumnType>],
         explicit_variadic: bool,
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        let Some(matched) = self.resolve_static_sql_routine_match(
+        self.resolve_function_overload_with_control(
             name,
             binding,
             argument_names,
             argument_types,
             explicit_variadic,
-            RoutineCallKind::Function,
-        )?
-        else {
-            return Ok(None);
-        };
-        let function = &matched.function;
-        Ok(Some(ResolvedFunctionOverload {
-            binding: matched.binding(),
-            return_type: static_function_return_type(
-                self,
-                name,
-                &function.def,
-                Some(&matched.invocation),
-            )?,
-            exact_matches: matched.exact_matches,
-            known_arguments: argument_types.iter().flatten().count(),
-            preferred_matches: matched.preferred_matches,
-            precedes_pg_catalog: self.user_function_precedes_pg_catalog(&function.def.name),
-        }))
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .map(|result| {
+            result.map(|result| {
+                result
+                    .into_uncontrolled()
+                    .expect("ordinary routine resolution")
+            })
+        })
     }
 
     fn is_scalar_function_binding(&self, binding: &FunctionBinding) -> Result<bool, SQLError> {
@@ -141,6 +211,21 @@ impl FunctionTypeResolver for RoutineOverloadContext<'_> {
                 })
             });
         Ok(function.is_some_and(|function| !function.def.returns_set()))
+    }
+
+    fn is_scalar_function_binding_with_control(
+        &self,
+        binding: &FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        if binding.builtin {
+            return Ok(false);
+        }
+        Ok(self
+            .catalog
+            .select_bound_routine_with_control(binding, RoutineCallKind::Function, control)?
+            .is_some_and(|function| !function.def.returns_set()))
     }
 
     fn resolve_function_overload_with_builtins(
@@ -185,20 +270,6 @@ impl RoutineCallKind {
 }
 
 impl RoutineOverloadContext<'_> {
-    pub(super) fn user_function_precedes_pg_catalog(&self, name: &str) -> bool {
-        let Ok((Some(schema), _)) = RelationIdentity::parse_reference(name) else {
-            return false;
-        };
-        let search_path = self.catalog.routine_search_path();
-        let Some(user_position) = search_path.iter().position(|entry| entry == &schema) else {
-            return false;
-        };
-        search_path
-            .iter()
-            .position(|entry| entry == "pg_catalog")
-            .is_some_and(|catalog_position| user_position < catalog_position)
-    }
-
     pub fn resolve_static_sql_function(
         &self,
         name: &str,
@@ -431,205 +502,16 @@ fn static_routine_match(
     explicit_variadic: bool,
     kind: RoutineCallKind,
 ) -> Result<Option<StaticFunctionMatch>, RoutineSignatureMatchError> {
-    let parameter_indices = routine_call_parameter_indices(&function.def, kind);
-    let parameters = parameter_indices
-        .iter()
-        .map(|index| &function.def.params[*index])
-        .collect::<Vec<_>>();
-    let Some(matched) = match_static_function_signature(
-        catalog,
-        &parameters,
-        argument_names,
-        argument_types,
-        explicit_variadic,
-    )?
-    else {
-        return Ok(None);
-    };
-    let invocation = routine_invocation_binding(&function.def, &parameter_indices, &matched);
-    Ok(Some(StaticFunctionMatch {
-        function,
-        argument_types: matched.argument_signature,
-        default_error: matched.default_error,
-        raw_exact_matches: matched.raw_exact_matches,
-        exact_matches: matched.exact_matches,
-        preferred_matches: matched.preferred_matches,
-        variadic_expansion: matches!(
-            matched.variadic_mode,
-            crate::type_resolution::RoutineVariadicMode::Pack
-        ),
-        invocation: Box::new(invocation),
-    }))
-}
-
-pub(super) fn static_function_match(
-    catalog: &RoutineTypeSnapshot,
-    function: Arc<SQLUserFunction>,
-    argument_names: &[Option<String>],
-    argument_types: &[Option<ColumnType>],
-    explicit_variadic: bool,
-) -> Result<Option<StaticFunctionMatch>, RoutineSignatureMatchError> {
-    static_routine_match(
+    production::match_ordinary(
         catalog,
         function,
-        argument_names,
-        argument_types,
-        explicit_variadic,
-        RoutineCallKind::Function,
-    )
-}
-
-fn match_static_function_signature(
-    catalog: &RoutineTypeSnapshot,
-    signature: &[&crate::ast::FunctionParam],
-    argument_names: &[Option<String>],
-    argument_types: &[Option<ColumnType>],
-    explicit_variadic: bool,
-) -> Result<Option<MatchedRoutineSignature>, RoutineSignatureMatchError> {
-    let parameters = signature
-        .iter()
-        .map(|parameter| RoutineParameterDescriptor {
-            name: Some(parameter.name.clone()),
-            type_name: canonical_routine_type_name(&parameter.type_name),
-            column_type: declared_parameter_type(catalog, &parameter.type_name),
-            has_default: parameter.default.is_some(),
-            default_type: parameter.default_type.clone(),
-            variadic: parameter.mode == FunctionParamMode::Variadic,
-        })
-        .collect::<Vec<_>>();
-    match_routine_candidate(
-        &parameters,
         RoutineCallDescriptor {
             argument_names,
             argument_types,
             explicit_variadic,
         },
+        kind,
     )
-}
-
-fn declared_parameter_type(catalog: &RoutineTypeSnapshot, type_name: &str) -> Option<ColumnType> {
-    if let Some(element) = type_name.strip_suffix("[]") {
-        return declared_parameter_type(catalog, element).map(|ty| ColumnType::Array(Box::new(ty)));
-    }
-    // Enum parameters match by identity alone; a domain parameter also needs its base type.
-    if let Some(identity) = crate::ast::UserTypeIdentity::parse(type_name) {
-        return (identity.kind == crate::ast::UserTypeKind::Domain)
-            .then(|| {
-                catalog
-                    .values()
-                    .find(|domain| domain.oid == identity.oid)
-                    .map(StoredDomain::column_type)
-                    .or_else(|| crate::catalog::system_catalog_domain(identity.oid))
-            })
-            .flatten();
-    }
-    ColumnType::from_sql_name(type_name).ok().or_else(|| {
-        catalog.values().map(StoredDomain::column_type).find(|ty| {
-            canonical_routine_type_name(&ty.sql_name()) == canonical_routine_type_name(type_name)
-        })
-    })
-}
-
-fn routine_call_parameter_indices(def: &CreateFunction, kind: RoutineCallKind) -> Vec<usize> {
-    def.params
-        .iter()
-        .enumerate()
-        .filter_map(|(index, parameter)| {
-            let participates = if kind == RoutineCallKind::Procedure && !def.is_procedure {
-                true
-            } else {
-                match parameter.mode {
-                    FunctionParamMode::In
-                    | FunctionParamMode::InOut
-                    | FunctionParamMode::Variadic => true,
-                    FunctionParamMode::Out => def.is_procedure,
-                    FunctionParamMode::Table => false,
-                }
-            };
-            participates.then_some(index)
-        })
-        .collect()
-}
-
-fn routine_invocation_binding(
-    def: &CreateFunction,
-    parameter_indices: &[usize],
-    matched: &MatchedRoutineSignature,
-) -> RoutineInvocationBinding {
-    // Matching keys identify an overload; execution receives the selected catalog types instead of resolving those keys through the caller's search_path.
-    let concrete = matched.invocation_binding(None);
-    let output_type = |type_name: &str| {
-        if crate::type_resolution::routine_polymorphic_type(type_name).is_some() {
-            matched
-                .substitute_type(type_name)
-                .map(|ty| ty.catalog_name())
-        } else {
-            Some(type_name.to_owned())
-        }
-    };
-    let parameter_types = def
-        .params
-        .iter()
-        .enumerate()
-        .map(|(definition_index, parameter)| {
-            parameter_indices
-                .iter()
-                .position(|index| *index == definition_index)
-                .and_then(|call_index| concrete.parameter_types.get(call_index).cloned())
-                .or_else(|| output_type(&parameter.type_name))
-                .unwrap_or_else(|| parameter.type_name.clone())
-        })
-        .collect::<Vec<_>>();
-    let argument_positions = matched
-        .argument_positions
-        .iter()
-        .map(|call_index| parameter_indices[*call_index])
-        .collect();
-    let variadic_mode = match &matched.variadic_plan {
-        crate::type_resolution::RoutineVariadicPlan::Pack {
-            parameter_index, ..
-        } => RoutineVariadicMode::Expanded {
-            parameter_index: parameter_indices[*parameter_index],
-        },
-        crate::type_resolution::RoutineVariadicPlan::PassThrough {
-            parameter_index, ..
-        } => RoutineVariadicMode::Explicit {
-            parameter_index: parameter_indices[*parameter_index],
-        },
-        crate::type_resolution::RoutineVariadicPlan::None
-        | crate::type_resolution::RoutineVariadicPlan::Default { .. } => RoutineVariadicMode::None,
-    };
-    let output_indices = def
-        .params
-        .iter()
-        .enumerate()
-        .filter_map(|(index, parameter)| {
-            matches!(
-                parameter.mode,
-                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-            )
-            .then_some(index)
-        })
-        .collect::<Vec<_>>();
-    let return_type = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            output_type(type_name)
-        }
-        FunctionReturns::Table => Some(ColumnType::Record.catalog_name()),
-        FunctionReturns::None => match output_indices.as_slice() {
-            [] => None,
-            [index] => parameter_types.get(*index).cloned(),
-            _ => Some(ColumnType::Record.catalog_name()),
-        },
-    };
-    RoutineInvocationBinding {
-        argument_positions,
-        argument_targets: concrete.argument_targets,
-        argument_sources: concrete.argument_sources,
-        parameter_types,
-        return_type,
-        variadic_mode,
-    }
 }
 
 pub(crate) fn static_signature_error(
@@ -637,70 +519,8 @@ pub(crate) fn static_signature_error(
     _name: &str,
     error: RoutineSignatureMatchError,
 ) -> SQLError {
-    let sqlstate = error.sqlstate().to_string();
-    let message = match error {
-        RoutineSignatureMatchError::InvalidVariadicSignature { reason } => reason,
-        RoutineSignatureMatchError::IndeterminatePolymorphicType { .. } => {
-            "could not determine polymorphic type because input has type unknown".into()
-        }
-        _ => unreachable!("default consistency is checked after candidate selection"),
-    };
-    SQLError::Routine { sqlstate, message }
-}
-
-pub(super) fn static_function_return_type(
-    resolver: &RoutineOverloadContext<'_>,
-    name: &str,
-    def: &CreateFunction,
-    invocation: Option<&RoutineInvocationBinding>,
-) -> Result<ColumnType, SQLError> {
-    let invocation_return = invocation.and_then(|invocation| invocation.return_type.as_deref());
-    let declared_return = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            Some(type_name.as_str())
-        }
-        FunctionReturns::Table | FunctionReturns::None => None,
-    };
-    if invocation_return
-        .or(declared_return)
-        .is_some_and(|type_name| canonical_routine_type_name(type_name) == "trigger")
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "trigger functions can only be called as triggers".into(),
-        });
-    }
-    if matches!(def.returns, FunctionReturns::Table) || def.output_params().nth(1).is_some() {
-        return Ok(ColumnType::Record);
-    }
-    if let Some(type_name) = invocation_return {
-        return resolver
-            .catalog
-            .resolve_catalog_column_type(type_name)
-            .or_else(|| ColumnType::from_sql_name(type_name).ok())
-            .ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "function `{name}` has unresolved return type `{type_name}`"
-                ))
-            });
-    }
-    let type_name = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => type_name,
-        FunctionReturns::None => {
-            &def.output_params()
-                .next()
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!("function `{name}` does not return a value"))
-                })?
-                .type_name
-        }
-        FunctionReturns::Table => unreachable!("table result handled above"),
-    };
-    resolver
-        .catalog
-        .resolve_catalog_column_type(type_name)
-        .or_else(|| ColumnType::from_sql_name(type_name).ok())
-        .ok_or_else(|| SQLError::TypeMismatch(format!("unknown type `{type_name}`")))
+    production::diagnostics::signature(&error, &uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("ordinary signature diagnostic")
 }
 
 fn ensure_routine_kind(
@@ -710,37 +530,26 @@ fn ensure_routine_kind(
     expected: RoutineCallKind,
     definition: &CreateFunction,
 ) -> Result<(), SQLError> {
-    if definition.is_procedure == expected.is_procedure() {
-        return Ok(());
-    }
-    let arguments = static_routine_argument_types(argument_names, argument_types);
-    let suffix = if definition.is_procedure {
-        "is a procedure"
-    } else {
-        "is not a procedure"
-    };
-    Err(SQLError::Diagnostic {
-        sqlstate: "42809".into(),
-        message: format!("{name}({arguments}) {suffix}"),
-        detail: None,
-        hint: Some(if definition.is_procedure {
-            "To call a procedure, use CALL.".into()
-        } else {
-            "To call a function, use SELECT.".into()
-        }),
-    })
+    production::diagnostics::kind(
+        name,
+        RoutineCallDescriptor {
+            argument_names,
+            argument_types,
+            explicit_variadic: false,
+        },
+        expected,
+        definition,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 fn static_bound_routine_error(kind: RoutineCallKind, binding: &FunctionBinding) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!(
-            "bound {} {}({}) does not exist",
-            kind.name(),
-            binding.name,
-            binding.argument_types.join(", ")
-        ),
-    }
+    production::diagnostics::bound(
+        kind,
+        binding,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary bound routine diagnostic")
 }
 
 fn static_routine_resolution_error(
@@ -750,44 +559,19 @@ fn static_routine_resolution_error(
     argument_types: &[Option<ColumnType>],
     suffix: &str,
 ) -> SQLError {
-    let arguments = static_routine_argument_types(&[], argument_types);
-    let hint = if sqlstate == "42725" {
-        format!(
-            "Could not choose a best candidate {}. You might need to add explicit type casts.",
-            kind.name()
-        )
-    } else {
-        format!(
-            "No {} matches the given name and argument types. You might need to add explicit type casts.",
-            kind.name()
-        )
-    };
-    SQLError::Diagnostic {
-        sqlstate: sqlstate.into(),
-        message: format!("{} {name}({arguments}) {suffix}", kind.name()),
-        detail: None,
-        hint: Some(hint),
-    }
-}
-
-fn static_routine_argument_types(
-    argument_names: &[Option<String>],
-    argument_types: &[Option<ColumnType>],
-) -> String {
-    argument_types
-        .iter()
-        .enumerate()
-        .map(|(index, ty)| {
-            let ty = ty
-                .as_ref()
-                .map_or_else(|| "unknown".into(), ColumnType::regtype_name);
-            argument_names
-                .get(index)
-                .and_then(Option::as_ref)
-                .map_or_else(|| ty.clone(), |name| format!("{name} => {ty}"))
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
+    production::diagnostics::resolution(
+        kind,
+        sqlstate,
+        name,
+        RoutineCallDescriptor {
+            argument_names: &[],
+            argument_types,
+            explicit_variadic: false,
+        },
+        suffix,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine resolution diagnostic")
 }
 
 /// Defaults do not exclude or rank an overload. Their polymorphic consistency is
@@ -827,83 +611,9 @@ fn default_type_error(
     catalog: &dyn RoutineTypeCatalog,
     error: &RoutineSignatureMatchError,
 ) -> Result<SQLError, SQLError> {
-    use RoutineSignatureMatchError as E;
-    let format = |actual: &crate::ast::RoutineDefaultType| match actual {
-        crate::ast::RoutineDefaultType::Concrete(ty) => catalog.format_type(ty),
-        crate::ast::RoutineDefaultType::Polymorphic(name) => Ok(name.clone()),
-    };
-    let mut detail = None;
-    let message = match error {
-        E::InconsistentDefault {
-            declared,
-            first,
-            second,
-        } => {
-            detail = Some(format!("{} versus {}", format(first)?, format(second)?));
-            format!("arguments declared \"{declared}\" are not all alike")
-        }
-        E::InconsistentPolymorphicTypes {
-            first_declared,
-            second_declared,
-            first,
-            second,
-        } => {
-            detail = Some(format!("{} versus {}", format(first)?, format(second)?));
-            format!("argument declared {first_declared} is not consistent with argument declared {second_declared}")
-        }
-        E::InvalidPolymorphicActual { declared, actual } => {
-            let kind = if declared.ends_with("multirange") {
-                "a multirange type"
-            } else if declared.ends_with("range") {
-                "a range type"
-            } else {
-                "an array"
-            };
-            format!(
-                "argument declared {declared} is not {kind} but type {}",
-                format(actual)?
-            )
-        }
-        E::IncompatibleDefaultTypes { first, second } => format!(
-            "argument types {} and {} cannot be matched",
-            catalog.format_type(first)?,
-            catalog.format_type(second)?
-        ),
-        E::IncompatibleRangeSubtype {
-            declared,
-            range,
-            common,
-        } => format!(
-            "{declared} type {} does not match anycompatible type {}",
-            catalog.format_type(range)?,
-            catalog.format_type(common)?
-        ),
-        E::InvalidPolymorphicElement { declared, actual } => {
-            let shape = if declared == "anyenum" {
-                "not an enum type"
-            } else {
-                "an array type"
-            };
-            format!(
-                "type matched to {declared} is {shape}: {}",
-                catalog.format_type(actual)?
-            )
-        }
-        E::IndeterminatePolymorphicArgument { declared } => format!(
-            "could not determine polymorphic type {declared} because input has type unknown"
-        ),
-        E::IndeterminateArrayElement => {
-            "cannot determine element type of \"anyarray\" argument".into()
-        }
-        E::IndeterminatePolymorphicType { .. } => {
-            "could not determine polymorphic type because input has type unknown".into()
-        }
-        E::InvalidVariadicSignature { reason } => reason.clone(),
-    };
-    Ok(SQLError::Diagnostic {
-        sqlstate: error.sqlstate().into(),
-        message,
-        detail,
-        hint: None,
-    })
+    production::diagnostics::default_type(
+        catalog,
+        error,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }

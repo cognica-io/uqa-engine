@@ -18,6 +18,21 @@ pub fn prune_command_with_control(
     command: &mut CommandPlan,
     control: ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    prune_command_with_retention(command, control, |arena, keep| {
+        let mut index = 0;
+        arena.retain(|_| {
+            let retained = keep(index);
+            index += 1;
+            retained
+        });
+    })
+}
+
+pub(crate) fn prune_command_with_retention(
+    command: &mut CommandPlan,
+    control: ProductionControl<'_>,
+    retain: impl FnOnce(&mut Vec<QueryPlan>, &dyn Fn(usize) -> bool),
+) -> Result<(), SQLError> {
     control.check()?;
     let Some(arena) = command_arena(command) else {
         return Ok(());
@@ -39,7 +54,10 @@ pub fn prune_command_with_control(
         if let Some(source) = command.source_input_mut() {
             visit_source(source, &mut |node| remap.rewrite(node));
         }
-        remap.retain(command_arena(command).expect("command still owns its arena"));
+        retain(
+            command_arena(command).expect("command still owns its arena"),
+            &|index| remap.slots.get(&index).is_some(),
+        );
     }
     Ok(())
 }
@@ -48,6 +66,21 @@ pub fn prune_command_with_control(
 pub fn prune_query_with_control(
     query: &mut QueryPlan,
     control: ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    prune_query_with_retention(query, control, |arena, keep| {
+        let mut index = 0;
+        arena.retain(|_| {
+            let retained = keep(index);
+            index += 1;
+            retained
+        });
+    })
+}
+
+pub(crate) fn prune_query_with_retention(
+    query: &mut QueryPlan,
+    control: ProductionControl<'_>,
+    retain: impl FnOnce(&mut Vec<QueryPlan>, &dyn Fn(usize) -> bool),
 ) -> Result<(), SQLError> {
     control.check()?;
     let arena = query_arena(&mut query.root);
@@ -82,7 +115,9 @@ pub fn prune_query_with_control(
     }
     if remap.prepare()? {
         visit_root(&mut query.root, &mut |node| remap.rewrite(node));
-        remap.retain(query_arena(&mut query.root));
+        retain(query_arena(&mut query.root), &|index| {
+            remap.slots.get(&index).is_some()
+        });
     }
     Ok(())
 }

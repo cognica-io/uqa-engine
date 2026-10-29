@@ -13,6 +13,8 @@ use std::sync::{atomic::Ordering, Arc};
 use uqa_core::Value;
 mod concatenation;
 mod fixture;
+mod ownership;
+mod production;
 mod table;
 use fixture::Catalog;
 

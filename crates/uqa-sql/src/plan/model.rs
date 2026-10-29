@@ -833,6 +833,18 @@ pub enum CommandPlan {
 /// making the planner depend on the engine.
 pub trait AggregateClassifier {
     fn is_registered_aggregate(&self, name: &str) -> bool;
+
+    /// Native catalogs override this observation to admit lookup scratch before allocation. External classifiers keep their existing callback boundary.
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, crate::SQLError> {
+        control.check()?;
+        let registered = self.is_registered_aggregate(name);
+        control.check()?;
+        Ok(registered)
+    }
 }
 
 impl<F> AggregateClassifier for F

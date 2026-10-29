@@ -40,7 +40,7 @@ impl Binder<'_, '_> {
         let Some(selected) = self.semantic(concatenation::select(
             left_type.as_deref(),
             right_type.as_deref(),
-            &self.control,
+            &self.context.control,
         ))?
         else {
             return Ok(());
@@ -48,7 +48,7 @@ impl Binder<'_, '_> {
         for (position, operand) in [left, right].into_iter().enumerate() {
             self.operand_cast(operand, selected.argument(position))?;
         }
-        let binding = selected.binding(&self.control)?;
+        let binding = selected.binding(&self.context.control)?;
         let binding = self.retain(binding);
         crate::ast::FunctionBinding::rebind(&mut call.binding, binding);
         Ok(())
