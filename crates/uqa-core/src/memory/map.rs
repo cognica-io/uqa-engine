@@ -116,6 +116,13 @@ impl<K: Ord, V> BudgetedMap<K, V> {
         tree::get(&self.root, key).map(|node| &node.value)
     }
 
+    pub fn get_key_value<Q: Ord + ?Sized>(&self, key: &Q) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        tree::get(&self.root, key).map(|node| (&node.key, &node.value))
+    }
+
     pub fn get_mut<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,

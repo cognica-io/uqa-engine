@@ -34,7 +34,7 @@ fn shared_statistics_keep_payloads_until_the_last_reader_releases_them() {
         },
     )]));
     let weak = Arc::downgrade(&catalog);
-    let map_pointer = Arc::as_ptr(&catalog);
+    let column_pointer = &raw const catalog["payload"];
     let payload_pointer = catalog["payload"].mcv_values.as_ptr();
     let mut readers: [Option<ColumnStatistics>; 64] = std::array::from_fn(|_| None);
     let allocation = allocation_counter::measure(|| {
@@ -45,7 +45,7 @@ fn shared_statistics_keep_payloads_until_the_last_reader_releases_them() {
     });
     assert_eq!(allocation.count_total, 0, "{allocation:?}");
     for reader in readers.iter().flatten() {
-        assert_eq!(&raw const **reader, map_pointer);
+        assert_eq!(&raw const reader["payload"], column_pointer);
         assert_eq!(reader["payload"].mcv_values.as_ptr(), payload_pointer);
         assert_eq!(reader["payload"].equality_selectivity(), 0.5);
     }
@@ -80,8 +80,8 @@ fn relation_builder_detaches_before_changing_shared_statistics() {
         },
     );
     assert!(!std::ptr::eq(
-        &raw const *reader.columns,
-        &raw const *changed.columns
+        &raw const reader.columns["id"],
+        &raw const changed.columns["id"]
     ));
     assert_eq!(reader.column("id").unwrap().mcv_values, [Value::Int(1)]);
     assert_eq!(changed.column("id").unwrap().mcv_values, [Value::Int(2)]);

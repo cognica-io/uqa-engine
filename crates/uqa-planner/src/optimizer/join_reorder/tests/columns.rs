@@ -24,7 +24,7 @@ fn relation(alias: &str, columns: impl IntoIterator<Item = String>) -> RelationM
 fn column_resolution_borrows_existing_names_without_index_storage() {
     let column = "x".repeat(4 * 1024 * 1024);
     let relations = [relation("a", [column])];
-    let name = relations[0].column_stats.first_key_value().unwrap().0;
+    let name = relations[0].column_stats.iter().next().unwrap().0;
     let allocation = allocation_counter::measure(|| {
         let owners = ColumnOwners::new(&relations);
         let (alias, column) = owners.resolve(name).unwrap();

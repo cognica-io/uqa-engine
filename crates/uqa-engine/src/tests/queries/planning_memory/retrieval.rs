@@ -32,6 +32,12 @@ fn native_retrieval_statistics_retain_the_request_reservation(#[case] provider: 
     populate(&engine);
     let retention = engine.query_retention_control().unwrap();
     let memory = retention.memory();
+    // The catalog retains column distributions independently of the optimizer's retrieval statistics.
+    uqa_planner::statement_planning::PlannerStatisticsCatalog::column_statistics(
+        &engine,
+        "retrieval_stats",
+    )
+    .unwrap();
     let before = memory.used();
     let optimizer = query_optimizer(&engine, "retrieval_stats", &term("known")).unwrap();
     assert_eq!(optimizer.index_stats.doc_freq("body", "known"), 1);
@@ -42,6 +48,8 @@ fn native_retrieval_statistics_retain_the_request_reservation(#[case] provider: 
     drop(optimizer);
     assert_eq!(memory.used(), before);
     engine.close().unwrap();
+    drop(engine);
+    assert_eq!(memory.used(), 0);
 }
 
 #[rstest::rstest]

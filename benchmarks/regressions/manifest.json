@@ -28366,6 +28366,168 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "distribution_rejects_a_large_copy_before_allocating_its_payload",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Copy a four MiB string under an eight KiB allowance.",
+      "invariant": "Reject with 53200 before the payload allocation and release partial distribution scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "column_scratch_is_admitted_before_consuming_the_population",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Initialize 100,000 column counters under an eight KiB allowance.",
+      "invariant": "Reject the scratch buffer before reading observations and release all admitted capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "interleaved_columns_match_independent_population_statistics",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Fold interleaved text and composite populations under one allowance.",
+      "invariant": "Match the independent population histogram and frequency oracle with bounded retained output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "maximum_and_losing_common_values_release_their_individual_leases",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Replace a one MiB maximum and evict a one MiB common-value candidate.",
+      "invariant": "Release each discarded payload with its lease and retain the exact winning frequency.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "distribution_errors_and_unwind_release_partial_construction",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Interrupt distribution construction with storage errors, invalid ordering, incomplete input and callback unwind.",
+      "invariant": "Drop all partial payload and scratch owners on every exit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "distribution_cancellation_observes_both_owners_and_preserves_input_errors",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Cancel original and invoking scopes during observation collection.",
+      "invariant": "Return 57014, preserve an earlier input error and release partial owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "named_statistics_release_duplicate_outputs_and_retain_only_the_final_generation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Replace duplicate one MiB column statistics and retain cloned readers.",
+      "invariant": "Retained allocator bytes equal admitted payload plus Arc counters, and the last reader releases the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "named_statistics_partial_replacement_preserves_readers_and_parent_admission",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/analyze/tests/memory.rs",
+      "capability": "Column statistics production",
+      "workload": "Replace one column while keeping another and exhaust the parent allowance.",
+      "invariant": "Failed admission leaves both snapshots unchanged; successful publication preserves old readers and exact parent ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_distribution_collection_rejects_before_large_output_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/analyze/tests/production.rs",
+      "capability": "Column statistics production",
+      "workload": "Collect exact distributions from retained native snapshots on all four providers under insufficient and ordinary output allowances.",
+      "invariant": "Reject with 53200, recover with exact histogram output, and retain the original allowance through the last reader.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_statistics_publication_retains_the_request_and_releases_replaced_generations",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/analyze/tests/production.rs",
+      "capability": "Column statistics production",
+      "workload": "Publish complete and partial column generations on all four providers.",
+      "invariant": "Selected-name admission preserves 53200 and 57014; both generations retain their request allowance until their last reader, and unchanged columns keep their values.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_lazy_statistics_failure_preserves_catalog_and_retries_on_the_same_owner",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/session/analyze/tests/production.rs",
+      "capability": "Column statistics production",
+      "workload": "Exhaust the request allowance before memory-provider lazy planning statistics.",
+      "invariant": "Failure preserves dirty state and the old catalog; the same owner retries and publishes successfully.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_lazy_statistics_cancelled_collection_keeps_the_old_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/session/analyze/tests/production.rs",
+      "capability": "Column statistics production",
+      "workload": "Cancel each production scope before memory-provider statistics collection.",
+      "invariant": "Return 57014 before collecting values and leave the catalog and reservations unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

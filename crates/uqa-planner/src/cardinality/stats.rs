@@ -8,7 +8,7 @@
 
 use super::{BTreeMap, Value, VertexConstraint};
 
-mod columns;
+pub(super) mod columns;
 pub use columns::ColumnStatistics;
 
 /// Jaccard-style selectivity assumed for text-similarity joins when no
@@ -182,7 +182,7 @@ pub struct RelationStats {
 #[derive(Clone, Copy)]
 pub(crate) struct RelationStatsRef<'a> {
     pub row_count: u64,
-    pub columns: &'a BTreeMap<String, ColumnStats>,
+    pub columns: &'a ColumnStatistics,
 }
 
 impl RelationStatsRef<'_> {

@@ -16,7 +16,7 @@ use uqa_sql::ast::{ColumnDef, ColumnType, GeneratedColumnKind};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::statistics::{now_ms, MaintenanceState};
-use crate::{ColumnStatsMap, Engine};
+use crate::Engine;
 
 /// The data generation of each table a sample read, in scan order.
 pub(super) type DataGenerations = Vec<(String, Option<u64>)>;
@@ -32,7 +32,7 @@ struct AutomaticAnalysis {
     /// The commit sequence the sample read at, where commits are numbered.
     sampled_at: Option<u64>,
     row_count: u64,
-    statistics: ColumnStatsMap,
+    statistics: uqa_planner::ColumnStatistics,
 }
 
 fn automatic_column(ty: &ColumnType) -> bool {
@@ -116,7 +116,7 @@ impl Engine {
             data_generations,
             sampled_at,
             row_count,
-            statistics,
+            statistics: statistics.into(),
         }))
     }
 

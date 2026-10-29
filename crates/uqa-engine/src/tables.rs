@@ -330,7 +330,7 @@ impl Engine {
             next_id: parking_lot::Mutex::new(1),
             maps_integer_keys: AtomicBool::new(true),
             analyzer: crate::state::CatalogCell::new(analyzer),
-            column_stats: crate::state::CatalogCell::new(BTreeMap::new()),
+            column_stats: crate::state::CatalogCell::new(uqa_planner::ColumnStatistics::default()),
             column_stats_loaded: AtomicBool::new(true),
             column_stats_dirty: AtomicBool::new(true),
             statistics_maintenance: parking_lot::Mutex::default(),

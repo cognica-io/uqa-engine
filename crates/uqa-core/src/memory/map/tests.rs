@@ -128,6 +128,8 @@ fn borrowed_keys_and_prepared_replacements_preserve_original_key_ownership() {
         .unwrap();
     assert_eq!(map.insert_prepared(replacement).as_deref(), Some("old"));
     assert_eq!(map.iter().next().unwrap().0.as_ptr(), pointer);
+    assert_eq!(map.get_key_value("alpha").unwrap().0.as_ptr(), pointer);
+    assert!(map.get_key_value("absent").is_none());
     assert_eq!(map.get("alpha").map(String::as_str), Some("new"));
     map.get_mut("alpha").unwrap().push('!');
     assert_eq!(map.remove("absent"), None);

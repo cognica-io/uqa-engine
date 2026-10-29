@@ -5,6 +5,7 @@
 //
 
 use super::*;
+mod memory;
 use std::collections::{BTreeMap, BTreeSet};
 
 fn comparable(value: &Value) -> bool {
@@ -122,6 +123,21 @@ fn sorted_statistics_preserve_complete_population_distributions() {
             )
             .unwrap();
             assert_stats(&actual[0], &expected);
+            let budget = uqa_core::memory::MemoryBudget::new(1024 * 1024);
+            let token = uqa_core::CancellationToken::new();
+            let actual = collect_statistics_with_control(
+                expected.row_count,
+                &counts,
+                values.iter().cloned().map(|value| Ok((0, value))),
+                101,
+                10,
+                ProductionControl::new(&budget, &token, &token),
+            )
+            .unwrap();
+            assert_stats(&actual[0], &expected);
+            assert_eq!(actual.reserved_bytes(), budget.used());
+            drop(actual);
+            assert_eq!(budget.used(), 0);
         }
     }
 }

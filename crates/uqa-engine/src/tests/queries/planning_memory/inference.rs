@@ -22,6 +22,13 @@ fn native_inferred_join_conditions_recover_and_preserve_postgresql_rows(
     let retention = engine.query_retention_control().unwrap();
     let memory = retention.memory();
     let input = UnifiedPlan::lower(uqa_sql::compile(INFERRED).unwrap().remove(0));
+    // Retain relation statistics before measuring the independently owned inferred executable.
+    for table in ["inference_a", "inference_b", "inference_c"] {
+        uqa_planner::statement_planning::PlannerStatisticsCatalog::column_statistics(
+            &engine, table,
+        )
+        .unwrap();
+    }
     let before = memory.used();
     let baseline =
         crate::capabilities::statement_planning::optimize_engine_plan(&engine, input.clone())

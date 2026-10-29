@@ -18,7 +18,7 @@ fn native_statistics_capture_reuses_catalog_payloads(#[case] provider: Provider)
     let engine = provider.open(&directory.path().join("statistics-owner.db"));
     engine.sql("CREATE TABLE stats_capture (payload text); INSERT INTO stats_capture VALUES ('x'), ('y'); ANALYZE stats_capture", &[]).unwrap();
     let table = engine.try_query_table("stats_capture").unwrap().unwrap();
-    table.column_stats.write().insert(
+    *table.column_stats.write() = std::collections::BTreeMap::from([(
         "payload".into(),
         uqa_planner::ColumnStats {
             row_count: 2,
@@ -27,7 +27,8 @@ fn native_statistics_capture_reuses_catalog_payloads(#[case] provider: Provider)
             mcv_frequencies: vec![0.5],
             ..Default::default()
         },
-    );
+    )])
+    .into();
     let retained = table.column_stats.snapshot();
     let pointer = retained["payload"].mcv_values.as_ptr();
     let mut output = None;
@@ -72,7 +73,10 @@ fn native_statistics_snapshots_follow_transactional_publication(#[case] provider
     let private = capture();
     assert_eq!(private["id"].row_count, 6);
     assert_eq!(private["id"].max_value, Some(Value::Int(6)));
-    assert!(!std::ptr::eq(&raw const *before, &raw const *private));
+    assert!(!std::ptr::eq(
+        &raw const before["id"],
+        &raw const private["id"]
+    ));
     engine.sql("ROLLBACK", &[]).unwrap();
     let restored = capture();
     assert_eq!(restored["id"].row_count, 3);

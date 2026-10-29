@@ -16,6 +16,8 @@ use super::{
     CatalogFacade, ColumnStatsInput, Engine, Ordering, StorageBackendError, StorageBackendResult,
     TableState, Value,
 };
+use uqa_core::memory::{ProductionControl, ProductionVec};
+use uqa_planner::ColumnStatistics;
 
 struct HierarchyAnalyzeInputs {
     row_count: u64,
@@ -221,23 +223,47 @@ impl Engine {
         requested_columns: Option<&[String]>,
         include_descendants: bool,
     ) -> StorageBackendResult<()> {
-        let available_columns: Vec<String> = t
-            .columns
-            .read()
-            .iter()
-            .filter(|column| {
-                !column.generated.as_ref().is_some_and(|generated| {
-                    generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual
-                })
+        let retained = self
+            .query_retention_control()
+            .map_err(|error| StorageBackendError::backend("ANALYZE resources", error))?;
+        let control = ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            &self.runtime.cancellation,
+        );
+        let available = t.columns.snapshot();
+        let visible = |column: &&uqa_sql::ast::ColumnDef| {
+            !column.generated.as_ref().is_some_and(|generated| {
+                generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual
             })
-            .map(|column| column.name.clone())
-            .collect();
-        let columns =
-            requested_columns.map_or_else(|| available_columns.clone(), <[String]>::to_vec);
-        if let Some(column) = columns
-            .iter()
-            .find(|column| !available_columns.contains(column))
-        {
+        };
+        let mut columns = ProductionVec::new(control);
+        let names: &mut dyn Iterator<Item = &String> = if let Some(requested) = requested_columns {
+            &mut requested.iter()
+        } else {
+            &mut available.iter().filter(visible).map(|column| &column.name)
+        };
+        for name in names {
+            columns
+                .push_produced(control.copy_text(name).map_err(|error| {
+                    StorageBackendError::backend(
+                        "ANALYZE column name",
+                        uqa_sql::SQLError::from(error),
+                    )
+                })?)
+                .map_err(|error| {
+                    StorageBackendError::backend(
+                        "ANALYZE column selection",
+                        uqa_sql::SQLError::from(error),
+                    )
+                })?;
+        }
+        if let Some(column) = columns.iter().find(|name| {
+            !available
+                .iter()
+                .filter(visible)
+                .any(|column| &column.name == *name)
+        }) {
             return Err(StorageBackendError::Other(format!(
                 "column `{column}` of relation `{canonical_table_name}` does not exist"
             )));
@@ -254,12 +280,16 @@ impl Engine {
             canonical_table_name,
             &columns,
             include_descendants,
+            control,
         )?;
 
         let stats_out = if requested_columns.is_some() {
-            let mut combined = t.column_stats.read().clone();
-            combined.extend(stats_out);
-            combined
+            t.column_stats
+                .read()
+                .with_replacements(&stats_out, control)
+                .map_err(|error| {
+                    StorageBackendError::backend("ANALYZE partial statistics", error)
+                })?
         } else {
             stats_out
         };
@@ -294,7 +324,11 @@ impl Engine {
         canonical_table_name: &str,
         columns: &[String],
         include_descendants: bool,
-    ) -> StorageBackendResult<(crate::ColumnStatsMap, u64)> {
+        control: ProductionControl<'_>,
+    ) -> StorageBackendResult<(ColumnStatistics, u64)> {
+        control.check().map_err(|error| {
+            StorageBackendError::backend("ANALYZE resources", uqa_sql::SQLError::from(error))
+        })?;
         let members = self
             .hierarchy_scan_tables(canonical_table_name, include_descendants)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -318,36 +352,33 @@ impl Engine {
             crate::statistics::value_size::accepts,
         )
         .map_err(|error| StorageBackendError::backend("ANALYZE value collection", error))?;
-        let counts = inputs
-            .counts
-            .iter()
-            .map(
-                |count| uqa_planner::cardinality::analyze::ColumnObservationCounts {
+        let counts = columns.iter().zip(&inputs.counts).map(|(name, count)| {
+            (
+                name.as_str(),
+                uqa_planner::cardinality::analyze::ColumnObservationCounts {
                     nulls: count.nulls,
                     omitted: count.omitted,
                     comparable: count.comparable,
                 },
             )
-            .collect::<Vec<_>>();
-        let stats = uqa_planner::cardinality::analyze::collect_statistics(
+        });
+        let stats = uqa_planner::cardinality::analyze::collect_named_statistics(
             inputs.row_count,
-            &counts,
+            counts,
             inputs.values,
             crate::statistics::value_size::HISTOGRAM_VALUES,
             crate::statistics::value_size::MCV_VALUES,
+            control,
         )
         .map_err(|error| StorageBackendError::backend("ANALYZE distributions", error))?;
-        Ok((
-            columns.iter().cloned().zip(stats).collect(),
-            inputs.row_count,
-        ))
+        Ok((stats, inputs.row_count))
     }
 
     /// `sampled_at` is the commit sequence the statistics were sampled at, or `None` when it is not known.
     pub(crate) fn persist_column_stats(
         catalog: &dyn CatalogFacade,
         table_name: &str,
-        stats: &BTreeMap<String, uqa_planner::ColumnStats>,
+        stats: &ColumnStatistics,
         object_id: [u8; 16],
         row_count: u64,
         sampled_at: Option<u64>,
@@ -366,7 +397,7 @@ impl Engine {
     fn persist_column_stats_rows(
         catalog: &dyn CatalogFacade,
         table_name: &str,
-        stats: &BTreeMap<String, uqa_planner::ColumnStats>,
+        stats: &ColumnStatistics,
     ) -> StorageBackendResult<()> {
         struct EncodedColumnStats {
             column_name: String,
@@ -381,7 +412,7 @@ impl Engine {
         }
 
         let mut encoded = Vec::with_capacity(stats.len());
-        for (col_name, cs) in stats {
+        for (col_name, cs) in stats.iter() {
             let min_json = cs
                 .min_value
                 .as_ref()
@@ -463,14 +494,14 @@ impl Engine {
         refresh: StatisticsRefresh,
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
         self.column_stats_snapshot_in_execution(table, refresh)
-            .map(|columns| (*columns).clone())
+            .map(|columns| columns.to_owned_map())
     }
 
     fn column_stats_snapshot_in_execution(
         &self,
         table: &str,
         refresh: StatisticsRefresh,
-    ) -> StorageBackendResult<Arc<crate::ColumnStatsMap>> {
+    ) -> StorageBackendResult<ColumnStatistics> {
         self.synchronize_table_data()?;
         let canonical_name = self
             .try_resolve_table_name(table)?
@@ -496,23 +527,23 @@ impl Engine {
                 if due {
                     self.analyze_table(&canonical_name, &t, false, None, true)?;
                 }
-                return Ok(t.column_stats.snapshot());
+                return Ok(t.column_stats.read().clone());
             }
             self.run_analyze(Some(&canonical_name))?;
             // Starting maintenance can refresh session-local table bindings.
             let refreshed = self.try_table(&canonical_name)?.ok_or_else(|| {
                 StorageBackendError::Other(format!("table `{canonical_name}` does not exist"))
             })?;
-            return Ok(refreshed.column_stats.snapshot());
+            return Ok(refreshed.column_stats.read().clone());
         }
-        let stats = t.column_stats.snapshot();
+        let stats = t.column_stats.read().clone();
         Ok(stats)
     }
 
     pub(crate) fn try_query_column_stats(
         &self,
         table: &str,
-    ) -> StorageBackendResult<Arc<crate::ColumnStatsMap>> {
+    ) -> StorageBackendResult<ColumnStatistics> {
         // Memory-only engines have no durable independent sessions or blob
         // I/O. Retain their automatic lazy refresh at this boundary.
         if self.storage.provider.is_none() && self.query_table_snapshots.is_none() {
@@ -525,7 +556,7 @@ impl Engine {
         // a synchronous full-table ANALYZE (including unrelated BLOB fields).
         // Keep using the last collected estimate while the database worker
         // refreshes it. A genuinely new table uses ordinary planner estimates.
-        let stats = table.column_stats.snapshot();
+        let stats = table.column_stats.read().clone();
         Ok(stats)
     }
 }

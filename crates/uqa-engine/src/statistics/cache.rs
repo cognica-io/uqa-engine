@@ -17,7 +17,7 @@ use crate::ColumnStatsMap;
 struct Snapshot {
     object_id: [u8; 16],
     revision: u64,
-    statistics: Weak<ColumnStatsMap>,
+    statistics: Weak<uqa_planner::ColumnStatistics>,
 }
 
 type Slot = Arc<Mutex<Option<Snapshot>>>;
@@ -34,7 +34,7 @@ impl StatisticsSnapshots {
         object_id: [u8; 16],
         revision: u64,
         load: impl FnOnce() -> StorageBackendResult<ColumnStatsMap>,
-    ) -> StorageBackendResult<Arc<ColumnStatsMap>> {
+    ) -> StorageBackendResult<Arc<uqa_planner::ColumnStatistics>> {
         let slot = Arc::clone(self.slots.lock().entry(name.to_owned()).or_default());
         let mut slot = slot.lock();
         if let Some(snapshot) = slot
@@ -45,7 +45,7 @@ impl StatisticsSnapshots {
                 return Ok(statistics);
             }
         }
-        let statistics = Arc::new(load()?);
+        let statistics = Arc::new(load()?.into());
         *slot = Some(Snapshot {
             object_id,
             revision,

@@ -242,7 +242,7 @@ impl Engine {
             next_id: parking_lot::Mutex::new(next_id),
             maps_integer_keys: AtomicBool::new(maps_integer_keys),
             analyzer: crate::state::CatalogCell::new(analyzer),
-            column_stats: crate::state::CatalogCell::new(column_stats),
+            column_stats: crate::state::CatalogCell::new(column_stats.into()),
             column_stats_loaded: AtomicBool::new(true),
             column_stats_dirty: AtomicBool::new(column_stats_dirty),
             statistics_maintenance: parking_lot::Mutex::default(),

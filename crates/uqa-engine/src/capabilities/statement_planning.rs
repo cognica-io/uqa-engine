@@ -123,11 +123,9 @@ impl PlannerStatisticsCatalog for Engine {
         self.table_row_estimate(table)
     }
     fn column_statistics(&self, table: &str) -> Result<ColumnStatistics, SQLError> {
-        self.try_query_column_stats(table)
-            .map(Into::into)
-            .map_err(|error| {
-                storage_error(&format!("read optimizer statistics for `{table}`"), &error)
-            })
+        self.try_query_column_stats(table).map_err(|error| {
+            storage_error(&format!("read optimizer statistics for `{table}`"), &error)
+        })
     }
     fn resolved_table_name(&self, table: &str) -> Result<Option<String>, SQLError> {
         self.resolve_table_name(table)

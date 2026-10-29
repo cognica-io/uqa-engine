@@ -221,7 +221,6 @@ impl RetrievalPlanningCatalog for Engine {
     }
     fn try_query_column_stats(&self, table: &str) -> Result<ColumnStatistics, String> {
         self.try_query_column_stats(table)
-            .map(Into::into)
             .map_err(|error| error.to_string())
     }
     fn graph_snapshot(&self, graph: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {
