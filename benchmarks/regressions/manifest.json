@@ -25313,8 +25313,8 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/tests/queries/planning_memory.rs",
       "capability": "Native join planning admission",
-      "workload": "Parameterized direct SQL, forced custom/generic prepared queries and JSON EXPLAIN with savepoint rejection/recovery on four providers and persistent reopen.",
-      "invariant": "Keep failed-frame and rollback behavior, return the expected row or explanation after recovery and release retained resources before reopen.",
+      "workload": "ON, USING and NATURAL joins through direct SQL, custom/generic prepared execution and EXPLAIN on all four storage providers, with admission failure and persistent reopen.",
+      "invariant": "Keep typed memory rejection, ordinary transaction/savepoint recovery and exact rows through all three join qualifications and each native planning entry point.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",
@@ -27902,6 +27902,149 @@
       "capability": "Positional source demand ownership",
       "workload": "A CTE with 1,024 demanded positions observed through definition pruning.",
       "invariant": "Keep the completed admitted demand in its lexical owner without copying nodes or increasing live reservation bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "joined_input_slots_preserve_ambiguity_hidden_aliases_and_physical_offsets",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/input_slots/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "Joined visible duplicates, NULL slots, hidden alias replacement, physical offsets, wildcard hiding and executor attributes.",
+      "invariant": "Borrowed input observation resolves the same physical membership as the owned concatenation, including recomputed ambiguity and right-alias precedence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "joined_input_indexes_borrow_payloads_and_admit_each_node_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/input_slots/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "Two 64 KiB source identities and a child allowance exhausted during index construction.",
+      "invariant": "Borrow original identity bytes, admit each index node before allocation and release partial scratch without consuming a sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "joined_input_observation_stops_on_failure_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/input_slots/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "Wildcard observation with a failing or unwinding callback and cancellation by either retained owner.",
+      "invariant": "Stop at the first failure, do not invoke cancelled callbacks and retire every temporary name-index node with its view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_using_retains_only_its_output_and_borrows_physical_demand",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/production/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "NATURAL and explicit USING with array comparison/output types, differing column order and a merged alias.",
+      "invariant": "Retain exactly the completed buffer, names, alias and nested type payloads; retire lookup scratch and preserve selected physical inputs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_using_preserves_duplicate_alias_missing_ambiguity_and_type_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/production/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "Conflicting duplicate USING names, aliases, absent or ambiguous inputs and incompatible equality types.",
+      "invariant": "Preserve the original duplicate, alias, left/right resolution and coercion diagnostic order, releasing partial results on SQL failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_using_rejects_wide_payloads_and_releases_partial_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/production/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "64 KiB column, domain and alias names under a 4 KiB child allowance.",
+      "invariant": "Reject before copying wide payloads and release completed prefix columns and temporary indexes without touching sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_using_observes_both_cancellation_owners_before_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/production/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "NATURAL resolution with a zero allowance after cancellation of either owner.",
+      "invariant": "Report 57014 before constructing lookup scratch or consuming any memory allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_join_rejects_before_copying_wide_input_schemas",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/joins.rs",
+      "capability": "Join input demand ownership",
+      "workload": "ON demand against two 1,024-column descriptors with a 128-byte allowance.",
+      "invariant": "Reject borrowed index growth before descriptor copies; preserve the source, recover the allowance and retain sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_join_using_rejects_before_copying_wide_column_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/joins.rs",
+      "capability": "Join input demand ownership",
+      "workload": "USING demand on a 64 KiB identity with a 1 KiB allowance.",
+      "invariant": "Resolve through admitted SQL-owned metadata without an ordinary joined descriptor or predicate copy, rejecting before wide output allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "positional_join_observes_both_cancellations_before_input_construction",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_demand/tests/joins.rs",
+      "capability": "Join input demand ownership",
+      "workload": "Already-cancelled ON demand against two 1,024-column descriptors.",
+      "invariant": "Observe either owner cancellation before constructing join workspace and leave the original source unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_using_input_observation_checks_empty_pairs_and_callback_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/production/tests.rs",
+      "capability": "Join input demand ownership",
+      "workload": "USING input observation with no physical slots, cancellation during the first side of a pair, and a failing callback.",
+      "invariant": "Check both cancellation owners even when a logical pair contributes no slot; stop before the next side on cancellation or the first callback error.",
       "case_names": [
         ""
       ]

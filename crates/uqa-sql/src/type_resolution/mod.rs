@@ -94,10 +94,10 @@ pub(crate) use cast_compatibility::{cast_catalog_entry_with_control, preserves_r
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
-    common_context_expression_type, common_type, common_type_in, effective_overload_argument_type,
-    effective_overload_argument_type_with_params, function_call_argument_signature,
-    select_common_input_type, values_column_types, CommonTypeContext,
-    FunctionCallArgumentSignature,
+    common_context_expression_type, common_type, common_type_in, common_type_in_with_control,
+    effective_overload_argument_type, effective_overload_argument_type_with_params,
+    function_call_argument_signature, select_common_input_type, values_column_types,
+    CommonTypeContext, FunctionCallArgumentSignature,
 };
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,

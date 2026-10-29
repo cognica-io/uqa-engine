@@ -14,7 +14,7 @@ use positions::Demand;
 use uqa_core::{RelationIdentity, RelationName};
 
 use uqa_sql::plan::AnalyzedSource;
-use uqa_sql::{RowSchema, SQLError};
+use uqa_sql::SQLError;
 
 use super::OptimizerConfig;
 use crate::{AggregateClassifier, CommandPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan};
@@ -336,23 +336,24 @@ impl<'catalog> Context<'_, 'catalog> {
             return Ok(());
         };
         let (left_schema, right_schema) = (&children.0.schema, &children.1.schema);
-        let input = RowSchema::join(left_schema, right_schema, std::iter::empty());
         let mut demand = demanded.copy()?;
-        let mut references = references::References::new(&input, &mut demand);
         if let Some(on) = on {
-            references.expression(on, subqueries)?;
+            references::References::join(left_schema, right_schema, &mut demand)?
+                .expression(on, subqueries)?;
         }
-        if let Some(using) = uqa_sql::semantics::resolve_join_using(
+        if let Some(using) = uqa_sql::semantics::resolve_join_using_with_control(
             using.as_ref(),
             *natural,
             left_schema,
             right_schema,
+            &self.config.production,
         )? {
-            if let Some(predicate) =
-                uqa_sql::semantics::join_using_predicate(&using, left_schema, right_schema)
-            {
-                references.expression(&predicate, subqueries)?;
-            }
+            using.visit_input_slots(
+                left_schema,
+                right_schema,
+                &self.config.production,
+                &mut |slot| demand.extend([slot]),
+            )?;
         }
         let boundary = left_schema.physical_width();
         let mut left_demand = Demand::new(self.config.production);

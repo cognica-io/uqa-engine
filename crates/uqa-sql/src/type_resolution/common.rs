@@ -500,13 +500,23 @@ pub fn common_type_in(
     left: &ColumnType,
     right: &ColumnType,
 ) -> Result<ColumnType, SQLError> {
-    select_pair_with_control(left, right, &ProductionControl::uncontrolled())
-        .map(|value| {
+    common_type_in_with_control(context, left, right, &ProductionControl::uncontrolled()).map(
+        |value| {
             value
                 .into_uncontrolled()
                 .expect("ordinary common type has no reservation")
-        })
-        .map_err(|failure| failure.in_context(context))
+        },
+    )
+}
+
+/// Select the construct's common type while admitting the resulting names and nested type payloads before copying.
+pub fn common_type_in_with_control(
+    context: CommonTypeContext,
+    left: &ColumnType,
+    right: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    select_pair_with_control(left, right, control).map_err(|failure| failure.in_context(context))
 }
 
 /// The construct selecting a common type, as `select_common_type` and `coerce_to_common_type` name it in their diagnostics.

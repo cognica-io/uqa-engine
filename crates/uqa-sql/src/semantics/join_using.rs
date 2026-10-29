@@ -6,7 +6,11 @@
 
 //! Schema binding and positional output shaping for `PostgreSQL` qualified joins.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use uqa_core::memory::ProductionControl;
+
+mod production;
+pub use production::resolve_join_using_with_control;
 
 use crate::ast::{BinaryOp, ColumnType, JoinKind, JoinUsing};
 use crate::schema::join_output::JoinOutputSource;
@@ -33,23 +37,6 @@ struct ResolvedJoinColumn {
     output_type: Option<ColumnType>,
 }
 
-fn visible_columns(schema: &RowSchema) -> Vec<(&str, usize)> {
-    schema
-        .columns()
-        .iter()
-        .enumerate()
-        .filter_map(|(position, _)| Some((schema.public_name(position)?, position)))
-        .collect()
-}
-
-fn positions_by_name<'a>(columns: &'a [(&'a str, usize)]) -> BTreeMap<&'a str, Vec<usize>> {
-    let mut positions = BTreeMap::<&str, Vec<usize>>::new();
-    for (name, position) in columns {
-        positions.entry(name).or_default().push(*position);
-    }
-    positions
-}
-
 fn missing_using_column(column: &str, side: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "42703".into(),
@@ -66,97 +53,53 @@ fn ambiguous_using_column(column: &str, side: &str) -> SQLError {
     }
 }
 
-fn unique_position(
-    positions: &BTreeMap<&str, Vec<usize>>,
-    column: &str,
-    side: &str,
-) -> Result<usize, SQLError> {
-    match positions.get(column).map(Vec::as_slice) {
-        None | Some([]) => Err(missing_using_column(column, side)),
-        Some([position]) => Ok(*position),
-        Some(_) => Err(ambiguous_using_column(column, side)),
-    }
-}
-
 pub fn resolve_join_using(
     explicit: Option<&JoinUsing>,
     natural: bool,
     left: &RowSchema,
     right: &RowSchema,
 ) -> Result<Option<ResolvedJoinUsing>, SQLError> {
-    if explicit.is_none() && !natural {
-        return Ok(None);
-    }
-    if explicit.is_some() && natural {
-        return Err(SQLError::Internal(
-            "JOIN cannot be both USING-qualified and NATURAL".into(),
-        ));
-    }
+    resolve_join_using_with_control(
+        explicit,
+        natural,
+        left,
+        right,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|using| {
+        using.map(|using| {
+            using
+                .into_uncontrolled()
+                .expect("ordinary USING resolution has no reservation")
+        })
+    })
+}
 
-    let left_columns = visible_columns(left);
-    let right_columns = visible_columns(right);
-    let left_positions = positions_by_name(&left_columns);
-    let right_positions = positions_by_name(&right_columns);
-    let (names, alias) = if let Some(using) = explicit {
-        let mut seen = BTreeSet::new();
-        for name in &using.columns {
-            if !seen.insert(name.as_str()) {
-                return Err(SQLError::Routine {
-                    sqlstate: "42701".into(),
-                    message: format!(
-                        "column name \"{name}\" appears more than once in USING clause"
-                    ),
-                });
+impl ResolvedJoinUsing {
+    /// Borrow the physical inputs consumed by the USING equality predicates without constructing their scalar trees. Logical positions and NULL slots resolve through the original child layouts, with cancellation checked even when a pair contributes no physical input.
+    pub fn visit_input_slots(
+        &self,
+        left: &RowSchema,
+        right: &RowSchema,
+        control: &ProductionControl<'_>,
+        visitor: &mut impl FnMut(usize) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        for column in &self.columns {
+            for slot in [
+                left.slot(column.left),
+                right
+                    .slot(column.right)
+                    .map(|slot| left.physical_width() + slot),
+            ] {
+                control.check()?;
+                if let Some(slot) = slot {
+                    visitor(slot)?;
+                }
             }
         }
-        (using.columns.clone(), using.alias.clone())
-    } else {
-        let mut names = Vec::new();
-        let mut seen = BTreeSet::new();
-        for (name, _) in &left_columns {
-            if right_positions.contains_key(name) && seen.insert(*name) {
-                names.push((*name).to_string());
-            }
-        }
-        (names, None)
-    };
-
-    if let Some(alias) = alias.as_deref() {
-        if left.has_qualifier(alias) || right.has_qualifier(alias) {
-            return Err(SQLError::Routine {
-                sqlstate: "42712".into(),
-                message: format!("table name \"{alias}\" specified more than once"),
-            });
-        }
+        Ok(())
     }
-
-    let mut columns = Vec::with_capacity(names.len());
-    for name in names {
-        let left_position = unique_position(&left_positions, &name, "left")?;
-        let right_position = unique_position(&right_positions, &name, "right")?;
-        let (comparison_type, output_type) = match (
-            left.column_type(left_position),
-            right.column_type(right_position),
-        ) {
-            (Some(left_type), Some(right_type)) => (
-                Some(crate::equality_operand_type(left_type, right_type)?),
-                Some(crate::type_resolution::common_type_in(
-                    crate::type_resolution::CommonTypeContext::JoinUsing,
-                    left_type,
-                    right_type,
-                )?),
-            ),
-            _ => (None, None),
-        };
-        columns.push(ResolvedJoinColumn {
-            left: left_position,
-            right: right_position,
-            name,
-            comparison_type,
-            output_type,
-        });
-    }
-    Ok(Some(ResolvedJoinUsing { columns, alias }))
 }
 
 pub fn join_using_predicate(
@@ -532,6 +475,25 @@ mod tests {
                 .unwrap();
             let predicate = join_using_predicate(&resolved, &left, &right).unwrap();
             let joined = RowSchema::join(&left, &right, []);
+            let mut slots = Vec::new();
+            resolved
+                .visit_input_slots(
+                    &left,
+                    &right,
+                    &ProductionControl::uncontrolled(),
+                    &mut |slot| {
+                        slots.push(slot);
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                slots,
+                [
+                    left.physical_slot(0).unwrap(),
+                    left.physical_width() + right.physical_slot(0).unwrap(),
+                ]
+            );
             let crate::plan::UnifiedPlan::Query(query) =
                 crate::plan::UnifiedPlan::lower(crate::compile("SELECT 1").unwrap().remove(0))
             else {

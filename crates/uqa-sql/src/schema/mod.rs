@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 mod collations;
 mod identity_lookup;
+mod input_slots;
 mod lateral;
 mod name_binding;
 mod open_columns;
@@ -31,6 +32,7 @@ mod schema_projection;
 mod schema_remap;
 pub use collations::CollationBinding;
 use collations::Collations;
+pub use input_slots::InputSlots;
 pub use record_fields::RecordFields;
 pub(crate) use record_fields::{RecordDescriptor, RecordFieldMetadata, RecordMetadata};
 

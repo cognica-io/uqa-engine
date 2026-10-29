@@ -7,8 +7,9 @@
 use super::*;
 use std::sync::Arc;
 use uqa_core::Value;
-use uqa_sql::{ast::InternalRelationId, ColumnType, ScalarExpr};
+use uqa_sql::{ast::InternalRelationId, ColumnType, RowSchema, ScalarExpr};
 mod control;
+mod joins;
 
 fn query(sql: &str) -> Box<QueryPlan> {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))

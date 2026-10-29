@@ -7,18 +7,33 @@
 //! Resolve consumed values against their lexical query and preceding-source scopes.
 
 use uqa_sql::plan::AnalyzedSource;
+use uqa_sql::schema::InputSlots;
 use uqa_sql::{RowSchema, SQLError, ScalarExpr};
 
 use super::{Demand, QueryPlan, SourcePlan};
 
 pub(super) struct References<'a, 'c> {
-    target: &'a RowSchema,
+    target: InputSlots<'a, 'c>,
     demand: &'a mut Demand<'c>,
 }
 
 impl<'a, 'c> References<'a, 'c> {
     pub(super) fn new(target: &'a RowSchema, demand: &'a mut Demand<'c>) -> Self {
-        Self { target, demand }
+        Self {
+            target: InputSlots::borrow(target, demand.control),
+            demand,
+        }
+    }
+
+    pub(super) fn join(
+        left: &'a RowSchema,
+        right: &'a RowSchema,
+        demand: &'a mut Demand<'c>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            target: InputSlots::join(left, right, demand.control)?,
+            demand,
+        })
     }
 
     pub(super) fn expression(
@@ -27,7 +42,10 @@ impl<'a, 'c> References<'a, 'c> {
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         let control = self.demand.control;
-        let mut visitor = |part: &ScalarExpr| retain(part, self.target, self.demand);
+        let mut visitor = |part: &ScalarExpr| {
+            self.target
+                .visit_reference(part, &mut |slot| self.demand.extend([slot]))
+        };
         let mut references = uqa_sql::binding::scoped_references::ControlledScopedReferences::new(
             &mut visitor,
             control,
@@ -48,7 +66,10 @@ impl<'a, 'c> References<'a, 'c> {
         inherited_lateral: bool,
     ) -> Result<(), SQLError> {
         let control = self.demand.control;
-        let mut visitor = |part: &ScalarExpr| retain(part, self.target, self.demand);
+        let mut visitor = |part: &ScalarExpr| {
+            self.target
+                .visit_reference(part, &mut |slot| self.demand.extend([slot]))
+        };
         let mut references = uqa_sql::binding::scoped_references::ControlledScopedReferences::new(
             &mut visitor,
             control,
@@ -62,39 +83,3 @@ impl<'a, 'c> References<'a, 'c> {
 }
 
 pub(super) use uqa_sql::binding::scoped_references::visit_query_inputs_with_control;
-
-fn retain(
-    expression: &ScalarExpr,
-    schema: &RowSchema,
-    demand: &mut Demand<'_>,
-) -> Result<(), SQLError> {
-    let slot = match expression {
-        ScalarExpr::Column(name) => {
-            if let Some(slot) = schema.column_slot(name) {
-                Some(slot)
-            } else {
-                demand.extend(schema.qualified_star_slots(name))?;
-                None
-            }
-        }
-        ScalarExpr::QualifiedColumn { qualifier, column } => {
-            schema.qualified_slot(qualifier, column)
-        }
-        ScalarExpr::InternalColumn(column) => schema.internal_slot(*column),
-        ScalarExpr::QualifiedStar(qualifier) => {
-            demand.extend(schema.qualified_star_slots(qualifier))?;
-            None
-        }
-        ScalarExpr::Star => {
-            demand.extend(
-                (0..schema.len())
-                    .filter(|position| schema.wildcard_position_visible(*position))
-                    .filter_map(|position| schema.slot(position)),
-            )?;
-            None
-        }
-        ScalarExpr::Position(position) => schema.slot(*position),
-        _ => None,
-    };
-    demand.extend(slot)
-}

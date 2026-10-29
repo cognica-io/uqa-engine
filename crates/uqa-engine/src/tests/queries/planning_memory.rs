@@ -243,17 +243,25 @@ fn native_join_requests_recover_after_admission_failure(#[case] provider: Provid
     populate(&engine);
     let retained = engine.query_retention_control().unwrap();
     let memory = retained.memory();
-    let query = format!("{JOIN} WHERE a.id = $1 AND a.id >= 0");
+    let joins = [
+        JOIN,
+        "SELECT a.id FROM a JOIN b USING (id) JOIN c USING (id)",
+        "SELECT a.id FROM a NATURAL JOIN b NATURAL JOIN c",
+    ];
     let params = [uqa_sql::SQLParam::Scalar(Value::Int(7))];
-    verify_request_recovery(&engine, &query, &params, &Value::Int(7), provider);
+    for join in joins {
+        let query = format!("{join} WHERE a.id = $1 AND a.id >= 0");
+        verify_request_recovery(&engine, &query, &params, &Value::Int(7), provider);
+    }
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);
     if !matches!(provider, Provider::Memory) {
         let reopened = provider.open(&path);
-        let result = reopened.sql(JOIN, &[]).unwrap();
-        assert_eq!(result.value_at(0, 0), Some(&Value::Int(7)));
-        drop(result);
+        for join in joins {
+            let result = reopened.sql(join, &[]).unwrap();
+            assert_eq!(result.value_at(0, 0), Some(&Value::Int(7)));
+        }
         reopened.close().unwrap();
     }
 }
