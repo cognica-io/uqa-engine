@@ -89,6 +89,7 @@ pub(super) fn optimize_query(
                 aggregates,
                 routines.volatility,
                 Some(routines.routines),
+                config.production,
             )?;
         }
     }
@@ -153,6 +154,7 @@ pub(super) fn optimize_query_block(
         super::derived_projection::prune(
             block,
             super::OutputPruningContext {
+                production: config.production,
                 aggregates,
                 routines: routines.map(|context| context.routines),
                 volatility: routines.map(|context| context.volatility),

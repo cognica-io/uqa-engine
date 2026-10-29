@@ -11,6 +11,10 @@ use crate::ast::ReturningAliases;
 use crate::plan::ProjectionPlan;
 use crate::{ColumnIdentity, RowSchema, SQLError, ScalarExpr};
 
+mod labels;
+pub(crate) use labels::field_selection_label;
+pub use labels::{function_projection_label, projection_label_at, visit_query_output_columns};
+
 pub fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
     projections.iter().map(projection_label_at).collect()
 }
@@ -29,119 +33,6 @@ pub fn output_position_error(clause: &str, position: i64) -> SQLError {
         sqlstate: "42P10".into(),
         message: format!("{clause} position {position} is not in select list"),
     }
-}
-
-/// Compute a projection's `PostgreSQL` output column name. Standalone expressions use `?column?`; repeated labels remain repeated until the final named-map compatibility boundary.
-pub fn projection_label_at(proj: &ProjectionPlan) -> String {
-    if let Some(a) = &proj.alias {
-        return a.clone();
-    }
-    let mut expression = &proj.expr;
-    while let ScalarExpr::Collated { expr, .. } = expression {
-        expression = expr;
-    }
-    match expression {
-        ScalarExpr::Column(c) => c.to_string(),
-        ScalarExpr::QualifiedColumn { column, .. } => column.to_string(),
-        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            ..
-        } => field_selection_label(binding.as_ref(), args.get(1))
-            .unwrap_or_else(|| function_projection_label(name, binding.as_ref())),
-        ScalarExpr::WindowCall { name, .. } => function_projection_label(name, None),
-        _ => "?column?".into(),
-    }
-}
-
-/// `FigureColname` names a field selection by its field.
-pub(crate) fn field_selection_label<E: FieldNameLiteral>(
-    binding: Option<&crate::ast::FunctionBinding>,
-    field: Option<&E>,
-) -> Option<String> {
-    (binding.and_then(|binding| binding.dispatch)
-        == Some(crate::ast::FunctionDispatch::FieldSelect))
-    .then(|| field.and_then(FieldNameLiteral::field_name))
-    .flatten()
-    .map(str::to_owned)
-}
-
-/// The field name literal of a field selection in parsed or planned expressions.
-pub(crate) trait FieldNameLiteral {
-    fn field_name(&self) -> Option<&str>;
-}
-
-impl FieldNameLiteral for ScalarExpr {
-    fn field_name(&self) -> Option<&str> {
-        match self {
-            ScalarExpr::Literal(uqa_core::Value::Str(field)) => Some(field),
-            _ => None,
-        }
-    }
-}
-
-impl FieldNameLiteral for crate::ast::Expr {
-    fn field_name(&self) -> Option<&str> {
-        match self {
-            crate::ast::Expr::Literal(uqa_core::Value::Str(field)) => Some(field),
-            _ => None,
-        }
-    }
-}
-
-pub fn function_projection_label(
-    name: &str,
-    binding: Option<&crate::ast::FunctionBinding>,
-) -> String {
-    // Operators and other syntax that the parser lowers to calls have no name of their own.
-    if matches!(
-        binding.and_then(|binding| binding.dispatch),
-        Some(
-            crate::ast::FunctionDispatch::NumericOperator(_)
-                | crate::ast::FunctionDispatch::Pattern { .. }
-                | crate::ast::FunctionDispatch::Concat { .. }
-                | crate::ast::FunctionDispatch::ArrayConcat
-                | crate::ast::FunctionDispatch::ArrayAppend
-                | crate::ast::FunctionDispatch::ArrayPrepend
-                | crate::ast::FunctionDispatch::IsDistinct
-                | crate::ast::FunctionDispatch::DistinctNot
-                | crate::ast::FunctionDispatch::RowDistinct
-                | crate::ast::FunctionDispatch::ValueIsDistinct
-                | crate::ast::FunctionDispatch::ValueNullTest { .. }
-                | crate::ast::FunctionDispatch::BooleanTest(_)
-                | crate::ast::FunctionDispatch::AnyOperator
-                | crate::ast::FunctionDispatch::AllOperator
-                | crate::ast::FunctionDispatch::BetweenSymmetric
-                | crate::ast::FunctionDispatch::JsonExtract { .. }
-        )
-    ) {
-        return "?column?".into();
-    }
-    let name = crate::parse_regobject_name(name)
-        .and_then(|mut names| names.pop())
-        .unwrap_or_else(|| name.to_string());
-    if operator_call(&name) {
-        return "?column?".into();
-    }
-    name
-}
-
-/// The calls the parser lowers operator syntax to under names no `PostgreSQL` function has: `||`, `@@`, `@?`, `@>`, `<@`, `&&`, `?`, `?|`, `?&`, `#-`, `~`, `~*`, `LIKE`, `ILIKE` and `SIMILAR TO`.
-fn operator_call(name: &str) -> bool {
-    matches!(
-        name,
-        "fts_match"
-            | "jsonpath_exists"
-            | "contains_op"
-            | "contained_by_op"
-            | "array_overlap"
-            | "json_has_key"
-            | "json_has_any_key"
-            | "json_has_all_keys"
-            | "json_delete_path"
-    )
 }
 
 pub fn expand_from_star_columns(

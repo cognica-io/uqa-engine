@@ -95,12 +95,18 @@ impl QueryOutputRewriter for Engine {
         schema: &uqa_sql::RowSchema,
         visible_ctes: &dyn Fn(&str) -> bool,
     ) -> Result<(), SQLError> {
+        let retention = self.query_retention_control()?;
         uqa_planner::optimizer::prune_query_outputs(
             query,
             aliases,
             &|name| projection.contains(name),
             Some(schema),
             uqa_planner::optimizer::OutputPruningContext {
+                production: uqa_core::memory::ProductionControl::new(
+                    retention.memory(),
+                    retention.cancellation(),
+                    retention.cancellation(),
+                ),
                 aggregates: self,
                 routines: Some(self),
                 volatility: Some(self),

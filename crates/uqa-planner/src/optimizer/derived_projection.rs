@@ -8,12 +8,16 @@
 
 use crate::{AggregateClassifier, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use std::collections::BTreeSet;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{ProductionControl, ProductionVec},
+    Value,
+};
 use uqa_sql::{ast::FunctionVolatility, RowSchema, SQLError, ScalarExpr};
 
 /// Catalog and lexical inputs for removing an unobserved output without losing its effects.
 #[derive(Clone, Copy)]
 pub struct OutputPruningContext<'a> {
+    pub production: ProductionControl<'a>,
     pub aggregates: &'a dyn AggregateClassifier,
     pub routines: Option<&'a dyn uqa_sql::routines::RoutineResolution>,
     pub volatility: Option<&'a dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
@@ -23,6 +27,7 @@ pub struct OutputPruningContext<'a> {
 impl<'a> OutputPruningContext<'a> {
     pub fn new(aggregates: &'a dyn AggregateClassifier) -> Self {
         Self {
+            production: ProductionControl::uncontrolled(),
             aggregates,
             routines: None,
             volatility: None,
@@ -77,13 +82,17 @@ pub(super) fn prune(
     if all {
         return Ok(());
     }
-    let aliases = column_aliases.clone();
-    let Some(SourcePlan::Subquery { body, .. }) = &mut block.from else {
+    let Some(SourcePlan::Subquery {
+        body,
+        column_aliases,
+        ..
+    }) = &mut block.from
+    else {
         unreachable!()
     };
     prune_outputs(
         body,
-        &aliases,
+        column_aliases,
         &|name| required.contains(name),
         None,
         context,
@@ -122,18 +131,27 @@ pub fn prune_outputs(
     schema: Option<&RowSchema>,
     context: OutputPruningContext<'_>,
 ) -> Result<(), SQLError> {
-    let names = schema
-        .or(query.analyzed_output.as_ref())
-        .map(|schema| schema.columns().to_vec())
-        .or_else(|| uqa_sql::semantics::query_plan_output_columns(query));
-    let Some(names) = names else {
+    let control = &context.production;
+    let mut demanded = ProductionVec::new(*control);
+    if let Some(schema) = schema.or(query.analyzed_output.as_ref()) {
+        demanded.reserve(schema.columns().len())?;
+        for (position, name) in schema.columns().iter().enumerate() {
+            control.check()?;
+            demanded.push_copy(required(aliases.get(position).unwrap_or(name)))?;
+        }
+    } else if !uqa_sql::semantics::visit_query_output_columns(
+        query,
+        aliases,
+        control,
+        &mut |name| {
+            demanded.reserve(1)?;
+            demanded.push_copy(required(name))?;
+            Ok(())
+        },
+    )? {
         return Ok(());
-    };
-    let demanded = names
-        .iter()
-        .enumerate()
-        .map(|(position, name)| required(aliases.get(position).unwrap_or(name)))
-        .collect::<Vec<_>>();
+    }
+    control.check()?;
     prune_positions(
         query,
         &|position| demanded.get(position).copied().unwrap_or(true),
@@ -369,6 +387,8 @@ fn removable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod demand;
+
     struct NoAggregates;
     impl AggregateClassifier for NoAggregates {
         fn is_registered_aggregate(&self, _: &str) -> bool {

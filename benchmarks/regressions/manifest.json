@@ -27369,6 +27369,152 @@
         "case_1_sqlite_key_value",
         "case_2_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_output_labels_keep_quoting_aliases_ordinals_and_duplicates",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "Planning output demand",
+      "workload": "Quoted and qualified functions, operators, collation, field selection, partial aliases, duplicate UNION labels and VALUES ordinals.",
+      "invariant": "Preserve the ordered SQL label sequence and release decoded/generated label storage after observation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "simple_output_labels_borrow_input_storage_without_an_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "Planning output demand",
+      "workload": "Column, qualified-column, alias and composite-field names under a zero-byte allowance.",
+      "invariant": "Observe original input addresses with no allocation or reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "decoded_output_labels_are_admitted_and_released_between_callbacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "Planning output demand",
+      "workload": "Decode 1,024 quoted function labels under a 256-byte child allowance beside a live sibling, then deny the first decode.",
+      "invariant": "Keep each decoded label lease live through its callback, release it before the next label and reject before invoking the observer when admission fails.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "output_label_callbacks_stop_on_errors_both_cancellations_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "Planning output demand",
+      "workload": "Function and generated VALUES labels whose first callback cancels either owner, returns a SQL error or panics.",
+      "invariant": "Do not observe later labels; preserve the first error and release label leases without changing the sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "absent_and_empty_output_descriptors_remain_distinct",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "Planning output demand",
+      "workload": "VALUES IR with no rows and with one empty row.",
+      "invariant": "Report absent and present-empty descriptors distinctly without invoking an output callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "known_output_demand_borrows_wide_column_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Observe all 1,024 required columns with 56-byte names in an existing row descriptor.",
+      "invariant": "Allocate less than 8 KiB, keep output callback order and leave all scalar projections unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "inferred_output_demand_borrows_wide_projection_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Observe all 1,024 required projection aliases without an analyzed row descriptor.",
+      "invariant": "Allocate less than 8 KiB without copying label storage or changing the query.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "output_demand_admits_scratch_before_growth_and_preserves_the_input_on_rejection",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Wide known and inferred output demand under a 128-byte child allowance, followed by an admitted retry.",
+      "invariant": "Return 53200 before large allocation or query mutation, bound callbacks and allocation, preserve the ancestor sibling and release scratch on both failure and success.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "output_demand_observes_original_names_with_live_scratch_and_alias_precedence",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Required outputs from fallback projections, retained analysis and an explicit schema, with a source alias override.",
+      "invariant": "Borrow original label addresses, preserve source-alias precedence, retain exact live ancestor leases during callbacks and release all scratch on return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "output_demand_releases_partial_scratch_on_both_cancellations_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Known and inferred descriptors interrupted by the third output-demand callback.",
+      "invariant": "Stop before later callbacks, preserve the unmodified query and release partial scratch beside the existing sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_output_demand_shares_request_allowance_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Prune 1,024 required outputs through the native CTE adapter under rejected, cancelled and exact admitted allowances on all four providers.",
+      "invariant": "Propagate the actual request budget and cancellation, reject before mutation, release temporary storage and preserve subsequent SQL and final owner cleanup.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

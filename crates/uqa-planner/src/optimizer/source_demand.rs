@@ -266,6 +266,7 @@ impl Context<'_, '_> {
                             &|position| positions.contains(&position),
                             None,
                             super::OutputPruningContext {
+                                production: self.config.production,
                                 aggregates: self.aggregates,
                                 routines: routines.map(|context| context.routines),
                                 volatility: routines.map(|context| context.volatility),
@@ -370,6 +371,7 @@ impl Context<'_, '_> {
             },
             None,
             super::OutputPruningContext {
+                production: self.config.production,
                 aggregates: self.aggregates,
                 routines: routines.map(|context| context.routines),
                 volatility: routines.map(|context| context.volatility),
