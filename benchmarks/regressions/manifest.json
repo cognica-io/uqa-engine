@@ -27212,6 +27212,32 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_constants_preserve_prepared_dependency_identity_without_payload_reads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/prepared/entry/reuse/tests/retained.rs",
+      "capability": "Prepared retained constant identity",
+      "workload": "Classify folded and mixed prepared plans whose retained constant source rejects every payload read.",
+      "invariant": "Recognize already-evaluated catalog-independent constants in executable, logical and source plans without decoding or reevaluating them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_constant_declarations_keep_unknown_and_catalog_dependencies_conservative",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/prepared/entry/reuse/tests/retained.rs",
+      "capability": "Prepared retained constant identity",
+      "workload": "Classify retained primitive and array constants alongside unknown, domain, regclass, record, temporal and named type metadata.",
+      "invariant": "Preserve conservative invalidation for unknown or untracked identities without materializing opaque values.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

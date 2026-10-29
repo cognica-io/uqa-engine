@@ -136,6 +136,16 @@ fn independent_expression(
     expression.visit(&mut |part| {
         independent &= match part {
             ScalarExpr::Literal(value) => independent_value(value),
+            ScalarExpr::RetainedLiteral(literal) => {
+                // Retained values are already evaluated. Classify their selected identity without decoding resident or spilled payloads.
+                literal
+                    .ty
+                    .as_ref()
+                    .is_some_and(|ty| independent_type(ty) || composites.tracks_type(ty))
+                    && literal.declaration.as_deref().is_none_or(|name| {
+                        independent_type_name(name) || composites.tracks_name(name)
+                    })
+            }
             ScalarExpr::Collated { ty, .. } => independent_type(ty) || composites.tracks_type(ty),
             ScalarExpr::Cast { ty, .. } => independent_type_name(ty) || composites.tracks_name(ty),
             ScalarExpr::TypedLiteral {

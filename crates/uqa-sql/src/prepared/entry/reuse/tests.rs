@@ -8,6 +8,8 @@ use super::*;
 use crate::RowSchema;
 use std::sync::Arc;
 
+mod retained;
+
 fn plan(sql: &str) -> UnifiedPlan {
     UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
 }
