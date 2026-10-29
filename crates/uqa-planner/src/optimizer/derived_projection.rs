@@ -164,7 +164,7 @@ pub fn prune_outputs(
     )
 }
 
-fn output_demand<'a>(
+pub(super) fn output_demand<'a>(
     query: &QueryPlan,
     aliases: &[String],
     required: &dyn Fn(&str) -> bool,

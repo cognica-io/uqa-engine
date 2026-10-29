@@ -11,7 +11,7 @@ use crate::{
     plan::{ProjectionPlan, QueryPlan, RelationalPlan},
     SQLError, ScalarExpr,
 };
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 enum Label<'a> {
     Borrowed(&'a str),
@@ -36,6 +36,39 @@ impl Label<'_> {
                 .expect("parsed identifier"),
         }
     }
+}
+
+/// An immutable positional descriptor borrowing existing names and retaining admitted decoding storage only where naming requires it.
+pub struct ProjectionLabels<'a> {
+    labels: Produced<Vec<Label<'a>>>,
+}
+
+impl ProjectionLabels<'_> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.labels.iter().map(Label::as_str)
+    }
+}
+
+/// Capture labels for repeated observation. Aliases override individual projections; duplicate labels retain their original positions. Admit descriptor capacity before decoding any name.
+pub fn projection_labels_with_control<'a>(
+    projections: &'a [ProjectionPlan],
+    aliases: &'a [String],
+    control: &ProductionControl<'_>,
+) -> Result<ProjectionLabels<'a>, SQLError> {
+    let mut labels = ProductionVec::new(*control);
+    labels.reserve(projections.len())?;
+    for (index, projection) in projections.iter().enumerate() {
+        control.check()?;
+        let label = if let Some(alias) = aliases.get(index) {
+            Label::Borrowed(alias)
+        } else {
+            projection_label(projection, control)?
+        };
+        labels.push_produced(control.finish(label, control.empty_reservation())?)?;
+    }
+    Ok(ProjectionLabels {
+        labels: labels.finish()?,
+    })
 }
 
 /// Compute a projection's `PostgreSQL` output column name. Standalone expressions use `?column?`; repeated labels remain repeated until the final named-map compatibility boundary.

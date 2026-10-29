@@ -6,221 +6,116 @@
 
 //! Remove unobserved folded CTE outputs before their constant expressions are evaluated.
 
-use crate::{AggregateClassifier, QueryPlan, RelationalPlan, SourcePlan};
-use std::collections::BTreeSet;
-use uqa_sql::{semantics::volatility::VolatilityCatalog, SQLError, ScalarExpr};
+use crate::{AggregateClassifier, QueryPlan, RelationalPlan};
+use uqa_core::memory::{ProductionControl, ProductionMap, ProductionVec};
+use uqa_sql::{semantics::volatility::VolatilityCatalog, SQLError};
+
+mod demand;
 
 pub(super) fn prune(
     query: &mut QueryPlan,
     aggregates: &dyn AggregateClassifier,
     volatility: &dyn VolatilityCatalog,
     routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
-    production: uqa_core::memory::ProductionControl<'_>,
+    production: ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    let folded = uqa_sql::semantics::cte_strategy::schedule_plan_ctes(volatility, query)?
-        .into_iter()
-        .filter(|cte| cte.deferred)
-        .map(|cte| cte.plan.name.clone())
-        .collect::<BTreeSet<_>>();
-    for name in folded {
-        let cte = query
-            .ctes
-            .iter()
-            .find(|cte| cte.name == name)
-            .expect("scheduled CTE");
+    let folded = folded_ctes(query, volatility, production)?;
+    for index in folded.iter().copied() {
+        production.check()?;
+        let cte = &query.ctes[index];
         let Some(body) = cte.body.query() else {
             continue;
         };
         let RelationalPlan::QueryBlock(block) = &body.root else {
             continue;
         };
-        let names = block
-            .projections
-            .iter()
-            .enumerate()
-            .map(|(position, projection)| {
-                cte.columns
-                    .get(position)
-                    .cloned()
-                    .unwrap_or_else(|| uqa_sql::semantics::projection_label_at(projection))
-            })
-            .collect::<Vec<_>>();
-        let mut required = BTreeSet::new();
-        let mut all = false;
-        collect_root(query, &name, &names, &mut required, &mut all);
-        for other in query.ctes.iter().filter(|cte| cte.name != name) {
+        let names = uqa_sql::semantics::projection_labels_with_control(
+            &block.projections,
+            &cte.columns,
+            &production,
+        )?;
+        let mut demand = demand::Demand::new(&cte.name, &names, production);
+        demand.collect_root(query)?;
+        for other in &query.ctes {
+            production.check()?;
+            if other.name == cte.name {
+                continue;
+            }
             if let Some(body) = other.body.query() {
-                collect_query(body, &name, &names, &mut required, &mut all);
+                demand.collect_query(body)?;
             } else {
-                all = true;
+                demand.all = true;
             }
         }
-        if !all {
-            let index = query
-                .ctes
-                .iter()
-                .position(|cte| cte.name == name)
-                .expect("scheduled CTE");
-            let (before, remaining) = query.ctes.split_at_mut(index);
-            let (cte, after) = remaining.split_first_mut().expect("scheduled CTE");
-            let visible = |name: &str| {
-                before.iter().any(|cte| cte.name == name)
-                    || (cte.recursive
-                        && (cte.name == name || after.iter().any(|cte| cte.name == name)))
-            };
-            super::derived_projection::prune_outputs(
-                cte.body.query_mut().expect("query CTE"),
-                &cte.columns,
-                &|column| required.contains(column),
-                None,
-                super::OutputPruningContext {
-                    production,
-                    aggregates,
-                    routines,
-                    volatility: Some(volatility),
-                    visible_ctes: &visible,
-                },
-            )?;
+        if demand.all {
+            continue;
         }
+        let demanded = super::derived_projection::output_demand(
+            body,
+            &cte.columns,
+            &|column| demand.required(column),
+            None,
+            production,
+        )?
+        .expect("query CTE output descriptor");
+        drop(demand);
+        drop(names);
+        let (before, remaining) = query.ctes.split_at_mut(index);
+        let (cte, after) = remaining.split_first_mut().expect("scheduled CTE");
+        let visible = |name: &str| {
+            before.iter().any(|cte| cte.name == name)
+                || (cte.recursive && (cte.name == name || after.iter().any(|cte| cte.name == name)))
+        };
+        super::derived_projection::prune_positions(
+            cte.body.query_mut().expect("query CTE"),
+            &|position| demanded.get(position).copied().unwrap_or(true),
+            None,
+            super::OutputPruningContext {
+                production,
+                aggregates,
+                routines,
+                volatility: Some(volatility),
+                visible_ctes: &visible,
+            },
+        )?;
     }
+    production.check()?;
     Ok(())
 }
 
-fn collect_query(
+fn folded_ctes<'c>(
     query: &QueryPlan,
-    name: &str,
-    names: &[String],
-    required: &mut BTreeSet<String>,
-    all: &mut bool,
-) {
-    if query.ctes.iter().any(|cte| cte.name == name) {
-        return;
+    volatility: &dyn VolatilityCatalog,
+    production: ProductionControl<'c>,
+) -> Result<ProductionVec<'c, usize>, SQLError> {
+    let scheduled = uqa_sql::semantics::cte_strategy::schedule_plan_ctes_with_control(
+        volatility, query, production,
+    )?;
+    let mut names = ProductionMap::new(production);
+    for cte in scheduled.iter().filter(|cte| cte.deferred) {
+        names.insert_copy(cte.plan.name.as_str(), None)?;
     }
-    collect_root(query, name, names, required, all);
-    for cte in &query.ctes {
-        if let Some(query) = cte.body.query() {
-            collect_query(query, name, names, required, all);
-        } else {
-            *all = true;
-        }
-    }
-}
-
-fn collect_root(
-    query: &QueryPlan,
-    name: &str,
-    names: &[String],
-    required: &mut BTreeSet<String>,
-    all: &mut bool,
-) {
-    match &query.root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = &block.from {
-                collect_source(source, block, name, names, required, all);
-            }
-            for query in &block.subqueries {
-                collect_query(query, name, names, required, all);
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            collect_query(left, name, names, required, all);
-            collect_query(right, name, names, required, all);
-            for query in subqueries {
-                collect_query(query, name, names, required, all);
-            }
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for query in subqueries {
-                collect_query(query, name, names, required, all);
-            }
+    drop(scheduled);
+    for (index, cte) in query.ctes.iter().enumerate() {
+        production.check()?;
+        if names.get(cte.name.as_str()) == Some(&None) {
+            names.insert_copy(cte.name.as_str(), Some(index))?;
         }
     }
-}
-
-fn collect_source(
-    source: &SourcePlan,
-    block: &crate::QueryBlockPlan,
-    name: &str,
-    names: &[String],
-    required: &mut BTreeSet<String>,
-    all: &mut bool,
-) {
-    match source {
-        SourcePlan::Table {
-            name: reference,
-            qualifier,
-            alias,
-            column_aliases,
-            ..
-        } if uqa_sql::semantics::cte_reference_name(reference).as_deref() == Some(name) => {
-            let qualifier = alias.as_deref().unwrap_or(qualifier);
-            if !block.subqueries.is_empty() {
-                *all = true;
-            }
-            block.visit_expressions(&mut |expression| {
-                super::output_demand::visit(expression, &mut |part| {
-                    let column = match part {
-                        ScalarExpr::Column(column) => Some(column),
-                        ScalarExpr::QualifiedColumn {
-                            qualifier: selected,
-                            column,
-                        } if selected == qualifier => Some(column),
-                        ScalarExpr::QualifiedStar(selected) if selected == qualifier => {
-                            *all = true;
-                            None
-                        }
-                        ScalarExpr::Star | ScalarExpr::Position(_) => {
-                            *all = true;
-                            None
-                        }
-                        _ => None,
-                    };
-                    if let Some(column) = column {
-                        if matches!(part, ScalarExpr::Column(_))
-                            && column == qualifier
-                            && !names.iter().enumerate().any(|(position, name)| {
-                                column_aliases.get(position).unwrap_or(name) == column
-                            })
-                        {
-                            *all = true;
-                        }
-                        for (position, original) in names.iter().enumerate() {
-                            if column_aliases.get(position).unwrap_or(original) == column {
-                                required.insert(original.clone());
-                            }
-                        }
-                    }
-                });
-            });
-        }
-        SourcePlan::Join {
-            left,
-            right,
-            alias,
-            on,
-            using,
-            natural,
-            ..
-        } => {
-            if alias.is_some() || on.is_some() || using.is_some() || *natural {
-                *all = true;
-            }
-            collect_source(left, block, name, names, required, all);
-            collect_source(right, block, name, names, required, all);
-        }
-        SourcePlan::Subquery { body, .. } => collect_query(body, name, names, required, all),
-        _ => {}
+    let mut indices = ProductionVec::new(production);
+    indices.reserve(names.len())?;
+    for (_, index) in &names {
+        indices.push_copy(index.expect("scheduled CTE"))?;
     }
+    Ok(indices)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SourcePlan;
+    use uqa_sql::ScalarExpr;
+    mod control;
     struct Catalog;
     impl AggregateClassifier for Catalog {
         fn is_registered_aggregate(&self, _: &str) -> bool {

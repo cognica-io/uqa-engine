@@ -27606,6 +27606,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_projection_labels_borrow_inputs_and_decode_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "A positional descriptor with a 64 KiB source alias, borrowed column/alias storage and repeated quoted function names observed 1,024 times.",
+      "invariant": "Borrow original input addresses, decode names once, match live allocator bytes to reservations and release every owner beside its ancestor sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_projection_labels_release_descriptor_and_partial_decoding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "Descriptor and function-name construction with allowances before, at and beyond descriptor capacity.",
+      "invariant": "Admit slots before decoding, reject with 53200 and release capacity plus partial decoded payloads without consuming sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_projection_labels_release_on_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/projection/labels/tests.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "A live decoded descriptor with either cancellation owner interrupted or its consumer unwinding.",
+      "invariant": "Return 57014 for cancellation, reject a later capture before allocation and retire all nested label owners on cancellation or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_workspace_rejects_before_copying_wide_inputs",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection/tests/control.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "A folded CTE with 1,024 required 56-byte labels under a 128-byte child allowance.",
+      "invariant": "Reject with 53200 before 8 KiB allocation or query mutation and restore the original ancestor sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_partial_workspace_failure_releases_ancestor_allowance",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection/tests/control.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "A 64-column CTE under allowances covering schedule, descriptor, partial required-name index and complete demand construction.",
+      "invariant": "Release all partial workspace on 53200, preserve the unchanged query and sibling, and succeed when the complete live workspace fits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_workspace_observes_both_cancellations_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection/tests/control.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "A folded CTE with 1,024 required names and either original or invoking token already cancelled.",
+      "invariant": "Return 57014 before large allocation or query mutation, with zero request peak despite the wide input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_names_and_repeated_consumers_borrow_original_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection/tests/control.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "A 64 KiB escaped CTE name and 4,096 repeated column references with independent source positions under 4 KiB allowance.",
+      "invariant": "Borrow the decoded name identity, reuse required-name nodes with less than 16 KiB total allocation and preserve every input address and diagnostic position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_selection_retains_lexical_order_and_releases_schedule_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection/tests/control.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "Three selected CTEs whose lexical, declaration and use orders differ.",
+      "invariant": "Keep lexical pruning order and only the exact selected-index buffer reservation after scheduling and name-index retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_demand_keeps_quoted_names_duplicate_aliases_and_analyzed_authority",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection/tests/control.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "Quoted, schema-qualified and shadowed CTE names, duplicate source aliases, whole-row demand and a retained analyzed descriptor.",
+      "invariant": "Preserve lexical resolution, conservative duplicate-name membership, whole-row versus column identity and analyzed output authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "folded_cte_name_owners_retire_before_output_errors_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/cte_projection/tests/control.rs",
+      "capability": "CTE output demand ownership",
+      "workload": "Folded output inspection that fails, unwinds or interrupts either request token after CTE demand is complete.",
+      "invariant": "Retain only selected indices and positional demand during inspection, propagate the original failure and release all temporary owners without mutation or sibling loss.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

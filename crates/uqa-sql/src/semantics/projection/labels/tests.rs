@@ -217,3 +217,144 @@ fn absent_and_empty_output_descriptors_remain_distinct() {
     })
     .unwrap());
 }
+
+#[test]
+fn retained_projection_labels_borrow_inputs_and_decode_once() {
+    let mut query = query("SELECT a, q.b, 1 AS named, custom.\"a\"\"b\"(1), custom.\"a\"\"b\"(2)");
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        panic!("block");
+    };
+    block.projections[1].alias = None;
+    let ScalarExpr::QualifiedColumn { column, .. } = &block.projections[1].expr else {
+        panic!("qualified column");
+    };
+    let aliases = ["x".repeat(64 * 1024)];
+    let pointers = [
+        aliases[0].as_ptr(),
+        column.as_ptr(),
+        block.projections[2].alias.as_ref().unwrap().as_ptr(),
+    ];
+    let parent = MemoryBudget::new(8192);
+    let sibling = parent.reserve(512).unwrap();
+    let budget = parent.child(4096);
+    let token = CancellationToken::new();
+    let mut labels = None;
+    let allocation = allocation_counter::measure(|| {
+        labels = Some(
+            projection_labels_with_control(
+                &block.projections,
+                &aliases,
+                &ProductionControl::new(&budget, &token, &token),
+            )
+            .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_total < 2048, "{allocation:?}");
+    assert_eq!(
+        allocation.bytes_current,
+        i64::try_from(budget.used()).unwrap()
+    );
+    let labels = labels.unwrap();
+    let allocation = allocation_counter::measure(|| {
+        for _ in 0..1024 {
+            let mut names = labels.iter();
+            assert_eq!(names.len(), 5);
+            for pointer in pointers {
+                assert_eq!(names.next().unwrap().as_ptr(), pointer);
+            }
+            assert_eq!(names.next(), Some("a\"b"));
+            assert_eq!(names.next(), Some("a\"b"));
+            assert_eq!(names.next(), None);
+        }
+    });
+    assert_eq!(allocation.bytes_total, 0);
+    assert_eq!(parent.used(), sibling.bytes() + budget.used());
+    drop(labels);
+    assert_eq!(budget.used(), 0);
+    assert_eq!(parent.used(), sibling.bytes());
+}
+
+#[test]
+fn retained_projection_labels_release_descriptor_and_partial_decoding() {
+    let query = query("SELECT custom.\"a\"\"b\"(1), custom.\"other.name\"(2), lower('a')");
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block");
+    };
+    let slots = std::mem::size_of::<Label<'_>>() * block.projections.len();
+    let token = CancellationToken::new();
+    let mut failed = 0;
+    let mut completed = 0;
+    for limit in [0, slots - 1, slots, slots + 32, slots + 128, 4096] {
+        let parent = MemoryBudget::new(8192);
+        let sibling = parent.reserve(512).unwrap();
+        let budget = parent.child(limit);
+        match projection_labels_with_control(
+            &block.projections,
+            &[],
+            &ProductionControl::new(&budget, &token, &token),
+        ) {
+            Ok(labels) => {
+                completed += 1;
+                assert_eq!(
+                    labels.iter().collect::<Vec<_>>(),
+                    ["a\"b", "other.name", "lower"]
+                );
+                assert!(budget.used() > slots);
+            }
+            Err(error) => {
+                failed += 1;
+                assert_eq!(error.sqlstate(), Some("53200"));
+                if limit >= slots {
+                    assert!(budget.peak() >= slots);
+                }
+            }
+        }
+        assert_eq!(budget.used(), 0);
+        assert_eq!(parent.used(), sibling.bytes());
+    }
+    assert!(failed >= 4);
+    assert!(completed >= 1);
+}
+
+#[test]
+fn retained_projection_labels_release_on_cancellation_and_unwind() {
+    let query = query("SELECT custom.\"a\"\"b\"(1), lower('a')");
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block");
+    };
+    for action in 0..3 {
+        let parent = MemoryBudget::new(8192);
+        let sibling = parent.reserve(512).unwrap();
+        let budget = parent.child(4096);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let labels = projection_labels_with_control(&block.projections, &[], &control)?;
+            assert_eq!(labels.iter().next(), Some("a\"b"));
+            assert!(budget.used() > 0);
+            match action {
+                0 => original.cancel(),
+                1 => invoking.cancel(),
+                _ => panic!("label consumer unwound"),
+            }
+            control.check()?;
+            Ok::<_, SQLError>(())
+        }));
+        if action == 2 {
+            assert!(result.is_err());
+        } else {
+            assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("57014"));
+            let allocation = allocation_counter::measure(|| {
+                let Err(error) = projection_labels_with_control(&block.projections, &[], &control)
+                else {
+                    panic!("cancelled descriptor");
+                };
+                assert_eq!(error.sqlstate(), Some("57014"));
+            });
+            assert!(allocation.bytes_total < 1024, "{allocation:?}");
+        }
+        assert_eq!(budget.used(), 0);
+        assert_eq!(parent.used(), sibling.bytes());
+    }
+}
