@@ -14,6 +14,7 @@ use std::sync::Arc;
 use triomphe::Arc as StrongArc;
 
 mod deque;
+mod hash_index;
 mod hash_set;
 mod heap;
 mod map;
@@ -24,6 +25,7 @@ mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
+pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter};
 pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
 pub use map::{

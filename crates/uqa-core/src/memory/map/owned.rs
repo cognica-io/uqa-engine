@@ -16,8 +16,9 @@ pub use set::{OwnedSet, OwnedSetIntoIter, OwnedSetIter};
 use std::{borrow::Borrow, ops::Bound};
 
 use super::{tree, BudgetedMapIter, Link, Node, OwnedNode, MAX_HEIGHT};
+use crate::memory::{MemoryBudget, MemoryError};
 
-/// An ordinary mutable ordered map with exact node ownership. Unlike `BudgetedMap`, insertion has no allowance and cannot be used as an admitted producer by itself. An enclosing controlled producer must reserve `entry_bytes()` before allocating each new entry and retain that lease until the map is dropped. Separately allocated key/value payloads require their own reservations.
+/// A mutable ordered map with exact node ownership. Ordinary insertion leaves admission to its enclosing owner; `insert_budgeted` admits and retains each new node under the supplied allowance. An enclosing controlled producer may instead reserve `entry_bytes()` before ordinary insertion and retain that lease until the node is dropped. Separately allocated key/value payloads require their own reservations.
 pub struct OwnedMap<K, V> {
     root: Link<K, V>,
     len: usize,
@@ -49,6 +50,10 @@ impl<K, V> OwnedMap<K, V> {
 
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::new();
     }
 
     pub fn iter(&self) -> BudgetedMapIter<'_, K, V> {
@@ -114,6 +119,43 @@ impl<K: Ord, V> OwnedMap<K, V> {
         let previous = tree::insert(&mut self.root, entry);
         self.len += 1;
         previous
+    }
+
+    /// Admit each newly allocated node before publication. Nodes retain their original leases independently, including when later inserts use another request's allowance; replacing a value does not replace its existing node or key. Key and value payloads keep their own owners.
+    pub fn insert_budgeted(
+        &mut self,
+        key: K,
+        value: V,
+        budget: &MemoryBudget,
+    ) -> Result<Option<V>, MemoryError> {
+        if let Some(previous) = self.get_mut(&key) {
+            return Ok(Some(std::mem::replace(previous, value)));
+        }
+        let memory = budget.reserve(Self::entry_bytes())?;
+        let entry = OwnedNode {
+            value: Box::new(Node {
+                key,
+                value,
+                left: None,
+                right: None,
+                height: 1,
+            }),
+            memory: Some(memory),
+        };
+        let previous = tree::insert(&mut self.root, entry);
+        self.len += 1;
+        Ok(previous)
+    }
+
+    /// Keep selected entries without constructing replacement nodes or releasing the retained entries' leases.
+    pub fn retain(&mut self, mut keep: impl FnMut(&K, &mut V) -> bool) {
+        let mut entries = std::mem::take(self).into_iter();
+        while let Some(mut node) = entries.next_node() {
+            if keep(&node.value.key, &mut node.value.value) {
+                tree::insert(&mut self.root, node);
+                self.len += 1;
+            }
+        }
     }
 
     /// Move entries from `other` without allocating replacement nodes. Collisions retain this map's original key and node, replacing only the value.
@@ -205,6 +247,14 @@ impl<K: Ord, V> FromIterator<(K, V)> for OwnedMap<K, V> {
             map.insert(key, value);
         }
         map
+    }
+}
+
+impl<K: Ord, V> Extend<(K, V)> for OwnedMap<K, V> {
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, entries: T) {
+        for (key, value) in entries {
+            self.insert(key, value);
+        }
     }
 }
 

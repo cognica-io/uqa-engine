@@ -15,6 +15,7 @@ use std::{
     },
 };
 
+mod admission;
 mod serialization;
 
 proptest! {

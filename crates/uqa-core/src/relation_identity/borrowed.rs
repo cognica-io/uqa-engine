@@ -88,14 +88,38 @@ pub(super) enum InvalidReference {
     Invalid,
 }
 
-impl InvalidReference {
-    pub(super) fn message(self, value: &str) -> String {
-        match self {
-            Self::Empty => "persisted relation name is empty".to_owned(),
-            Self::Unterminated => format!("unterminated quoted relation name `{value}`"),
-            Self::Invalid => format!("invalid persisted relation name `{value}`"),
+/// A borrowed parse diagnostic. Formatting streams the original input without constructing an intermediate error string.
+pub struct RelationReferenceError<'a> {
+    kind: InvalidReference,
+    input: &'a str,
+}
+impl fmt::Debug for RelationReferenceError<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, formatter)
+    }
+}
+impl fmt::Display for RelationReferenceError<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            InvalidReference::Empty => formatter.write_str("persisted relation name is empty"),
+            InvalidReference::Unterminated => write!(
+                formatter,
+                "unterminated quoted relation name `{}`",
+                self.input
+            ),
+            InvalidReference::Invalid => write!(
+                formatter,
+                "invalid persisted relation name `{}`",
+                self.input
+            ),
         }
     }
+}
+
+pub(super) fn parse_result(
+    value: &str,
+) -> Result<RelationReference<'_>, RelationReferenceError<'_>> {
+    parse(value).map_err(|kind| RelationReferenceError { kind, input: value })
 }
 
 pub(super) fn parse(value: &str) -> Result<RelationReference<'_>, InvalidReference> {

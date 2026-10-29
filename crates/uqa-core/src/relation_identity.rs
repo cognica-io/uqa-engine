@@ -9,7 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 mod borrowed;
-pub use borrowed::{RelationName, RelationReference};
+mod production;
+pub use borrowed::{RelationName, RelationReference, RelationReferenceError};
 #[cfg(test)]
 mod tests;
 
@@ -33,11 +34,14 @@ impl RelationIdentity {
     }
 
     pub fn qualified_name(&self) -> String {
-        format!(
-            "{}.{}",
-            render_relation_component(&self.schema),
-            render_relation_component(&self.name)
-        )
+        RelationReference {
+            schema: Some(RelationName::decoded(&self.schema)),
+            name: RelationName::decoded(&self.name),
+        }
+        .render_with_control(&crate::memory::ProductionControl::uncontrolled())
+        .expect("ordinary relation names cannot be cancelled or limited")
+        .into_uncontrolled()
+        .expect("ordinary relation names have no reservation")
     }
 
     /// Physical owner keys that can refer to this relation. New writes use
@@ -86,7 +90,7 @@ impl RelationIdentity {
     /// Parse a possibly-unqualified SQL relation reference without choosing a
     /// search-path schema. Components use `PostgreSQL` double-quote escaping.
     pub fn parse_reference(value: &str) -> Result<(Option<String>, String), String> {
-        let reference = borrowed::parse(value).map_err(|error| error.message(value))?;
+        let reference = Self::try_borrowed_reference(value).map_err(|error| error.to_string())?;
         Ok((
             reference.schema.map(|schema| schema.to_string()),
             reference.name.to_string(),
@@ -95,7 +99,14 @@ impl RelationIdentity {
 
     /// Parse a relation reference without allocating decoded names or error text. Qualified references retain their separate schema component.
     pub fn borrowed_reference(value: &str) -> Option<RelationReference<'_>> {
-        borrowed::parse(value).ok()
+        Self::try_borrowed_reference(value).ok()
+    }
+
+    /// Retain an invalid reference as a borrowing diagnostic so controlled consumers can admit its formatting.
+    pub fn try_borrowed_reference(
+        value: &str,
+    ) -> Result<RelationReference<'_>, RelationReferenceError<'_>> {
+        borrowed::parse_result(value)
     }
 }
 
