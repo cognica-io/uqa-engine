@@ -54,7 +54,7 @@ pub(super) fn action_target_qualifier_referenced(
             let mut detector = QualifierReferenceDetector::new(qualifier);
             let mut scope = super::RuleBindingScope::default();
             if let Some(source) = &update.from {
-                let _ = super::bind_from(source, &mut detector, &scope, &context);
+                let _ = super::inspection::source(source, &mut detector, &scope, &context);
                 let _ = super::collect_visible_scope(source, &context, &mut scope);
             }
             for expression in update
@@ -62,12 +62,20 @@ pub(super) fn action_target_qualifier_referenced(
                 .iter()
                 .flat_map(|(target, value)| target.expressions().chain(std::iter::once(value)))
             {
-                let _ =
-                    super::bind_rule_expr_with_scope(expression, &mut detector, &scope, &context);
+                let _ = super::inspection::scoped_expression(
+                    expression,
+                    &mut detector,
+                    &scope,
+                    &context,
+                );
             }
             if let Some(expression) = &update.r#where {
-                let _ =
-                    super::bind_rule_expr_with_scope(expression, &mut detector, &scope, &context);
+                let _ = super::inspection::scoped_expression(
+                    expression,
+                    &mut detector,
+                    &scope,
+                    &context,
+                );
             }
             detector.referenced
         }
@@ -78,12 +86,16 @@ pub(super) fn action_target_qualifier_referenced(
             let mut detector = QualifierReferenceDetector::new(qualifier);
             let mut scope = super::RuleBindingScope::default();
             if let Some(source) = &delete.using {
-                let _ = super::bind_from(source, &mut detector, &scope, &context);
+                let _ = super::inspection::source(source, &mut detector, &scope, &context);
                 let _ = super::collect_visible_scope(source, &context, &mut scope);
             }
             if let Some(expression) = &delete.r#where {
-                let _ =
-                    super::bind_rule_expr_with_scope(expression, &mut detector, &scope, &context);
+                let _ = super::inspection::scoped_expression(
+                    expression,
+                    &mut detector,
+                    &scope,
+                    &context,
+                );
             }
             detector.referenced
         }

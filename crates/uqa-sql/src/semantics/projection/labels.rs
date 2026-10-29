@@ -168,6 +168,19 @@ pub fn function_projection_label(name: &str, binding: Option<&FunctionBinding>) 
         .into_uncontrolled()
 }
 
+pub(crate) fn rule_function_label<E: FieldNameLiteral>(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    field: Option<&E>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    if let Some(name) = field_selection_name(binding, field) {
+        return Ok(control.copy_text(name)?);
+    }
+    let label = function_label(name, binding, control)?;
+    Ok(control.copy_text(label.as_str())?)
+}
+
 fn function_label<'a>(
     name: &'a str,
     binding: Option<&FunctionBinding>,

@@ -8,6 +8,7 @@
 
 use crate::Engine;
 use std::{collections::BTreeSet, sync::Arc};
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{ColumnDef, RuleEvent, TriggerEvent, TriggerTiming},
@@ -154,6 +155,15 @@ impl ViewRewriteCatalog for Engine {
         rule: &StoredRule,
     ) -> Result<Option<BTreeSet<String>>, SQLError> {
         uqa_sql::semantics::rules::action_binding::rule_new_row_columns(self, rule)
+    }
+    fn rule_new_row_columns_with_control(
+        &self,
+        rule: &StoredRule,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Vec<String>>>, SQLError> {
+        uqa_sql::semantics::rules::action_binding::rule_new_row_columns_with_control(
+            self, rule, control,
+        )
     }
     fn target_view_kind(&self, name: &str) -> Result<Option<StoredViewKind>, SQLError> {
         self.mutation_view_kind(name)

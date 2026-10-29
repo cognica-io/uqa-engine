@@ -100,11 +100,11 @@ fn is_action_image_alias(
     }
 }
 
-struct RuleActionReturningResolver<'a, 'resolver> {
-    action_columns: &'a BTreeSet<String>,
-    aliases: &'a ReturningAliases,
-    action_event: RuleEvent,
-    event_resolver: &'resolver mut dyn VariableResolver,
+pub(super) struct RuleActionReturningResolver<'a, 'resolver> {
+    pub(super) action_columns: &'a dyn super::names::ActionColumns,
+    pub(super) aliases: &'a ReturningAliases,
+    pub(super) action_event: RuleEvent,
+    pub(super) event_resolver: &'resolver mut dyn VariableResolver,
 }
 
 impl RuleActionReturningResolver<'_, '_> {

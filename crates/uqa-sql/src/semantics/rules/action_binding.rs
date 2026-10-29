@@ -6,7 +6,7 @@
 
 //! Query-scope-aware binding for rewrite-rule OLD/NEW pseudo-relations.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::ast::{
     Expr, FrameBound, FromClause, OrderBy, Projection, RuleEvent, SelectStmt, Statement,
@@ -16,7 +16,9 @@ use crate::plpgsql::{bind_statement, ResolvedVariable, VariableResolver};
 use crate::SQLError;
 
 mod insert;
+mod inspection;
 use insert::bind_insert;
+mod names;
 mod namespace;
 mod references;
 mod returning;
@@ -27,14 +29,12 @@ pub use references::{
     first_rule_row_reference_in_statement, rule_action_has_set_operation,
     rule_condition_plan_references_whole_row, rule_condition_plan_row_columns,
     rule_expr_references_row, rule_expr_references_whole_row, rule_expr_row_columns,
-    rule_new_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
-    rule_statement_row_columns,
+    rule_new_row_columns, rule_new_row_columns_with_control, rule_statement_references_row,
+    rule_statement_references_whole_row, rule_statement_row_columns,
 };
 pub use returning::expand_rule_action_returning_stars;
 pub use row_expansion::expand_rule_action_row_stars;
-use scope::{
-    apply_positional_aliases, collect_visible_scope, cte_output_columns, RuleBindingScope,
-};
+use scope::{collect_visible_scope, cte_output_columns, RuleBindingScope};
 
 pub fn action_target_qualifier_referenced(
     catalog: &dyn RuleSourceCatalog,
@@ -120,7 +120,7 @@ pub fn bind_rule_action(
 }
 
 struct RuleActionBodyResolver<'a, 'resolver> {
-    action_columns: &'a BTreeSet<String>,
+    action_columns: &'a dyn names::ActionColumns,
     action_event: RuleEvent,
     event_resolver: &'resolver mut dyn VariableResolver,
 }
@@ -128,10 +128,7 @@ struct RuleActionBodyResolver<'a, 'resolver> {
 impl RuleActionBodyResolver<'_, '_> {
     fn is_action_column(&self, name: &str) -> bool {
         matches!(self.action_event, RuleEvent::Update | RuleEvent::Delete)
-            && self
-                .action_columns
-                .iter()
-                .any(|column| column.eq_ignore_ascii_case(name))
+            && self.action_columns.contains_folded(name)
     }
 }
 
@@ -441,19 +438,6 @@ fn bind_rule_case_expression(
     })
 }
 
-fn bind_rule_select_scoped(
-    catalog: &dyn RuleSourceCatalog,
-    select: &SelectStmt,
-    resolver: &mut dyn VariableResolver,
-) -> Result<SelectStmt, SQLError> {
-    bind_select_with_scope(
-        select,
-        resolver,
-        &RuleBindingScope::default(),
-        &RuleBindingContext::with_catalog(catalog, false),
-    )
-}
-
 fn bind_rule_statement_body(
     statement: &Statement,
     resolver: &mut dyn VariableResolver,
@@ -474,8 +458,8 @@ fn bind_rule_statement_body(
             let mut output = delete.clone();
             output.with = bind_ctes(&delete.with, resolver, inherited, context)?;
             let context = context.with_ctes(&delete.with)?;
-            let mut target_scope = inherited.clone();
-            target_scope.insert_qualifier(&delete.target_qualifier);
+            let mut target_scope = inherited.copy(&context.control())?;
+            target_scope.insert_qualifier(&delete.target_qualifier, &context.control())?;
             output.using = delete
                 .using
                 .as_ref()
@@ -533,8 +517,8 @@ fn bind_update(
     let mut output = update.clone();
     output.with = bind_ctes(&update.with, resolver, inherited, context)?;
     let context = context.with_ctes(&update.with)?;
-    let mut target_scope = inherited.clone();
-    target_scope.insert_qualifier(&update.target_qualifier);
+    let mut target_scope = inherited.copy(&context.control())?;
+    target_scope.insert_qualifier(&update.target_qualifier, &context.control())?;
     output.from = update
         .from
         .as_ref()
@@ -571,7 +555,7 @@ fn bind_select_with_scope(
     context: &RuleBindingContext<'_>,
 ) -> Result<SelectStmt, SQLError> {
     let local_context = context.with_ctes(&select.with)?;
-    let mut scope = inherited.clone();
+    let mut scope = inherited.copy(&context.control())?;
     if let Some(source) = &select.from {
         collect_visible_scope(source, &local_context, &mut scope)?;
     }
@@ -772,12 +756,12 @@ fn bind_join_from(
         unreachable!("join binder received a non-join source")
     };
     let bound_left = bind_from(left, resolver, inherited, context)?;
-    let mut right_scope = inherited.clone();
+    let mut right_scope = inherited.copy(&context.control())?;
     if *lateral {
         collect_visible_scope(left, context, &mut right_scope)?;
     }
     let bound_right = bind_from(right, resolver, &right_scope, context)?;
-    let mut on_scope = inherited.clone();
+    let mut on_scope = inherited.copy(&context.control())?;
     collect_visible_scope(left, context, &mut on_scope)?;
     collect_visible_scope(right, context, &mut on_scope)?;
     Ok(FromClause::Join {
@@ -800,18 +784,10 @@ fn bind_ctes(
     inherited: &RuleBindingScope,
     context: &RuleBindingContext<'_>,
 ) -> Result<Vec<CTE>, SQLError> {
-    let mut visible = context.clone();
+    let mut visible = context.copy()?;
     let mut bound = Vec::with_capacity(ctes.len());
     for cte in ctes {
-        if cte.recursive {
-            visible
-                .ctes
-                .entry(cte.name.to_ascii_lowercase())
-                .or_default();
-            let mut columns = cte_output_columns(&cte.body, &visible)?;
-            apply_positional_aliases(&mut columns, &cte.columns);
-            visible.ctes.insert(cte.name.to_ascii_lowercase(), columns);
-        }
+        visible.prepare_recursive_cte(cte)?;
         bound.push(CTE {
             name: cte.name.clone(),
             columns: cte.columns.clone(),
@@ -849,16 +825,7 @@ fn bind_ctes(
                 body => body.clone(),
             },
         });
-        let mut columns = cte_output_columns(&cte.body, &visible)?;
-        apply_positional_aliases(&mut columns, &cte.columns);
-        if let Some(search) = &cte.search {
-            columns.push(search.sequence_column.clone());
-        }
-        if let Some(cycle) = &cte.cycle {
-            columns.push(cycle.mark_column.clone());
-            columns.push(cycle.path_column.clone());
-        }
-        visible.ctes.insert(cte.name.to_ascii_lowercase(), columns);
+        visible.record_cte(cte)?;
     }
     Ok(bound)
 }

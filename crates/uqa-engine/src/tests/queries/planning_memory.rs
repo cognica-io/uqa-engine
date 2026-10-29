@@ -412,3 +412,5 @@ fn native_scalar_translation_requests_recover_after_rejection(#[case] provider: 
         engine.close().unwrap();
     }
 }
+
+mod rule_references;

@@ -14,8 +14,12 @@ use crate::plpgsql::{ResolvedVariable, VariableResolver};
 use crate::SQLError;
 use crate::ScalarExpr;
 
-use super::{bind_rule_action, bind_rule_expr_scoped, bind_rule_select_scoped};
+use super::{
+    inspection,
+    names::{self, Names},
+};
 use crate::catalog::events::RuleConditionBinding;
+use uqa_core::memory::{OwnedProductionControl, Produced, ProductionControl, ProductionVec};
 
 #[derive(Default)]
 struct RuleRowReferenceDetector {
@@ -23,14 +27,33 @@ struct RuleRowReferenceDetector {
     whole_row: bool,
 }
 
-#[derive(Default)]
 struct RuleRowColumnCollector {
-    columns: BTreeSet<String>,
+    columns: Names,
+    control: OwnedProductionControl,
     qualifier: Option<&'static str>,
     whole_row: bool,
 }
 
+impl Default for RuleRowColumnCollector {
+    fn default() -> Self {
+        Self::new(&ProductionControl::uncontrolled())
+    }
+}
 impl RuleRowColumnCollector {
+    fn new(control: &ProductionControl<'_>) -> Self {
+        Self {
+            columns: Names::new(),
+            control: control.capture(),
+            qualifier: None,
+            whole_row: false,
+        }
+    }
+    fn into_uncontrolled(self) -> BTreeSet<String> {
+        self.columns
+            .into_iter()
+            .map(|name| name.into_uncontrolled().expect("ordinary rule reference"))
+            .collect()
+    }
     fn accepts(&self, qualifier: &str) -> bool {
         self.qualifier.map_or_else(
             || qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new"),
@@ -51,7 +74,7 @@ impl VariableResolver for RuleRowColumnCollector {
         column: &str,
     ) -> Result<Option<ResolvedVariable>, SQLError> {
         if self.accepts(qualifier) {
-            self.columns.insert(column.to_string());
+            names::insert_name(&mut self.columns, column, false, &self.control.control())?;
         }
         Ok(None)
     }
@@ -120,7 +143,7 @@ pub fn first_rule_row_reference_in_expr(
     shadowed: &BTreeSet<String>,
 ) -> Option<String> {
     let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_rule_expr_scoped(expr, &mut detector, shadowed);
+    let _ = inspection::expression(expr, &mut detector, shadowed);
     detector.qualifier
 }
 
@@ -129,7 +152,7 @@ pub fn first_rule_row_reference_in_select(
     select: &SelectStmt,
 ) -> Option<String> {
     let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_rule_select_scoped(catalog, select, &mut detector);
+    let _ = inspection::select(catalog, select, &mut detector);
     detector.qualifier
 }
 
@@ -139,7 +162,7 @@ pub fn rule_expr_references_row(expr: &Expr) -> bool {
 
 pub fn rule_expr_references_whole_row(expr: &Expr) -> bool {
     let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_rule_expr_scoped(expr, &mut detector, &BTreeSet::new());
+    let _ = inspection::expression(expr, &mut detector, &BTreeSet::new());
     detector.whole_row
 }
 
@@ -162,7 +185,7 @@ pub fn first_rule_row_reference_in_statement(
         .into_iter()
         .collect();
     let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_rule_action(catalog, statement, &columns, &mut detector)?;
+    inspection::action(catalog, statement, &columns, &mut detector)?;
     Ok(detector.qualifier)
 }
 
@@ -172,7 +195,7 @@ pub fn rule_statement_references_row(
     action_columns: &BTreeSet<String>,
 ) -> Result<bool, SQLError> {
     let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_rule_action(catalog, statement, action_columns, &mut detector)?;
+    inspection::action(catalog, statement, action_columns, &mut detector)?;
     Ok(detector.qualifier.is_some())
 }
 
@@ -182,14 +205,14 @@ pub fn rule_statement_references_whole_row(
     action_columns: &BTreeSet<String>,
 ) -> Result<bool, SQLError> {
     let mut detector = RuleRowReferenceDetector::default();
-    let _ = bind_rule_action(catalog, statement, action_columns, &mut detector)?;
+    inspection::action(catalog, statement, action_columns, &mut detector)?;
     Ok(detector.whole_row)
 }
 
 pub fn rule_expr_row_columns(expr: &Expr) -> BTreeSet<String> {
     let mut collector = RuleRowColumnCollector::default();
-    let _ = bind_rule_expr_scoped(expr, &mut collector, &BTreeSet::new());
-    collector.columns
+    let _ = inspection::expression(expr, &mut collector, &BTreeSet::new());
+    collector.into_uncontrolled()
 }
 
 fn collect_condition_plan_row_column(
@@ -219,9 +242,10 @@ pub fn rule_condition_plan_references_whole_row(plan: &ExpressionPlan) -> bool {
         referenced |= condition_plan_expression_references_whole_row(expression);
     });
     for subquery in &plan.subqueries {
-        let mut subquery = subquery.clone();
-        subquery.rewrite_scalar_expressions(&mut |expression| {
-            referenced |= condition_plan_expression_references_whole_row(expression);
+        subquery.visit_scalar_expressions(&mut |root| {
+            root.visit(&mut |expression| {
+                referenced |= condition_plan_expression_references_whole_row(expression);
+            });
         });
     }
     referenced
@@ -236,9 +260,10 @@ pub fn rule_condition_plan_row_columns(
         collect_condition_plan_row_column(expression, binding, &mut columns);
     });
     for subquery in &plan.subqueries {
-        let mut subquery = subquery.clone();
-        subquery.rewrite_scalar_expressions(&mut |expression| {
-            collect_condition_plan_row_column(expression, binding, &mut columns);
+        subquery.visit_scalar_expressions(&mut |root| {
+            root.visit(&mut |expression| {
+                collect_condition_plan_row_column(expression, binding, &mut columns);
+            });
         });
     }
     columns
@@ -250,8 +275,8 @@ pub fn rule_statement_row_columns(
     action_columns: &BTreeSet<String>,
 ) -> Result<BTreeSet<String>, SQLError> {
     let mut collector = RuleRowColumnCollector::default();
-    let _ = bind_rule_action(catalog, statement, action_columns, &mut collector)?;
-    Ok(collector.columns)
+    inspection::action(catalog, statement, action_columns, &mut collector)?;
+    Ok(collector.into_uncontrolled())
 }
 
 /// Input assignments contribute only NEW fields; OLD references require source rows but never the corresponding new assignment expression.
@@ -259,16 +284,55 @@ pub fn rule_new_row_columns(
     catalog: &dyn super::RuleSourceCatalog,
     rule: &crate::catalog::events::StoredRule,
 ) -> Result<Option<BTreeSet<String>>, SQLError> {
+    Ok(
+        rule_new_row_columns_with_control(catalog, rule, &ProductionControl::uncontrolled())?.map(
+            |columns| {
+                columns
+                    .into_uncontrolled()
+                    .expect("ordinary rule reference")
+                    .into_iter()
+                    .collect()
+            },
+        ),
+    )
+}
+
+pub fn rule_new_row_columns_with_control(
+    catalog: &dyn super::RuleSourceCatalog,
+    rule: &crate::catalog::events::StoredRule,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<String>>>, SQLError> {
+    control.check()?;
     let mut collector = RuleRowColumnCollector {
         qualifier: Some("new"),
-        ..RuleRowColumnCollector::default()
+        ..RuleRowColumnCollector::new(control)
     };
     if let Some(condition) = &rule.definition.condition {
-        bind_rule_expr_scoped(condition, &mut collector, &BTreeSet::new())?;
+        inspection::expression_with_control(condition, &mut collector, &BTreeSet::new(), control)?;
     }
     for action in &rule.definition.actions {
-        let columns = super::rule_action_target_columns(catalog, action)?;
-        bind_rule_action(catalog, action, &columns, &mut collector)?;
+        control.check()?;
+        let target = match action {
+            Statement::Insert(statement) => Some(statement.table.as_str()),
+            Statement::Update(statement) => Some(statement.table.as_str()),
+            Statement::Delete(statement) => Some(statement.table.as_str()),
+            _ => None,
+        };
+        let mut columns = Names::new();
+        if let Some(target) = target {
+            let selected = catalog.rule_relation_columns_with_control(target, control)?;
+            for name in selected.iter() {
+                names::insert_name(&mut columns, name, false, control)?;
+            }
+        }
+        inspection::action_with_control(catalog, action, &columns, &mut collector, control)?;
     }
-    Ok((!collector.whole_row).then_some(collector.columns))
+    if collector.whole_row {
+        return Ok(None);
+    }
+    let mut output = ProductionVec::new(*control);
+    for column in collector.columns {
+        output.push_produced(column)?;
+    }
+    Ok(Some(output.finish()?))
 }

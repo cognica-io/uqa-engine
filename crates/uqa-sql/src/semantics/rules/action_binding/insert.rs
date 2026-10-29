@@ -40,8 +40,8 @@ pub(super) fn bind_insert(
         .on_conflict
         .as_ref()
         .map(|conflict| -> Result<crate::ast::OnConflict, SQLError> {
-            let mut conflict_scope = inherited.clone();
-            conflict_scope.insert_qualifier(&insert.target_qualifier);
+            let mut conflict_scope = inherited.copy(&context.control())?;
+            conflict_scope.insert_qualifier(&insert.target_qualifier, &context.control())?;
             Ok(crate::ast::OnConflict {
                 predicate: conflict
                     .predicate

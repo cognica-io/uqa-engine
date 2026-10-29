@@ -14,7 +14,7 @@ use crate::{ColumnIdentity, RowSchema, SQLError, ScalarExpr};
 mod labels;
 mod mutation;
 mod stars;
-pub(crate) use labels::field_selection_label;
+pub(crate) use labels::{field_selection_label, rule_function_label};
 pub use labels::{
     function_projection_label, projection_label_at, projection_labels_with_control,
     visit_query_output_columns, with_projection_label, ProjectionLabels,
