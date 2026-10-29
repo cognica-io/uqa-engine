@@ -23,7 +23,7 @@ fn native_prepared_executions_share_cached_plans_until_replacement(#[case] provi
         )
         .unwrap();
     engine.sql(
-        "SET plan_cache_mode=force_generic_plan; \
+        "BEGIN ISOLATION LEVEL REPEATABLE READ; SET plan_cache_mode=force_generic_plan; \
          PREPARE shared(integer) AS SELECT id, $1 AS marker FROM shared_rows WHERE id >= $1 ORDER BY id; \
          EXECUTE shared(1)",
         &[],
@@ -78,6 +78,7 @@ fn native_prepared_executions_share_cached_plans_until_replacement(#[case] provi
     assert_eq!(control.memory().used(), before - reserved);
     engine.sql("DEALLOCATE ALL", &[]).unwrap();
     assert_eq!(replacement.strong_count(), 1);
+    engine.sql("COMMIT", &[]).unwrap();
     engine.close().unwrap();
     drop(engine);
     drop(replacement);

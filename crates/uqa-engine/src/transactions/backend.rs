@@ -14,6 +14,23 @@ use super::{
 };
 
 impl Engine {
+    /// Idle requests observe committed catalogs before cache lookup. Active requests keep their current view until the statement scheduler admits them; transaction-exit commands need no catalog refresh.
+    pub(crate) fn refresh_idle_statement_view(&self) -> Result<(), SQLError> {
+        if self.transaction_depth() == 0 {
+            self.refresh_statement_catalogs()?;
+        }
+        Ok(())
+    }
+
+    fn refresh_statement_catalogs(&self) -> Result<(), SQLError> {
+        self.synchronize_table_catalog()
+            .map_err(|error| Self::storage_tx_error("refresh table catalog", &error))?;
+        self.synchronize_table_data()
+            .map_err(|error| Self::storage_tx_error("refresh committed table data", &error))?;
+        self.synchronize_catalog_registries()
+            .map_err(|error| Self::storage_tx_error("refresh durable catalog registries", &error))
+    }
+
     pub(crate) fn versioned_backend_transactions(&self) -> bool {
         self.storage
             .backend
@@ -34,6 +51,7 @@ impl Engine {
         &self,
         sets_transaction_snapshot: bool,
     ) -> Result<(), SQLError> {
+        self.refresh_statement_catalogs()?;
         self.prepare_command_snapshot(sets_transaction_snapshot, true)
     }
 

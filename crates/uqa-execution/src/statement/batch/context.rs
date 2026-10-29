@@ -87,6 +87,8 @@ pub trait StatementCache {
 
 /// Transaction state changes requested at the native scheduler's boundaries.
 pub trait BatchTransactions: StatementTransactions {
+    /// Refresh an idle session before reading its statement cache. An active transaction retains its view until its admitted statement selects a snapshot, including ownership of refresh failure.
+    fn refresh_idle_statement_view(&self) -> Result<(), SQLError>;
     fn begin_simple_query_transaction(&self) -> Result<(), SQLError>;
     fn promote_simple_query_transaction(&self) -> Result<(), SQLError>;
     fn run_transaction_statement(&self, statement: TransactionStmt) -> Result<(), SQLError>;

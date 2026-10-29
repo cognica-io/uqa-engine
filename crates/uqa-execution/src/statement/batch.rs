@@ -52,6 +52,7 @@ pub fn execute_prepared_statement<S: Clone + Send + Sync + 'static>(
         .cancellation
         .check()
         .map_err(|error| abort_explicit_statement_error(context.transactions, error.into()))?;
+    context.transactions.refresh_idle_statement_view()?;
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.runtime.cancellation);
     let display = context
@@ -192,6 +193,7 @@ fn execute_with_context<S: Clone + Send + Sync + 'static>(
             error.into(),
         ));
     }
+    context.transactions.refresh_idle_statement_view()?;
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.runtime.cancellation);
     // Diagnostics spell user-defined types as the statement's search path finds them.

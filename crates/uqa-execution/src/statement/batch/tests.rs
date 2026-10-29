@@ -230,6 +230,9 @@ impl StatementTransactions for Inputs {
     }
 }
 impl BatchTransactions for Inputs {
+    fn refresh_idle_statement_view(&self) -> Result<(), SQLError> {
+        Ok(())
+    }
     fn begin_simple_query_transaction(&self) -> Result<(), SQLError> {
         self.record("begin.segment");
         assert_eq!(self.depth.replace(1), 0);

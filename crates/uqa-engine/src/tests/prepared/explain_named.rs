@@ -126,17 +126,22 @@ fn named_explain_prepares_private_sources_and_preserves_cache_recovery(#[case] p
         .into_iter()
         .enumerate()
     {
+        // Compare private preparation within one catalog snapshot; autocommit refresh may legitimately retire a cached executable after EXPLAIN returns.
+        engine
+            .sql("BEGIN ISOLATION LEVEL REPEATABLE READ", &[])
+            .unwrap();
         engine
             .sql(
                 &format!("EXPLAIN (MEMORY, FORMAT JSON) EXECUTE {name}"),
                 &[],
             )
             .unwrap();
-        let selected = engine.session.prepared.read()[name].plan.clone().unwrap();
+        let selected = engine.session.prepared.read()[name]
+            .plan
+            .clone()
+            .unwrap_or_else(|| panic!("{provider:?}, {name}: executable in the pinned snapshot"));
         let original = serde_json::to_value(selected.as_ref()).unwrap();
-        engine
-            .sql("BEGIN; SAVEPOINT retry_explanation", &[])
-            .unwrap();
+        engine.sql("SAVEPOINT retry_explanation", &[]).unwrap();
         let baseline = retained.memory().used();
         let occupied = retained
             .memory()
@@ -151,7 +156,11 @@ fn named_explain_prepares_private_sources_and_preserves_cache_recovery(#[case] p
         );
         drop(occupied);
         assert_eq!(retained.memory().used(), baseline);
-        assert!(engine.transaction_failed());
+        assert!(
+            engine.transaction_failed(),
+            "{provider:?}, {name}, depth={}: {error:?}",
+            engine.transaction_depth()
+        );
         engine.sql("ROLLBACK TO retry_explanation", &[]).unwrap();
         let result = engine.sql(&analyze, &[]).unwrap();
         let Some(Value::Json(text)) = result.value_at(0, 0) else {
@@ -171,7 +180,10 @@ fn named_explain_prepares_private_sources_and_preserves_cache_recovery(#[case] p
         assert_eq!(serde_json::to_value(selected.as_ref()).unwrap(), original);
     }
     engine
-        .sql("EXPLAIN EXECUTE write_explanation", &[])
+        .sql(
+            "BEGIN ISOLATION LEVEL REPEATABLE READ; EXPLAIN EXECUTE write_explanation",
+            &[],
+        )
         .unwrap();
     let original = engine.session.prepared.read()["write_explanation"]
         .plan
@@ -190,6 +202,7 @@ fn named_explain_prepares_private_sources_and_preserves_cache_recovery(#[case] p
         Some(&Value::Int(103))
     );
     drop(original);
+    engine.sql("COMMIT", &[]).unwrap();
     engine.close().unwrap();
     drop(engine);
     assert_eq!(retained.memory().used(), 0);

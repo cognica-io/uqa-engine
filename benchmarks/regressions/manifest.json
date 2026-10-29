@@ -29700,6 +29700,21 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_statement_catalog_admission_owns_failure_and_savepoint_recovery",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/transactions/tests/admission.rs",
+      "capability": "Statement catalog admission and transaction recovery",
+      "workload": "SQL, Simple Query, cursor and host prepared execution after a sibling catalog publication inside REPEATABLE READ, with the session retention allowance exhausted on native SQLite, SQLite Key/Value and redb; memory engines do not provide independent sessions.",
+      "invariant": "Catalog refresh failure returns 53200 within the transaction owner, rejects further SQL with 25P02 while the allowance remains exhausted, releases partial ownership and recovers the original row through the savepoint.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }

@@ -30,6 +30,7 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
             error.into(),
         ));
     }
+    context.transactions.refresh_idle_statement_view()?;
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.runtime.cancellation);
     let cached = context.cache.cached_sql_statement(sql);

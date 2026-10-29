@@ -11,6 +11,9 @@ use uqa_execution::statement::transactions::StatementTransactions;
 use uqa_sql::{ast::TransactionStmt, SQLError};
 
 impl uqa_execution::statement::batch::context::BatchTransactions for Engine {
+    fn refresh_idle_statement_view(&self) -> Result<(), SQLError> {
+        Engine::refresh_idle_statement_view(self)
+    }
     fn begin_simple_query_transaction(&self) -> Result<(), SQLError> {
         Engine::begin_simple_query_transaction(self)
     }
