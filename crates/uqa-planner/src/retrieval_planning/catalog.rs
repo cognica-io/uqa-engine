@@ -11,17 +11,17 @@ use std::collections::BTreeMap;
 use uqa_core::{catalog_index::CatalogIndexSnapshot, Edge, Predicate, Vertex};
 use uqa_sql::SQLError;
 
-/// The implementation retains the actual text-index read guard through all analyzer and frequency reads.
+/// The implementation retains the actual text-index read guard through all analyzer and frequency reads. Resource and storage failures retain their typed SQL diagnostics.
 pub trait TextStatisticsRead {
-    fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, String>;
-    fn doc_freq(&self, field: &str, term: &str) -> Result<u64, String>;
-    fn doc_freq_any_field(&self, term: &str) -> Result<u64, String>;
+    fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, SQLError>;
+    fn doc_freq(&self, field: &str, term: &str) -> Result<u64, SQLError>;
+    fn doc_freq_any_field(&self, term: &str) -> Result<u64, SQLError>;
     /// Field inventory for analyzed all-field queries. Legacy scalar adapters may omit it.
-    fn field_names(&self) -> Result<Option<Vec<String>>, String> {
+    fn field_names(&self) -> Result<Option<Vec<String>>, SQLError> {
         Ok(None)
     }
     /// Estimate all-field query support using each field's retained search revision.
-    fn query_doc_freq_any_field(&self, query: &str) -> Result<u64, String> {
+    fn query_doc_freq_any_field(&self, query: &str) -> Result<u64, SQLError> {
         let Some(fields) = self.field_names()? else {
             return self.doc_freq_any_field(query);
         };
@@ -34,17 +34,19 @@ pub trait TextStatisticsRead {
         Ok(frequency)
     }
 
-    fn analyze_utf16(&self, field: &str, query: &str) -> Result<Vec<Vec<u16>>, String> {
+    fn analyze_utf16(&self, field: &str, query: &str) -> Result<Vec<Vec<u16>>, SQLError> {
         Ok(self
             .analyze(field, query)?
             .into_iter()
             .map(|term| term.encode_utf16().collect())
             .collect())
     }
-    fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> Result<u64, String> {
+    fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> Result<u64, SQLError> {
         self.doc_freq(
             field,
-            &String::from_utf16(term).map_err(|error| error.to_string())?,
+            &String::from_utf16(term).map_err(|error| {
+                SQLError::Internal(format!("execute read document frequency: {error}"))
+            })?,
         )
     }
 }
@@ -79,6 +81,11 @@ pub struct GraphStatisticsSnapshot {
     pub vertex_label_counts: BTreeMap<String, u64>,
 }
 pub trait RetrievalPlanningCatalog {
+    /// Retain the invoking allowance for statistics production. Standalone catalogs may use ordinary allocation.
+    fn production_resources(&self) -> Result<Option<crate::PlanningResources>, SQLError> {
+        Ok(None)
+    }
+
     fn has_table(&self, table: &str) -> Result<bool, String>;
     fn resolve_table_name(&self, table: &str) -> Result<Option<String>, String>;
     fn list_catalog_indexes(&self) -> Result<CatalogIndexSnapshot, String>;

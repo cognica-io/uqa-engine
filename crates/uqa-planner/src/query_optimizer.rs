@@ -37,7 +37,7 @@ mod index_selection;
 mod reorder;
 mod tree_map;
 
-use uqa_core::{IndexStats, Predicate};
+use uqa_core::{IndexStats, OwnedIndexStats, Predicate};
 use uqa_operators::OperatorTree;
 
 use crate::cardinality::{CardinalityEstimator, ColumnStatistics, GraphStats, GraphStoreSampler};
@@ -108,7 +108,7 @@ pub struct QueryOptimizer {
     pub index_candidates: Vec<IndexScanCandidate>,
     pub table_name: Option<String>,
     pub row_count: Option<u64>,
-    pub index_stats: IndexStats,
+    pub index_stats: OwnedIndexStats,
     pub config: OptimizerConfig,
 }
 
@@ -121,7 +121,7 @@ impl QueryOptimizer {
             index_candidates: Vec::new(),
             table_name: None,
             row_count: None,
-            index_stats: IndexStats::new(1_000),
+            index_stats: IndexStats::new(1_000).into(),
             config: OptimizerConfig::default(),
         }
     }
@@ -151,11 +151,12 @@ impl QueryOptimizer {
 
     pub fn with_row_count(mut self, n: u64) -> Self {
         self.row_count = Some(n);
-        self.index_stats.total_docs = n;
+        self.index_stats = self.index_stats.with_total_docs(n);
         self
     }
 
-    pub fn with_index_stats(mut self, stats: IndexStats) -> Self {
+    pub fn with_index_stats(mut self, stats: impl Into<OwnedIndexStats>) -> Self {
+        let stats: OwnedIndexStats = stats.into();
         self.row_count = Some(stats.total_docs);
         self.index_stats = stats;
         self

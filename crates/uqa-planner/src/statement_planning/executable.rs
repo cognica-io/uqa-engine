@@ -7,12 +7,10 @@
 //! Analyze executable plans before optimizer inputs and constant evaluation.
 
 use super::{rule_inputs::RuleInputPlanningContext, StatementStatisticsContext};
+pub use crate::PlanningResources;
 use crate::{AggregateClassifier, ConstantEvaluator, QueryPlan, UnifiedPlan};
 use std::borrow::Cow;
-use uqa_core::{
-    memory::{MemoryBudget, ProductionControl},
-    CancellationToken,
-};
+use uqa_core::memory::ProductionControl;
 use uqa_sql::{
     binding::statements::{analyze_executable_plan, AnalyzedResult, StatementAnalysisContext},
     plan::{OwnedExecutablePlan, OwnedQueryPlan, SharedExecutablePlan},
@@ -42,26 +40,6 @@ pub trait StatementOptimizationContexts {
     }
     fn routine_inlining(&self) -> Option<uqa_sql::routines::inlining::RoutineInliningContext<'_>> {
         None
-    }
-}
-
-/// Native planning retains the existing request owner without depending on a
-/// storage provider. Its new allocations use the invoking cancellation scope.
-pub struct PlanningResources {
-    memory: MemoryBudget,
-    cancellation: CancellationToken,
-}
-
-impl PlanningResources {
-    pub fn new(memory: MemoryBudget, cancellation: CancellationToken) -> Self {
-        Self {
-            memory,
-            cancellation,
-        }
-    }
-
-    pub(super) fn control(&self) -> ProductionControl<'_> {
-        ProductionControl::new(&self.memory, &self.cancellation, &self.cancellation)
     }
 }
 

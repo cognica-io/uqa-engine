@@ -64,6 +64,16 @@ impl<K, V> OwnedMap<K, V> {
 }
 
 impl<K: Ord, V> OwnedMap<K, V> {
+    /// Borrow a value using a compound or differently encoded query without constructing an owned key. The comparator orders the query against each stored key and must agree with the key's `Ord` implementation.
+    pub fn get_by(&self, compare: impl FnMut(&K) -> std::cmp::Ordering) -> Option<&V> {
+        tree::get_by(&self.root, compare).map(|node| &node.value)
+    }
+
+    /// Mutate only a selected value, using the same query-to-key ordering as `get_by`. Keys and node ownership remain unchanged.
+    pub fn get_mut_by(&mut self, compare: impl FnMut(&K) -> std::cmp::Ordering) -> Option<&mut V> {
+        tree::get_mut_by(&mut self.root, compare).map(|node| &mut node.value)
+    }
+
     pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,

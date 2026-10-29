@@ -26800,6 +26800,207 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "frequency_lookups_borrow_large_scalar_and_raw_utf16_keys",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/index_stats/tests.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Read existing and missing one MiB field names, scalar terms, equivalent UTF-16 and isolated-surrogate keys.",
+      "invariant": "Every read is allocation-free and preserves exact field/term identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_statistics_retain_exact_allocations_and_lossless_key_identity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/index_stats/tests.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Publish large text, scalar/raw UTF-16 collisions, unpaired surrogates and signed-zero vector queries under one allowance.",
+      "invariant": "The exact retained allocator bytes equal the owner reservation; point values and binary32 identity survive population changes and release to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "statistics_replacements_need_no_capacity_and_failed_growth_preserves_the_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/index_stats/tests.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Fill a shared ancestor with a sibling reservation, replace equivalent text/vector keys, then attempt new-key growth.",
+      "invariant": "Inline replacements allocate nothing; rejected growth preserves existing values and releases only its own partial storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "statistics_admission_rejects_large_keys_before_copying_and_releases_partial_keys",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/index_stats/tests.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Attempt four MiB text and vector keys below their required allowance.",
+      "invariant": "Reject before large payload copies, keep allocation below four KiB and preserve existing entries and their reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "statistics_honor_both_cancellation_scopes_and_release_failed_publication",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/index_stats/tests.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Cancel each original/invoking scope before replacement and final publication.",
+      "invariant": "Typed cancellation prevents mutation or publication and releases all owned bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "statistics_release_builder_and_published_output_on_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/index_stats/tests.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Unwind while retaining a populated builder or its immutable published result.",
+      "invariant": "Both owners free every admitted node and payload and restore the allowance to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "text_statistics_borrow_the_source_and_retain_only_the_published_key",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/statistics/tests/collection.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Estimate a four MiB text query with saturating term frequencies.",
+      "invariant": "The analyzer receives original addresses, only the published key is copied, frequency clamps to the document population and the exact lease survives until output drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unusable_or_unmaterialized_vector_inputs_need_no_coordinate_copy",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/statistics/tests/collection.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Estimate three four MiB coordinate inputs with no physical metadata, a missing field or nonfinite components under zero output allowance.",
+      "invariant": "Keep total allocation below four KiB, pass the original usable query address and retain the original maximum dimension estimate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_keep_text_preorder_zip_clamping_and_guard_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/statistics/tests/collection.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Mix all text and vector variants, unequal multifield lists and an all-field term.",
+      "invariant": "Preserve text preorder, zipped-prefix inputs, saturation/clamping, text-before-vector reads and read-guard release order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "typed_callback_errors_precede_cancellation_and_skip_large_suffixes",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/statistics/tests/collection.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Raise 53200, 40001 or 57014 during the second text callback while cancelling the reader, before eight MiB of unused suffix payloads.",
+      "invariant": "Return the callback error unchanged, allocate below four KiB, stop later callbacks and release only partial statistics, preserving the sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "either_cancellation_scope_releases_partial_statistics_and_readers",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/statistics/tests/collection.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Cancel the original or invoking scope after one completed text statistic.",
+      "invariant": "Return 57014 before later frequency/vector reads and release partial output, the text reader and retained table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "vector_callback_unwind_releases_text_statistics_and_both_guards",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/statistics/tests/collection.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Unwind physical-vector metadata lookup after completed text statistics.",
+      "invariant": "Release text output, vector reader and retained table with no remaining reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "physical_statistics_reuse_exact_queries_and_retain_the_coordinates",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/retrieval_planning/statistics/tests/collection.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Estimate duplicate binary32 queries and a distinct negative-zero query, then drop the original tree.",
+      "invariant": "Read physical metadata once per exact query, borrow source addresses and retain independent admitted coordinates until the statistics owner drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_retrieval_statistics_retain_the_request_reservation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/retrieval.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Build native text statistics over an indexed document on all four providers.",
+      "invariant": "Keep the invoking request reservation with the optimizer statistics and release it on owner drop without changing the document frequency.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_retrieval_statistics_reject_growth_and_release_partial_storage",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/retrieval.rs",
+      "capability": "Admitted retrieval statistics",
+      "workload": "Build 4096 distinct text-query statistics with only 16 KiB remaining allowance on all four providers, then release the sibling reservation and retry.",
+      "invariant": "Return typed 53200 for storage-read or statistics growth exhaustion, release partial storage, preserve sibling bytes and complete the same query statistics after recovery.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

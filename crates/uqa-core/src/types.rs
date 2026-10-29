@@ -67,8 +67,8 @@ pub use graph_phi::{
     GRAPH_PHI_VERTICES_FIELD,
 };
 pub use index_stats::{
-    DiskANNIndexStats, DiskANNQueryStats, IndexStats, VectorGeneration, VectorPopulationStats,
-    VectorQueryRoute, VectorReadStats,
+    DiskANNIndexStats, DiskANNQueryStats, IndexStats, IndexStatsBuilder, OwnedIndexStats,
+    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats,
 };
 pub use jsonb::{
     jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,

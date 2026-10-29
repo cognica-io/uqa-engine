@@ -76,19 +76,21 @@ impl RetrievalStatisticsTable for Table {
     }
 }
 impl TextStatisticsRead for Text<'_> {
-    fn analyze(&self, _: &str, query: &str) -> Result<Vec<String>, String> {
+    fn analyze(&self, _: &str, query: &str) -> Result<Vec<String>, SQLError> {
         self.0.events.borrow_mut().push("analyze".into());
         Ok(query.split_whitespace().map(str::to_owned).collect())
     }
-    fn doc_freq(&self, _: &str, term: &str) -> Result<u64, String> {
+    fn doc_freq(&self, _: &str, term: &str) -> Result<u64, SQLError> {
         self.0.events.borrow_mut().push(format!("frequency:{term}"));
         if term == "failing" {
-            Err("unavailable".into())
+            Err(SQLError::Internal(
+                "execute read document frequency: unavailable".into(),
+            ))
         } else {
             Ok(1)
         }
     }
-    fn doc_freq_any_field(&self, _: &str) -> Result<u64, String> {
+    fn doc_freq_any_field(&self, _: &str) -> Result<u64, SQLError> {
         panic!("field is explicit")
     }
 }

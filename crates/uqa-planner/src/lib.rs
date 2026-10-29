@@ -54,6 +54,8 @@ pub mod join_graph;
 pub mod join_order;
 pub mod optimizer;
 pub mod plan_cost;
+mod planning_resources;
+pub use planning_resources::PlanningResources;
 pub mod query_optimizer;
 pub mod statement_planning;
 pub mod text_top_k;

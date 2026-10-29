@@ -42,7 +42,12 @@ pub fn query_optimizer(
     tree: &OperatorTree,
 ) -> PlanningResult<QueryOptimizer> {
     let candidates = index_candidates(catalog, table, tree)?;
-    let stats = index_stats(catalog, table, tree)?;
+    let resources = catalog.production_resources()?;
+    let control = resources.as_ref().map_or_else(
+        uqa_core::memory::ProductionControl::uncontrolled,
+        crate::PlanningResources::control,
+    );
+    let stats = index_stats(catalog, table, tree, &control)?;
     let column_stats = if table.is_empty() {
         crate::ColumnStatistics::default()
     } else {

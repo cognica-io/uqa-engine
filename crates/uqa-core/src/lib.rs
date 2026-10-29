@@ -45,14 +45,15 @@ pub use types::{
     ArrayAssignmentError, ArrayTraversalError, ArrayValue, BitStringValue, BudgetedArrayElements,
     ControlledArrayElements, DatumValue, DecimalValue, DiskANNIndexStats, DiskANNQueryStats, DocId,
     Edge, EdgeId, EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, FieldName,
-    GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError,
-    LegacyVectorKind, LegacyVectorValue, PathExpr, PathSegment, Payload, PostingEntry,
-    RecordDatumField, RecordDescriptor, RecordFieldType, RecordIter, RecordIterMut, RecordValue,
-    RowDescriptor, RowValue, TemporalDate, TemporalDateOrder, TemporalDateStyle, TemporalDateTime,
-    TemporalInfinity, TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
-    TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError,
-    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
-    MAX_ENUM_LABEL_KEY_BYTES, POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
+    GeneralizedPayload, GeneralizedPostingEntry, IndexStats, IndexStatsBuilder, JsonValueDecoder,
+    JsonbKeyError, LegacyVectorKind, LegacyVectorValue, OwnedIndexStats, PathExpr, PathSegment,
+    Payload, PostingEntry, RecordDatumField, RecordDescriptor, RecordFieldType, RecordIter,
+    RecordIterMut, RecordValue, RowDescriptor, RowValue, TemporalDate, TemporalDateOrder,
+    TemporalDateStyle, TemporalDateTime, TemporalInfinity, TemporalInputError,
+    TemporalIntervalStyle, TemporalTimeZone, TemporalValue, TokenOccurrence, TokenOccurrenceError,
+    TokenOffsets, Value, ValueRetentionError, VectorGeneration, VectorPopulationStats,
+    VectorQueryRoute, VectorReadStats, Vertex, VertexId, MAX_ENUM_LABEL_KEY_BYTES,
+    POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
 
 mod scored_entry;
