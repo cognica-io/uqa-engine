@@ -25,14 +25,14 @@ pub(super) fn optimize_collated(
         unreachable!("retained collation expression");
     };
     let selected_arm = matches!(*expr, ScalarExpr::Case { .. });
-    let mut expr = match *expr {
+    let mut expr = super::rewrite_box(expr, |expression| match expression {
         expression @ ScalarExpr::Binary { .. } => {
-            super::optimize_noncall_scalar(expression, config, Some(&ty))?
+            super::optimize_noncall_scalar(expression, config, Some(&ty))
         }
-        expression => optimize_scalar(expression, config)?,
-    };
+        expression => optimize_scalar(expression, config),
+    })?;
     if let Some(oid) = collation.implicit_oid() {
-        match &mut expr {
+        match expr.as_mut() {
             ScalarExpr::TypedLiteral {
                 ty: name,
                 bound_type,
@@ -50,10 +50,10 @@ pub(super) fn optimize_collated(
                 *name = ty.catalog_name();
                 *bound_type = Some(ty);
                 *collation_oid = Some(oid);
-                return Ok(expr);
+                return Ok(*expr);
             }
             ScalarExpr::Literal(_) => {
-                let ScalarExpr::Literal(value) = expr else {
+                let ScalarExpr::Literal(value) = *expr else {
                     unreachable!()
                 };
                 return Ok(ScalarExpr::TypedLiteral {
@@ -69,7 +69,7 @@ pub(super) fn optimize_collated(
         }
     }
     Ok(ScalarExpr::Collated {
-        expr: Box::new(expr),
+        expr,
         ty,
         collation,
     })

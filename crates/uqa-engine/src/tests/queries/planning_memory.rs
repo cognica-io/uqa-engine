@@ -15,6 +15,7 @@ mod demand;
 mod indexes;
 mod inference;
 mod retrieval;
+mod scalar_rewrite;
 mod sources;
 mod statistics;
 mod subqueries;

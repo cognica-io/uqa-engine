@@ -79,14 +79,20 @@ pub(super) fn optimize_boolean(
 
 pub(super) fn optimize_case(
     base: Option<Box<ScalarExpr>>,
-    when: Vec<(ScalarExpr, ScalarExpr)>,
+    mut when: Vec<(ScalarExpr, ScalarExpr)>,
     else_branch: Option<Box<ScalarExpr>>,
     config: &OptimizerConfig,
 ) -> Result<ScalarExpr, SQLError> {
     let base = optimize_optional(base, config)?;
-    let mut kept = Vec::with_capacity(when.len());
-    let mut remaining = when.into_iter();
-    while let Some((condition, result)) = remaining.next() {
+    let mut kept = 0;
+    for index in 0..when.len() {
+        let (condition, result) = std::mem::replace(
+            &mut when[index],
+            (
+                ScalarExpr::Literal(Value::Null),
+                ScalarExpr::Literal(Value::Null),
+            ),
+        );
         let condition = optimize_scalar(condition, config)?;
         let matched = match (
             base.as_deref(),
@@ -116,65 +122,73 @@ pub(super) fn optimize_case(
             }
             let result = optimize_scalar(result, config)?;
             if matched == Some(true) {
-                return Ok(if kept.is_empty() {
+                when.truncate(kept);
+                return Ok(if kept == 0 {
                     result
                 } else {
+                    let else_branch = match else_branch {
+                        Some(mut branch) => {
+                            *branch = result;
+                            branch
+                        }
+                        None => Box::new(result),
+                    };
                     ScalarExpr::Case {
                         base,
-                        when: kept,
-                        else_branch: Some(Box::new(result)),
+                        when,
+                        else_branch: Some(else_branch),
                     }
                 });
             }
-            kept.push((condition, result));
+            when[kept] = (condition, result);
+            kept += 1;
             continue;
         }
-        // Retain unreachable arms for schema binding: their types still
-        // participate in CASE's common result type, but their values do not.
+        // Retain unreachable arms for schema binding: their types still participate in CASE's common result type, but their values do not.
         let result = if matched == Some(false) {
             result
         } else {
             optimize_scalar(result, config)?
         };
-        kept.push((condition, result));
+        when[kept] = (condition, result);
+        kept += 1;
         if matched == Some(true) {
-            kept.extend(remaining);
             return Ok(ScalarExpr::Case {
                 base,
-                when: kept,
+                when,
                 else_branch,
             });
         }
     }
-    if config.coerced_conditionals && kept.is_empty() {
+    when.truncate(kept);
+    if config.coerced_conditionals && kept == 0 {
         return Ok(optimize_optional(else_branch, config)?
             .map_or(ScalarExpr::Literal(Value::Null), |value| *value));
     }
     Ok(ScalarExpr::Case {
         base,
-        when: kept,
+        when,
         else_branch: optimize_optional(else_branch, config)?,
     })
 }
 
 pub(super) fn optimize_coalesce(
-    args: Vec<ScalarExpr>,
+    mut args: Vec<ScalarExpr>,
     config: &OptimizerConfig,
 ) -> Result<Vec<ScalarExpr>, SQLError> {
-    let mut kept = Vec::with_capacity(args.len());
-    let mut remaining = args.into_iter();
-    while let Some(argument) = remaining.next() {
+    for index in 0..args.len() {
+        let argument = std::mem::replace(&mut args[index], ScalarExpr::Literal(Value::Null));
         let argument = optimize_scalar(argument, config)?;
         let stops = literal_value_with_control(&argument, &config.production)?
             .as_deref()
             .is_some_and(|value| !matches!(value, Value::Null));
-        kept.push(argument);
+        args[index] = argument;
         if stops {
-            if !config.coerced_conditionals {
-                kept.extend(remaining);
+            if config.coerced_conditionals {
+                args.truncate(index + 1);
             }
             break;
         }
     }
-    Ok(kept)
+    Ok(args)
 }

@@ -28801,6 +28801,165 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "scalar_rewrite_reuses_surviving_boxes_and_array_capacity",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Rewrite nonconstant binary, unary, NOT, null, range, membership and subquery operands in an array.",
+      "invariant": "Reuse existing boxes and array storage with zero new allocation and preserve the complete expression.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "case_reuses_storage_without_evaluating_unreachable_values",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Simplify CASE with false, unknown and true conditions before invalid unreachable branches, with and without completed coercions.",
+      "invariant": "Retain the original arm buffer and ELSE box, preserve unbound type arms and never evaluate unreachable errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "coalesce_reuses_arguments_and_keeps_unbound_type_arms",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Simplify COALESCE with a dynamic input, NULL, a nonnull constant and an unreachable invalid cast.",
+      "invariant": "Reuse the argument buffer, retain unbound type arms and truncate only after coercions are complete.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "simple_case_moves_base_and_else_boxes_without_changing_arm_order",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Optimize a simple CASE with a dynamic base, two arms and an ELSE branch.",
+      "invariant": "Retain original base, arm and ELSE allocation identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_moves_first_payload_and_orders_fields_after_other_predicates",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Merge interleaved duplicate KNN thresholds with a 4 MiB first-call payload and an independent sibling reservation.",
+      "invariant": "Retain original input and argument buffers and payload address, bound temporary allocation, preserve field/output order and release all merge scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_preserves_first_call_metadata_and_strict_float_comparison",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Merge case-insensitive calls with NaN payload bits, signed zero, ties and infinity.",
+      "invariant": "Move the first call metadata unchanged and update only thresholds that compare strictly greater.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_admits_scratch_before_copying_payloads_and_releases_partial_work",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Merge 512 distinct fields under four insufficient allowances with an independent sibling owner.",
+      "invariant": "Reject with 53200 before large allocation and release every partially built map or placement buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_checks_both_cancellation_scopes_and_can_recover",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Cancel either original or invoking owner before merging duplicate thresholds and retry with a fresh scope.",
+      "invariant": "Return 57014 without retained scratch and recover with the expected first-call payload and maximum threshold.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_reuses_nonmatching_containers_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Traverse nested OR, NOT and AND expressions without an eligible KNN call.",
+      "invariant": "Allocate no replacement boxes, vectors or scratch and preserve the expression.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_permutation_preserves_each_first_call_for_interleaved_fields",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Merge 32 deterministic interleavings of 97 predicates across 19 fields and ordinary columns.",
+      "invariant": "Match independently selected first-call payloads, maximum thresholds and ordinary/field ordering.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_scalar_merge_admits_scratch_and_moves_original_payload",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scalar_rewrite.rs",
+      "capability": "Native scalar rewrite admission",
+      "workload": "Optimize duplicate KNN threshold IR through the actual native catalog-scalar adapter on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Share request admission and cancellation, reject with 53200, preserve original first-call payload ownership without large copies, recover and release all temporary reservations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "merge_admits_placement_storage_after_the_field_index",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/vector_thresholds/tests.rs",
+      "capability": "Scalar rewrite storage and merge admission",
+      "workload": "Merge one field and then 512 duplicate calls with the same small allowance and an independent sibling owner.",
+      "invariant": "Admit the field index successfully, reject the larger placement buffer before allocation and release the index without changing sibling reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

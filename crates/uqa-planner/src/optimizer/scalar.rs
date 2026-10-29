@@ -6,19 +6,22 @@
 
 //! Scalar simplification with SQL errors preserved at the planning boundary.
 
-use super::{
-    AssignmentPlan, BTreeMap, OptimizerConfig, ProjectionPlan, ScalarExpr, ScalarFrameBound, Value,
-};
+use super::{AssignmentPlan, OptimizerConfig, ProjectionPlan, ScalarExpr, ScalarFrameBound, Value};
 use uqa_sql::SQLError;
 
 mod conditional;
 pub(super) mod constants;
 mod nodes;
 mod qualification;
+mod vector_thresholds;
 pub(crate) use qualification::optimize_qualification;
 
 use conditional::{optimize_boolean, optimize_case, optimize_coalesce};
 use constants::fold_selected_literal;
+use vector_thresholds::merge_vector_thresholds;
+
+#[cfg(test)]
+mod storage_tests;
 
 pub(super) fn optimize_assignments(
     assignments: &mut [AssignmentPlan],
@@ -55,7 +58,7 @@ pub(super) fn optimize_scalar_slot(
     let placeholder = ScalarExpr::Literal(Value::Null);
     let mut optimized = optimize_scalar(std::mem::replace(expression, placeholder), config)?;
     if config.enable_vector_threshold_merge {
-        optimized = merge_vector_thresholds(optimized);
+        optimized = merge_vector_thresholds(optimized, &config.production)?;
     }
     *expression = optimized;
     Ok(())
@@ -78,9 +81,25 @@ fn optimize_optional(
     config: &OptimizerConfig,
 ) -> Result<Option<Box<ScalarExpr>>, SQLError> {
     match expression {
-        Some(expression) => Ok(Some(Box::new(optimize_scalar(*expression, config)?))),
+        Some(expression) => Ok(Some(optimize_box(expression, config)?)),
         None => Ok(None),
     }
+}
+
+fn rewrite_box(
+    mut expression: Box<ScalarExpr>,
+    rewrite: impl FnOnce(ScalarExpr) -> Result<ScalarExpr, SQLError>,
+) -> Result<Box<ScalarExpr>, SQLError> {
+    let original = std::mem::replace(expression.as_mut(), ScalarExpr::Literal(Value::Null));
+    *expression = rewrite(original)?;
+    Ok(expression)
+}
+
+fn optimize_box(
+    expression: Box<ScalarExpr>,
+    config: &OptimizerConfig,
+) -> Result<Box<ScalarExpr>, SQLError> {
+    rewrite_box(expression, |expression| optimize_scalar(expression, config))
 }
 
 fn optimize_scalar(
@@ -115,37 +134,39 @@ fn optimize_noncall_scalar(
             };
             ScalarExpr::Binary {
                 op,
-                lhs: Box::new(operand(*lhs)?),
-                rhs: Box::new(operand(*rhs)?),
+                lhs: rewrite_box(lhs, operand)?,
+                rhs: rewrite_box(rhs, operand)?,
             }
         }
-        ScalarExpr::UnaryMinus(inner) => {
-            ScalarExpr::UnaryMinus(Box::new(optimize_scalar(*inner, config)?))
-        }
+        ScalarExpr::UnaryMinus(inner) => ScalarExpr::UnaryMinus(optimize_box(inner, config)?),
         ScalarExpr::Not(inner) => {
-            let inner = optimize_scalar(*inner, config)?;
-            match inner {
-                ScalarExpr::Not(inner) if config.enable_boolean_simplify => *inner,
-                other => ScalarExpr::Not(Box::new(other)),
+            let inner = optimize_box(inner, config)?;
+            if config.enable_boolean_simplify && matches!(*inner, ScalarExpr::Not(_)) {
+                let ScalarExpr::Not(inner) = *inner else {
+                    unreachable!()
+                };
+                *inner
+            } else {
+                ScalarExpr::Not(inner)
             }
         }
         ScalarExpr::And(items) => optimize_boolean(items, true, config)?,
         ScalarExpr::Or(items) => optimize_boolean(items, false, config)?,
         ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
-            expr: Box::new(optimize_scalar(*expr, config)?),
+            expr: optimize_box(expr, config)?,
             negated,
         },
         ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
-            expr: Box::new(optimize_scalar(*expr, config)?),
-            low: Box::new(optimize_scalar(*low, config)?),
-            high: Box::new(optimize_scalar(*high, config)?),
+            expr: optimize_box(expr, config)?,
+            low: optimize_box(low, config)?,
+            high: optimize_box(high, config)?,
         },
         ScalarExpr::InList {
             expr,
             list,
             negated,
         } => ScalarExpr::InList {
-            expr: Box::new(optimize_scalar(*expr, config)?),
+            expr: optimize_box(expr, config)?,
             list: optimize_list(list, config)?,
             negated,
         },
@@ -179,7 +200,7 @@ fn optimize_noncall_scalar(
         } => optimize_case(base, when, else_branch, config)?,
         ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
             implicit,
-            expr: Box::new(optimize_scalar(*expr, config)?),
+            expr: optimize_box(expr, config)?,
             ty,
         },
         ScalarExpr::InSubquery {
@@ -187,7 +208,7 @@ fn optimize_noncall_scalar(
             subquery,
             negated,
         } => ScalarExpr::InSubquery {
-            expr: Box::new(optimize_scalar(*expr, config)?),
+            expr: optimize_box(expr, config)?,
             subquery,
             negated,
         },
@@ -289,51 +310,6 @@ fn optimize_frame_bound(
         | ScalarFrameBound::CurrentRow => {}
     }
     Ok(())
-}
-
-fn merge_vector_thresholds(expression: ScalarExpr) -> ScalarExpr {
-    match expression {
-        ScalarExpr::And(items) => {
-            let mut by_field: BTreeMap<String, (ScalarExpr, f64)> = BTreeMap::new();
-            let mut others = Vec::new();
-            for item in items {
-                if let ScalarExpr::Func { name, args, .. } = &item {
-                    if name.eq_ignore_ascii_case("knn_match") && args.len() >= 3 {
-                        if let (
-                            ScalarExpr::Literal(Value::Str(field)),
-                            ScalarExpr::Literal(Value::Float(threshold)),
-                        ) = (&args[0], &args[2])
-                        {
-                            let entry = by_field
-                                .entry(field.clone())
-                                .or_insert_with(|| (item.clone(), *threshold));
-                            if *threshold > entry.1 {
-                                entry.1 = *threshold;
-                                if let ScalarExpr::Func { args, .. } = &mut entry.0 {
-                                    args[2] = ScalarExpr::Literal(Value::Float(*threshold));
-                                }
-                            }
-                            continue;
-                        }
-                    }
-                }
-                others.push(merge_vector_thresholds(item));
-            }
-            others.extend(by_field.into_values().map(|(expression, _)| expression));
-            if others.is_empty() {
-                ScalarExpr::Literal(Value::Bool(true))
-            } else if others.len() == 1 {
-                others.remove(0)
-            } else {
-                ScalarExpr::And(others)
-            }
-        }
-        ScalarExpr::Or(items) => {
-            ScalarExpr::Or(items.into_iter().map(merge_vector_thresholds).collect())
-        }
-        ScalarExpr::Not(inner) => ScalarExpr::Not(Box::new(merge_vector_thresholds(*inner))),
-        other => other,
-    }
 }
 
 #[cfg(test)]
