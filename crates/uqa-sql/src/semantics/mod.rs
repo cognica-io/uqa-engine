@@ -19,7 +19,9 @@ mod expression_shape;
 mod functions;
 mod input_values;
 mod membership;
-pub use input_values::visit_input_values;
+pub use input_values::{
+    try_visit_input_values, try_visit_input_values_with_control, visit_input_values,
+};
 mod projection;
 mod source_shape;
 pub use ctes::*;

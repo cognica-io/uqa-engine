@@ -7,7 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
-fn wide_query(width: usize) -> QueryPlan {
+pub(super) fn wide_query(width: usize) -> QueryPlan {
     let crate::UnifiedPlan::Query(mut query) =
         crate::UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0))
     else {

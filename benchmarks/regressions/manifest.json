@@ -27515,6 +27515,97 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_value_observation_lends_names_without_copying_or_demanding_count_star",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/input_values.rs",
+      "capability": "Derived source demand ownership",
+      "workload": "A row containing ordered/filtered COUNT(*) and a later ordinary column.",
+      "invariant": "Lend original names in ORDER BY, FILTER and sibling order without allocating or treating COUNT(*) as input-value demand.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_value_observation_stops_at_the_first_callback_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/input_values.rs",
+      "capability": "Derived source demand ownership",
+      "workload": "Input-value observation whose COUNT(*) FILTER column callback fails after its ordering column.",
+      "invariant": "Return the original callback error before later scalar siblings and retain the original borrowed-name sequence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "derived_required_names_reject_before_copying_wide_inputs",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/required.rs",
+      "capability": "Derived source demand ownership",
+      "workload": "A derived source with 1,024 distinct required 56-byte names under a 128-byte child allowance.",
+      "invariant": "Reject with 53200 before 8 KiB allocation, preserve the unmodified query and release the partial name index without consuming the ancestor sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "repeated_required_names_borrow_original_storage_and_ignore_diagnostic_positions",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/required.rs",
+      "capability": "Derived source demand ownership",
+      "workload": "4,096 references to one source output with independent parser positions under a 256-byte allowance.",
+      "invariant": "Reuse one borrowed name identity with less than 2 KiB allocation, preserve every input address and position and release temporary storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "required_name_nodes_release_before_output_inspection_and_its_errors_or_unwind",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/required.rs",
+      "capability": "Derived source demand ownership",
+      "workload": "A derived output whose discarded subquery invokes a failing or unwinding view catalog.",
+      "invariant": "Release all name-index nodes before the original effect inspection, retain only positional demand, propagate failure and release all scratch beside a sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "required_name_discovery_observes_both_cancellation_owners_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/required.rs",
+      "capability": "Derived source demand ownership",
+      "workload": "A 1,024-name derived source with either owner already cancelled and no memory allowance.",
+      "invariant": "Return 57014 before node allocation or query mutation, without a memory-error substitution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unobserved_row_count_nodes_still_preserve_cancellation_checkpoints",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/input_values.rs",
+      "capability": "Derived source demand ownership",
+      "workload": "A row with 4,096 COUNT(*) nodes interrupted at the third traversal checkpoint through either cancellation owner.",
+      "invariant": "Stop after exactly three checkpoints, retain the row-count/input-value distinction and allocate no traversal storage.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

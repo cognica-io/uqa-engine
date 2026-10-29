@@ -13,7 +13,10 @@ use crate::{ColumnIdentity, RowSchema, SQLError, ScalarExpr};
 
 mod labels;
 pub(crate) use labels::field_selection_label;
-pub use labels::{function_projection_label, projection_label_at, visit_query_output_columns};
+pub use labels::{
+    function_projection_label, projection_label_at, visit_query_output_columns,
+    with_projection_label,
+};
 
 pub fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
     projections.iter().map(projection_label_at).collect()

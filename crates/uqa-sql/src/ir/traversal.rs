@@ -19,11 +19,11 @@ impl ScalarExpr {
     }
 
     /// Visit a window call's arguments, `FILTER` condition, partition and ordering keys, and frame offsets.
-    fn try_visit_window<E>(
-        args: &[Self],
-        filter: Option<&Self>,
-        spec: &super::ScalarWindowSpec,
-        visitor: &mut impl FnMut(&Self) -> Result<bool, E>,
+    fn try_visit_window<'a, E>(
+        args: &'a [Self],
+        filter: Option<&'a Self>,
+        spec: &'a super::ScalarWindowSpec,
+        visitor: &mut impl FnMut(&'a Self) -> Result<bool, E>,
     ) -> Result<(), E> {
         for expression in args
             .iter()
@@ -48,9 +48,9 @@ impl ScalarExpr {
     }
 
     /// Visit in pre-order, skipping a subtree when the visitor returns false and stopping immediately on its first error.
-    pub fn try_visit<E>(
-        &self,
-        visitor: &mut impl FnMut(&Self) -> Result<bool, E>,
+    pub fn try_visit<'a, E>(
+        &'a self,
+        visitor: &mut impl FnMut(&'a Self) -> Result<bool, E>,
     ) -> Result<(), E> {
         if !visitor(self)? {
             return Ok(());

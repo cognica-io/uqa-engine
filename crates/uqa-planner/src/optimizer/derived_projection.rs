@@ -7,9 +7,8 @@
 //! Eliminate unused scalar outputs of a simple derived source before constant evaluation.
 
 use crate::{AggregateClassifier, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
-use std::collections::BTreeSet;
 use uqa_core::{
-    memory::{ProductionControl, ProductionVec},
+    memory::{ProductionControl, ProductionMap, ProductionVec},
     Value,
 };
 use uqa_sql::{ast::FunctionVolatility, RowSchema, SQLError, ScalarExpr};
@@ -52,75 +51,97 @@ pub(super) fn prune(
     if !block.subqueries.is_empty() {
         return Ok(());
     }
-    let mut required = BTreeSet::new();
+    let control = &context.production;
+    let mut required = ProductionMap::new(*control);
     let mut all = false;
-    block.visit_expressions(&mut |expression| {
-        super::output_demand::visit(expression, &mut |part| match part {
-            ScalarExpr::Column(name) => {
-                if alias.as_deref() == Some(name.as_str())
-                    && !has_named_output(body, column_aliases, name.as_str())
+    block.try_visit_expressions(&mut |expression| {
+        control.check()?;
+        super::output_demand::try_visit(expression, control, &mut |part| {
+            match part {
+                ScalarExpr::Column(name) => {
+                    if alias.as_deref() == Some(name.as_str())
+                        && !has_named_output(body, column_aliases, name.as_str(), control)?
+                    {
+                        all = true;
+                    } else {
+                        required.insert_copy(name.as_str(), ())?;
+                    }
+                }
+                ScalarExpr::QualifiedColumn { qualifier, column }
+                    if alias.as_deref() == Some(qualifier.as_str()) =>
+                {
+                    required.insert_copy(column.as_str(), ())?;
+                }
+                ScalarExpr::QualifiedStar(qualifier)
+                    if alias.as_deref() == Some(qualifier.as_str()) =>
                 {
                     all = true;
-                } else {
-                    required.insert(name.clone());
                 }
+                ScalarExpr::Star | ScalarExpr::Position(_) => all = true,
+                _ => {}
             }
-            ScalarExpr::QualifiedColumn { qualifier, column }
-                if alias.as_deref() == Some(qualifier.as_str()) =>
-            {
-                required.insert(column.clone());
-            }
-            ScalarExpr::QualifiedStar(qualifier)
-                if alias.as_deref() == Some(qualifier.as_str()) =>
-            {
-                all = true;
-            }
-            ScalarExpr::Star | ScalarExpr::Position(_) => all = true,
-            _ => {}
-        });
-    });
+            Ok::<_, SQLError>(())
+        })?;
+        Ok::<_, SQLError>(true)
+    })?;
     if all {
         return Ok(());
     }
-    let Some(SourcePlan::Subquery {
+    let demanded = output_demand(
         body,
         column_aliases,
-        ..
-    }) = &mut block.from
-    else {
+        &|name| required.get(name).is_some(),
+        None,
+        *control,
+    )?;
+    drop(required);
+    let Some(demanded) = demanded else {
+        return Ok(());
+    };
+    let Some(SourcePlan::Subquery { body, .. }) = &mut block.from else {
         unreachable!()
     };
-    prune_outputs(
+    prune_positions(
         body,
-        column_aliases,
-        &|name| required.contains(name),
+        &|position| demanded.get(position).copied().unwrap_or(true),
         None,
         context,
     )
 }
 
-fn has_named_output(query: &QueryPlan, aliases: &[String], name: &str) -> bool {
+fn has_named_output(
+    query: &QueryPlan,
+    aliases: &[String],
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
     if let Some(schema) = &query.analyzed_output {
-        return schema
-            .columns()
-            .iter()
-            .enumerate()
-            .any(|(index, column)| aliases.get(index).unwrap_or(column) == name);
+        for (index, column) in schema.columns().iter().enumerate() {
+            control.check()?;
+            if aliases.get(index).unwrap_or(column) == name {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
     }
     let RelationalPlan::QueryBlock(block) = &query.root else {
         // Other relational roots are not pruned by this direct-source path.
-        return true;
+        return Ok(true);
     };
-    block
-        .projections
-        .iter()
-        .enumerate()
-        .any(|(index, projection)| {
-            aliases.get(index).map_or_else(
-                || uqa_sql::semantics::projection_label_at(projection) == name,
-                |alias| alias == name,
-            )
-        })
+    for (index, projection) in block.projections.iter().enumerate() {
+        control.check()?;
+        let matches = if let Some(alias) = aliases.get(index) {
+            alias == name
+        } else {
+            uqa_sql::semantics::with_projection_label(projection, control, |label| {
+                Ok(label == name)
+            })?
+        };
+        if matches {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Remove unused scalar output expressions while retaining the relation's complete positional descriptor and analyzed column authority.
@@ -131,8 +152,26 @@ pub fn prune_outputs(
     schema: Option<&RowSchema>,
     context: OutputPruningContext<'_>,
 ) -> Result<(), SQLError> {
-    let control = &context.production;
-    let mut demanded = ProductionVec::new(*control);
+    let Some(demanded) = output_demand(query, aliases, required, schema, context.production)?
+    else {
+        return Ok(());
+    };
+    prune_positions(
+        query,
+        &|position| demanded.get(position).copied().unwrap_or(true),
+        schema,
+        context,
+    )
+}
+
+fn output_demand<'a>(
+    query: &QueryPlan,
+    aliases: &[String],
+    required: &dyn Fn(&str) -> bool,
+    schema: Option<&RowSchema>,
+    control: ProductionControl<'a>,
+) -> Result<Option<ProductionVec<'a, bool>>, SQLError> {
+    let mut demanded = ProductionVec::new(control);
     if let Some(schema) = schema.or(query.analyzed_output.as_ref()) {
         demanded.reserve(schema.columns().len())?;
         for (position, name) in schema.columns().iter().enumerate() {
@@ -142,22 +181,17 @@ pub fn prune_outputs(
     } else if !uqa_sql::semantics::visit_query_output_columns(
         query,
         aliases,
-        control,
+        &control,
         &mut |name| {
             demanded.reserve(1)?;
             demanded.push_copy(required(name))?;
             Ok(())
         },
     )? {
-        return Ok(());
+        return Ok(None);
     }
     control.check()?;
-    prune_positions(
-        query,
-        &|position| demanded.get(position).copied().unwrap_or(true),
-        schema,
-        context,
-    )
+    Ok(Some(demanded))
 }
 
 pub(super) fn prune_positions(
@@ -388,6 +422,7 @@ fn removable(
 mod tests {
     use super::*;
     mod demand;
+    mod required;
 
     struct NoAggregates;
     impl AggregateClassifier for NoAggregates {

@@ -45,6 +45,18 @@ pub fn projection_label_at(projection: &ProjectionPlan) -> String {
         .into_uncontrolled()
 }
 
+/// Lend one projection label through an observation, admitting any decoding workspace and retaining it until the callback returns.
+pub fn with_projection_label<T>(
+    projection: &ProjectionPlan,
+    control: &ProductionControl<'_>,
+    observe: impl FnOnce(&str) -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
+    let label = projection_label(projection, control)?;
+    let result = observe(label.as_str())?;
+    control.check()?;
+    Ok(result)
+}
+
 fn projection_label<'a>(
     projection: &'a ProjectionPlan,
     control: &ProductionControl<'_>,
@@ -196,8 +208,7 @@ pub fn visit_query_output_columns(
                 if let Some(alias) = aliases.get(position) {
                     visitor(alias)?;
                 } else {
-                    let label = projection_label(projection, control)?;
-                    visitor(label.as_str())?;
+                    with_projection_label(projection, control, &mut *visitor)?;
                 }
             }
         }
