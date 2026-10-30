@@ -31543,6 +31543,61 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "any_column_authority_preserves_whole_table_demand_and_column_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/table/selection/tests/columns.rs",
+      "capability": "Retained table authorization",
+      "workload": "Table owners and column-only readers over stored bound ACLs.",
+      "invariant": "Preserve table privilege short-circuiting and original declared-column demand and order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "any_column_authority_preserves_catalog_errors_before_superuser_and_column_shortcuts",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/table/selection/tests/columns.rs",
+      "capability": "Retained table authorization",
+      "workload": "A stored column grant referring to a replaced role incarnation while the subject is superuser.",
+      "invariant": "Retain XX000 before privilege shortcuts or opening table columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "any_column_authority_releases_partial_membership_work_on_cancel_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/table/selection/tests/columns.rs",
+      "capability": "Retained table authorization",
+      "workload": "Partial column permission observation followed by either original cancellation token or callback unwind.",
+      "invariant": "Release temporary membership work without releasing an independent sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_authorization_borrows_large_acl_generations",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/table_authorization.rs",
+      "capability": "Retained table authorization",
+      "workload": "Three native privilege checks over a four MiB immutable ACL with 64 KiB available, and selected column-name production, on all four providers.",
+      "invariant": "Avoid the prior 24 MiB ACL copies; retain exact selected-name leases, reject a four MiB column before copying, preserve both cancellations and sibling allowance, and recover normal SQL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

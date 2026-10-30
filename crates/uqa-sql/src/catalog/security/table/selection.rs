@@ -62,6 +62,36 @@ impl<Subject: RoleSubject + ?Sized> RelationPrivileges<'_, '_, Subject> {
         )
     }
 
+    /// Validate every stored authority reference before checking table access; demand declared columns only when table access fails.
+    pub fn any_column_for(
+        &self,
+        security: &BoundTableSecurity,
+        privilege: TableAclPrivilege,
+        columns: impl FnOnce(&mut dyn FnMut(&str) -> Result<bool, SQLError>) -> Result<bool, SQLError>,
+    ) -> Result<bool, SQLError> {
+        self.validate(
+            security.role_owner,
+            security.acl.as_deref(),
+            security.column_acls.values().map(Vec::as_slice),
+        )?;
+        if self.allowed(
+            security.role_owner,
+            security.acl.as_deref(),
+            None,
+            privilege,
+        )? {
+            return Ok(true);
+        }
+        columns(&mut |column| {
+            self.allowed(
+                security.role_owner,
+                security.acl.as_deref(),
+                security.column_acls.get(column).map(Vec::as_slice),
+                privilege,
+            )
+        })
+    }
+
     pub fn system(
         &self,
         relation: SystemRelation,

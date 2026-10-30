@@ -40,6 +40,17 @@ impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
     fn role_memberships(&self) -> uqa_execution::catalog::security::roles::RoleMembershipRead<'_> {
         Box::new(self.durable.role_memberships.read())
     }
+    fn with_role_catalogs_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut uqa_sql::catalog::roles::guards::RoleCatalogVisitor<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let roles = self.durable.roles.read();
+        let memberships = self.durable.role_memberships.read();
+        read(&roles, &memberships)?;
+        Ok(control.check()?)
+    }
     fn inquiry_role_definitions(
         &self,
     ) -> Result<uqa_execution::catalog::security::roles::RoleDefinitionRead<'_>, SQLError> {

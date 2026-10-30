@@ -239,3 +239,5 @@ fn bound_relation_checks_preserve_every_table_and_column_privilege() {
         }
     }
 }
+
+mod columns;

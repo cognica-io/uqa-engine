@@ -29,6 +29,7 @@ mod scopes;
 mod sources;
 mod statistics;
 mod subqueries;
+mod table_authorization;
 mod view_commands;
 mod view_embedding;
 mod view_returning;
