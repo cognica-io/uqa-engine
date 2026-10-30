@@ -88,7 +88,7 @@ fn deferred_definitions_keep_only_their_original_lexical_inputs() {
 #[test]
 fn restored_definition_keeps_shared_inputs_and_invoking_scalar_arena() {
     use super::bindings::{restore_cte_names, save_cte_names};
-    use std::{collections::BTreeSet, sync::Arc};
+    use std::collections::BTreeSet;
 
     let mut scope = CteScope::<()>::new();
     let definition = query(
@@ -109,10 +109,7 @@ fn restored_definition_keeps_shared_inputs_and_invoking_scalar_arena() {
             input.deferred_ctes["q"].as_ref(),
             original.as_ref()
         ));
-        assert!(Arc::ptr_eq(
-            &input.scalar_subqueries,
-            &scope.scalar_subqueries
-        ));
+        assert!(input.scalar_subqueries.ptr_eq(&scope.scalar_subqueries));
     }
 }
 

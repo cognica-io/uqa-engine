@@ -68,7 +68,9 @@ fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
             try_build_streaming_subquery_operator(&context.source, &root, params, &mut scope)
         }
         RelationalPlan::Values { rows, subqueries } => {
-            let scope = scope.enter_scalar_subqueries(subqueries);
+            let arena_resources = context.source.ctes.production_resources()?;
+            let scope = scope
+                .enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
             let outer = scope.row_lock_outer_row().cloned();
             let schema = crate::query::binding::values_schema_in_scope(
                 context.source.ctes.routines,
@@ -177,7 +179,9 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
         windows: Vec::new(),
     };
     let mut scope = scope.clone();
-    let scope = scope.enter_scalar_subqueries(subqueries);
+    let arena_resources = context.source.ctes.production_resources()?;
+    let scope =
+        scope.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
     let output = crate::query::ordering::identity_order_columns(schema.columns());
     crate::query::relational::limit::attach_order_limit(
         operator,

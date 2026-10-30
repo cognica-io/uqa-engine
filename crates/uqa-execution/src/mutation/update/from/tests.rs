@@ -17,6 +17,9 @@ use uqa_core::Value;
 struct PreparationCounter(AtomicUsize);
 
 impl QueryExpressionFactory<()> for PreparationCounter {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
+    }
     fn bind_scope(
         &self,
         _: CteScope,

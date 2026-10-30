@@ -31201,6 +31201,116 @@
       "capability": "Native view mutation authorization",
       "workload": "All mutation authorization adapters with large unused stored definitions and scalar-query arenas; PostgreSQL 18.4 column-privilege outputs, denied commands and durable reopen.",
       "invariant": "All four providers avoid payload copies, reject owned scratch at the original allowance, preserve cancellation/recovery and match PostgreSQL rows and SQLSTATEs."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_arenas_keep_exact_constructor_ownership_until_the_last_reader",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retained_arena/tests.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "CTE, set-operation and 4 MiB query payloads transferred into 32 shared readers.",
+      "invariant": "Transfer the original buffer without copies, retain exact constructor reservations through the final reader and release them on unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_arena_admission_rejects_large_payloads_and_retires_partial_shared_destinations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retained_arena/tests.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "4 MiB scalar-query input with exhausted or small allowances and a rejected shared-header allocation.",
+      "invariant": "Reject with 53200 before copying large payloads and release partial destinations without affecting a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_arena_capture_preserves_both_cancellations_and_allocation_free_empty_namespaces",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retained_arena/tests.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "Original and invoking cancellation before capture and shared handoff; empty arenas with no available allowance.",
+      "invariant": "Both cancellation owners produce 57014, partial owners retire and an empty namespace allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_binding_snapshots_admit_ordinary_arenas_and_share_previously_owned_queries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retained_arena/tests.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "Binding snapshots retaining an ordinary or previously admitted 4 MiB query arena.",
+      "invariant": "Admit an ordinary private copy before allocation and share admitted queries through the final binding reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scalar_arena_entry_preserves_parent_state_on_admission_failure_and_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/query_arenas.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "Block and scalar scope entry with 4 MiB queries, selected small allowances and both cancelled owners.",
+      "invariant": "Reject before large allocation and preserve parent arena, cache identity, outer row and lock identity state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_scalar_scopes_keep_child_ownership_after_guard_completion_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/query_arenas.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "Nested scalar scope completion and unwind with a retained child reader and separate cached results.",
+      "invariant": "Restore the parent scope while the retained child keeps its arena reservation and cache identity until dropped.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_mutation_query_arenas_admit_before_copying_and_retain_their_original_allowance",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/query_arenas.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "Native MERGE analysis retains a 4 MiB query under a 64 KiB remaining allowance on all four providers.",
+      "invariant": "Reject with 53200 before copying, recover on the original allowance, share child plans and release the last scope owner.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_query_arena_namespaces_match_postgresql_across_queries_mutations_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/query_arenas.rs",
+      "capability": "Request-owned scalar-query namespaces",
+      "workload": "PostgreSQL 18.4 reference rows for nested scalar queries, CTE shadowing, LATERAL UNION, view UPDATE and INSERT/DELETE/MERGE.",
+      "invariant": "All four providers preserve exact ordered results and persisted rows after reopening the database.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

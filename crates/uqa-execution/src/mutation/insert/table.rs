@@ -279,7 +279,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 params,
                 scope,
             )?;
-            scope.scalar_subqueries = stmt.subqueries.as_slice().into();
+            let arena_resources = context.query.source.ctes.production_resources()?;
+            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &stmt.subqueries,
+                &arena_resources.control(),
+            )?;
             let query_rules = (has_any_insert_rules || stmt.rule_values_input.is_some())
                 .then(|| {
                     mutation

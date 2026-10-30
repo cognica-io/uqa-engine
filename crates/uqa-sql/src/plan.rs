@@ -48,6 +48,8 @@ mod query;
 mod query_visit;
 mod retained;
 pub use retained::RetainedCtePlan;
+mod retained_arena;
+pub use retained_arena::RetainedQueryArena;
 mod rewrite;
 mod scalar;
 pub use scalar::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};

@@ -117,7 +117,9 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
             offset,
             subqueries,
         } => {
-            let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+            let arena_resources = context.ctes.production_resources()?;
+            let scoped_ctes =
+                ctes.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
             let lhs = execute_lateral_subquery_output_inner(
                 context,
                 left,
@@ -203,7 +205,9 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     let outer_row = captured_outer.as_ref();
     let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
     let inherited_lock_identities = scoped_ctes.lock_identities.emit;
-    let mut scoped_ctes = scoped_ctes.enter_query_block(stmt);
+    let arena_resources = context.ctes.production_resources()?;
+    let mut scoped_ctes =
+        scoped_ctes.enter_query_block_with_control(stmt, &arena_resources.control())?;
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
     let row_identity_barrier = stmt.distinct
         || !stmt.distinct_on.is_empty()
@@ -233,7 +237,9 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     let stmt = stmt.as_ref();
     let mut bound_scope;
     let scoped_ctes = if rewrite_subqueries {
-        bound_scope = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        bound_scope = scoped_ctes
+            .enter_scalar_subqueries_with_control(&stmt.subqueries, &arena_resources.control())?;
         &mut *bound_scope
     } else {
         &mut *scoped_ctes
@@ -266,7 +272,9 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     };
     let rewritten_scope;
     let scoped_ctes = if rewrite_subqueries {
-        rewritten_scope = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        rewritten_scope = scoped_ctes
+            .enter_scalar_subqueries_with_control(&stmt.subqueries, &arena_resources.control())?;
         &*rewritten_scope
     } else {
         &*scoped_ctes

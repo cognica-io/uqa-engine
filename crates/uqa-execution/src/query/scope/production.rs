@@ -39,7 +39,7 @@ impl<S: Clone> CteScope<S> {
             definition_scopes: BTreeMap::new(),
             folded_ctes: BTreeSet::new(),
             non_returning_ctes: BTreeSet::new(),
-            scalar_subqueries: Arc::default(),
+            scalar_subqueries: uqa_sql::plan::RetainedQueryArena::default(),
             source_outer_rewrites: None,
             lock_identities: LockIdentityOptions::default(),
             row_lock: None,

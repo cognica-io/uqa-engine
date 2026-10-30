@@ -106,7 +106,10 @@ impl RoutineExpressions for Engine {
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
         let mut scope = super::query_scope::new_for_current_routine(self);
-        scope.scalar_subqueries = plan.subqueries.as_slice().into();
+        let resources =
+            uqa_execution::query::relational::QueryExpressionFactory::production_resources(self)?;
+        scope.scalar_subqueries =
+            uqa_sql::plan::RetainedQueryArena::capture(&plan.subqueries, &resources.control())?;
         let hook = uqa_execution::query::relational::context::QueryExpressionFactory::bind_scope(
             self, scope,
         );

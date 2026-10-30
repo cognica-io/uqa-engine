@@ -123,7 +123,11 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
+            let arena_resources = context.query.source.ctes.production_resources()?;
+            ctes.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &stmt.subqueries,
+                &arena_resources.control(),
+            )?;
             let mut has_rules = false;
             for relation in std::iter::once(&target.canonical_name).chain(&stmt.view_rule_relations)
             {

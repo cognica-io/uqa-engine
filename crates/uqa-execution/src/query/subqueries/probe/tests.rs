@@ -26,7 +26,7 @@ fn prepared_predicate_retains_its_scope_and_borrows_hooks_for_each_row() {
         lookup,
         negated: false,
     };
-    scope.scalar_subqueries = Arc::default();
+    scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::default();
     let schema = RowSchema::new(vec![]);
     let row = PhysicalRow::from_values(vec![]);
     assert!(predicate.keep_physical(&schema, &row).unwrap());

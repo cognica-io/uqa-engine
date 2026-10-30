@@ -204,10 +204,34 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         block: &uqa_sql::plan::QueryBlockPlan,
     ) -> ScalarSubqueryScope<'_, S> {
-        let mut scope = self.enter_scalar_subqueries(&block.subqueries);
-        scope.source_outer_rewrites = (!block.deferred_outer_rewrites.is_empty())
-            .then(|| block.deferred_outer_rewrites.as_slice().into());
-        scope
+        self.enter_query_block_with_control(
+            block,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary query-block scope")
+    }
+
+    /// Construct both private destinations before installing either, so admission failure leaves the complete parent namespace intact.
+    pub fn enter_query_block_with_control(
+        &mut self,
+        block: &uqa_sql::plan::QueryBlockPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<ScalarSubqueryScope<'_, S>, SQLError> {
+        let arena = uqa_sql::plan::RetainedQueryArena::capture(&block.subqueries, control)?;
+        let rewrites = if block.deferred_outer_rewrites.is_empty() {
+            None
+        } else {
+            let mut rewrites = uqa_core::memory::ProductionVec::new(*control);
+            rewrites.reserve(block.deferred_outer_rewrites.len())?;
+            for rewrite in &block.deferred_outer_rewrites {
+                rewrites.push_produced(rewrite.clone_with_control(control)?)?;
+            }
+            Some(rewrites.finish()?.into_shared(control)?)
+        };
+        control.check()?;
+        let mut scope = self.enter_retained_scalar_subqueries(arena);
+        scope.source_outer_rewrites = rewrites;
+        Ok(scope)
     }
 
     /// Bind the scalar-subquery arena owned by one query block. The guard restores the parent arena and correlated row binding on success, error, or panic so nested and lateral query execution cannot resolve a child slot in its parent.
@@ -215,7 +239,27 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         subqueries: &[QueryPlan],
     ) -> ScalarSubqueryScope<'_, S> {
-        let previous = std::mem::replace(&mut self.scalar_subqueries, subqueries.into());
+        self.enter_scalar_subqueries_with_control(
+            subqueries,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary scalar-query scope")
+    }
+
+    pub fn enter_scalar_subqueries_with_control(
+        &mut self,
+        subqueries: &[QueryPlan],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<ScalarSubqueryScope<'_, S>, SQLError> {
+        let arena = uqa_sql::plan::RetainedQueryArena::capture(subqueries, control)?;
+        Ok(self.enter_retained_scalar_subqueries(arena))
+    }
+
+    fn enter_retained_scalar_subqueries(
+        &mut self,
+        arena: uqa_sql::plan::RetainedQueryArena,
+    ) -> ScalarSubqueryScope<'_, S> {
+        let previous = std::mem::replace(&mut self.scalar_subqueries, arena);
         let next_arena = self
             .next_scalar_subquery_arena
             .fetch_add(1, Ordering::Relaxed);
@@ -375,11 +419,11 @@ impl<S: Clone> Drop for QueryPlanScope<'_, S> {
 
 pub struct ScalarSubqueryScope<'a, S: Clone> {
     ctes: &'a mut CteScope<S>,
-    previous: Option<Arc<[QueryPlan]>>,
+    previous: Option<uqa_sql::plan::RetainedQueryArena>,
     previous_arena: u64,
     previous_lock_identities: LockIdentityOptions,
     previous_outer_row: Option<Arc<crate::OwnedPhysicalRow>>,
-    previous_source_rewrites: Option<Arc<[uqa_sql::semantics::view_rewrite::DeferredOuterRewrite]>>,
+    previous_source_rewrites: Option<super::SourceOuterRewrites>,
 }
 
 impl<S: Clone> std::ops::Deref for ScalarSubqueryScope<'_, S> {

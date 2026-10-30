@@ -9,10 +9,9 @@
 use super::{BindingContext, SchemaScope};
 use crate::{
     catalog::{analysis::CatalogReadView, resolution::RelationNameResolution},
-    plan::{QueryPlan, RetainedCtePlan},
+    plan::{QueryPlan, RetainedCtePlan, RetainedQueryArena},
     RowSchema, SQLError,
 };
-use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
 
 mod entries;
@@ -33,7 +32,7 @@ pub struct ControlledBindingSnapshot {
     pub ctes: BindingMap<RowSchema>,
     pub deferred_ctes: BindingMap<RetainedCtePlan>,
     pub non_returning_ctes: BindingNameSet,
-    pub scalar_subqueries: Arc<[QueryPlan]>,
+    pub scalar_subqueries: RetainedQueryArena,
 }
 
 pub struct ControlledBindingContext<'a> {
@@ -53,7 +52,7 @@ impl ControlledBindingSnapshot {
         ctes: impl IntoIterator<Item = (&'a str, RowSchema)>,
         deferred_ctes: impl IntoIterator<Item = (&'a str, &'a RetainedCtePlan)>,
         non_returning_ctes: impl IntoIterator<Item = &'a str>,
-        scalar_subqueries: Arc<[QueryPlan]>,
+        scalar_subqueries: RetainedQueryArena,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         control.check()?;
@@ -63,7 +62,7 @@ impl ControlledBindingSnapshot {
             ctes: BindingMap::new(),
             deferred_ctes: BindingMap::new(),
             non_returning_ctes: BindingNameSet::new(),
-            scalar_subqueries,
+            scalar_subqueries: scalar_subqueries.retain_with_control(control)?,
         };
         for (name, schema) in ctes {
             output.ctes.insert_with_control(name, schema, control)?;

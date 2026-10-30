@@ -38,7 +38,9 @@ pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
             &mut subqueries,
         );
         rewritten_scope = ctes.clone();
-        arena_scope = rewritten_scope.enter_scalar_subqueries(&subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        arena_scope = rewritten_scope
+            .enter_scalar_subqueries_with_control(&subqueries, &arena_resources.control())?;
         &mut *arena_scope
     } else {
         ctes

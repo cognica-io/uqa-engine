@@ -214,7 +214,8 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
     for cte in inputs.ctes {
         scope.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
-    scope.scalar_subqueries = inputs.subqueries.into();
+    scope.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(inputs.subqueries, &control)?;
     let mut visible = scope.enter_visible_ctes(inputs.ctes.iter().map(|cte| cte.name.as_str()));
     let scope = &mut *visible;
     if let Some(source) = inputs.source {

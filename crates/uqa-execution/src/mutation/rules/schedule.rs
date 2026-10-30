@@ -135,7 +135,11 @@ fn run<S: Clone + Send + Sync + 'static>(
         let mut affected = 0;
         for relation in &relations {
             let input = relation.input();
-            scope.scalar_subqueries = input.subqueries().into();
+            let arena_resources = context.query.source.ctes.production_resources()?;
+            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                input.subqueries(),
+                &arena_resources.control(),
+            )?;
             let source_schema = context
                 .mutation
                 .rules

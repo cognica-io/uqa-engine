@@ -9,11 +9,10 @@
 use super::context::BindingContext;
 use crate::{
     catalog::{analysis::CatalogReadView, resolution::RelationNameResolution},
-    plan::{CtePlan, QueryPlan},
+    plan::{CtePlan, RetainedQueryArena},
     RowSchema,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct BindingSnapshot {
@@ -22,7 +21,7 @@ pub struct BindingSnapshot {
     pub ctes: BTreeMap<String, RowSchema>,
     pub deferred_ctes: BTreeMap<String, crate::plan::RetainedCtePlan>,
     pub non_returning_ctes: BTreeSet<String>,
-    pub scalar_subqueries: Arc<[QueryPlan]>,
+    pub scalar_subqueries: RetainedQueryArena,
 }
 impl From<BindingContext<'_>> for BindingSnapshot {
     fn from(context: BindingContext<'_>) -> Self {

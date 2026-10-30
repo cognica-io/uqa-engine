@@ -37,7 +37,11 @@ impl<'a> PreparedCheck<'a> {
             inputs.catalog.session.relation_name_resolution(),
             None,
         );
-        scope.scalar_subqueries = expression.subqueries.as_slice().into();
+        let arena_resources = inputs.expressions.production_resources()?;
+        scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+            &expression.subqueries,
+            &arena_resources.control(),
+        )?;
         let hook = inputs.expressions.bind_scope(scope);
         let schema = RowSchema::with_types(
             vec!["value".into()],

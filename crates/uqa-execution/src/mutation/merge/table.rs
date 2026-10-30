@@ -141,7 +141,9 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     {
         ctes.set_command_cte_snapshot(Some(std::sync::Arc::new(context.snapshots.capture()?)));
     }
-    ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
+    let arena_resources = context.query.source.ctes.production_resources()?;
+    ctes.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(&stmt.subqueries, &arena_resources.control())?;
     uqa_sql::semantics::merge::validate_merge_target_columns(assignment.columns, stmt)?;
     let statement_snapshot = ctes.command_cte_snapshot();
     let mut execute_read =

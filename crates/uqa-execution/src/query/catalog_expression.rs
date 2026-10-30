@@ -44,7 +44,11 @@ pub fn eval_lowered_expression_with_type<S: Clone + 'static>(
     params: &[SQLParam],
 ) -> Result<(Value, Option<uqa_sql::ast::ColumnType>), SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
-    scope.scalar_subqueries = expression.subqueries.as_slice().into();
+    let arena_resources = factory.production_resources()?;
+    scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+        &expression.subqueries,
+        &arena_resources.control(),
+    )?;
     let hook = factory.bind_scope(scope);
     let declared_type = crate::scalar_type_with_resolver(
         &expression.scalar,
@@ -151,7 +155,11 @@ impl<'a> PreparedCatalogExpression<'a> {
         params: &'a [SQLParam],
         optimize: bool,
     ) -> Result<Self, SQLError> {
-        scope.scalar_subqueries = expression.subqueries.as_slice().into();
+        let arena_resources = factory.production_resources()?;
+        scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+            &expression.subqueries,
+            &arena_resources.control(),
+        )?;
         let hook = factory.bind_scope(scope);
         let source =
             crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
@@ -280,6 +288,11 @@ mod tests {
     }
 
     impl QueryExpressionFactory<()> for PreparationCounter {
+        fn production_resources(
+            &self,
+        ) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+            Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
+        }
         fn bind_scope(
             &self,
             scope: CteScope,

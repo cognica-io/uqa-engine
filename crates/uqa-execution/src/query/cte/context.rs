@@ -111,3 +111,18 @@ pub struct CteExecutionContext<'a, S: Clone> {
     pub runtime: QueryRuntimeView<'a>,
 }
 impl<S: Clone> Copy for CteExecutionContext<'_, S> {}
+
+impl<S: Clone> CteExecutionContext<'_, S> {
+    /// Retain the original query allowance and both cancellation owners for private execution inputs.
+    pub fn production_resources(
+        &self,
+    ) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        let retained = self.queries.read_control()?;
+        Ok(uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.runtime.cancellation,
+        )
+        .capture())
+    }
+}

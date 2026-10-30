@@ -93,7 +93,11 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
                 },
             )?;
             let schema = uqa_sql::binding::overlay_outer_schema(&schema, outer);
-            scope.scalar_subqueries = block.subqueries.as_slice().into();
+            let arena_resources = context.ctes.production_resources()?;
+            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &block.subqueries,
+                &arena_resources.control(),
+            )?;
             if let Some(from) = &block.from {
                 super::ensure_select_privileges_for_query_block(block, from, scope)?;
             }

@@ -313,7 +313,9 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
     let block = original.as_ref();
     let mut rewritten_scope;
     let ctes = if rewrite_subqueries {
-        rewritten_scope = ctes.enter_scalar_subqueries(&stmt.subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        rewritten_scope = ctes
+            .enter_scalar_subqueries_with_control(&stmt.subqueries, &arena_resources.control())?;
         &mut *rewritten_scope
     } else {
         ctes
@@ -433,7 +435,8 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     output_mode: QueryOutputMode<'a>,
 ) -> Result<QueryOutput, SQLError> {
     let inherited_lock_identities = ctes.lock_identities.emit;
-    let mut scoped_ctes = ctes.enter_query_block(block);
+    let arena_resources = context.ctes.production_resources()?;
+    let mut scoped_ctes = ctes.enter_query_block_with_control(block, &arena_resources.control())?;
     let row_identity_barrier = block.distinct
         || !block.distinct_on.is_empty()
         || matches!(block.compute, ComputePlan::Aggregate | ComputePlan::Window);
@@ -446,7 +449,11 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     let scoped_ctes = if block.deferred_outer_rewrites.is_empty() {
         &mut *scoped_ctes
     } else {
-        rewritten_scope = scoped_ctes.enter_scalar_subqueries(&bound.block.subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        rewritten_scope = scoped_ctes.enter_scalar_subqueries_with_control(
+            &bound.block.subqueries,
+            &arena_resources.control(),
+        )?;
         &mut *rewritten_scope
     };
     run_bound_query_block_output(

@@ -108,7 +108,11 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 };
                 let mut source_scope;
                 let ctes = if let Some(binding) = &source_binding {
-                    source_scope = ctes.enter_scalar_subqueries(&binding.subqueries);
+                    let arena_resources = context.ctes.production_resources()?;
+                    source_scope = ctes.enter_scalar_subqueries_with_control(
+                        &binding.subqueries,
+                        &arena_resources.control(),
+                    )?;
                     &mut *source_scope
                 } else {
                     ctes

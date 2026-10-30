@@ -40,7 +40,8 @@ pub fn merge_analysis_scope<S: Clone>(
     for cte in &stmt.ctes {
         scope.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
     }
-    scope.scalar_subqueries = stmt.subqueries.as_slice().into();
+    scope.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(&stmt.subqueries, &control)?;
     Ok(scope)
 }
 

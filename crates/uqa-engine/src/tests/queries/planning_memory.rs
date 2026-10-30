@@ -424,3 +424,5 @@ mod rule_selection;
 mod rule_targets;
 
 mod view_privileges;
+
+mod query_arenas;

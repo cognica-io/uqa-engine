@@ -156,6 +156,9 @@ impl SetFunctionRuntime for Services {
     }
 }
 impl QueryExpressionFactory<()> for Services {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
+    }
     fn bind_scope(&self, scope: CteScope) -> Arc<dyn SetFunctionRuntime + '_> {
         assert!(scope.scalar_subqueries.is_empty());
         Arc::new(Self)

@@ -163,7 +163,11 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
+            let arena_resources = context.query.source.ctes.production_resources()?;
+            ctes.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &stmt.subqueries,
+                &arena_resources.control(),
+            )?;
 
             if let Some(source) = stmt.source.as_deref() {
                 crate::query::privileges::ensure_select_privileges_for_source_expressions(

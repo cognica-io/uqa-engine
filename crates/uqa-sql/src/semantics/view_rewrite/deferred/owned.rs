@@ -120,7 +120,7 @@ impl DeferredOuterRewrite {
         })
     }
 
-    pub(crate) fn clone_with_control(
+    pub fn clone_with_control(
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, SQLError> {

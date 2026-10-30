@@ -132,7 +132,7 @@ impl RoutineInliningContext<'_> {
             .retain(|name, _| namespace.transition_relations.contains(name));
         snapshot.deferred_ctes.clear();
         snapshot.non_returning_ctes.clear();
-        snapshot.scalar_subqueries = std::sync::Arc::default();
+        snapshot.scalar_subqueries = crate::plan::RetainedQueryArena::default();
         let prepared = {
             let _placement = if matches!(definition.body, FunctionBody::Statements(_)) {
                 crate::semantics::sets::placement_scope::SetPlacementScope::stored_definition()

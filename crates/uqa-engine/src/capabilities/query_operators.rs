@@ -32,6 +32,16 @@ impl Engine {
 }
 
 impl QueryExpressionFactory<StatementReadSnapshot> for Engine {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        let retained = self.query_retention_control()?;
+        Ok(uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.query_runtime_view().cancellation,
+        )
+        .capture())
+    }
+
     fn optimize_catalog_scalar(&self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         uqa_planner::statement_planning::schema_expressions::optimize_catalog_scalar(
             &self.statement_planning_context(),

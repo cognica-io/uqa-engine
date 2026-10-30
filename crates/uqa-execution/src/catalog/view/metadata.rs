@@ -217,7 +217,7 @@ impl ViewRewriteCatalog for RetainedViewCatalog<'_> {
             ctes: scope.ctes,
             deferred_ctes: scope.deferred_ctes,
             non_returning_ctes: scope.non_returning_ctes,
-            scalar_subqueries: Arc::default(),
+            scalar_subqueries: uqa_sql::plan::RetainedQueryArena::default(),
         })
     }
     fn restored_view_scope_with_control(
@@ -326,7 +326,7 @@ impl ViewRewriteCatalog for RetainedViewCatalog<'_> {
             ctes: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
             non_returning_ctes: BTreeSet::new(),
-            scalar_subqueries: Arc::default(),
+            scalar_subqueries: uqa_sql::plan::RetainedQueryArena::default(),
         })
     }
     fn restored_view_catalog(

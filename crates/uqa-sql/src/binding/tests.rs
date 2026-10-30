@@ -5,7 +5,6 @@
 //
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use crate::ast::{ColumnDef, ColumnType};
 use crate::plan::{
@@ -410,7 +409,7 @@ fn deferred_cte_shadowing_uses_the_replacement_row_type() {
             } else {
                 BTreeSet::new()
             },
-            scalar_subqueries: Arc::default(),
+            scalar_subqueries: crate::plan::RetainedQueryArena::default(),
         };
         scope.insert_deferred(plan.ctes.remove(0));
         let schema = super::analyze_query_plan_schema(

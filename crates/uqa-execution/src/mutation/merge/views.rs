@@ -793,7 +793,9 @@ fn initialize_view_merge_scope<S: Clone>(
         params,
         ctes,
     )?;
-    ctes.scalar_subqueries = plan.subqueries.as_slice().into();
+    let arena_resources = context.query.source.ctes.production_resources()?;
+    ctes.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(&plan.subqueries, &arena_resources.control())?;
     Ok(())
 }
 

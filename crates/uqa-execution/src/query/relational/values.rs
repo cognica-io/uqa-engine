@@ -168,7 +168,9 @@ fn execute_directional_values_output<S: Clone + 'static>(
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
     let mut values_ctes = ctes.clone();
-    values_ctes.scalar_subqueries = subqueries.into();
+    let arena_resources = context.expressions.production_resources()?;
+    values_ctes.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(subqueries, &arena_resources.control())?;
     let operator: Box<dyn crate::PhysicalOperator + '_> = Box::new(DirectionalValuesScan::new(
         rows,
         source_types,

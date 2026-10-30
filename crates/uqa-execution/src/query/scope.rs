@@ -15,7 +15,6 @@ use std::sync::{atomic::AtomicU64, Arc};
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::plan::QueryPlan;
 use uqa_sql::SQLError;
 
 pub(crate) mod binding;
@@ -25,6 +24,8 @@ mod producers;
 mod production;
 pub use production::{CteRowsIter, CteRowsMap};
 #[cfg(test)]
+mod query_arenas;
+#[cfg(test)]
 mod retained_plans;
 mod row_locks;
 mod statement_commands;
@@ -33,6 +34,9 @@ use row_locks::RowLockScopeState;
 pub use row_locks::{LockIdentityOptions, ResolvedRowLock};
 pub use statement_commands::StatementCommands;
 use subqueries::ScalarSubqueryCacheEntry;
+
+type SourceOuterRewrites =
+    Arc<uqa_core::memory::Produced<Vec<uqa_sql::semantics::view_rewrite::DeferredOuterRewrite>>>;
 
 type ScalarSubqueryCache = parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>;
 
@@ -44,9 +48,8 @@ pub struct CteScope<S: Clone = ()> {
     definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
     folded_ctes: BTreeSet<String>,
     pub non_returning_ctes: BTreeSet<String>,
-    pub scalar_subqueries: Arc<[QueryPlan]>,
-    pub(crate) source_outer_rewrites:
-        Option<Arc<[uqa_sql::semantics::view_rewrite::DeferredOuterRewrite]>>,
+    pub scalar_subqueries: uqa_sql::plan::RetainedQueryArena,
+    pub(crate) source_outer_rewrites: Option<SourceOuterRewrites>,
     pub lock_identities: LockIdentityOptions,
     row_lock: Option<Box<RowLockScopeState>>,
     visible_cte_names: BTreeSet<String>,

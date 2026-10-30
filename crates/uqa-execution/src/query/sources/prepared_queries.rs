@@ -215,7 +215,11 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
-            scope.scalar_subqueries = block.subqueries.as_slice().into();
+            let arena_resources = context.ctes.production_resources()?;
+            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &block.subqueries,
+                &arena_resources.control(),
+            )?;
             let mut source_schema = RowSchema::default();
             if let Some(from) = &block.from {
                 source_schema = crate::query::binding::bind_source_plan_schema(

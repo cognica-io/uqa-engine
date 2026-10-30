@@ -16,6 +16,7 @@ use uqa_sql::{plan::QueryBlockPlan, semantics::sets::SetFunctionCatalog, SQLErro
 
 /// Bind scoped expression services without exposing the owning session or storage state.
 pub trait QueryExpressionFactory<S: Clone + 'static>: Sync {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError>;
     fn bind_scope(&self, scope: CteScope<S>) -> Arc<dyn SetFunctionRuntime + '_>;
     /// Apply the owning planner to a validated schema/procedural execution copy.
     fn optimize_catalog_scalar(&self, expression: &mut ScalarExpr) -> Result<(), SQLError>;

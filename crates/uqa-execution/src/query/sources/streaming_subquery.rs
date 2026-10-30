@@ -63,7 +63,8 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
     crate::query::privileges::routine_calls::query(context, body, params, ctes)?;
 
     // The block's scalar subqueries live in their own arena for the whole pull pipeline: the evaluators built below snapshot this scope, so a derived table with subqueries still streams and an outer LIMIT keeps its inner locking demand-driven.
-    let mut ctes = ctes.enter_query_block(block);
+    let arena_resources = context.ctes.production_resources()?;
+    let mut ctes = ctes.enter_query_block_with_control(block, &arena_resources.control())?;
     let ctes: &mut CteScope<S> = &mut ctes;
     let outer_row = ctes
         .row_lock_outer_row()
@@ -106,7 +107,9 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
     let block = block.as_ref();
     let mut bound_scope;
     let ctes = if rewrite_subqueries {
-        bound_scope = ctes.enter_scalar_subqueries(&block.subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        bound_scope = ctes
+            .enter_scalar_subqueries_with_control(&block.subqueries, &arena_resources.control())?;
         &mut *bound_scope
     } else {
         ctes
@@ -215,7 +218,11 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
         };
         let rewritten_scope;
         let ctes = if rewrite_subqueries {
-            rewritten_scope = ctes.enter_scalar_subqueries(&block.subqueries);
+            let arena_resources = context.ctes.production_resources()?;
+            rewritten_scope = ctes.enter_scalar_subqueries_with_control(
+                &block.subqueries,
+                &arena_resources.control(),
+            )?;
             &*rewritten_scope
         } else {
             &*ctes

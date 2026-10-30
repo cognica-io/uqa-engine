@@ -184,7 +184,9 @@ fn execute_values_root<S: Clone + Send + Sync + 'static>(
     output_mode: QueryOutputMode<S>,
 ) -> Result<QueryOutput, SQLError> {
     {
-        let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+        let arena_resources = context.source.ctes.production_resources()?;
+        let scoped_ctes =
+            ctes.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
         let type_resolver = context
             .source
             .relational
@@ -286,7 +288,9 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
         );
         let (input, (resolved_offset, resolved_limit)) =
             crate::physical::construction::OperatorBuild::run(operation, |_| {
-                let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+                let arena_resources = context.source.ctes.production_resources()?;
+                let scoped_ctes = ctes
+                    .enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
                 Ok((
                     resolve_limit_offset_with_ctes(
                         offset.as_deref(),
@@ -335,7 +339,9 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
         let columns = set_schema.columns().to_vec();
         let column_types = set_schema.column_types().to_vec();
         let (resolved_offset, resolved_limit) = {
-            let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+            let arena_resources = context.source.ctes.production_resources()?;
+            let scoped_ctes =
+                ctes.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
             (
                 resolve_limit_offset_with_ctes(
                     offset.as_deref(),
@@ -447,7 +453,9 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
             locking: Vec::new(),
             windows: Vec::new(),
         };
-        let ordering_scope = ctes.enter_scalar_subqueries(subqueries);
+        let arena_resources = context.source.ctes.production_resources()?;
+        let ordering_scope =
+            ctes.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
         let evaluator = context.source.relational.evaluator(params, &ordering_scope);
         let output = identity_order_columns(&columns);
         let operation = attach_order_limit(
