@@ -32027,6 +32027,112 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_copies_preserve_carriers_types_and_deferred_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/parameters.rs",
+      "capability": "Retained INSERT source ownership",
+      "workload": "Copy every SQL parameter representation, including typed scalars, deferred diagnostics, nested vectors and empty/nonempty packed tensors.",
+      "invariant": "Retain exact live payload leases without forcing deferred errors or losing declared types or tensor dimensions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_copy_admits_before_allocation_and_preserves_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/parameters.rs",
+      "capability": "Retained INSERT source ownership",
+      "workload": "Capture a deferred four-MiB diagnostic under 64 KiB available memory, cancel each control, then recover.",
+      "invariant": "Reject before copying the payload and release partial destinations without evaluating the deferred error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_insert_select_capture_admits_private_statement_before_copy",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_source.rs",
+      "capability": "Retained INSERT source ownership",
+      "workload": "Capture an INSERT SELECT with a four-MiB statement literal under 64 KiB available memory on four providers.",
+      "invariant": "Admit complete private statements before copying, preserve both cancellation owners, recover and retain exact input leases until the last consumer releases them after session close.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_insert_select_capture_admits_private_parameters_before_copy",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_source.rs",
+      "capability": "Retained INSERT source ownership",
+      "workload": "Capture an INSERT SELECT with a four-MiB bound parameter under 64 KiB available memory on four providers.",
+      "invariant": "Admit private parameters before copying, preserve both cancellation owners, recover and retain exact input leases until the last consumer releases them after session close.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_insert_select_borrows_explicit_targets_and_publishes_complete_source_shape",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_source.rs",
+      "capability": "Retained INSERT source ownership",
+      "workload": "Bind a retained explicit partial target containing a four-MiB lazy operand with zero then 64 KiB available memory.",
+      "invariant": "Borrow owned targets without a second payload copy, retain exact newly selected names, publish only a complete shape and preserve state through repeated begin, width error, cancellation and recovery.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_insert_source_names_precede_default_observation_and_release_on_failure",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_source.rs",
+      "capability": "Retained INSERT source ownership",
+      "workload": "Read an immutable declaration beside a dangling DEFAULT, then select a four-MiB implicit name under 64 KiB available memory.",
+      "invariant": "Release catalog guards before callbacks, preserve raw-name observation before default dependency errors, bound copying, retain storage context and preserve the prior shape after a failed rebind.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_insert_source_preserves_lazy_targets_implicit_defaults_and_prepared_effects",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_source.rs",
+      "capability": "Retained INSERT source ownership",
+      "workload": "Replay PostgreSQL partial array targets, implicit INSERT/VALUES/MERGE defaults, generic/custom preparation, rollback, EXPLAIN and persistent reopen.",
+      "invariant": "Preserve lazy source effects, exact rows and default values, no-effect EXPLAIN and complete session resource retirement on all four providers.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

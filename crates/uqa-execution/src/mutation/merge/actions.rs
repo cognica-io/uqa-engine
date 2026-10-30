@@ -13,7 +13,7 @@ use crate::mutation::{
         apply_missing_column_defaults, eval_mutation_assignment, MutationAssignmentContext,
         MutationAssignmentTarget,
     },
-    errors::{dml_storage_error, missing_document_error},
+    errors::missing_document_error,
     expressions::eval_mutation_expr,
 };
 use crate::query::CteScope;
@@ -202,18 +202,33 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                 ..
             } => {
                 let implicit_columns = columns.is_empty();
-                let target_columns = if implicit_columns {
-                    services
-                        .rows
-                        .relations
-                        .column_names(target_table)
-                        .map_err(|error| dml_storage_error("MERGE INSERT", error))?
-                        .into_iter()
-                        .map(Into::into)
-                        .collect()
-                } else {
-                    columns.clone()
-                };
+                let owned_columns;
+                let target_columns: &[uqa_sql::ast::AssignmentTarget<uqa_sql::ScalarExpr>] =
+                    if implicit_columns {
+                        let mut targets = uqa_core::memory::ProductionVec::new(*control);
+                        services
+                            .rows
+                            .relations
+                            .visit_column_names_with_control(target_table, control, &mut |name| {
+                                targets.push_produced(
+                                    uqa_sql::assignment::targets::whole_column_with_control(
+                                        name, control,
+                                    )?,
+                                )?;
+                                Ok(())
+                            })
+                            .map_err(|error| {
+                                uqa_sql::catalog::errors::dml_storage_error_with_control(
+                                    "MERGE INSERT",
+                                    error,
+                                    control,
+                                )
+                            })?;
+                        owned_columns = targets.finish()?;
+                        &owned_columns
+                    } else {
+                        columns
+                    };
                 if values.len() > target_columns.len()
                     || (!implicit_columns && values.len() != target_columns.len())
                 {

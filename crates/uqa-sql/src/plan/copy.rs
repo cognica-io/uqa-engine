@@ -52,6 +52,13 @@ impl super::CtePlan {
     }
 }
 
+impl super::InsertPlan {
+    /// Capture a retained INSERT executable before scheduling its source, admitting each private destination without evaluating expressions.
+    pub fn clone_with_control(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>> {
+        copy_syntax_with_control(self, control)
+    }
+}
+
 impl QueryPlan {
     /// Copy a relational executable and its query/mutation CTEs, admitting destination capacities and owned payloads before allocation. Immutable analysis descriptors and retained row/literal identities remain shared.
     pub fn clone_with_control(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>> {

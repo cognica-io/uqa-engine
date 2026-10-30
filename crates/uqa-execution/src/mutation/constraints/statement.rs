@@ -42,12 +42,38 @@ pub fn statement_relation(
     context: super::ConstraintContext<'_>,
     relation: &str,
 ) -> Result<String, uqa_sql::SQLError> {
-    Ok(context
+    statement_relation_with_control(
+        context,
+        relation,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|name| {
+        name.into_uncontrolled()
+            .expect("ordinary statement relation")
+    })
+}
+
+/// Resolve before falling back to the supplied spelling, retaining the selected diagnostic name with its producer's allowance.
+pub fn statement_relation_with_control(
+    context: super::ConstraintContext<'_>,
+    relation: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<String>, uqa_sql::SQLError> {
+    let resolved = context
         .partitions
         .catalog
-        .try_resolve_table_name(relation)
-        .map_err(|error| {
-            uqa_sql::SQLError::Internal(format!("resolve statement relation: {error}"))
-        })?
-        .unwrap_or_else(|| relation.to_string()))
+        .try_resolve_table_name_with_control(relation, control)
+        .map_err(|error| match error {
+            uqa_sql::SQLError::Internal(message) => {
+                match control.format(format_args!("resolve statement relation: {message}")) {
+                    Ok(message) => uqa_sql::SQLError::Internal(message.into_parts().0),
+                    Err(error) => error.into(),
+                }
+            }
+            error => error,
+        })?;
+    match resolved {
+        Some(name) => Ok(name),
+        None => Ok(control.copy_text(relation)?),
+    }
 }

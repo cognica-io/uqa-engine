@@ -43,15 +43,7 @@ pub(crate) fn storage_context(
     action: &str,
     control: &ProductionControl<'_>,
 ) -> SQLError {
-    match error {
-        SQLError::Internal(message) => match control.format(format_args!(
-            "{action} failed in storage backend: {message}"
-        )) {
-            Ok(message) => SQLError::Internal(message.into_parts().0),
-            Err(error) => error.into(),
-        },
-        error => error,
-    }
+    crate::catalog::errors::dml_storage_error_with_control(action, error, control)
 }
 
 pub fn validate_mutation_columns_with_control<'a>(

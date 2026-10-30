@@ -12,6 +12,7 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod parameters;
 mod syntax;
 
 fn one(sql: &str) -> UnifiedPlan {

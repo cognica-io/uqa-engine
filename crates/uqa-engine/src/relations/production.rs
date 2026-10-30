@@ -191,6 +191,20 @@ impl Engine {
         name: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<std::sync::Arc<crate::TableState>>, SQLError> {
+        self.with_table_state_with_control(name, control, |_, table| {
+            Ok(std::sync::Arc::clone(table))
+        })
+    }
+
+    pub(crate) fn with_table_state_with_control<R>(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: impl FnOnce(
+            &uqa_core::RelationIdentity,
+            &std::sync::Arc<crate::TableState>,
+        ) -> Result<R, SQLError>,
+    ) -> Result<Option<R>, SQLError> {
         control.check()?;
         self.synchronize_table_catalog()
             .and_then(|()| self.synchronize_table_data())
@@ -212,11 +226,36 @@ impl Engine {
             )?;
         let table = {
             let tables = self.storage.tables.read();
-            candidates
-                .iter()
-                .find_map(|relation| tables.get(relation).cloned())
+            candidates.iter().find_map(|relation| {
+                tables
+                    .get(relation)
+                    .map(|table| (relation, std::sync::Arc::clone(table)))
+            })
         };
         control.check()?;
-        Ok(table)
+        table
+            .map(|(relation, table)| read(relation, &table))
+            .transpose()
+    }
+
+    pub(crate) fn visit_raw_table_column_names_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let columns = self
+            .table_column_snapshot_with_control(name, control)?
+            .ok_or_else(
+                || match control.format(format_args!("table `{name}` does not exist")) {
+                    Ok(message) => SQLError::Internal(message.into_parts().0),
+                    Err(error) => error.into(),
+                },
+            )?;
+        for column in columns.iter() {
+            control.check()?;
+            read(&column.name)?;
+        }
+        Ok(())
     }
 }

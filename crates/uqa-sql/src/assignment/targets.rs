@@ -18,6 +18,15 @@ pub use types::{assignment_input_type_with_control, field_assignment_types_with_
 #[cfg(test)]
 mod tests;
 
+/// Produce an implicit whole-column target without cloning unrelated declaration expressions.
+pub fn whole_column_with_control<E>(
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<AssignmentTarget<E>>, SQLError> {
+    let (column, memory) = control.copy_text(name)?.into_parts();
+    Ok(control.finish(AssignmentTarget::from(column), memory)?)
+}
+
 fn error(code: &str, message: String) -> SQLError {
     SQLError::Routine {
         sqlstate: code.into(),

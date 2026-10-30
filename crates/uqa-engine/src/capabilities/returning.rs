@@ -55,6 +55,14 @@ impl ReturningCatalog for Engine {
     fn try_table_columns(&self, table: &str) -> Result<Vec<String>, String> {
         Engine::table_columns_in_execution(self, table).map_err(|error| error.to_string())
     }
+    fn visit_column_names_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.visit_raw_table_column_names_with_control(table, control, read)
+    }
     fn view_schema(&self, table: &str) -> Result<Option<RowSchema>, SQLError> {
         Engine::view_schema(self, table)
     }

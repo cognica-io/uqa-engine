@@ -39,6 +39,21 @@ pub trait ReturningCatalog {
         Ok(true)
     }
     fn try_table_columns(&self, table: &str) -> Result<Vec<String>, String>;
+    /// Visit declared names without resolving DEFAULT or generated expressions. Native catalogs lend an immutable declaration generation without copying its payloads.
+    fn visit_column_names_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let names = self.try_table_columns(table).map_err(SQLError::Internal)?;
+        for name in &names {
+            control.check()?;
+            read(name)?;
+        }
+        Ok(())
+    }
     fn view_schema(&self, table: &str) -> Result<Option<RowSchema>, SQLError>;
 }
 /// Capture names and types from an active scope without exposing execution state.

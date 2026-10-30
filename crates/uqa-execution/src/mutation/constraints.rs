@@ -32,7 +32,7 @@ pub use keys::{
 use parent_keys::foreign_key_parent_index;
 use period::{period_foreign_key_is_covered, PeriodParentIds};
 pub use routing::{partition_insert_target, validate_partition_constraint};
-pub use statement::{statement_relation, ConstraintStatement};
+pub use statement::{statement_relation, statement_relation_with_control, ConstraintStatement};
 use uqa_core::{DocId, Value};
 use uqa_sql::{
     ast::{ForeignKey, TableKeyConstraint},

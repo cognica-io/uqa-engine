@@ -29,6 +29,23 @@ pub fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError 
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
 
+/// Add storage context to a raw catalog failure while preserving admission, cancellation and SQL diagnostics from a controlled reader.
+pub fn dml_storage_error_with_control(
+    action: &str,
+    error: SQLError,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> SQLError {
+    match error {
+        SQLError::Internal(message) => match control.format(format_args!(
+            "{action} failed in storage backend: {message}"
+        )) {
+            Ok(message) => SQLError::Internal(message.into_parts().0),
+            Err(error) => error.into(),
+        },
+        error => error,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

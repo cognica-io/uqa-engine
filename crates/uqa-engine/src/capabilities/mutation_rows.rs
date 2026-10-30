@@ -23,6 +23,14 @@ impl MutationRowCatalog for Engine {
         self.table_columns_in_execution(table)
             .map_err(|error| error.to_string())
     }
+    fn visit_column_names_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.visit_raw_table_column_names_with_control(table, control, read)
+    }
     fn view_schema(&self, name: &str) -> Result<RowSchema, SQLError> {
         let definition = self
             .view_definition(name)?

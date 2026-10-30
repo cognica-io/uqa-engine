@@ -28,7 +28,6 @@ use crate::{
         command_scope::MutationOverlayScope,
         conflict::update::InsertConflictLocks,
         constraints::{partition_insert_target, ConstraintStatement},
-        errors::dml_storage_error,
         identity::{
             insert_identity_columns, persist_auto_increment_identity,
             prepare_auto_increment_identity, prepare_insert_identity,
@@ -369,19 +368,30 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             }
 
             let implicit_columns = stmt.columns.is_empty();
-            let columns: Vec<uqa_sql::ast::AssignmentTarget<uqa_sql::ScalarExpr>> =
+            let owned_columns;
+            let columns: &[uqa_sql::ast::AssignmentTarget<uqa_sql::ScalarExpr>] =
                 if implicit_columns {
-                    // INSERT without explicit column list: project the table schema.
+                    let mut targets = uqa_core::memory::ProductionVec::new(control);
                     preparation
                         .returning
                         .catalog
-                        .try_table_columns(&stmt.table)
-                        .map_err(|error| dml_storage_error("INSERT", error))?
-                        .into_iter()
-                        .map(Into::into)
-                        .collect()
+                        .visit_column_names_with_control(&stmt.table, &control, &mut |name| {
+                            targets.push_produced(
+                                uqa_sql::assignment::targets::whole_column_with_control(
+                                    name, &control,
+                                )?,
+                            )?;
+                            Ok(())
+                        })
+                        .map_err(|error| {
+                            uqa_sql::catalog::errors::dml_storage_error_with_control(
+                                "INSERT", error, &control,
+                            )
+                        })?;
+                    owned_columns = targets.finish()?;
+                    &owned_columns
                 } else {
-                    stmt.columns.clone()
+                    &stmt.columns
                 };
             if view_original_query {
                 validate_mutation_targets_with_control(

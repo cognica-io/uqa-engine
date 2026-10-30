@@ -13,7 +13,6 @@ use crate::mutation::{
     assignment::apply_missing_column_defaults,
     conflict::update::{InsertConflictLocks, InsertConflictPreparation},
     constraints::{lock_document_key_dependencies, partition_insert_target, ConstraintStatement},
-    errors::dml_storage_error,
     identity::{
         prepare_auto_increment_identity, prepare_insert_identity,
         refresh_insert_identity_after_trigger, InsertIdentityContext,
@@ -22,8 +21,10 @@ use crate::mutation::{
 };
 use crate::query::{projection::physical_work_mem_bytes, runtime::QueryRuntimeView, CteScope};
 use std::cell::RefCell;
+use uqa_core::memory::{Produced, ProductionVec};
 use uqa_sql::{plan::InsertPlan, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
+mod columns;
 #[derive(Clone)]
 pub struct InsertSourceContext<'a, S: Clone + 'static> {
     pub rows: MutationPreparationContext<'a, S>,
@@ -72,18 +73,18 @@ pub struct InsertSelectIdentity {
 }
 
 pub struct InsertSelectConsumerState<S: Clone + 'static> {
-    pub stmt: InsertPlan,
-    pub params: Vec<SQLParam>,
+    pub stmt: Produced<InsertPlan>,
+    pub params: Produced<Vec<SQLParam>>,
     pub snapshot_scope: CteScope<S>,
-    pub auto_id_column: Option<String>,
-    pub id_column: String,
+    pub auto_id_column: Option<Produced<String>>,
+    pub id_column: Produced<String>,
     pub identity_source: crate::mutation::identity::IdentitySource,
-    pub conflict_update_columns: Vec<String>,
-    pub columns: Option<Vec<uqa_sql::ast::AssignmentTarget<crate::ScalarExpr>>>,
+    pub conflict_update_columns: Produced<Vec<String>>,
+    columns: Option<columns::InsertSelectColumns>,
     /// The columns the statement supplies, which its constraint violations show to a role that may not read the table: the target columns the source fills and those `ON CONFLICT DO UPDATE` sets.
-    pub supplied_columns: Vec<String>,
+    pub supplied_columns: Produced<Vec<String>>,
     /// The catalog name of the relation the statement names.
-    pub statement_relation: String,
+    pub statement_relation: Produced<String>,
     /// The identity columns whose source values `OVERRIDING USER VALUE` discards.
     pub discarded_identities: uqa_core::memory::OwnedSet<uqa_core::memory::Produced<String>>,
     pub result_width: Option<usize>,
@@ -115,29 +116,43 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         stmt: &InsertPlan,
         params: &[SQLParam],
         snapshot_scope: CteScope<S>,
-        identity: InsertSelectIdentity,
-        conflict_update_columns: Vec<String>,
+        identity: &InsertSelectIdentity,
+        conflict_update_columns: &[String],
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
-        let InsertSelectIdentity {
-            auto_id_column,
-            id_column,
-            identity_source,
-        } = identity;
+        let stmt = stmt.clone_with_control(control)?;
+        let mut captured_params = ProductionVec::new(*control);
+        captured_params.reserve(params.len())?;
+        for param in params {
+            captured_params.push_produced(param.clone_with_control(control)?)?;
+        }
+        let params = captured_params.finish()?;
+        let auto_id_column = identity
+            .auto_id_column
+            .as_ref()
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        let id_column = control.copy_text(&identity.id_column)?;
+        let mut conflicts = ProductionVec::new(*control);
+        conflicts.reserve(conflict_update_columns.len())?;
+        for name in conflict_update_columns {
+            conflicts.push_produced(control.copy_text(name)?)?;
+        }
+        let conflict_update_columns = conflicts.finish()?;
         let prepared_schema = prepared_insert_spill_schema();
         Ok(Self {
             production: control.capture(),
             state: RefCell::new(InsertSelectConsumerState {
-                stmt: stmt.clone(),
-                params: params.to_vec(),
+                stmt,
+                params,
                 snapshot_scope,
                 auto_id_column,
                 id_column,
-                identity_source,
+                identity_source: identity.identity_source,
                 conflict_update_columns,
                 columns: None,
-                supplied_columns: Vec::new(),
-                statement_relation: String::new(),
+                supplied_columns: control.finish(Vec::new(), control.empty_reservation())?,
+                statement_relation: control.copy_text("")?,
                 discarded_identities: uqa_core::memory::OwnedSet::new(),
                 result_width: None,
                 prepared_schema,
@@ -180,79 +195,6 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
 }
 
 impl<S: Clone + 'static> InsertSelectConsumer<S> {
-    pub fn begin(
-        &self,
-        services: InsertSourceContext<'_, S>,
-        source_columns: &[String],
-        _schema: &crate::RowSchema,
-    ) -> Result<(), SQLError> {
-        let control = self.production.control();
-        let mut state = self.state.borrow_mut();
-        let result_width = source_columns.len();
-        let implicit_columns = state.stmt.columns.is_empty();
-        let columns = if implicit_columns {
-            let target_columns = services
-                .rows
-                .referential
-                .assignment
-                .rows
-                .relations
-                .column_names(&state.stmt.table)
-                .map_err(|error| dml_storage_error("INSERT SELECT", error))?;
-            if target_columns.is_empty() {
-                source_columns.iter().cloned().map(Into::into).collect()
-            } else {
-                target_columns.into_iter().map(Into::into).collect()
-            }
-        } else {
-            state.stmt.columns.clone()
-        };
-        uqa_sql::assignment::columns::validate_mutation_targets_with_control(
-            services.rows.referential.assignment.columns,
-            &state.stmt.table,
-            columns.iter(),
-            "INSERT SELECT",
-            true,
-            &control,
-        )?;
-        if result_width > columns.len() || (!implicit_columns && result_width != columns.len()) {
-            return Err(SQLError::TypeMismatch(format!(
-                "INSERT SELECT width {result_width} != column count {}",
-                columns.len()
-            )));
-        }
-        if let (Some(existing_columns), Some(existing_width)) =
-            (state.columns.as_ref(), state.result_width)
-        {
-            if existing_columns != &columns || existing_width != result_width {
-                return Err(SQLError::Internal(
-                    "INSERT SELECT row consumer was rebound to a different source shape".into(),
-                ));
-            }
-            return Ok(());
-        }
-        state.discarded_identities =
-            super::identity_targets::user_value_identity_columns_with_control(
-                services.identities,
-                &state.stmt,
-                columns.iter().map(|column| column.column.as_str()),
-                &control,
-            )?;
-        state.statement_relation = crate::mutation::constraints::statement_relation(
-            services.rows.referential.constraints,
-            &state.stmt.table,
-        )?;
-        state.supplied_columns = columns
-            .iter()
-            .take(result_width)
-            .map(|column| column.column.clone())
-            .chain(state.conflict_update_columns.iter().cloned())
-            .collect();
-        state.columns = Some(columns);
-        state.result_width = Some(result_width);
-        Ok(())
-    }
-
     #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
     pub fn consume(
         &self,
@@ -285,9 +227,12 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             has_prepared_auto_identity,
             supplied_identities,
         } = &mut *state;
-        let columns = columns.as_ref().ok_or_else(|| {
-            SQLError::Internal("INSERT SELECT row consumer was not initialized".into())
-        })?;
+        let columns = columns
+            .as_ref()
+            .ok_or_else(|| {
+                SQLError::Internal("INSERT SELECT row consumer was not initialized".into())
+            })?
+            .as_slice(stmt);
         let result_width = result_width.ok_or_else(|| {
             SQLError::Internal("INSERT SELECT row consumer has no source width".into())
         })?;
@@ -349,7 +294,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             &stmt.table,
             id_column,
             *identity_source,
-            auto_id_column.as_deref(),
+            auto_id_column.as_ref().map(|name| name.as_str()),
             &mut document,
             "prepare INSERT SELECT identity",
         )?;
