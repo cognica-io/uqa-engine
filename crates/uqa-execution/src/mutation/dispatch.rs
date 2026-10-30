@@ -5,7 +5,7 @@
 //
 
 //! Resolve mutation execution paths using SQL view rewriting and execution-owned command loops.
-use super::{insert::table::InsertPlanning, views::commands::SourceOutputPruning};
+use super::insert::table::InsertPlanning;
 use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::MutationStatementContext;
 use crate::query::CteScope;
@@ -98,27 +98,24 @@ fn set_returning_values_query<S: Clone + Send + Sync + 'static>(
 
 pub fn run_update<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     stmt: &UpdatePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    super::rules::schedule::run_update(context, prune, stmt, params, inherited_ctes)
+    super::rules::schedule::run_update(context, stmt, params, inherited_ctes)
 }
 
 pub fn run_delete<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     stmt: &DeletePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    super::rules::schedule::run_delete(context, prune, stmt, params, inherited_ctes)
+    super::rules::schedule::run_delete(context, stmt, params, inherited_ctes)
 }
 
 pub fn run_merge<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     stmt: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
@@ -148,12 +145,12 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
                     .map(uqa_sql::binding::snapshot::BindingSnapshot::from);
                 let rewritten =
                     view_rewrite::rewrite_merge_to_base(rewrite, stmt, params, inherited.as_ref())?;
-                run_merge(context, prune, &rewritten, params, inherited_ctes)
+                run_merge(context, &rewritten, params, inherited_ctes)
             }
             view_rewrite::MergeViewTargetPath::ViewTriggers => {
                 let _ = view_privileges::ensure_merge(rewrite.authorization, stmt)?;
                 super::routine_calls::merge(context, stmt, params, inherited_ctes)?;
-                super::merge::views::run_view_merge(context, prune, stmt, params, inherited_ctes)
+                super::merge::views::run_view_merge(context, stmt, params, inherited_ctes)
             }
         };
     }

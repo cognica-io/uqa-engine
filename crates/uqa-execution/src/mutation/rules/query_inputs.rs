@@ -151,7 +151,7 @@ fn copy_rule_input_query<S: Clone + 'static>(
         .expect("query input")
         .copy_for_rewrite(control)?;
     if let Some(required) = required {
-        query = (prune.owned)(
+        query = prune(
             context.volatility,
             context.returning.routines,
             query,

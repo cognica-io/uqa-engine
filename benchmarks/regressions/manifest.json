@@ -30783,6 +30783,142 @@
       "capability": "Automatic view metadata ownership",
       "workload": "Four MiB retained view definitions, exhausted request admission and writable-view mutations on every provider.",
       "invariant": "Early shape rejection precedes payload production; admitted layer failure releases its owners and native mutations recover with durable results."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_target_capture_selects_metadata_and_owns_exact_query_allocations",
+      "source": "crates/uqa-sql/src/semantics/view_mutation/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "A four MiB query and eight MiB of unrelated view metadata.",
+      "invariant": "Only selected fields are copied; exact live query/name ownership remains after the catalog declaration is released."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_target_rejection_precedes_large_payload_copy_and_preserves_siblings",
+      "source": "crates/uqa-sql/src/semantics/view_mutation/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "A four MiB query under a 32 KiB remaining allowance.",
+      "invariant": "Admission fails before the payload copy, independent owners survive and a later capture succeeds."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_target_partial_capture_releases_names_queries_and_transferred_schemas",
+      "source": "crates/uqa-sql/src/semantics/view_mutation/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "Nine allowances spanning partial target construction.",
+      "invariant": "Failure and success release all selected target and schema storage without retiring an independent owner."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_target_capture_observes_both_cancellations_and_releases_on_unwind",
+      "source": "crates/uqa-sql/src/semantics/view_mutation/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "Both original cancellation scopes and a consumer unwind.",
+      "invariant": "Cancellation precedes large copies and every target allocation is released on unwind."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "captured_view_owners_admit_names_and_retain_the_selected_role_incarnation",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "A four MiB owner name, failed admission, rename and shared authority readers.",
+      "invariant": "Owner names reject before copying, captured identities survive rename and the last reader releases their allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "captured_view_owner_diagnostics_and_both_cancellation_scopes_are_preserved",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "Invalid and replaced owner incarnations and both cancellation scopes.",
+      "invariant": "Original diagnostic variants and messages remain intact; cancelled lookup releases all ownership."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_view_target_selection_avoids_full_definition_copies",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_targets.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "Four MiB persisted view queries on all four providers.",
+      "invariant": "Target selection copies the selected query once and allocates less than its payload plus 256 KiB."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_trigger_view_targets_reject_before_copies_and_recover_all_commands",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_targets.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "Native target rejection and cancellation followed by INSERT, UPDATE, MERGE, DELETE and durable reopen.",
+      "invariant": "Request admission precedes large query copies; all four trigger mutation paths recover and retain correct persistent results."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "captured_table_privileges_admit_only_acl_payloads_and_preserve_snapshots",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "A four MiB ACL column name and its catalog mutation revision.",
+      "invariant": "Only authorization payloads are copied, exact leases survive later catalog changes and failure precedes large copies."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "captured_table_privileges_release_partial_copies_and_observe_cancellation",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native view mutation target ownership",
+      "workload": "Eight allowances and both cancellation scopes during ACL capture.",
+      "invariant": "Partial relation and column ACL outputs are released independently of sibling owners; cancelled capture leaves no allocation."
     }
   ]
 }

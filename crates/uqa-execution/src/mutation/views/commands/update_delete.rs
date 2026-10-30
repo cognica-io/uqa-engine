@@ -10,7 +10,7 @@ use super::{
     validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
     with_mutation_snapshot, BTreeSet, CteScope, DeletePlan, DmlReturningShape,
     MutationStatementContext, OwnedPhysicalRow, ReturningValueProjectionRow, SQLError, SQLParam,
-    ScalarExpr, SourceOutputPruning, TriggerViewChecks, UpdatePlan, Value, ViewDmlTarget,
+    ScalarExpr, TriggerViewChecks, UpdatePlan, Value, ViewDmlTarget,
 };
 use crate::mutation::output::MutationOutput;
 use crate::mutation::{
@@ -123,12 +123,11 @@ fn matching_source_context<S: Clone + Send + Sync + 'static>(
 )]
 pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune_source_outputs: SourceOutputPruning,
     stmt: &UpdatePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let target = resolve_view_target(context.mutation.rules.views, &stmt.table)?;
+    let target = resolve_view_target(context, &stmt.table)?;
     let assigned_columns = stmt
         .assignments
         .iter()
@@ -251,14 +250,8 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 source_rows.as_ref().map(crate::SharedSpill::row_schema),
             )?;
             let mut target_scope = ctes.returning_statement_snapshot_scope();
-            let candidates = materialize_view_rows(
-                &read_context.query,
-                prune_source_outputs,
-                &target,
-                None,
-                params,
-                &mut target_scope,
-            )?;
+            let candidates =
+                materialize_view_rows(&read_context.query, &target, params, &mut target_scope)?;
             let snapshot = ctes.returning_statement_snapshot_scope();
             let work_mem = context.mutation.rules.rules.memory.work_mem_bytes()?;
             let cancellation = context.mutation.rules.rules.cancellation.clone();

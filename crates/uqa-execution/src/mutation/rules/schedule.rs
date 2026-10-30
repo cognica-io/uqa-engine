@@ -9,7 +9,6 @@
 use crate::{
     mutation::{
         output::MutationOutput, statement::context::MutationStatementContext, statement_end,
-        views::commands::SourceOutputPruning,
     },
     query::CteScope,
 };
@@ -60,7 +59,6 @@ impl MutationCommand {
 
 pub fn run_update<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     statement: &UpdatePlan,
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
@@ -72,7 +70,6 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     }
     run(
         context,
-        prune,
         MutationCommand::Update(statement.clone()),
         params,
         inherited,
@@ -81,7 +78,6 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
 
 pub fn run_delete<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     statement: &DeletePlan,
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
@@ -91,7 +87,6 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     }
     run(
         context,
-        prune,
         MutationCommand::Delete(statement.clone()),
         params,
         inherited,
@@ -100,7 +95,6 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
 
 fn run<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     statement: MutationCommand,
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
@@ -109,7 +103,7 @@ fn run<S: Clone + Send + Sync + 'static>(
     if relations.is_empty() {
         return original.map_or_else(
             || Ok(MutationOutput::from_affected(0)),
-            |original| run_original(context, prune, &original, params, inherited),
+            |original| run_original(context, &original, params, inherited),
         );
     }
     let (commands, _running) = statement_end::statement_commands(inherited);
@@ -185,7 +179,7 @@ fn run<S: Clone + Send + Sync + 'static>(
         }
         if let Some(original) = &mut original {
             original.clear_ctes();
-            let result = run_original(context, prune, original, params, Some(&scope))?;
+            let result = run_original(context, original, params, Some(&scope))?;
             if output.is_none() {
                 return Ok(result);
             }
@@ -383,7 +377,6 @@ fn lock_and_validate_returning<S: Clone + Send + Sync + 'static>(
 
 fn run_original<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     original: &MutationCommand,
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
@@ -399,13 +392,13 @@ fn run_original<S: Clone + Send + Sync + 'static>(
         MutationCommand::Update(plan) if view => {
             crate::mutation::routine_calls::update(context, plan, params, inherited)?;
             crate::mutation::views::commands::run_view_update_inner(
-                context, prune, plan, params, inherited,
+                context, plan, params, inherited,
             )
         }
         MutationCommand::Delete(plan) if view => {
             crate::mutation::routine_calls::delete(context, plan, params, inherited)?;
             crate::mutation::views::commands::run_view_delete_inner(
-                context, prune, plan, params, inherited,
+                context, plan, params, inherited,
             )
         }
         MutationCommand::Update(plan) => {

@@ -18,7 +18,6 @@ use uqa_sql::{
             table::{role_has_privilege, TableAclPrivilege, TablePrivilegeCheck},
             BoundTableSecurity,
         },
-        stored_view::StoredView,
     },
     SQLError,
 };
@@ -87,12 +86,12 @@ impl TableAuthorizationContext<'_> {
     /// The columns of a view that the description of a row its `INSTEAD OF` trigger stores shows, which `ExecBuildSlotValueDescription` decides for the view as it does for a table: `None` when the current role may read the view, otherwise, in view order, each column the role may read or the statement supplies.
     pub fn view_row_description_columns(
         &self,
-        view: &StoredView,
+        security: &uqa_sql::catalog::security::table_binding::CapturedTablePrivileges,
         columns: &[String],
         supplied: &[String],
     ) -> Result<Option<Vec<String>>, SQLError> {
-        self.visible_row_columns(
-            &view.security(),
+        self.visible_row_columns_with(
+            |roles| security.resolve(roles),
             &self.names.current_role(),
             columns.to_vec(),
             supplied,
@@ -106,9 +105,21 @@ impl TableAuthorizationContext<'_> {
         columns: Vec<String>,
         supplied: &[String],
     ) -> Result<Option<Vec<String>>, SQLError> {
+        self.visible_row_columns_with(|roles| security.resolve(roles), subject, columns, supplied)
+    }
+
+    fn visible_row_columns_with(
+        &self,
+        resolve: impl FnOnce(
+            &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+        ) -> Result<uqa_sql::catalog::security::TableSecurity, String>,
+        subject: &dyn RoleSubject,
+        columns: Vec<String>,
+        supplied: &[String],
+    ) -> Result<Option<Vec<String>>, SQLError> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
-        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
+        let security = resolve(&roles).map_err(SQLError::Internal)?;
         let check = TablePrivilegeCheck {
             privilege: TableAclPrivilege::Select,
             grant_option: false,

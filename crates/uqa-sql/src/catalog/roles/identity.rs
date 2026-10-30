@@ -68,6 +68,14 @@ impl RoleReference {
                     "role identity references a missing or replaced incarnation".into(),
                 )
             })?;
+        Self::from_definition_with_control(role, control)
+    }
+
+    pub(crate) fn from_definition_with_control(
+        role: &RoleDefinition,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
         let oid = RoleBinding::validated_oid(role)?;
         let header = control.reserve(std::mem::size_of::<RoleBinding>())?;
         let (name, memory) = control.copy_text(&role.name)?.into_parts();

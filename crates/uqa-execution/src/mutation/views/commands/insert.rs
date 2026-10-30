@@ -29,7 +29,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let target = resolve_view_target(context.mutation.rules.views, &stmt.table)?;
+    let target = resolve_view_target(context, &stmt.table)?;
     if stmt.on_conflict.is_some() {
         return Err(SQLError::Routine {
             sqlstate: "0A000".into(),

@@ -201,7 +201,7 @@ fn view_row_detail(
 ) -> Result<Option<String>, SQLError> {
     let diagnostics = context.diagnostics.diagnostic_context();
     let visible = diagnostics.authorization.view_row_description_columns(
-        &target.definition,
+        &target.security,
         &target.columns,
         supplied,
     )?;

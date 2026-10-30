@@ -29,6 +29,7 @@ mod sources;
 mod statistics;
 mod subqueries;
 mod view_shapes;
+mod view_targets;
 
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]

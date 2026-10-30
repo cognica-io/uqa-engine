@@ -179,6 +179,18 @@ impl CatalogReadView {
             .owner_reference(&self.snapshot.definitions.roles)
     }
 
+    pub fn view_owner_with_control(
+        &self,
+        owner: uqa_sql::catalog::roles::RoleIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<RoleReference, SQLError> {
+        uqa_sql::catalog::security::table_binding::owner_reference_with_control(
+            owner,
+            &self.snapshot.definitions.roles,
+            control,
+        )
+    }
+
     pub fn bind_role(&self, name: &str) -> Result<RoleReference, SQLError> {
         RoleReference::from(name)
             .bind(&self.snapshot.definitions.roles)

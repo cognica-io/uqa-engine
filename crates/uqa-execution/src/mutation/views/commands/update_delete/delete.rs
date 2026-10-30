@@ -12,7 +12,7 @@ use super::{
     validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
     view_values, with_mutation_snapshot, BTreeSet, CteScope, DeletePlan, DmlReturningShape,
     MutationImageBuffer, MutationStatementContext, ReturningValueProjectionRow, SQLError, SQLParam,
-    SourceOutputPruning, ViewDmlSourceMatch,
+    ViewDmlSourceMatch,
 };
 use crate::mutation::output::MutationOutput;
 
@@ -22,12 +22,11 @@ use crate::mutation::output::MutationOutput;
 )]
 pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune_source_outputs: SourceOutputPruning,
     stmt: &DeletePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let target = resolve_view_target(context.mutation.rules.views, &stmt.table)?;
+    let target = resolve_view_target(context, &stmt.table)?;
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
         if let Some(predicate) = stmt.predicate.as_ref() {
@@ -128,14 +127,8 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
                 source_rows.as_ref().map(crate::SharedSpill::row_schema),
             )?;
             let mut target_scope = ctes.returning_statement_snapshot_scope();
-            let candidates = materialize_view_rows(
-                &read_context.query,
-                prune_source_outputs,
-                &target,
-                None,
-                params,
-                &mut target_scope,
-            )?;
+            let candidates =
+                materialize_view_rows(&read_context.query, &target, params, &mut target_scope)?;
             let snapshot = ctes.returning_statement_snapshot_scope();
             let cancellation = context.mutation.rules.rules.cancellation.clone();
             let mut pending = MutationImageBuffer::new(
