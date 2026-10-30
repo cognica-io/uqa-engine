@@ -108,6 +108,18 @@ impl CatalogReadView {
             .map_err(graph_error)
     }
 
+    pub fn graph_label_kind(
+        &self,
+        graph: &str,
+        label: &str,
+    ) -> Result<Option<uqa_graph::LabelKind>, SQLError> {
+        self.graph_read(graph)?
+            .map(|store| store.graph_label_kind(graph, label))
+            .transpose()
+            .map(Option::flatten)
+            .map_err(graph_error)
+    }
+
     /// Unobserved names for binding and restoration; row consumers use `read_graph_names`.
     pub fn graph_names(&self) -> Vec<String> {
         self.graph_names_iter().map(str::to_owned).collect()

@@ -6,12 +6,19 @@
 
 //! Physical-plan correlation analysis for scalar subquery initialization.
 
+#[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::plan::{ComputePlan, ProjectionPlan, QueryPlan, RelationalPlan, SourcePlan};
+use crate::production::Buffer;
 use crate::SQLError;
-use crate::{ScalarExpr, ScalarFrameBound};
+use crate::ScalarExpr;
+use uqa_core::memory::{OwnedMap, OwnedSet, ProductionControl};
+mod memory;
+use memory::{
+    copy_ctes, copy_names, insert, insert_set, Analysis, Ctes, QueryScope, RelationColumns,
+};
 
 use crate::catalog::{analysis::AnalysisCatalog, resolution::RelationNameResolution};
 mod outputs;
@@ -35,42 +42,6 @@ pub trait CorrelationRelations {
     fn columns(&self, relation: &str) -> Option<&[String]>;
 }
 
-#[derive(Clone, Default)]
-struct RelationColumns {
-    names: BTreeSet<String>,
-    ordered: Vec<String>,
-    complete: bool,
-}
-
-impl RelationColumns {
-    fn known(ordered: Vec<String>) -> Self {
-        Self {
-            names: ordered.iter().cloned().collect(),
-            ordered,
-            complete: true,
-        }
-    }
-
-    fn empty_known() -> Self {
-        Self::known(Vec::new())
-    }
-
-    fn apply_positional_aliases(&mut self, aliases: &[String]) {
-        for (column, alias) in self.ordered.iter_mut().zip(aliases) {
-            column.clone_from(alias);
-        }
-        self.names = self.ordered.iter().cloned().collect();
-    }
-}
-
-#[derive(Clone, Default)]
-struct QueryScope {
-    qualifiers: BTreeMap<String, Arc<RelationColumns>>,
-    internal_relations: BTreeSet<crate::ast::InternalRelationId>,
-    columns: Arc<RelationColumns>,
-    enclosing: Option<crate::RowSchema>,
-}
-
 pub struct DecorrelatedExistsPlan {
     pub inner: QueryPlan,
     pub outer_keys: Vec<ScalarExpr>,
@@ -84,6 +55,10 @@ pub fn decorrelate_exists(
     context: CorrelationContext<'_>,
     plan: &QueryPlan,
 ) -> Result<Option<DecorrelatedExistsPlan>, SQLError> {
+    let context = Analysis {
+        context,
+        control: ProductionControl::uncontrolled(),
+    };
     if !plan.ctes.is_empty() {
         return Ok(None);
     }
@@ -107,13 +82,13 @@ pub fn decorrelate_exists(
         return Ok(None);
     }
 
-    let scope = source_scope(context, source, &BTreeMap::new(), &[])?;
+    let scope = source_scope(context, source, &Ctes::new(), &[])?;
     if source_references_outer(
         context,
         source,
         &block.subqueries,
-        &mut Vec::new(),
-        &BTreeMap::new(),
+        &mut Buffer::new(&context.control),
+        &Ctes::new(),
     )? {
         return Ok(None);
     }
@@ -150,7 +125,11 @@ pub fn decorrelate_exists(
                 _ => {}
             }
         }
-        if expression_has_external_reference(conjunct, std::slice::from_ref(&scope)) {
+        if expression_has_external_reference(
+            conjunct,
+            std::slice::from_ref(&scope),
+            &context.control,
+        )? {
             return Ok(None);
         }
         residual.push(conjunct.clone());
@@ -220,88 +199,146 @@ pub fn query_depends_on_outer_row(
     context: CorrelationContext<'_>,
     plan: &QueryPlan,
 ) -> Result<bool, SQLError> {
-    query_has_external_reference(context, plan, &mut Vec::new())
+    query_depends_on_outer_row_with_control(context, plan, &ProductionControl::uncontrolled())
 }
 
-/// Whether a scalar expression needs a row outside its declared FROM namespace. Scalar subqueries keep their own local aliases and CTEs; an uncorrelated subquery does not introduce an outer-row dependency.
+pub fn query_depends_on_outer_row_with_control(
+    context: CorrelationContext<'_>,
+    plan: &QueryPlan,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    query_has_external_reference(
+        Analysis {
+            context,
+            control: *control,
+        },
+        plan,
+        &mut Buffer::new(control),
+    )
+}
+
+/// Whether an expression needs a row outside its FROM namespace; nested subqueries retain their local aliases and CTEs.
 pub fn expression_depends_on_outer_row(
     context: CorrelationContext<'_>,
     expression: &crate::plan::ExpressionPlan,
     source: Option<&SourcePlan>,
     definitions: &[crate::plan::CtePlan],
 ) -> Result<bool, SQLError> {
-    let mut ctes = BTreeMap::new();
-    for cte in definitions.iter().filter(|cte| cte.recursive) {
-        ctes.insert(
-            cte.name.clone(),
-            RelationColumns {
-                names: cte.columns.iter().cloned().collect(),
-                ordered: cte.columns.clone(),
-                complete: false,
-            },
-        );
-    }
-    for cte in definitions {
-        let columns = cte_output_columns(context, cte, &ctes, &[])?;
-        ctes.insert(cte.name.clone(), columns);
-    }
-    let mut scopes = match source {
-        Some(source) => vec![source_scope(context, source, &ctes, &[])?],
-        None => Vec::new(),
-    };
-    expression_references_outer(
+    expression_depends_on_outer_row_with_control(
         context,
         &expression.scalar,
         &expression.subqueries,
-        &mut scopes,
-        &ctes,
+        source,
+        definitions,
+        &ProductionControl::uncontrolled(),
     )
 }
 
-/// Whether a subquery refers to the caller's own row. Seed enclosing identities so references beyond that row are not mistaken for level-zero variables.
+/// Borrow the scalar and its original query arena while admitting lexical namespace scratch before allocation.
+pub fn expression_depends_on_outer_row_with_control(
+    context: CorrelationContext<'_>,
+    scalar: &ScalarExpr,
+    subqueries: &[QueryPlan],
+    source: Option<&SourcePlan>,
+    definitions: &[crate::plan::CtePlan],
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    control.check()?;
+    let context = Analysis {
+        context,
+        control: *control,
+    };
+    let mut ctes = Ctes::new();
+    for cte in definitions.iter().filter(|cte| cte.recursive) {
+        let mut columns = RelationColumns::known(
+            copy_names(cte.columns.iter().map(String::as_str), control)?,
+            control,
+        )?;
+        columns.complete = false;
+        insert(
+            &mut ctes,
+            control.copy_text(&cte.name)?,
+            columns.share(control)?,
+            control,
+        )?;
+    }
+    for cte in definitions {
+        let columns = cte_output_columns(context, cte, &ctes, &[])?;
+        insert(
+            &mut ctes,
+            control.copy_text(&cte.name)?,
+            columns.share(control)?,
+            control,
+        )?;
+    }
+    let mut scopes = Buffer::new(control);
+    if let Some(source) = source {
+        scopes.push(source_scope(context, source, &ctes, &[])?, control)?;
+    }
+    expression_references_outer(context, scalar, subqueries, &mut scopes, &ctes)
+}
+
+/// Enclosing identities resolve beyond the calling row rather than becoming level-zero dependencies.
 pub(crate) fn query_depends_on_current_row(
     context: CorrelationContext<'_>,
     plan: &QueryPlan,
     input: &crate::RowSchema,
 ) -> Result<bool, SQLError> {
-    query_has_external_reference(context, plan, &mut vec![enclosing_scope(input)])
+    let control = ProductionControl::uncontrolled();
+    let context = Analysis { context, control };
+    let mut scopes = Buffer::new(&control);
+    scopes.push(enclosing_scope(input, &control)?, &control)?;
+    query_has_external_reference(context, plan, &mut scopes)
 }
 
-fn enclosing_scope(input: &crate::RowSchema) -> QueryScope {
-    let deferred_columns = Arc::new(RelationColumns::default());
-    let mut enclosing = QueryScope {
-        columns: Arc::new(RelationColumns::empty_known()),
-        enclosing: Some(input.clone()),
-        ..QueryScope::default()
-    };
+fn enclosing_scope(
+    input: &crate::RowSchema,
+    control: &ProductionControl<'_>,
+) -> Result<QueryScope, SQLError> {
+    let deferred_columns = RelationColumns::empty(false, control)?.share(control)?;
+    let mut columns = RelationColumns::empty(true, control)?;
+    let mut qualifiers = OwnedMap::new();
+    let mut internal_relations = OwnedSet::new();
     for (identity, _) in input.typed_physical_alias_identities() {
+        control.check()?;
         if !input.resolves_local_column(identity.qualifier(), identity.column()) {
             if let Some(qualifier) = identity.qualifier() {
-                enclosing
-                    .qualifiers
-                    .entry(qualifier.to_owned())
-                    .or_insert_with(|| Arc::clone(&deferred_columns));
+                if !qualifiers.contains_key(qualifier) {
+                    insert(
+                        &mut qualifiers,
+                        control.copy_text(qualifier)?,
+                        Arc::clone(&deferred_columns),
+                        control,
+                    )?;
+                }
             } else {
-                Arc::make_mut(&mut enclosing.columns)
-                    .names
-                    .insert(identity.column().to_owned());
+                insert_set(
+                    &mut columns.names,
+                    control.copy_text(identity.column())?,
+                    control,
+                )?;
             }
         }
     }
     for (column, slot) in input.internal_identities() {
         if !input.slot_is_local(slot) {
-            enclosing.internal_relations.insert(column.relation());
+            insert_set(&mut internal_relations, column.relation(), control)?;
         }
     }
-    enclosing
+    Ok(QueryScope {
+        columns: columns.share(control)?,
+        qualifiers,
+        internal_relations,
+        enclosing: Some(input.clone()),
+    })
 }
 
 fn query_has_external_reference(
-    context: CorrelationContext<'_>,
+    context: Analysis<'_, '_>,
     plan: &QueryPlan,
-    scopes: &mut Vec<QueryScope>,
+    scopes: &mut Buffer<QueryScope>,
 ) -> Result<bool, SQLError> {
-    query_references_outer(context, plan, scopes, &BTreeMap::new())
+    query_references_outer(context, plan, scopes, &Ctes::new())
 }
 
 #[expect(
@@ -309,33 +346,45 @@ fn query_has_external_reference(
     reason = "preserves scope and subquery identity"
 )]
 fn query_references_outer(
-    context: CorrelationContext<'_>,
+    context: Analysis<'_, '_>,
     plan: &QueryPlan,
-    scopes: &mut Vec<QueryScope>,
-    parent_ctes: &BTreeMap<String, RelationColumns>,
+    scopes: &mut Buffer<QueryScope>,
+    parent_ctes: &Ctes,
 ) -> Result<bool, SQLError> {
-    let mut ctes = parent_ctes.clone();
+    context.control.check()?;
+    let control = &context.control;
+    let mut ctes = copy_ctes(parent_ctes, control)?;
     if plan.ctes.iter().any(|cte| cte.recursive) {
         for cte in &plan.ctes {
-            let columns = RelationColumns {
-                names: cte.columns.iter().cloned().collect(),
-                ordered: cte.columns.clone(),
-                complete: false,
-            };
-            ctes.insert(cte.name.clone(), columns);
+            let mut columns = RelationColumns::known(
+                copy_names(cte.columns.iter().map(String::as_str), control)?,
+                control,
+            )?;
+            columns.complete = false;
+            insert(
+                &mut ctes,
+                control.copy_text(&cte.name)?,
+                columns.share(control)?,
+                control,
+            )?;
         }
     }
     for cte in &plan.ctes {
-        let columns = cte_output_columns(context, cte, &ctes, scopes)?;
+        let columns = cte_output_columns(context, cte, &ctes, scopes)?.share(control)?;
         if cte.recursive {
-            ctes.insert(cte.name.clone(), columns.clone());
+            insert(
+                &mut ctes,
+                control.copy_text(&cte.name)?,
+                Arc::clone(&columns),
+                control,
+            )?;
         }
         if cte.body.query().map_or(Ok(true), |query| {
             query_references_outer(context, query, scopes, &ctes)
         })? {
             return Ok(true);
         }
-        ctes.insert(cte.name.clone(), columns);
+        insert(&mut ctes, control.copy_text(&cte.name)?, columns, control)?;
     }
 
     match &plan.root {
@@ -348,14 +397,9 @@ fn query_references_outer(
             }
             let scope = match block.from.as_ref() {
                 Some(source) => source_scope(context, source, &ctes, scopes)?,
-                None => QueryScope {
-                    qualifiers: BTreeMap::new(),
-                    internal_relations: BTreeSet::new(),
-                    columns: Arc::new(RelationColumns::empty_known()),
-                    enclosing: None,
-                },
+                None => QueryScope::empty(control)?,
             };
-            scopes.push(scope);
+            scopes.push(scope, control)?;
             let result = block
                 .try_visit_expressions(&mut |expression| {
                     expression_references_outer(
@@ -385,12 +429,12 @@ fn query_references_outer(
             {
                 return Ok(true);
             }
-            scopes.push(QueryScope {
-                qualifiers: BTreeMap::new(),
-                internal_relations: BTreeSet::new(),
-                columns: Arc::new(query_output_columns(context, left, &ctes, scopes)?),
-                enclosing: None,
-            });
+            let scope = QueryScope::relation(
+                None,
+                query_output_columns(context, left, &ctes, scopes)?,
+                control,
+            )?;
+            scopes.push(scope, control)?;
             let result = (|| {
                 for expression in order_by.iter().map(|order| &order.expr) {
                     if expression_references_outer(context, expression, subqueries, scopes, &ctes)?
@@ -410,12 +454,7 @@ fn query_references_outer(
             result
         }
         RelationalPlan::Values { rows, subqueries } => {
-            scopes.push(QueryScope {
-                qualifiers: BTreeMap::new(),
-                internal_relations: BTreeSet::new(),
-                columns: Arc::new(RelationColumns::empty_known()),
-                enclosing: None,
-            });
+            scopes.push(QueryScope::empty(control)?, control)?;
             let result = (|| {
                 for expression in rows.iter().flatten() {
                     if expression_references_outer(context, expression, subqueries, scopes, &ctes)?
@@ -431,102 +470,45 @@ fn query_references_outer(
     }
 }
 
-fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -> bool {
-    match expr {
-        ScalarExpr::Column(column) => !resolves_unqualified(column, scopes),
-        ScalarExpr::QualifiedColumn { qualifier, .. } => !scopes
-            .iter()
-            .rev()
-            .any(|scope| scope.qualifiers.contains_key(qualifier)),
-        ScalarExpr::QualifiedStar(qualifier) => !scopes
-            .iter()
-            .rev()
-            .any(|scope| scope.qualifiers.contains_key(qualifier.as_str())),
-        ScalarExpr::InternalColumn(column) => !scopes
-            .iter()
-            .rev()
-            .any(|scope| scope.internal_relations.contains(&column.relation())),
-        ScalarExpr::Func {
-            binding,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            binding
+fn expression_has_external_reference(
+    expression: &ScalarExpr,
+    scopes: &[QueryScope],
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let mut found = false;
+    expression.try_visit(&mut |node| {
+        control.check()?;
+        if found {
+            return Ok(false);
+        }
+        found = match node {
+            ScalarExpr::Column(column) => !resolves_unqualified(column, scopes),
+            ScalarExpr::QualifiedColumn { qualifier, .. } => !scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.qualifiers.contains_key(qualifier.as_str())),
+            ScalarExpr::QualifiedStar(qualifier) => !scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.qualifiers.contains_key(qualifier.as_str())),
+            ScalarExpr::InternalColumn(column) => !scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.internal_relations.contains(&column.relation())),
+            ScalarExpr::Func { binding, .. } => binding
                 .as_ref()
                 .and_then(crate::semantics::function_implicit_row_input)
                 .is_some_and(|column| {
-                    expression_has_external_reference(&ScalarExpr::InternalColumn(column), scopes)
-                })
-                || args
-                    .iter()
-                    .any(|expr| expression_has_external_reference(expr, scopes))
-                || order_by
-                    .iter()
-                    .any(|order| expression_has_external_reference(&order.expr, scopes))
-                || filter
-                    .as_deref()
-                    .is_some_and(|expr| expression_has_external_reference(expr, scopes))
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items
-            .iter()
-            .any(|expr| expression_has_external_reference(expr, scopes)),
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            expression_has_external_reference(lhs, scopes)
-                || expression_has_external_reference(rhs, scopes)
-        }
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => {
-            expression_has_external_reference(inner, scopes)
-        }
-        ScalarExpr::Between { expr, low, high } => {
-            expression_has_external_reference(expr, scopes)
-                || expression_has_external_reference(low, scopes)
-                || expression_has_external_reference(high, scopes)
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            expression_has_external_reference(expr, scopes)
-                || list
-                    .iter()
-                    .any(|item| expression_has_external_reference(item, scopes))
-        }
-        ScalarExpr::WindowCall {
-            args, spec, filter, ..
-        } => window_has_external_reference(args, filter.as_deref(), spec, scopes),
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_deref()
-                .is_some_and(|expr| expression_has_external_reference(expr, scopes))
-                || when.iter().any(|(condition, result)| {
-                    expression_has_external_reference(condition, scopes)
-                        || expression_has_external_reference(result, scopes)
-                })
-                || else_branch
-                    .as_deref()
-                    .is_some_and(|expr| expression_has_external_reference(expr, scopes))
-        }
-        ScalarExpr::InSubquery { expr, .. } => expression_has_external_reference(expr, scopes),
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::Position(_)
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => false,
-    }
+                    !scopes
+                        .iter()
+                        .rev()
+                        .any(|scope| scope.internal_relations.contains(&column.relation()))
+                }),
+            _ => false,
+        };
+        Ok::<_, SQLError>(!found)
+    })?;
+    Ok(found)
 }
 
 fn resolves_unqualified(column: &str, scopes: &[QueryScope]) -> bool {
@@ -539,35 +521,6 @@ fn resolves_unqualified(column: &str, scopes: &[QueryScope]) -> bool {
         }
     }
     false
-}
-
-/// Whether a window call's arguments, `FILTER`, keys or frame offsets refer outside the query scopes.
-fn window_has_external_reference(
-    args: &[ScalarExpr],
-    filter: Option<&ScalarExpr>,
-    spec: &crate::ScalarWindowSpec,
-    scopes: &[QueryScope],
-) -> bool {
-    args.iter()
-        .chain(filter)
-        .chain(&spec.partition_by)
-        .chain(spec.order_by.iter().map(|order| &order.expr))
-        .any(|expr| expression_has_external_reference(expr, scopes))
-        || spec.frame.as_ref().is_some_and(|frame| {
-            frame_bound_has_external_reference(&frame.start, scopes)
-                || frame_bound_has_external_reference(&frame.end, scopes)
-        })
-}
-
-fn frame_bound_has_external_reference(bound: &ScalarFrameBound, scopes: &[QueryScope]) -> bool {
-    match bound {
-        ScalarFrameBound::Preceding(expr) | ScalarFrameBound::Following(expr) => {
-            expression_has_external_reference(expr, scopes)
-        }
-        ScalarFrameBound::UnboundedPreceding
-        | ScalarFrameBound::UnboundedFollowing
-        | ScalarFrameBound::CurrentRow => false,
-    }
 }
 
 #[cfg(test)]

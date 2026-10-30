@@ -19,6 +19,7 @@ use crate::{
 use uqa_core::memory::{OwnedMap, Produced, ProductionControl};
 
 mod conditions;
+mod mutation;
 
 struct RuleColumnTemplate {
     name: String,

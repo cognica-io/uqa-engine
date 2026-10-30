@@ -268,3 +268,39 @@ fn controlled_using_input_observation_checks_empty_pairs_and_callback_failures()
     assert_eq!(error.sqlstate(), Some("P0001"));
     assert_eq!(calls, 1);
 }
+
+#[test]
+fn controlled_join_output_names_share_logical_order_and_retain_exact_payload() {
+    let left = schema("l", &["b", "a", "l_only"], &ColumnType::Integer);
+    let right = schema("r", &["a", "b", "r_only"], &ColumnType::Integer);
+    let using = JoinUsing {
+        columns: vec!["a".into(), "b".into()],
+        alias: None,
+    };
+    let resolved = super::super::resolve_join_using(Some(&using), false, &left, &right)
+        .unwrap()
+        .unwrap();
+    for kind in [
+        crate::ast::JoinKind::Inner,
+        crate::ast::JoinKind::Left,
+        crate::ast::JoinKind::Right,
+        crate::ast::JoinKind::Full,
+    ] {
+        let budget = MemoryBudget::new(4096);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let mut output = None;
+        let measured = allocation_counter::measure(|| {
+            output = Some(
+                join_using_column_names_with_control(kind, &left, &right, &resolved, &control)
+                    .unwrap(),
+            );
+        });
+        let output = output.unwrap();
+        assert_eq!(*output, ["a", "b", "l_only", "r_only"]);
+        assert_eq!(measured.bytes_current, output.reserved_bytes() as i64);
+        assert_eq!(budget.used(), output.reserved_bytes());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+}

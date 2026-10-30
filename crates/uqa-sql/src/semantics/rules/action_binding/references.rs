@@ -164,6 +164,21 @@ pub fn rule_expr_references_row(expr: &Expr) -> bool {
     first_rule_row_reference_in_expr(expr, &BTreeSet::new()).is_some()
 }
 
+fn rule_expr_references_row_with_control(
+    expr: &Expr,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let mut detector = RuleRowReferenceDetector::default();
+    if let Err(error) =
+        inspection::expression_with_control(expr, &mut detector, &BTreeSet::new(), control)
+    {
+        if matches!(error.sqlstate(), Some("53200" | "57014")) {
+            return Err(error);
+        }
+    }
+    Ok(detector.qualifier.is_some())
+}
+
 pub fn rule_expr_references_whole_row(expr: &Expr) -> bool {
     let mut detector = RuleRowReferenceDetector::default();
     let _ = inspection::expression(expr, &mut detector, &BTreeSet::new());
@@ -198,8 +213,39 @@ pub fn rule_statement_references_row(
     statement: &Statement,
     action_columns: &BTreeSet<String>,
 ) -> Result<bool, SQLError> {
+    rule_statement_references_row_with_control(
+        catalog,
+        statement,
+        action_columns,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+/// Whether an action or its unevaluated rule condition needs the event relation.
+pub fn rule_action_references_row_with_control(
+    catalog: &dyn super::RuleSourceCatalog,
+    statement: &Statement,
+    action_columns: &dyn super::ActionColumns,
+    condition: Option<&Expr>,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    Ok(
+        rule_statement_references_row_with_control(catalog, statement, action_columns, control)?
+            || condition
+                .map(|condition| rule_expr_references_row_with_control(condition, control))
+                .transpose()?
+                .unwrap_or(false),
+    )
+}
+
+fn rule_statement_references_row_with_control(
+    catalog: &dyn super::RuleSourceCatalog,
+    statement: &Statement,
+    action_columns: &dyn super::ActionColumns,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
     let mut detector = RuleRowReferenceDetector::default();
-    inspection::action(catalog, statement, action_columns, &mut detector)?;
+    inspection::action_with_control(catalog, statement, action_columns, &mut detector, control)?;
     Ok(detector.qualifier.is_some())
 }
 

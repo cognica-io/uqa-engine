@@ -15,6 +15,79 @@ use crate::type_resolution::{
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionMap, ProductionVec};
 
+pub(super) enum OutputColumn<'a> {
+    Merged(&'a ResolvedJoinColumn),
+    Left(usize),
+    Right(usize),
+}
+
+pub(super) fn visit_column_order(
+    kind: crate::ast::JoinKind,
+    left_width: usize,
+    right_width: usize,
+    using: &ResolvedJoinUsing,
+    control: &ProductionControl<'_>,
+    mut visit: impl FnMut(OutputColumn<'_>) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    let mut left_used = ProductionVec::new(*control);
+    let mut right_used = ProductionVec::new(*control);
+    for _ in 0..left_width {
+        left_used.push_copy(false)?;
+    }
+    for _ in 0..right_width {
+        right_used.push_copy(false)?;
+    }
+    for column in &using.columns {
+        control.check()?;
+        left_used.as_mut_slice()[column.left] = true;
+        right_used.as_mut_slice()[column.right] = true;
+        if kind == crate::ast::JoinKind::Cross {
+            return Err(SQLError::Internal(
+                "CROSS JOIN cannot carry a USING qualification".into(),
+            ));
+        }
+        visit(OutputColumn::Merged(column))?;
+    }
+    for (position, used) in left_used.iter().enumerate() {
+        control.check()?;
+        if !used {
+            visit(OutputColumn::Left(position))?;
+        }
+    }
+    for (position, used) in right_used.iter().enumerate() {
+        control.check()?;
+        if !used {
+            visit(OutputColumn::Right(position))?;
+        }
+    }
+    Ok(())
+}
+
+/// Select only the logical join column names through the same ordered layout used by physical join binding.
+pub fn join_using_column_names_with_control(
+    kind: crate::ast::JoinKind,
+    left: &RowSchema,
+    right: &RowSchema,
+    using: &ResolvedJoinUsing,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<String>>, SQLError> {
+    let mut names = ProductionVec::new(*control);
+    visit_column_order(kind, left.len(), right.len(), using, control, |column| {
+        let name = match column {
+            OutputColumn::Merged(column) => column.name.as_str(),
+            OutputColumn::Left(position) => left
+                .public_name(position)
+                .unwrap_or(&left.columns()[position]),
+            OutputColumn::Right(position) => right
+                .public_name(position)
+                .unwrap_or(&right.columns()[position]),
+        };
+        names.push_produced(control.copy_text(name)?)?;
+        Ok(())
+    })?;
+    Ok(names.finish()?)
+}
+
 type Positions<'s, 'c> = ProductionMap<'c, &'s str, Option<usize>>;
 
 fn positions<'s, 'c>(

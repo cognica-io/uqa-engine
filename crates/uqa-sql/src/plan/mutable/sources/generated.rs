@@ -15,6 +15,36 @@ use crate::{
 use uqa_core::memory::ProductionControl;
 
 impl MutableSourcePlan {
+    /// Construct a relation reference from borrowed names without first materializing an ordinary source.
+    pub fn table(
+        name: &str,
+        qualifier: &str,
+        alias: Option<&str>,
+        include_descendants: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        if let Some(mut copying) = Copying::for_rewrite(*control) {
+            let source = copying.table_source(name, qualifier, alias, include_descendants)?;
+            return Ok(Self {
+                source,
+                memory: Some(copying.into_rewrite_memory()),
+            });
+        }
+        Ok(Self {
+            source: SourcePlan::Table {
+                name: name.into(),
+                executable_query: None,
+                qualifier: qualifier.into(),
+                alias: alias.map(str::to_owned),
+                column_aliases: Vec::new(),
+                bound_columns: None,
+                include_descendants,
+            },
+            memory: None,
+        })
+    }
+
     pub fn captured_values(
         values: impl ExactSizeIterator<Item = OwnedScalarExpr>,
         relation: InternalRelationId,

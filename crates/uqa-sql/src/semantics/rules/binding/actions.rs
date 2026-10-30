@@ -8,8 +8,9 @@
 
 mod query;
 pub use query::{
-    InsertRuleQueries, MutationRuleInput, OwnedRuleQueryInput, OwnedRuleQueryResolver, RuleAction,
-    RuleInputColumns, RuleMutation, RuleQueryInput, RuleQueryResolver,
+    InsertRuleQueries, MutationRuleInput, OwnedMutationRuleInput, OwnedRuleQueryInput,
+    OwnedRuleQueryResolver, RuleAction, RuleInputColumns, RuleMutation, RuleQueryInput,
+    RuleQueryResolver,
 };
 
 #[cfg(test)]

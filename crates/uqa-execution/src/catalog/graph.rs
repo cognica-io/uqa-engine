@@ -106,6 +106,54 @@ pub fn age_label_relation_schema(
     Ok(Some(columns))
 }
 
+pub fn age_label_relation_columns_with_control(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+    control.check()?;
+    let reference = RelationIdentity::try_borrowed_reference(name).map_err(|error| {
+        control
+            .format(format_args!("invalid AGE label relation `{name}`: {error}"))
+            .map(|text| SQLError::Internal(text.into_parts().0))
+            .unwrap_or_else(Into::into)
+    })?;
+    let schema = reference
+        .schema
+        .map(|schema| control.format(format_args!("{schema}")))
+        .transpose()?;
+    let label = control.format(format_args!("{}", reference.name))?;
+    let names = schema
+        .as_ref()
+        .map(|schema| schema.as_str())
+        .into_iter()
+        .chain(
+            schema
+                .is_none()
+                .then_some(resolution.search_path())
+                .into_iter()
+                .flatten()
+                .map(String::as_str),
+        );
+    for graph in names {
+        control.check()?;
+        let Some(kind) = catalog.graph_label_kind(graph, &label)? else {
+            continue;
+        };
+        let columns: &[&str] = match kind {
+            LabelKind::Vertex => &["id", "properties"],
+            LabelKind::Edge => &["id", "start_id", "end_id", "properties"],
+        };
+        let mut output = uqa_core::memory::ProductionVec::new(*control);
+        for column in columns {
+            output.push_produced(control.copy_text(column)?)?;
+        }
+        return Ok(Some(output.finish()?));
+    }
+    Ok(None)
+}
+
 impl AgeLabelRelation {
     pub fn includes_graphid(&self, graphid: u64) -> bool {
         self.label.id == self.label.kind.default_label_id()

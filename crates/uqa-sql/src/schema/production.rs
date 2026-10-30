@@ -10,6 +10,7 @@ use super::{ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata};
 use crate::{ast::InternalRelationId, SQLError};
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
+mod canonical;
 mod captured_aliases;
 mod captured_output;
 mod composition;

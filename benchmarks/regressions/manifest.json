@@ -30374,6 +30374,178 @@
     },
     {
       "package": "uqa-sql",
+      "test": "canonical_capture_preserves_hidden_alias_order_null_slots_and_internal_types",
+      "source": "crates/uqa-sql/src/schema/production/canonical/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Hidden aliases, duplicate physical slots, NULL slots and internal types.",
+      "invariant": "Canonical order and schema metadata match the existing boundary; exact live payload leases survive shared consumers."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "canonical_capture_rejects_before_wide_name_copies_and_releases_partial_layouts",
+      "source": "crates/uqa-sql/src/schema/production/canonical/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Four MiB column names, partial construction limits, both cancellation handles and recovery.",
+      "invariant": "Denied payloads are never copied; failed layouts release their own reservations and preserve siblings."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_mutation_inputs_preserve_target_source_and_action_namespaces",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/mutation_owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Seven UPDATE/DELETE forms with and without event references, including scalar subqueries and partial array assignments.",
+      "invariant": "Owned native inputs preserve relational action plans, source context and declared schemas while releasing all owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "mutation_templates_defer_assignment_errors_until_the_selected_new_field",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/mutation_owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "An invalid partial assignment and independently selected OLD/NEW fields.",
+      "invariant": "The original lazy diagnostic and unrelated field availability remain unchanged; retained owners release on drop."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "mutation_input_failures_release_admitted_prefixes_and_preserve_siblings",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/mutation_owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Progressive small allowances and both cancellation scopes.",
+      "invariant": "Native mutation input construction rejects with the original typed error and retires only its own prefixes."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_correlation_borrows_function_arguments_and_releases_namespaces",
+      "source": "crates/uqa-sql/src/binding/correlation/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "A function group with a four MiB literal under a 64 KiB allowance.",
+      "invariant": "Correlation borrows arguments, admits lexical metadata and retires every temporary owner."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_correlation_rejects_wide_names_before_copying_and_recovers",
+      "source": "crates/uqa-sql/src/binding/correlation/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Four MiB column aliases, progressive limits, both cancellations and a subsequent CTE query.",
+      "invariant": "Name admission precedes copying, preserves sibling leases and permits independent recovery."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_correlation_preserves_cte_join_window_and_lateral_scopes",
+      "source": "crates/uqa-sql/src/binding/correlation/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "CTEs, recursive CTEs, NATURAL/USING joins, window frames and lateral function arguments.",
+      "invariant": "Local and enclosing column identities retain the original correlation semantics and release scope metadata."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_empty_function_columns_admit_only_final_names",
+      "source": "crates/uqa-sql/src/semantics/table_functions/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Overridden four MiB function names, selected aliases, ordinality and rejected output.",
+      "invariant": "Only final selected names allocate; retained payload bytes equal reservations and failures release scratch."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_join_output_names_share_logical_order_and_retain_exact_payload",
+      "source": "crates/uqa-sql/src/semantics/join_using/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "INNER, LEFT, RIGHT and FULL joins with reordered USING names and unmatched columns.",
+      "invariant": "The shared layout emits the canonical logical order and retains exactly its final name storage."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "correlation_catalog_facets_borrow_selected_view_and_foreign_declarations",
+      "source": "crates/uqa-execution/src/catalog/analysis/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Retained views and foreign declarations with unrelated four MiB metadata and a virtual relation.",
+      "invariant": "Native facets lend the original query and declarations and admit only selected virtual names."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "correlation_catalog_selection_rejects_before_callbacks_and_preserves_sibling_leases",
+      "source": "crates/uqa-execution/src/catalog/analysis/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Exhausted and cancelled catalog lookups with an independent live reservation.",
+      "invariant": "No rejected lookup enters its consumer; only its own lookup scratch releases."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_mutation_rule_inputs_reject_before_payload_copies_and_recover",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_mutations.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native mutation rule input admission",
+      "workload": "Native UPDATE and DELETE actions with four MiB payloads, a 64 KiB remaining allowance and durable recovery.",
+      "invariant": "All four providers reject before payload copying, leave target/action effects absent, recover and retain persistent results on reopen."
+    },
+    {
+      "package": "uqa-sql",
       "test": "controlled_sequence_dispatch_preserves_bound_and_unbound_session_calls",
       "source": "crates/uqa-sql/src/expr/call_dispatch/production/tests/sequences.rs",
       "kind": "lib",

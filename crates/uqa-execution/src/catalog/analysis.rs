@@ -10,6 +10,60 @@ use uqa_sql::catalog::analysis::{AnalysisCatalog, TableDefinition, ViewDefinitio
 use uqa_sql::{ColumnType, SQLError};
 
 impl AnalysisCatalog for CatalogReadView {
+    fn with_view_definition_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(
+            uqa_sql::catalog::analysis::ViewDefinitionRef<'_>,
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        if let Some(view) =
+            CatalogReadView::view_resolved_with_control(self, resolution, name, control)?
+        {
+            read(uqa_sql::catalog::analysis::ViewDefinitionRef {
+                query: &view.query,
+                output_columns: view.output_columns.as_deref(),
+                materialized: view.kind == crate::catalog::view::StoredViewKind::Materialized,
+                materialized_column_types: &view.materialized_column_types,
+                materialized_column_collations: view.materialized_column_collations.as_deref(),
+            })?;
+        }
+        control.check()?;
+        Ok(())
+    }
+
+    fn with_foreign_table_columns_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[uqa_sql::ast::ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        if let Some(table) =
+            CatalogReadView::foreign_table_resolved_with_control(self, resolution, name, control)?
+        {
+            read(&table.columns)?;
+        }
+        control.check()?;
+        Ok(())
+    }
+
+    fn virtual_relation_columns_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+        if let Some(relation) =
+            self.virtual_relation_resolved_with_control(resolution, name, control)?
+        {
+            return relation.column_names_with_control(control).map(Some);
+        }
+        super::graph::age_label_relation_columns_with_control(self, resolution, name, control)
+    }
+
     fn relation_row_type(
         &self,
         resolution: &RelationNameResolution,
@@ -258,3 +312,6 @@ impl AnalysisCatalog for CatalogReadView {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

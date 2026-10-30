@@ -12,6 +12,35 @@ use std::sync::Arc;
 use uqa_core::memory::Produced;
 
 impl<T: AnalysisCatalog> AnalysisCatalog for Produced<T> {
+    fn with_view_definition_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(super::ViewDefinitionRef<'_>) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        (**self).with_view_definition_with_control(resolution, name, control, read)
+    }
+
+    fn with_foreign_table_columns_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[crate::ast::ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        (**self).with_foreign_table_columns_with_control(resolution, name, control, read)
+    }
+
+    fn virtual_relation_columns_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Produced<Vec<String>>>, SQLError> {
+        (**self).virtual_relation_columns_with_control(resolution, name, control)
+    }
+
     fn relation_row_type(
         &self,
         resolution: &RelationNameResolution,

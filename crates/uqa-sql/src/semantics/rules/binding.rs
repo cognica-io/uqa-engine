@@ -8,8 +8,9 @@
 
 mod actions;
 pub use actions::{
-    InsertRuleQueries, MutationRuleInput, OwnedRuleQueryInput, OwnedRuleQueryResolver, RuleAction,
-    RuleInputColumns, RuleMutation, RuleQueryInput, RuleQueryResolver,
+    InsertRuleQueries, MutationRuleInput, OwnedMutationRuleInput, OwnedRuleQueryInput,
+    OwnedRuleQueryResolver, RuleAction, RuleInputColumns, RuleMutation, RuleQueryInput,
+    RuleQueryResolver,
 };
 
 pub struct RuleColumnMetadata {

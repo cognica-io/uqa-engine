@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use uqa_core::memory::ProductionControl;
 
 mod production;
-pub use production::resolve_join_using_with_control;
+pub use production::{join_using_column_names_with_control, resolve_join_using_with_control};
 
 use crate::ast::{BinaryOp, ColumnType, JoinKind, JoinUsing};
 use crate::schema::join_output::JoinOutputSource;
@@ -296,68 +296,66 @@ pub fn join_using_layout(
     using: &ResolvedJoinUsing,
 ) -> Result<JoinUsingLayout, SQLError> {
     let right_offset = left.len();
-    let mut left_used = vec![false; left.len()];
-    let mut right_used = vec![false; right.len()];
     let mut columns = Vec::with_capacity(left.len() + right.len() - using.columns.len());
     let mut merged_sources = Vec::with_capacity(using.columns.len());
-
-    for column in &using.columns {
-        left_used[column.left] = true;
-        right_used[column.right] = true;
-        let source = match kind {
-            JoinKind::Inner | JoinKind::Left => coerced_output_source(
-                column.left,
-                left.column_type(column.left),
-                column.output_type.as_ref(),
-            ),
-            JoinKind::Right => coerced_output_source(
-                right_offset + column.right,
-                right.column_type(column.right),
-                column.output_type.as_ref(),
-            ),
-            JoinKind::Full => {
-                column
-                    .output_type
-                    .as_ref()
-                    .map_or(JoinOutputSource::Input(column.left), |ty| {
-                        JoinOutputSource::Coalesce {
-                            left: column.left,
-                            right: right_offset + column.right,
-                            ty: ty.clone(),
+    production::visit_column_order(
+        kind,
+        left.len(),
+        right.len(),
+        using,
+        &ProductionControl::uncontrolled(),
+        |column| {
+            match column {
+                production::OutputColumn::Merged(column) => {
+                    let source = match kind {
+                        JoinKind::Inner | JoinKind::Left => coerced_output_source(
+                            column.left,
+                            left.column_type(column.left),
+                            column.output_type.as_ref(),
+                        ),
+                        JoinKind::Right => coerced_output_source(
+                            right_offset + column.right,
+                            right.column_type(column.right),
+                            column.output_type.as_ref(),
+                        ),
+                        JoinKind::Full => column.output_type.as_ref().map_or(
+                            JoinOutputSource::Input(column.left),
+                            |ty| JoinOutputSource::Coalesce {
+                                left: column.left,
+                                right: right_offset + column.right,
+                                ty: ty.clone(),
+                            },
+                        ),
+                        JoinKind::Cross => {
+                            unreachable!("qualified cross join rejected by column selection")
                         }
-                    })
+                    };
+                    columns.push((
+                        column.name.clone(),
+                        ColumnIdentity::unqualified(&column.name),
+                        source.clone(),
+                    ));
+                    merged_sources.push((column.name.clone(), source));
+                }
+                production::OutputColumn::Left(position) => columns.push((
+                    left.public_name(position)
+                        .unwrap_or(&left.columns()[position])
+                        .to_owned(),
+                    left.identities()[position].clone(),
+                    JoinOutputSource::Input(position),
+                )),
+                production::OutputColumn::Right(position) => columns.push((
+                    right
+                        .public_name(position)
+                        .unwrap_or(&right.columns()[position])
+                        .to_owned(),
+                    right.identities()[position].clone(),
+                    JoinOutputSource::Input(right_offset + position),
+                )),
             }
-            JoinKind::Cross => {
-                return Err(SQLError::Internal(
-                    "CROSS JOIN cannot carry a USING qualification".into(),
-                ));
-            }
-        };
-        columns.push((
-            column.name.clone(),
-            ColumnIdentity::unqualified(&column.name),
-            source.clone(),
-        ));
-        merged_sources.push((column.name.clone(), source));
-    }
-    for (position, column) in left.columns().iter().enumerate() {
-        if !left_used[position] {
-            columns.push((
-                left.public_name(position).unwrap_or(column).to_string(),
-                left.identities()[position].clone(),
-                JoinOutputSource::Input(position),
-            ));
-        }
-    }
-    for (position, column) in right.columns().iter().enumerate() {
-        if !right_used[position] {
-            columns.push((
-                right.public_name(position).unwrap_or(column).to_string(),
-                right.identities()[position].clone(),
-                JoinOutputSource::Input(right_offset + position),
-            ));
-        }
-    }
+            Ok(())
+        },
+    )?;
 
     let mut aliases = Vec::new();
     for (position, identity) in left.identities().iter().enumerate() {

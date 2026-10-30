@@ -19,6 +19,9 @@ use crate::{
     ColumnIdentity, RowSchema,
 };
 
+mod owned;
+pub use owned::OwnedMutationRuleInput;
+
 #[derive(Clone, Copy)]
 pub enum RuleMutation<'a> {
     Update(&'a UpdatePlan),
@@ -84,6 +87,19 @@ impl<'a> RuleMutation<'a> {
             bound_columns: None,
             include_descendants: *field!(self, include_descendants),
         }
+    }
+
+    pub fn target_source_with_control(
+        self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableSourcePlan, SQLError> {
+        crate::plan::MutableSourcePlan::table(
+            self.table(),
+            self.target_qualifier(),
+            field!(self, target_alias).as_deref(),
+            *field!(self, include_descendants),
+            control,
+        )
     }
 
     fn relations_bound(self) -> bool {

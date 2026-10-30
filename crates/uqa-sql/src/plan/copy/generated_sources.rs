@@ -13,6 +13,24 @@ use crate::{
 };
 
 impl Copying<'_> {
+    pub(crate) fn table_source(
+        &mut self,
+        name: &str,
+        qualifier: &str,
+        alias: Option<&str>,
+        include_descendants: bool,
+    ) -> Result<SourcePlan> {
+        Ok(SourcePlan::Table {
+            name: self.field("name", |copying| copying.text(name))?,
+            executable_query: self.field("executable_query", |_| Ok(None))?,
+            qualifier: self.field("qualifier", |copying| copying.text(qualifier))?,
+            alias: self.optional_text(alias)?,
+            column_aliases: Vec::new(),
+            bound_columns: None,
+            include_descendants,
+        })
+    }
+
     pub(in crate::plan) fn captured_rows_source(
         &mut self,
         rows: crate::plan::mutable::values::OwnedRows,

@@ -29,6 +29,10 @@ pub(super) fn catalog_fixture() -> Catalog {
 }
 
 pub(super) fn normalize(plan: &UnifiedPlan) -> serde_json::Value {
+    normalize_value(plan)
+}
+
+pub(super) fn normalize_value(plan: &impl serde::Serialize) -> serde_json::Value {
     fn visit(value: &mut serde_json::Value, identities: &mut BTreeMap<u64, u64>) {
         match value {
             serde_json::Value::Object(fields) => {

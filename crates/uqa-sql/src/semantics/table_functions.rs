@@ -14,6 +14,8 @@ use crate::type_resolution::{BuiltinFunctionOverload, FunctionTypeResolver};
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 use std::sync::Arc;
 
+mod columns;
+pub use columns::table_function_empty_schema_with_control;
 mod production;
 mod selection;
 pub use production::{
@@ -342,89 +344,18 @@ pub fn table_function_empty_schema(
     output_width: usize,
     ordinality: bool,
 ) -> Vec<String> {
-    let lower = crate::semantics::builtin_function_dispatch_name(name);
-    let columns = if lower == "unnest" {
-        let width = output_width.max(1);
-        let default_column = if width == 1 {
-            alias.unwrap_or(output_name)
-        } else {
-            output_name
-        };
-        vec![default_column.to_string(); width]
-    } else {
-        match lower.as_ref() {
-            "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
-                vec!["key".into(), "value".into()]
-            }
-            "pg_get_sequence_data" => vec!["last_value".into(), "is_called".into()],
-            "aclexplode" => vec![
-                "grantor".into(),
-                "grantee".into(),
-                "privilege_type".into(),
-                "is_grantable".into(),
-            ],
-            "pg_sequence_parameters" => vec![
-                "start_value".into(),
-                "minimum_value".into(),
-                "maximum_value".into(),
-                "increment".into(),
-                "cycle_option".into(),
-                "cache_size".into(),
-                "data_type".into(),
-            ],
-            "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
-            | "graph_betweenness" => vec!["_doc_id".into(), "_score".into()],
-            "rpq" => vec!["vertex_id".into()],
-            "list_analyzers" => vec!["analyzer_name".into()],
-            "analyze_text" => vec!["analysis".into()],
-            "fts_index_stats" => vec![
-                "table_name".into(),
-                "field".into(),
-                "analyzer".into(),
-                "posting_count".into(),
-                "doc_length_count".into(),
-                "indexed_doc_count".into(),
-                "term_count".into(),
-                "total_field_length".into(),
-            ],
-            "text_similarity_join"
-            | "vector_similarity_join"
-            | "graph_join"
-            | "hybrid_join"
-            | "cross_paradigm_join" => {
-                vec!["left_doc_id".into(), "right_doc_id".into(), "_score".into()]
-            }
-            "generate_series"
-            | "pg_listening_channels"
-            | "regexp_matches"
-            | "regexp_split_to_table"
-            | "string_to_table"
-            | "json_array_elements"
-            | "jsonb_array_elements"
-            | "json_array_elements_text"
-            | "jsonb_array_elements_text"
-            | "json_object_keys"
-            | "jsonb_object_keys" => vec![scalar_table_function_default_column(
-                &lower,
-                output_name,
-                alias,
-                &[],
-            )],
-            _ => {
-                let minimum_width = 1;
-                let aliased_value_width = if ordinality && column_aliases.len() > minimum_width {
-                    column_aliases.len() - 1
-                } else {
-                    column_aliases.len()
-                };
-                vec![
-                    scalar_table_function_default_column(&lower, output_name, alias, &[]);
-                    minimum_width.max(aliased_value_width)
-                ]
-            }
-        }
-    };
-    apply_table_function_aliases(columns, column_aliases, ordinality)
+    table_function_empty_schema_with_control(
+        name,
+        output_name,
+        alias,
+        column_aliases,
+        output_width,
+        ordinality,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary table-function names")
+    .into_uncontrolled()
+    .expect("ordinary table-function owner")
 }
 
 pub fn apply_table_function_aliases(

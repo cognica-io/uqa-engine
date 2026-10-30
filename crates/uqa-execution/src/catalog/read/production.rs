@@ -13,6 +13,29 @@ use uqa_core::{
 };
 
 impl CatalogReadView {
+    pub fn virtual_relation_resolved_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::catalog::VirtualRelation>, SQLError> {
+        let candidates = self
+            .relation_names()
+            .relation_lookup_candidates_with_control(resolution, name, control)?;
+        for relation in candidates.iter() {
+            control.check()?;
+            if let Some(relation) =
+                uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name)
+            {
+                return Ok(Some(relation));
+            }
+            if self.relation_exists(relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
+    }
+
     pub fn view_resolved_with_control(
         &self,
         resolution: &RelationNameResolution,

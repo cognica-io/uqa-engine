@@ -90,17 +90,11 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<uqa_sql::catalog::VirtualRelation>, SQLError> {
-        for relation in self.relation_lookup_candidates(resolution, name)? {
-            if let Some(relation) =
-                uqa_sql::catalog::VirtualRelation::at(&relation.schema, &relation.name)
-            {
-                return Ok(Some(relation));
-            }
-            if self.relation_exists(&relation) {
-                return Ok(None);
-            }
-        }
-        Ok(None)
+        self.virtual_relation_resolved_with_control(
+            resolution,
+            name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
 
     pub fn all_schema_names(&self) -> Vec<String> {

@@ -24,7 +24,7 @@ pub use schedule::InsertRuleQueries;
 mod assignments;
 mod conditions;
 mod mutation;
-pub use mutation::{MutationRuleInput, RuleMutation};
+pub use mutation::{MutationRuleInput, OwnedMutationRuleInput, RuleMutation};
 mod owned;
 #[cfg(test)]
 mod tests;

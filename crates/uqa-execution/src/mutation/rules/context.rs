@@ -115,31 +115,6 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
         )
     }
 
-    pub(super) fn execute_action(
-        &self,
-        statement: uqa_sql::ast::Statement,
-        input: Option<uqa_sql::semantics::rules::binding::RuleQueryInput>,
-        params: &[uqa_sql::SQLParam],
-        scope: &crate::query::CteScope<S>,
-        subject: &RoleReference,
-        consumer: Option<std::rc::Rc<dyn crate::query::consumer::QueryRowConsumer + '_>>,
-    ) -> Result<StatementOutput, SQLError> {
-        let _stored =
-            uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition();
-        self.statements.execute(
-            uqa_sql::semantics::rules::binding::RuleAction::bind(
-                self.analysis,
-                self.returning.aggregates,
-                statement,
-                input,
-            )?,
-            params,
-            Some(scope),
-            subject,
-            consumer,
-        )
-    }
-
     pub(super) fn execute_bound_action(
         &self,
         statement: &uqa_sql::semantics::rules::action_binding::BoundRuleStatement,
@@ -178,16 +153,23 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
         params: &[uqa_sql::SQLParam],
         scope: &crate::query::CteScope<S>,
     ) -> Result<Option<crate::RowSchema>, SQLError> {
-        let binding = crate::query::binding::binding_context(scope)?;
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        let binding = crate::query::binding::binding_context_with_control(scope, &control)?;
         input
             .source()
             .map(|source| {
-                uqa_sql::binding::analyze_source_plan_schema(
+                uqa_sql::binding::production::analyze_source_plan_schema_with_control(
                     self.returning.routines,
                     source,
                     params,
-                    &binding,
+                    binding,
                     None,
+                    &control,
                 )
             })
             .transpose()
@@ -197,19 +179,21 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
         &self,
         input: uqa_sql::semantics::rules::binding::RuleMutation<'_>,
         params: &[uqa_sql::SQLParam],
-        binding: &uqa_sql::binding::BindingContext<'_>,
+        binding: &uqa_sql::binding::production::ControlledBindingContext<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<(crate::RowSchema, Option<crate::RowSchema>), SQLError> {
         let analyze = |source: &uqa_sql::plan::SourcePlan| {
-            uqa_sql::binding::analyze_source_plan_schema(
+            uqa_sql::binding::production::analyze_source_plan_schema_with_control(
                 self.returning.routines,
                 source,
                 params,
-                binding,
+                binding.copy_with_control(control)?,
                 None,
+                control,
             )
         };
         Ok((
-            analyze(&input.target_source())?,
+            analyze(&*input.target_source_with_control(control)?)?,
             input.source().map(analyze).transpose()?,
         ))
     }

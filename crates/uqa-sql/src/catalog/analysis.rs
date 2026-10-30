@@ -29,6 +29,27 @@ pub struct ViewDefinition {
     pub materialized_column_collations: Option<Vec<u32>>,
 }
 
+#[derive(Clone, Copy)]
+pub struct ViewDefinitionRef<'a> {
+    pub query: &'a QueryPlan,
+    pub output_columns: Option<&'a [String]>,
+    pub materialized: bool,
+    pub materialized_column_types: &'a [Option<ColumnType>],
+    pub materialized_column_collations: Option<&'a [u32]>,
+}
+
+impl<'a> From<&'a ViewDefinition> for ViewDefinitionRef<'a> {
+    fn from(view: &'a ViewDefinition) -> Self {
+        Self {
+            query: &view.query,
+            output_columns: view.output_columns.as_deref(),
+            materialized: view.materialized,
+            materialized_column_types: &view.materialized_column_types,
+            materialized_column_collations: view.materialized_column_collations.as_deref(),
+        }
+    }
+}
+
 /// Immutable namespace-aware lookup for SQL analysis. This contract exposes definitions only; it grants no row access, mutation, locking, or transaction services.
 pub trait AnalysisCatalog: Send + Sync {
     /// The actual row type of a selected catalog relation. Anonymous query sources and catalog fixtures without identities leave this unavailable.
@@ -166,6 +187,55 @@ pub trait AnalysisCatalog: Send + Sync {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<ViewDefinition>, SQLError>;
+
+    /// Native catalogs lend one selected retained declaration; the default preserves ordinary catalog adapters.
+    fn with_view_definition_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(ViewDefinitionRef<'_>) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        if let Some(view) = self.view_resolved(resolution, name)? {
+            read((&view).into())?;
+        }
+        control.check()?;
+        Ok(())
+    }
+
+    /// Native catalogs lend column declarations without copying foreign options or unrelated metadata.
+    fn with_foreign_table_columns_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        if let Some(table) = self.foreign_table_resolved(resolution, name)? {
+            read(&table.columns)?;
+        }
+        control.check()?;
+        Ok(())
+    }
+
+    fn virtual_relation_columns_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+        control.check()?;
+        let Some(schema) = self.virtual_relation_schema(resolution, name)? else {
+            return Ok(None);
+        };
+        let mut columns = uqa_core::memory::ProductionVec::new(*control);
+        for (name, _) in &schema {
+            columns.push_produced(control.copy_text(name)?)?;
+        }
+        Ok(Some(columns.finish()?))
+    }
     fn foreign_table_resolved(
         &self,
         resolution: &RelationNameResolution,
