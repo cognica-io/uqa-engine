@@ -255,12 +255,23 @@ impl DeferredOuterRewrite {
     }
 
     pub(crate) fn visit_scalar_expressions(&self, visit: &mut dyn FnMut(&ScalarExpr)) {
+        let Ok(()) = self.try_visit_scalar_expressions(&mut |expression| {
+            visit(expression);
+            Ok::<_, std::convert::Infallible>(())
+        });
+    }
+
+    pub(crate) fn try_visit_scalar_expressions<E>(
+        &self,
+        visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+    ) -> Result<(), E> {
         for expression in self.expressions() {
-            visit(&expression.scalar);
+            visit(&expression.scalar)?;
             for query in &expression.subqueries {
-                query.visit_scalar_expressions(visit);
+                query.try_visit_scalar_expressions(visit)?;
             }
         }
+        Ok(())
     }
 
     pub(crate) fn rewrite_scalar_expressions(&mut self, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {

@@ -246,32 +246,6 @@ fn rename_shadowing_cte_qualifier(
     }
 }
 
-fn collect_cte_source_qualifiers(
-    body: &crate::plan::CtePlanBody,
-    qualifiers: &mut BTreeSet<String>,
-) {
-    match body {
-        crate::plan::CtePlanBody::Query(query) => {
-            collect_query_source_qualifiers(query, qualifiers);
-        }
-        crate::plan::CtePlanBody::Command(command) => {
-            if let Some(qualifier) = command.target_qualifier() {
-                qualifiers.insert(qualifier.to_string());
-            }
-            for cte in command.ctes() {
-                qualifiers.insert(cte.name.clone());
-                collect_cte_source_qualifiers(&cte.body, qualifiers);
-            }
-            for query in command.query_inputs() {
-                collect_query_source_qualifiers(query, qualifiers);
-            }
-            if let Some(source) = command.source_input() {
-                collect_source_qualifiers(source, qualifiers);
-            }
-        }
-    }
-}
-
 fn rename_shadowing_query_qualifier(
     query: &mut QueryPlan,
     qualifier: &str,
@@ -368,71 +342,13 @@ fn rename_shadowing_query_qualifier(
     }
 }
 
-fn collect_query_source_qualifiers(query: &QueryPlan, qualifiers: &mut BTreeSet<String>) {
-    for cte in &query.ctes {
-        qualifiers.insert(cte.name.clone());
-        collect_cte_source_qualifiers(&cte.body, qualifiers);
-    }
-    match &query.root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = &block.from {
-                collect_source_qualifiers(source, qualifiers);
-            }
-            for subquery in &block.subqueries {
-                collect_query_source_qualifiers(subquery, qualifiers);
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            collect_query_source_qualifiers(left, qualifiers);
-            collect_query_source_qualifiers(right, qualifiers);
-            for subquery in subqueries {
-                collect_query_source_qualifiers(subquery, qualifiers);
-            }
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for subquery in subqueries {
-                collect_query_source_qualifiers(subquery, qualifiers);
-            }
-        }
-    }
-}
-
-fn collect_source_qualifiers(source: &SourcePlan, qualifiers: &mut BTreeSet<String>) {
-    if let Some(qualifier) = source.visible_qualifier() {
-        qualifiers.insert(qualifier.to_string());
-    }
-    match source {
-        crate::plan::SourcePlan::RetainedRows(_) => {}
-        SourcePlan::Join { left, right, .. } => {
-            collect_source_qualifiers(left, qualifiers);
-            collect_source_qualifiers(right, qualifiers);
-        }
-        SourcePlan::Subquery { body, .. } => collect_query_source_qualifiers(body, qualifiers),
-        SourcePlan::Table { .. }
-        | SourcePlan::Values { .. }
-        | SourcePlan::Function { .. }
-        | SourcePlan::FunctionGroup { .. } => {}
-    }
-}
+mod qualifiers;
 
 fn fresh_query_qualifier(query: &QueryPlan) -> String {
-    let mut qualifiers = BTreeSet::new();
-    collect_query_source_qualifiers(query, &mut qualifiers);
-    let mut query = query.clone();
-    query.rewrite_scalar_expressions(&mut |expression| {
-        if let Some(qualifier) = expression.reference_qualifier() {
-            qualifiers.insert(qualifier.to_owned());
-        }
-    });
-    (0..=qualifiers.len())
-        .map(|index| format!("__uqa_view_subquery_local_{index}"))
-        .find(|candidate| !qualifiers.contains(candidate))
-        .expect("one of N+1 generated qualifiers must be absent from an N-name set")
+    qualifiers::fresh(query, &uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("ordinary qualifier production")
+        .into_uncontrolled()
+        .expect("ordinary qualifier ownership")
 }
 
 struct LayerSubqueryRewriteContext<'a> {
@@ -746,3 +662,6 @@ pub(super) fn embed_layer_expression(
     target_subqueries.extend(subqueries);
     Ok(expression)
 }
+
+#[cfg(test)]
+mod tests;

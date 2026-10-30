@@ -28,6 +28,7 @@ mod scopes;
 mod sources;
 mod statistics;
 mod subqueries;
+mod view_shapes;
 
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]

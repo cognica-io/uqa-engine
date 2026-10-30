@@ -6,7 +6,7 @@
 
 //! `PostgreSQL` 18 automatically updatable view analysis and DML rewriting.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::ast::{ReturningAliases, TriggerEvent, TriggerTiming};
 use crate::plan::{
@@ -125,7 +125,7 @@ pub struct AutomaticViewLayer {
     pub canonical_name: String,
     pub source_name: String,
     pub source_qualifier: String,
-    pub source_column_map: BTreeMap<String, String>,
+    pub source_column_map: Vec<(String, String)>,
     pub source_include_descendants: bool,
     pub source_schema: RowSchema,
     pub columns: Vec<ViewColumn>,
@@ -137,8 +137,8 @@ pub struct AutomaticViewLayer {
 impl AutomaticViewLayer {
     pub fn physical_source_column<'a>(&'a self, column: &'a str) -> &'a str {
         self.source_column_map
-            .get(column)
-            .map_or(column, String::as_str)
+            .binary_search_by(|(name, _)| name.as_str().cmp(column))
+            .map_or(column, |index| self.source_column_map[index].1.as_str())
     }
 
     /// Whether a column of the view is a column of its base relation, which INSERT and UPDATE need and DELETE does not.
@@ -174,6 +174,7 @@ impl AutomaticViewLayer {
 }
 
 /// What `view_query_is_auto_updatable` finds in a view's own query, short of its test for an updatable column, which depends on the command.
+#[derive(Debug)]
 pub enum ViewQueryShape {
     Updatable(Box<AutomaticViewLayer>),
     NotUpdatable(NotUpdatableReason),
@@ -218,24 +219,6 @@ fn source_qualifier_matches(qualifier: &str, source_qualifier: &str, source_name
             .is_some_and(|identity| identity.name == uqa_core::RelationName::decoded(qualifier))
 }
 
-fn direct_source_column(
-    expression: &ScalarExpr,
-    source_qualifier: &str,
-    source_name: &str,
-    source_columns: &BTreeMap<String, String>,
-) -> Option<String> {
-    let column = match expression {
-        ScalarExpr::Column(column) => Some(column.clone()),
-        ScalarExpr::QualifiedColumn { qualifier, column }
-            if source_qualifier_matches(qualifier, source_qualifier, source_name) =>
-        {
-            Some(column.clone())
-        }
-        _ => None,
-    }?;
-    source_columns.get(column.as_str()).cloned()
-}
-
 pub fn automatic_view_layer(
     services: ViewRewriteContext<'_>,
     name: &str,
@@ -258,14 +241,30 @@ pub fn view_query_shape(
     else {
         return Ok(None);
     };
-    let definition = services
-        .catalog
-        .view_definition(&canonical_name)?
-        .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-    if definition.kind != StoredViewKind::View {
-        return Ok(None);
-    }
-    view_query_shape_from_definition(services, &canonical_name, &definition).map(Some)
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let mut shape = None;
+    services.catalog.with_view_definition_with_control(
+        &canonical_name,
+        &control,
+        &mut |definition| {
+            let definition = definition.ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
+            if definition.kind == StoredViewKind::View {
+                shape = Some(
+                    production::shape_from_definition(
+                        services,
+                        &canonical_name,
+                        definition,
+                        &control,
+                    )?
+                    .finish(&control)?
+                    .into_uncontrolled()
+                    .expect("ordinary view shape"),
+                );
+            }
+            Ok(())
+        },
+    )?;
+    Ok(shape)
 }
 
 /// The catalog name of view `name`.
@@ -323,187 +322,18 @@ fn next_rewritten_layer(
     }
 }
 
-/// The reason `view_query_is_auto_updatable` finds first in the clauses of a query block, before it looks at the block's target list and source.
-fn query_block_restriction(
-    services: ViewRewriteContext<'_>,
-    query: &QueryPlan,
-    block: &crate::plan::QueryBlockPlan,
-) -> Option<NotUpdatableReason> {
-    if block.distinct || !block.distinct_on.is_empty() {
-        Some(NotUpdatableReason::Distinct)
-    } else if !block.group_by.is_empty() || !block.grouping_sets.is_empty() || block.group_distinct
-    {
-        Some(NotUpdatableReason::GroupBy)
-    } else if block.having.is_some() {
-        Some(NotUpdatableReason::Having)
-    } else if !query.ctes.is_empty() {
-        Some(NotUpdatableReason::With)
-    } else if block.limit.is_some() || block.offset.is_some() || block.with_ties {
-        Some(NotUpdatableReason::LimitOffset)
-    } else if matches!(block.compute, ComputePlan::Aggregate)
-        || (matches!(block.compute, ComputePlan::Window)
-            && crate::semantics::aggregates::has_aggregate(
-                &|name: &str| services.routines.is_registered_aggregate(name),
-                &block.projections,
-            ))
-    {
-        Some(NotUpdatableReason::Aggregate)
-    } else if matches!(block.compute, ComputePlan::Window) {
-        Some(NotUpdatableReason::Window)
-    } else {
-        None
-    }
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves view qualifier and row identity"
-)]
 fn view_query_shape_from_definition(
     services: ViewRewriteContext<'_>,
     canonical_name: &str,
     definition: &StoredView,
 ) -> Result<ViewQueryShape, SQLError> {
-    let block = match &definition.query.root {
-        RelationalPlan::QueryBlock(block) => block,
-        RelationalPlan::SetOp { .. } => {
-            return Ok(ViewQueryShape::NotUpdatable(
-                NotUpdatableReason::SetOperation,
-            ));
-        }
-        RelationalPlan::Values { .. } => {
-            return Ok(ViewQueryShape::NotUpdatable(
-                NotUpdatableReason::NotSingleRelation,
-            ));
-        }
-    };
-    if let Some(reason) = query_block_restriction(services, &definition.query, block) {
-        return Ok(ViewQueryShape::NotUpdatable(reason));
-    }
-    let analysis_scope = services.catalog.binding_scope()?;
-    let source_schema = match block.from.as_ref() {
-        Some(source) => crate::semantics::view_rewrite::context::analyze_source_plan_schema(
-            services,
-            source,
-            &[],
-            &analysis_scope,
-            None,
-        )?,
-        None => RowSchema::default(),
-    };
-    let resolver = crate::binding::scoped_types::BindingTypeResolver {
-        routines: services.routines,
-        scope: &analysis_scope,
-    };
-    for projection in &block.projections {
-        if crate::semantics::sets::validation::expression_may_return_set(
-            services.routines,
-            &resolver,
-            &projection.expr,
-            &source_schema,
-            &[],
-        )? {
-            return Ok(ViewQueryShape::NotUpdatable(
-                NotUpdatableReason::SetReturning,
-            ));
-        }
-    }
-    // The base relation must be one table or view; a materialized view is neither.
-    let Some(SourcePlan::Table {
-        name: source_name,
-        qualifier,
-        alias,
-        column_aliases,
-        include_descendants,
-        ..
-    }) = block.from.as_ref()
-    else {
-        return Ok(ViewQueryShape::NotUpdatable(
-            NotUpdatableReason::NotSingleRelation,
-        ));
-    };
-    if services.catalog.target_view_kind(source_name)? == Some(StoredViewKind::Materialized) {
-        return Ok(ViewQueryShape::NotUpdatable(
-            NotUpdatableReason::NotSingleRelation,
-        ));
-    }
-    let source_qualifier = alias.as_deref().unwrap_or(qualifier).to_string();
-    let source_columns = relation_columns(services, source_name)?;
-    let mut visible_source_columns = source_columns.clone();
-    for (column, alias) in visible_source_columns.iter_mut().zip(column_aliases) {
-        column.clone_from(alias);
-    }
-    let source_column_map = visible_source_columns
-        .iter()
-        .cloned()
-        .zip(source_columns.iter().cloned())
-        .collect::<BTreeMap<_, _>>();
-    let mut expressions = Vec::new();
-    for projection in &block.projections {
-        match &projection.expr {
-            ScalarExpr::Star => {
-                expressions.extend(
-                    visible_source_columns
-                        .iter()
-                        .cloned()
-                        .map(|column| ScalarExpr::Column(column.into())),
-                );
-            }
-            ScalarExpr::QualifiedStar(star_qualifier)
-                if source_qualifier_matches(star_qualifier, &source_qualifier, source_name) =>
-            {
-                expressions.extend(visible_source_columns.iter().cloned().map(|column| {
-                    ScalarExpr::QualifiedColumn {
-                        qualifier: source_qualifier.clone(),
-                        column: column.into(),
-                    }
-                }));
-            }
-            expression => expressions.push(expression.clone()),
-        }
-    }
-    let schema = stored_view_schema(services, definition)?;
-    let output_columns = schema
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(position, column)| schema.public_name(position).unwrap_or(column).to_string())
-        .collect::<Vec<_>>();
-    if expressions.len() != output_columns.len() {
-        return Err(SQLError::Internal(format!(
-            "view `{canonical_name}` has {} stored projections for {} output columns",
-            expressions.len(),
-            output_columns.len()
-        )));
-    }
-    let columns = output_columns
-        .into_iter()
-        .zip(expressions)
-        .enumerate()
-        .map(|(position, (name, expression))| ViewColumn {
-            collation_oid: schema.column_collation(position),
-            writable_source_column: direct_source_column(
-                &expression,
-                &source_qualifier,
-                source_name,
-                &source_column_map,
-            ),
-            name,
-            expression,
-        })
-        .collect();
-    Ok(ViewQueryShape::Updatable(Box::new(AutomaticViewLayer {
-        canonical_name: canonical_name.to_string(),
-        source_name: source_name.clone(),
-        source_qualifier,
-        source_column_map,
-        source_include_descendants: *include_descendants,
-        source_schema,
-        columns,
-        predicate: block.r#where.clone(),
-        subqueries: block.subqueries.clone(),
-        check_option: ViewCheckOption::from_options(&definition.options),
-    })))
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    Ok(
+        production::shape_from_definition(services, canonical_name, definition.into(), &control)?
+            .finish(&control)?
+            .into_uncontrolled()
+            .expect("ordinary view shape"),
+    )
 }
 
 mod layer_rewrite;

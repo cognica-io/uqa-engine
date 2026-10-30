@@ -19,6 +19,7 @@ use crate::{
 use uqa_core::memory::{Produced, ProductionControl, ProductionMap, ProductionVec};
 
 mod columns;
+mod frozen;
 
 pub struct OwnedViewColumn {
     pub name: Produced<String>,
@@ -70,11 +71,32 @@ impl OwnedAutomaticViewLayer {
     }
 }
 
+/// Shape analysis preserves the first rejection reason without constructing a layer for rejected views.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the independently admitted layer moves without a temporary root allocation"
+)]
+pub enum OwnedViewQueryShape {
+    Updatable(OwnedAutomaticViewLayer),
+    NotUpdatable(NotUpdatableReason),
+}
+
 pub fn automatic_view_layer_owned(
     services: ViewRewriteContext<'_>,
     name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<OwnedAutomaticViewLayer>, SQLError> {
+    Ok(match view_query_shape_owned(services, name, control)? {
+        Some(OwnedViewQueryShape::Updatable(layer)) => Some(layer),
+        Some(OwnedViewQueryShape::NotUpdatable(_)) | None => None,
+    })
+}
+
+pub fn view_query_shape_owned(
+    services: ViewRewriteContext<'_>,
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<OwnedViewQueryShape>, SQLError> {
     let Some(canonical) = services
         .catalog
         .try_resolve_view_name_with_control(name, control)?
@@ -87,7 +109,9 @@ pub fn automatic_view_layer_owned(
         .with_view_definition_with_control(&canonical, control, &mut |definition| {
             let definition = definition.ok_or_else(|| SQLError::UnknownTable(name.into()))?;
             if definition.kind == StoredViewKind::View {
-                result = from_definition(services, &canonical, definition, control)?;
+                result = Some(shape_from_definition(
+                    services, &canonical, definition, control,
+                )?);
             }
             Ok(())
         })?;
@@ -97,10 +121,14 @@ pub fn automatic_view_layer_owned(
 fn restriction(
     services: ViewRewriteContext<'_>,
     query: &crate::plan::QueryPlan,
-    block: &crate::plan::QueryBlockPlan,
     control: &ProductionControl<'_>,
 ) -> Result<Option<NotUpdatableReason>, SQLError> {
     control.check()?;
+    let block = match &query.root {
+        RelationalPlan::QueryBlock(block) => block,
+        RelationalPlan::SetOp { .. } => return Ok(Some(NotUpdatableReason::SetOperation)),
+        RelationalPlan::Values { .. } => return Ok(Some(NotUpdatableReason::NotSingleRelation)),
+    };
     Ok(if block.distinct || !block.distinct_on.is_empty() {
         Some(NotUpdatableReason::Distinct)
     } else if !block.group_by.is_empty() || !block.grouping_sets.is_empty() || block.group_distinct
@@ -128,18 +156,18 @@ fn restriction(
     })
 }
 
-fn from_definition(
+pub(super) fn shape_from_definition(
     services: ViewRewriteContext<'_>,
     canonical: &str,
     definition: ViewRewriteDefinitionRef<'_>,
     control: &ProductionControl<'_>,
-) -> Result<Option<OwnedAutomaticViewLayer>, SQLError> {
-    let RelationalPlan::QueryBlock(block) = &definition.query.root else {
-        return Ok(None);
-    };
-    if restriction(services, definition.query, block, control)?.is_some() {
-        return Ok(None);
+) -> Result<OwnedViewQueryShape, SQLError> {
+    if let Some(reason) = restriction(services, definition.query, control)? {
+        return Ok(OwnedViewQueryShape::NotUpdatable(reason));
     }
+    let RelationalPlan::QueryBlock(block) = &definition.query.root else {
+        unreachable!("non-query blocks have a structural restriction");
+    };
     let scope = services.catalog.binding_scope_with_control(control)?;
     let source_schema = match block.from.as_ref() {
         Some(source) => crate::binding::analyze_source_plan_schema_with_control(
@@ -168,7 +196,9 @@ fn from_definition(
             &[],
             control,
         )? {
-            return Ok(None);
+            return Ok(OwnedViewQueryShape::NotUpdatable(
+                NotUpdatableReason::SetReturning,
+            ));
         }
     }
     let Some(SourcePlan::Table {
@@ -180,14 +210,18 @@ fn from_definition(
         ..
     }) = block.from.as_ref()
     else {
-        return Ok(None);
+        return Ok(OwnedViewQueryShape::NotUpdatable(
+            NotUpdatableReason::NotSingleRelation,
+        ));
     };
     if services
         .catalog
         .target_view_kind_with_control(source_name, control)?
         == Some(StoredViewKind::Materialized)
     {
-        return Ok(None);
+        return Ok(OwnedViewQueryShape::NotUpdatable(
+            NotUpdatableReason::NotSingleRelation,
+        ));
     }
     let source_qualifier = alias.as_deref().unwrap_or(qualifier);
     let source_columns = super::relation_columns_with_control(services, source_name, control)?;
@@ -211,7 +245,7 @@ fn from_definition(
         canonical,
         control,
     )?;
-    Ok(Some(OwnedAutomaticViewLayer {
+    Ok(OwnedViewQueryShape::Updatable(OwnedAutomaticViewLayer {
         canonical_name: control.copy_text(canonical)?,
         source_name: control.copy_text(source_name)?,
         source_qualifier: control.copy_text(source_qualifier)?,
@@ -244,3 +278,6 @@ fn retain_column_mapping(
     }
     Ok(source_map.finish()?)
 }
+
+#[cfg(test)]
+mod tests;

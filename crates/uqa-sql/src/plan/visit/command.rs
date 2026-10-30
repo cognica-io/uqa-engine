@@ -6,40 +6,55 @@
 
 //! Borrow command expressions directly, including plans retained by utility commands.
 
-use super::{visit_ctes, CommandPlan, QueryPlan, ScalarExpr};
-fn subqueries(values: &[QueryPlan], visit: &mut dyn FnMut(&ScalarExpr)) {
+use super::{try_visit_ctes, CommandPlan, QueryPlan, ScalarExpr};
+fn subqueries<E>(
+    values: &[QueryPlan],
+    visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+) -> Result<(), E> {
     for query in values {
-        query.visit_scalar_expressions(visit);
+        query.try_visit_scalar_expressions(visit)?;
     }
+    Ok(())
 }
 
 impl CommandPlan {
     /// Visit scalar roots without copying the plan or collecting its children. Mutations retain their analysis order: CTEs, direct expressions, query inputs, then source inputs. Query-bearing utilities share the scalar rewrite's ownership boundary.
     pub fn visit_scalar_expressions(&self, visit: &mut dyn FnMut(&ScalarExpr)) {
+        let Ok(()) = self.try_visit_scalar_expressions(&mut |expression| {
+            visit(expression);
+            Ok::<_, std::convert::Infallible>(())
+        });
+    }
+
+    /// Stop at the first callback error, without copying syntax or visiting later inputs.
+    pub fn try_visit_scalar_expressions<E>(
+        &self,
+        visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+    ) -> Result<(), E> {
         match self {
             Self::Insert(_) | Self::Update(_) | Self::Delete(_) | Self::Merge(_) => {
-                visit_ctes(self.ctes(), visit);
+                try_visit_ctes(self.ctes(), visit)?;
                 for expression in self.expressions() {
-                    visit(expression);
+                    visit(expression)?;
                 }
                 for query in self.query_inputs() {
-                    query.visit_scalar_expressions(visit);
+                    query.try_visit_scalar_expressions(visit)?;
                 }
                 if let Some(source) = self.source_input() {
-                    source.visit_scalar_expressions(visit);
+                    source.try_visit_scalar_expressions(visit)?;
                 }
             }
             Self::CreateView { query, .. }
             | Self::CreateMaterializedView { query, .. }
             | Self::CreateTableAs { query, .. }
-            | Self::DeclareCursor { query, .. } => query.visit_scalar_expressions(visit),
+            | Self::DeclareCursor { query, .. } => query.try_visit_scalar_expressions(visit)?,
             Self::Explain { body, .. } | Self::Prepare { body, .. } => {
-                body.visit_scalar_expressions(visit);
+                body.try_visit_scalar_expressions(visit)?;
             }
             Self::Execute { params, .. } | Self::Call { args: params, .. } => {
                 for expression in params {
-                    visit(&expression.scalar);
-                    subqueries(&expression.subqueries, visit);
+                    visit(&expression.scalar)?;
+                    subqueries(&expression.subqueries, visit)?;
                 }
             }
             Self::CreateTable(_)
@@ -109,5 +124,6 @@ impl CommandPlan {
             | Self::DoBlock { .. }
             | Self::Empty => {}
         }
+        Ok(())
     }
 }

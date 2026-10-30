@@ -30663,6 +30663,126 @@
       "capability": "Native INSERT rule schedule admission",
       "workload": "Native catalog adapters and four MiB VALUES/SELECT inputs, followed by two-view default and conditional-rule execution on all providers.",
       "invariant": "Construction rejects before copying and public INSERT recovery preserves target/log effects and durable reopen results."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "readonly_view_shapes_move_payloads_and_retain_exact_live_allocations",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "Two retained four MiB view-column payloads and scalar-query metadata.",
+      "invariant": "Freezing moves existing payloads and preserves exact live ownership while retiring mutable constructor records."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "readonly_view_shape_rejection_retires_partial_destinations_and_preserves_siblings",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "Partial destination admission across eight allowances with a retained sibling.",
+      "invariant": "Rejection retires all private construction allocations and retains only independent siblings."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "readonly_view_shapes_preserve_both_cancellations_and_unwind_ownership",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "Both cancellation owners and a consumer unwinding with retained view metadata.",
+      "invariant": "Cancellation and unwind release all view ownership without changing sibling reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "readonly_rejected_view_shapes_need_no_layer_storage",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/production/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "Ten rejected shape classifications with a zero-byte allowance.",
+      "invariant": "Rejected shape observations allocate no layer and retain their original reasons."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "qualifier_discovery_borrows_large_payloads_and_nested_reference_names",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "A four MiB constant and generated-name collisions through nested scalar queries and CTEs.",
+      "invariant": "Discovery never copies query payloads and preserves the first available qualifier."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "qualifier_selection_admits_indices_without_copying_unrelated_names",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "Eight MiB of unrelated source/scalar names with a 64-byte allowance and noncanonical generated-name suffixes.",
+      "invariant": "Only canonical colliding suffixes require index storage; unrelated names stay borrowed and final name ownership is exact."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "qualifier_selection_releases_partial_indices_and_obeys_both_cancellations",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "128 conflicting names under four allowances and either cancelled owner.",
+      "invariant": "Failed discovery frees partial index nodes and leaves sibling ownership intact."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "readonly_query_visitation_stops_on_nested_cte_errors",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "Scalar roots spanning a data-modifying CTE and nested queries.",
+      "invariant": "The first callback failure stops traversal before every later root while preserving identity and order."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_view_shape_admission_preserves_rejection_order_and_recovers",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_shapes.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Automatic view metadata ownership",
+      "workload": "Four MiB retained view definitions, exhausted request admission and writable-view mutations on every provider.",
+      "invariant": "Early shape rejection precedes payload production; admitted layer failure releases its owners and native mutations recover with durable results."
     }
   ]
 }
