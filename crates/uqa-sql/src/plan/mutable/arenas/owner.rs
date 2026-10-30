@@ -17,6 +17,13 @@ pub struct ScalarQueryArena {
 }
 
 impl ScalarQueryArena {
+    pub(in crate::plan) fn from_rewrite_parts(
+        queries: Vec<QueryPlan>,
+        memory: Option<RewriteMemory>,
+    ) -> Self {
+        Self { queries, memory }
+    }
+
     pub(crate) fn copy_from(
         queries: &[QueryPlan],
         control: &ProductionControl<'_>,

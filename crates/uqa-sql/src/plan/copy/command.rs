@@ -55,11 +55,12 @@ impl Copying<'_> {
                     .map(|source| copying.boxed(|copying| copying.query(source)))
                     .transpose()
             })?,
-            rule_values_input: plan
-                .rule_values_input
-                .as_ref()
-                .map(|input| self.rule_values(input))
-                .transpose()?,
+            rule_values_input: self.field("rule_values_input", |copying| {
+                plan.rule_values_input
+                    .as_ref()
+                    .map(|input| copying.rule_values(input))
+                    .transpose()
+            })?,
             on_conflict: self.field("on_conflict", |copying| {
                 plan.on_conflict
                     .as_ref()

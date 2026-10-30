@@ -59,6 +59,24 @@ impl<'a> SyntaxProduction<'a> {
         Ok(value)
     }
 
+    pub(crate) fn set_copy<T: Copy + Ord>(
+        &self,
+        values: impl IntoIterator<Item = T>,
+    ) -> Result<uqa_core::memory::OwnedSet<T>, SQLError> {
+        let mut output = uqa_core::memory::OwnedSet::new();
+        for value in values {
+            self.check()?;
+            if !output.contains(&value) {
+                let memory = self
+                    .control
+                    .reserve(uqa_core::memory::OwnedSet::<T>::entry_bytes())?;
+                output.insert(value);
+                self.absorb(memory);
+            }
+        }
+        Ok(output)
+    }
+
     pub(crate) fn vector<T>(&self, capacity: usize) -> Result<SyntaxVector<'_, 'a, T>, SQLError> {
         let values = self.control.budget().map_or_else(
             || SyntaxBuffer::Ordinary(Vec::new()),

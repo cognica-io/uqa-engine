@@ -25,6 +25,36 @@ mod mutations;
 mod query;
 mod source;
 
+impl crate::plan::ExpressionPlan {
+    /// Lower a borrowed expression and every nested query directly into independently movable owners.
+    pub fn lower_borrowed_for_rewrite(
+        expression: &Expr,
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableExpressionPlan> {
+        Self::lower_borrowed_with(expression, &crate::plan::NoRegisteredAggregates, control)
+    }
+
+    pub fn lower_borrowed_with(
+        expression: &Expr,
+        aggregates: &dyn AggregateClassifier,
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableExpressionPlan> {
+        control.check()?;
+        if control.budget().is_none() {
+            return Self::lower_with(expression.clone(), aggregates).copy_for_rewrite(control);
+        }
+        let mut arena = QueryArena::new(*control, None);
+        let scalar = lower_scalar_with_arena(expression, aggregates, &mut arena, *control)?;
+        let (queries, memory) = arena.queries.into_parts();
+        arena.copying.memory.absorb(memory);
+        let arena = crate::plan::ScalarQueryArena::from_rewrite_parts(
+            queries,
+            Some(arena.copying.into_rewrite_memory()),
+        );
+        crate::plan::MutableExpressionPlan::from_parts(scalar, arena, control)
+    }
+}
+
 impl UnifiedPlan {
     /// Lower retained syntax directly into independently owned executable fields. Source parsing and its original syntax owner remain separate; no temporary ordinary executable is constructed on the controlled path.
     pub fn lower_borrowed_for_rewrite(

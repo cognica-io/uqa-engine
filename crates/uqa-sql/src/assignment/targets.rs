@@ -12,6 +12,9 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+mod types;
+pub use types::{assignment_input_type_with_control, field_assignment_types_with_control};
+
 #[cfg(test)]
 mod tests;
 
@@ -135,21 +138,26 @@ impl<E> AssignmentLevel<'_, E> {
 
 /// Group an assignment's indirection into fields and subscript groups, in order.
 pub fn assignment_levels<E>(steps: &[AssignmentStep<E>]) -> Vec<AssignmentLevel<'_, E>> {
-    let mut levels = Vec::new();
-    let mut position = 0;
-    while position < steps.len() {
-        if let AssignmentStep::Field(field) = &steps[position] {
-            levels.push(AssignmentLevel::Field(field));
-            position += 1;
-            continue;
+    level_iter(steps).collect()
+}
+
+fn level_iter<E>(steps: &[AssignmentStep<E>]) -> impl Iterator<Item = AssignmentLevel<'_, E>> {
+    let mut remaining = steps;
+    std::iter::from_fn(move || {
+        let first = remaining.first()?;
+        if let AssignmentStep::Field(field) = first {
+            remaining = &remaining[1..];
+            Some(AssignmentLevel::Field(field))
+        } else {
+            let count = remaining
+                .iter()
+                .take_while(|step| !matches!(step, AssignmentStep::Field(_)))
+                .count();
+            let (group, tail) = remaining.split_at(count);
+            remaining = tail;
+            Some(AssignmentLevel::Subscripts(group))
         }
-        let start = position;
-        while position < steps.len() && !matches!(steps[position], AssignmentStep::Field(_)) {
-            position += 1;
-        }
-        levels.push(AssignmentLevel::Subscripts(&steps[start..position]));
-    }
-    levels
+    })
 }
 
 /// Whether an assignment writes a composite field somewhere along its indirection.
@@ -166,71 +174,14 @@ pub fn field_assignment_types<E>(
     declared: &ColumnType,
     composites: Option<&dyn crate::expr::composites::CompositeTypeCatalog>,
 ) -> Result<Vec<ColumnType>, SQLError> {
-    let mut types = vec![declared.clone()];
-    for level in assignment_levels(&target.indirection) {
-        let current = types.last().expect("the declared type starts the levels");
-        let mut base = current;
-        while let ColumnType::Domain { base: inner, .. } = base {
-            base = inner;
-        }
-        let next = match level {
-            AssignmentLevel::Field(field) => {
-                let ColumnType::Composite(reference) = base else {
-                    return Err(error("42804", format!(
-                        "cannot assign to field \"{field}\" of column \"{}\" because its type {} is not a composite type",
-                        target.column, current.display_name()
-                    )));
-                };
-                let descriptor = crate::expr::composites::descriptor(composites, reference.oid)?;
-                let Some((_, attribute)) = descriptor.attribute(field) else {
-                    return Err(error("42703", format!(
-                        "cannot assign to field \"{field}\" of column \"{}\" because there is no such column in data type {}",
-                        target.column, current.display_name()
-                    )));
-                };
-                attribute.ty.clone()
-            }
-            AssignmentLevel::Subscripts(steps) => {
-                let array = match base {
-                    ColumnType::Array(_) => base.clone(),
-                    ColumnType::Int2Vector => ColumnType::Array(Box::new(ColumnType::SmallInteger)),
-                    ColumnType::OidVector => ColumnType::Array(Box::new(ColumnType::Oid)),
-                    _ => {
-                        return Err(error(
-                            "42804",
-                            format!(
-                                "cannot subscript type {} because it does not support subscripting",
-                                current.display_name()
-                            ),
-                        ))
-                    }
-                };
-                if steps.len() > 6 {
-                    return Err(error(
-                        "54000",
-                        format!(
-                            "number of array dimensions ({}) exceeds the maximum allowed (6)",
-                            steps.len()
-                        ),
-                    ));
-                }
-                if steps
-                    .iter()
-                    .any(|step| matches!(step, AssignmentStep::Slice { .. }))
-                {
-                    array
-                } else {
-                    let mut element = &array;
-                    while let ColumnType::Array(inner) = element {
-                        element = inner;
-                    }
-                    element.clone()
-                }
-            }
-        };
-        types.push(next);
-    }
-    Ok(types)
+    Ok(field_assignment_types_with_control(
+        target,
+        declared,
+        composites,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary assignment types"))
 }
 
 /// Slices consume an array; any number of element subscripts consumes one scalar element.

@@ -23,14 +23,21 @@ mod assignments;
 mod conditions;
 mod mutation;
 pub use mutation::{MutationRuleInput, RuleMutation};
+mod owned;
 #[cfg(test)]
 mod tests;
 mod values;
+pub use owned::OwnedRuleQueryInput;
 
 /// An action can borrow a native query tree without converting its rows into constants.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "native action owners move without an additional unadmitted root box"
+)]
 pub enum RuleAction {
     Stored(Box<Statement>),
     Rewritten(UnifiedPlan),
+    Owned(crate::plan::MutableExecutablePlan),
 }
 
 impl From<Statement> for RuleAction {
@@ -65,6 +72,7 @@ impl RuleAction {
                     .mark_catalog_relations_bound(control)
             }
             Self::Rewritten(plan) => plan.copy_for_rewrite(control),
+            Self::Owned(plan) => plan.transfer(control),
         }
     }
 
@@ -76,6 +84,12 @@ impl RuleAction {
                 Ok(plan)
             }
             Self::Rewritten(plan) => Ok(plan),
+            Self::Owned(plan) => Ok(plan
+                .as_plan_ref()
+                .copy_for_rewrite(&uqa_core::memory::ProductionControl::uncontrolled())?
+                .finish(&uqa_core::memory::ProductionControl::uncontrolled())?
+                .into_parts()
+                .0),
         }
     }
 }

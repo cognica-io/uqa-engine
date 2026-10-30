@@ -14,6 +14,38 @@ use crate::{
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
 impl OwnedScalarExpr {
+    /// Construct CASE from independent scalar owners, admitting branch storage before moving any child.
+    pub fn case(
+        base: Option<Self>,
+        branches: impl ExactSizeIterator<Item = (Self, Self)>,
+        fallback: Option<Self>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        control.check()?;
+        let mut lowering = owned_lowering(control);
+        let base = base
+            .map(|base| lowering.boxed(|lowering| Self::attach_child(lowering, base)))
+            .transpose()?;
+        let when = lowering.map(branches, |lowering, (condition, value)| {
+            Ok((
+                Self::attach_child(lowering, condition)?,
+                Self::attach_child(lowering, value)?,
+            ))
+        })?;
+        let else_branch = fallback
+            .map(|fallback| lowering.boxed(|lowering| Self::attach_child(lowering, fallback)))
+            .transpose()?;
+        finish(
+            ScalarExpr::Case {
+                base,
+                when,
+                else_branch,
+            },
+            lowering,
+            control,
+        )
+    }
+
     /// Replace a named row constructor's resolved type while moving its scalar fields into admitted destination slots. Binding metadata is copied through its existing owner before the old constructor is retired.
     pub fn replace_composite_type(
         mut self,

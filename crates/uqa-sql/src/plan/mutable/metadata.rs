@@ -19,6 +19,15 @@ use uqa_core::{
 };
 
 impl MutableQueryPlan {
+    /// Drop cached row and source analysis after a structural input rewrite; query syntax and its independently owned fields remain intact.
+    pub fn clear_row_analysis(mut self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        self.query.analyzed_output = None;
+        self.query.analyzed_source = None;
+        Ok(self)
+    }
+
     pub fn append_row_lock(
         mut self,
         strength: crate::ast::LockStrength,

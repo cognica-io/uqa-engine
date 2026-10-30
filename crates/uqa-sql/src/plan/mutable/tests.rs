@@ -9,6 +9,7 @@ use crate::plan::UnifiedPlan;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod children;
+mod command_inputs;
 mod construction;
 mod executable_bodies;
 mod projections;

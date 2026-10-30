@@ -18,6 +18,8 @@ use uqa_core::Value;
 
 pub(super) use crate::plan::RuleValuesInput as ValuesInput;
 
+mod owned;
+
 impl ValuesInput {
     pub(crate) fn describe(insert: &InsertPlan) -> Result<Option<Self>, SQLError> {
         if insert.source.is_some() {

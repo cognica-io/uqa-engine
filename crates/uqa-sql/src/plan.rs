@@ -36,8 +36,8 @@ pub use mutable::{
     CommandAssignmentSlot, CommandQuerySlot, CommandScalarSlot, MutableCommandPlan,
     MutableExecutablePlan, MutableExpressionPlan, MutableJoinParts, MutableJoinShell,
     MutableQueryPlan, MutableSourcePlan, OwnedDeferredRewriteIter, OwnedProjection,
-    OwnedProjectionIter, QueryChildSlot, QueryScalarSlot, ScalarArenaTransform, ScalarQueryArena,
-    SourceChildSlot, SourceScalarSlot,
+    OwnedProjectionIter, OwnedValueRow, QueryChildSlot, QueryScalarSlot, ScalarArenaTransform,
+    ScalarQueryArena, SourceChildSlot, SourceScalarSlot,
 };
 pub(crate) use mutable::{QueryMetadataUpdate, SourceMetadataUpdate};
 mod optimization;

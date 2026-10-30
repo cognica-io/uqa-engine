@@ -30189,6 +30189,149 @@
       "capability": "Native rule declaration ownership",
       "workload": "Four MiB table defaults through native catalog and RETURNING producers and actual rule execution on every provider.",
       "invariant": "The original request rejects before copying, retains exact successful output leases, releases failed execution input and permits subsequent ordinary SQL."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "optional_mutation_inputs_reuse_boxes_and_keep_exact_live_owners",
+      "source": "crates/uqa-sql/src/plan/mutable/tests/command_inputs.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule input attachment",
+      "workload": "Existing UPDATE source boxes, large query payloads and appended predicate arenas.",
+      "invariant": "Source addresses and payloads survive movement; query IDs are remapped and physical live bytes equal retained reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "absent_mutation_sources_and_predicates_can_be_installed_and_retired",
+      "source": "crates/uqa-sql/src/plan/mutable/tests/command_inputs.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule input attachment",
+      "workload": "UPDATE and DELETE without FROM/USING or a predicate.",
+      "invariant": "Installing and removing optional inputs preserves exact leases and independent sibling reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "mutation_input_failure_cancellation_and_unwind_drop_detached_owners",
+      "source": "crates/uqa-sql/src/plan/mutable/tests/command_inputs.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule input attachment",
+      "workload": "Consumed mutation sources and predicates with failure, both cancellation handles, exhaustion and unwind.",
+      "invariant": "Every detached payload is released with its constructor and unrelated reservations survive."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "values_projection_moves_payloads_and_preserves_query_metadata_and_arenas",
+      "source": "crates/uqa-sql/src/plan/mutable/tests/command_inputs.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule input attachment",
+      "workload": "One-row and multi-row VALUES roots carrying a four MiB literal, CTE and scalar subqueries.",
+      "invariant": "Projection conversion preserves literal and multi-row buffer addresses, query metadata, namespace order and exact live allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "values_projection_rejection_and_cancellation_release_moved_children",
+      "source": "crates/uqa-sql/src/plan/mutable/tests/command_inputs.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule input attachment",
+      "workload": "VALUES conversion with exhausted allowance and either cancelled owner.",
+      "invariant": "Rejected construction releases moved children and supports recovery without altering sibling owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "native_values_actions_preserve_defaults_partial_targets_and_scalar_query_order",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule action construction",
+      "workload": "Six INSERT VALUES shapes with defaults, partial array targets, omitted columns and scalar subqueries.",
+      "invariant": "Owned construction matches the predecessor plan and retains exactly the physical live output storage."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "native_values_actions_move_large_literals_without_copying_them",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule action construction",
+      "workload": "Multi-row INSERT VALUES containing a four MiB literal and DEFAULT.",
+      "invariant": "The literal address survives source and default-layer construction with bounded new allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "native_values_admission_failure_and_both_cancellations_release_consumed_inputs",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule action construction",
+      "workload": "Native borrowed column declarations with a four MiB default, exhausted allowance and both cancellation tokens.",
+      "invariant": "Rejection precedes the large copy; consumed inputs release their leases and a subsequent action succeeds."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "native_rule_input_attachment_preserves_every_relational_action_shape",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Owning rule action construction",
+      "workload": "Ten SELECT, VALUES, INSERT, UPDATE and DELETE shapes with inline and captured inputs.",
+      "invariant": "Attachment preserves plan structure, ordered scalar-query namespaces and exact retained allocation across twenty combinations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_assignment_types_retain_only_the_selected_destination_storage",
+      "source": "crates/uqa-sql/src/assignment/targets/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Admitted rule assignment types",
+      "workload": "Composite field, array element and slice type traversal.",
+      "invariant": "Complete type paths and final-type-only selection retain exactly their physical destination allocation and release intermediate declarations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "assignment_type_admission_rejects_large_declarations_and_cancellation_before_copying",
+      "source": "crates/uqa-sql/src/assignment/targets/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Admitted rule assignment types",
+      "workload": "A four MiB declared type under a small allowance and either cancelled owner.",
+      "invariant": "Full-path and final-type selection reject before copying and preserve independent reservations."
     }
   ]
 }

@@ -16,6 +16,35 @@ pub struct MutableExpressionPlan {
 }
 
 impl super::MutableQueryPlan {
+    /// Edit an optional WHERE clause together with its scalar-query namespace, including construction of a previously absent predicate.
+    pub fn map_where_input(
+        self,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(
+            Option<OwnedScalarExpr>,
+            &mut ScalarQueryArena,
+        ) -> Result<Option<OwnedScalarExpr>, SQLError>,
+    ) -> Result<Self, SQLError> {
+        let (mut query, predicate) = self.take_where(control)?;
+        let mut arena = query.take_arena();
+        let predicate = map(predicate, &mut arena)?;
+        query = query.replace_where(predicate, control)?;
+        query.restore_arena(arena);
+        Ok(query)
+    }
+
+    /// Detach a WHERE clause with its complete original query namespace. Unreferenced namespaces remain with a query that has no WHERE clause.
+    pub fn take_where_expression(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, Option<MutableExpressionPlan>), SQLError> {
+        let (mut query, predicate) = self.take_where(control)?;
+        let expression = predicate
+            .map(|scalar| MutableExpressionPlan::from_parts(scalar, query.take_arena(), control))
+            .transpose()?;
+        Ok((query, expression))
+    }
+
     pub(crate) fn replace_where_expression(
         self,
         expression: MutableExpressionPlan,

@@ -102,6 +102,20 @@ impl ProjectionVector {
 }
 
 impl MutableQueryPlan {
+    /// Edit the projection list and its scalar-query namespace together, moving existing projection children without copying their payloads.
+    pub fn map_projection_inputs<I: ExactSizeIterator<Item = OwnedProjection>>(
+        self,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(OwnedProjectionIter, &mut super::ScalarQueryArena) -> Result<I, SQLError>,
+    ) -> Result<Self, SQLError> {
+        let (mut query, projections) = self.take_projections(control)?;
+        let mut arena = query.take_arena();
+        let projections = map(projections, &mut arena)?;
+        query = query.replace_projections(projections, control)?;
+        query.restore_arena(arena);
+        Ok(query)
+    }
+
     /// Move all projections into an owning iterator. The remaining query has an empty projection vector; its other constructors are unchanged.
     pub fn take_projections(
         mut self,

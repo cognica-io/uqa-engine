@@ -64,7 +64,7 @@ impl Copying<'_> {
             ctes,
             rows,
             source,
-            rule_values_input: None,
+            rule_values_input: self.field("rule_values_input", |_| Ok(None))?,
             on_conflict,
             returning,
             returning_aliases: self.returning_aliases(&statement.returning_aliases)?,

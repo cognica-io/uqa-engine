@@ -47,6 +47,16 @@ impl PlanRef<'_> {
 }
 
 impl MutableExecutablePlan {
+    /// Transfer a retained native executable through another entry point using the same allowance and its current cancellation tokens.
+    pub fn transfer(self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
+        match &self {
+            Self::Query(query) => query.assert_owner(control),
+            Self::Command(command) => command.assert_owner(control),
+        }
+        control.check()?;
+        Ok(self)
+    }
+
     pub fn as_plan_ref(&self) -> PlanRef<'_> {
         match self {
             Self::Query(query) => PlanRef::Query(query),

@@ -13,6 +13,36 @@ use crate::{
 };
 
 impl Copying<'_> {
+    pub(in crate::plan) fn captured_rows_source(
+        &mut self,
+        rows: crate::plan::mutable::values::OwnedRows,
+        relation: InternalRelationId,
+        width: usize,
+    ) -> Result<SourcePlan> {
+        self.check()?;
+        self.fields
+            .as_mut()
+            .expect("controlled VALUES source")
+            .reserve(1)?;
+        let crate::plan::mutable::values::OwnedRows { rows, memory } = rows;
+        self.fields
+            .as_mut()
+            .expect("controlled VALUES source")
+            .push(super::RewriteField {
+                name: "rows",
+                memory,
+            })?;
+        Ok(SourcePlan::Values {
+            lateral: true,
+            rows,
+            alias: None,
+            column_aliases: Vec::new(),
+            internal_relation: Some(relation),
+            internal_column_types: self.map(0..width, |_, _| Ok(None))?,
+            internal_column_collations: self.map(0..width, |_, _| Ok(None))?,
+        })
+    }
+
     pub(crate) fn captured_values_source(
         &mut self,
         values: impl ExactSizeIterator<Item = OwnedScalarExpr>,

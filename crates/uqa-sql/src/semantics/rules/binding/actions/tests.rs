@@ -20,6 +20,7 @@ use crate::{
 use std::collections::BTreeMap;
 
 mod collations;
+mod owned;
 
 struct Catalog(Vec<ColumnDef>);
 impl RuleSourceCatalog for Catalog {
@@ -33,6 +34,17 @@ impl RuleSourceCatalog for Catalog {
     }
 }
 impl crate::semantics::returning::ReturningCatalog for Catalog {
+    fn with_table_row_type_with_control(
+        &self,
+        _: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        read(&self.0)?;
+        Ok(true)
+    }
+
     fn try_describe_table_row_type(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Ok(Some(self.0.clone()))
     }

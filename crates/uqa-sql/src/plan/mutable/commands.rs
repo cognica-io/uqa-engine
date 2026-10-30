@@ -19,6 +19,8 @@ use uqa_core::{
 mod assignments;
 pub(in crate::plan::mutable) mod children;
 mod executable;
+mod inputs;
+mod insert;
 mod projections;
 pub(in crate::plan) mod rule_inputs;
 pub(in crate::plan::mutable) mod transformation;

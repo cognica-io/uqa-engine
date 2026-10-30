@@ -11,6 +11,57 @@ use crate::plan::{MutableQueryPlan, MutableSourcePlan, QueryPlan, RelationalPlan
 use uqa_core::memory::Produced;
 
 impl Copying<'_> {
+    pub(in crate::plan) fn boxed_query(
+        &mut self,
+        query: MutableQueryPlan,
+    ) -> Result<Box<QueryPlan>> {
+        self.boxed(|copying| copying.take_query(query))
+    }
+
+    pub(in crate::plan) fn insert_values_query(
+        &mut self,
+        rows: crate::plan::mutable::values::OwnedRows,
+        subqueries: &[QueryPlan],
+        relations_bound: bool,
+    ) -> Result<QueryPlan> {
+        let mut shell = crate::plan::mutable::construction::empty_projection_query();
+        shell.relations_bound = relations_bound;
+        self.query_fields_using(&shell, |copying| {
+            copying.fields.as_mut().expect("VALUES fields").reserve(1)?;
+            let crate::plan::mutable::values::OwnedRows { rows, memory } = rows;
+            copying
+                .fields
+                .as_mut()
+                .expect("VALUES fields")
+                .push(RewriteField {
+                    name: "rows",
+                    memory,
+                })?;
+            Ok(RelationalPlan::Values {
+                rows,
+                subqueries: copying.field("subqueries", |copying| {
+                    copying.map(subqueries.iter(), Self::query)
+                })?,
+            })
+        })
+    }
+
+    pub(in crate::plan) fn implicit_insert_columns<'a>(
+        &mut self,
+        names: impl ExactSizeIterator<Item = &'a str>,
+    ) -> Result<Vec<crate::ast::AssignmentTarget<crate::ScalarExpr>>> {
+        self.map(names, |copying, name| {
+            Ok(crate::ast::AssignmentTarget {
+                column: copying.text(name)?,
+                indirection: copying.field("indirection", |_| Ok(Vec::new()))?,
+            })
+        })
+    }
+
+    pub(crate) fn boxed_source(&mut self, source: MutableSourcePlan) -> Result<Box<SourcePlan>> {
+        self.boxed(|copying| copying.take_source(source))
+    }
+
     pub(crate) fn take_privilege_subject(
         &mut self,
         subject: Produced<crate::catalog::roles::RoleReference>,
