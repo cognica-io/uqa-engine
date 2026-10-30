@@ -17,6 +17,41 @@ impl ReturningCatalog for Engine {
     fn try_describe_table_row_type(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::try_describe_table_row_type(self, table).map_err(|error| error.to_string())
     }
+    fn with_table_row_type_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        self.synchronize_table_catalog()
+            .and_then(|()| self.synchronize_table_data())
+            .map_err(|error| {
+                match uqa_execution::storage_errors::storage_error("read table row type", &error) {
+                    SQLError::Internal(_) => match control.format(format_args!("{error}")) {
+                        Ok(message) => SQLError::Internal(message.into_parts().0),
+                        Err(error) => error.into(),
+                    },
+                    diagnostic => diagnostic,
+                }
+            })?;
+        let candidates =
+            uqa_sql::catalog::resolution::candidates::relation_lookup_candidates_with_control(
+                self, name, control,
+            )?;
+        let table = {
+            let tables = self.storage.tables.read();
+            candidates
+                .iter()
+                .find_map(|relation| tables.get(relation).cloned())
+        };
+        let Some(table) = table else {
+            return Ok(false);
+        };
+        control.check()?;
+        read(&table.columns.read())?;
+        Ok(true)
+    }
     fn try_table_columns(&self, table: &str) -> Result<Vec<String>, String> {
         Engine::table_columns_in_execution(self, table).map_err(|error| error.to_string())
     }

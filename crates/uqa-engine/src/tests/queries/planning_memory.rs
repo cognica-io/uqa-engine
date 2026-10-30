@@ -414,3 +414,4 @@ fn native_scalar_translation_requests_recover_after_rejection(#[case] provider: 
 }
 
 mod rule_references;
+mod rule_targets;

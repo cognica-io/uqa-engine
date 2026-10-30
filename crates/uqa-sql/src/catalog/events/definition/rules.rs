@@ -28,6 +28,7 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
+mod columns;
 #[cfg(test)]
 mod tests;
 

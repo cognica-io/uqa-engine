@@ -80,4 +80,12 @@ impl uqa_sql::semantics::rules::action_binding::RuleSourceCatalog for Engine {
         self.event_analysis_context()
             .rule_relation_definitions(name)
     }
+    fn rule_relation_columns_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<String>>, SQLError> {
+        self.event_analysis_context()
+            .rule_relation_column_names_with_control(name, control)
+    }
 }
