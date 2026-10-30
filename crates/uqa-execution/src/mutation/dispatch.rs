@@ -57,8 +57,8 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
         {
             let _ =
                 view_privileges::ensure_insert_with_control(rewrite.authorization, stmt, &control)?;
-            let expanded = set_returning_values_query(context, stmt)?;
-            let stmt = expanded.as_ref().unwrap_or(stmt);
+            let expanded = set_returning_values_query(context, stmt, &control)?;
+            let stmt = expanded.as_deref().map_or(stmt, expanded_insert);
             super::routine_calls::insert(context, stmt, params, inherited_ctes)?;
             return super::views::commands::run_view_insert_inner(
                 context,
@@ -85,11 +85,11 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
         };
         return run_insert(context, planning, plan, params, inherited_ctes);
     }
-    let expanded = set_returning_values_query(context, stmt)?;
+    let expanded = set_returning_values_query(context, stmt, &control)?;
     crate::mutation::insert::table::run_table_insert(
         context,
         planning,
-        expanded.as_ref().unwrap_or(stmt),
+        expanded.as_deref().map_or(stmt, expanded_insert),
         params,
         inherited_ctes,
     )
@@ -99,24 +99,35 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
 fn set_returning_values_query<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
     stmt: &InsertPlan,
-) -> Result<Option<InsertPlan>, SQLError> {
-    uqa_sql::semantics::insert_values::single_row_values_query(
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_sql::plan::MutableCommandPlan>, SQLError> {
+    uqa_sql::semantics::insert_values::single_row_values_query_with_control(
         context.query.source.ctes.routines,
         stmt,
         || {
-            uqa_sql::semantics::rules::analysis::relation_rule_row_columns(
+            uqa_sql::semantics::rules::analysis::relation_rule_row_columns_with_control(
                 context.mutation.rules.rules.analysis,
                 &stmt.table,
                 uqa_sql::ast::RuleEvent::Insert,
+                control,
             )
         },
         || {
-            uqa_sql::semantics::insert_values::implicit_target_columns(
+            uqa_sql::semantics::insert_values::implicit_target_columns_with_control(
                 context.mutation.rules.views,
                 &stmt.table,
+                control,
             )
         },
+        control,
     )
+}
+
+fn expanded_insert(command: &uqa_sql::plan::CommandPlan) -> &InsertPlan {
+    let uqa_sql::plan::CommandPlan::Insert(plan) = command else {
+        unreachable!("INSERT VALUES expansion")
+    };
+    plan
 }
 
 pub fn run_update<S: Clone + Send + Sync + 'static>(

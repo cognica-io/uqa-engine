@@ -316,3 +316,5 @@ fn insert_schedule_cancellation_and_subject_failure_release_only_their_owners() 
     drop(sibling);
     assert_eq!(budget.used(), 0);
 }
+
+mod row_columns;

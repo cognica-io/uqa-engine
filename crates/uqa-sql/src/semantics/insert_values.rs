@@ -7,14 +7,14 @@
 //! A single `INSERT ... VALUES` row, which `PostgreSQL` processes like the target list of a SELECT without FROM.
 
 use super::view_rewrite::context::ViewRewriteContext;
-use crate::ast::AssignmentTarget;
 use crate::catalog::view::StoredViewKind;
-use crate::plan::{
-    AccessPathPlan, ComputePlan, InsertPlan, ProjectionPlan, QueryBlockPlan, QueryPlan,
-    RelationalPlan,
-};
-use crate::{SQLError, ScalarExpr};
+use crate::plan::{CommandPlan, InsertPlan};
+use crate::SQLError;
 use std::collections::BTreeSet;
+use uqa_core::memory::ProductionControl;
+
+mod production;
+pub use production::{implicit_target_columns_with_control, single_row_values_query_with_control};
 
 /// The `INSERT ... SELECT` form of an INSERT whose single VALUES row contains a set-returning call, so the call expands into one inserted row per result as in `PostgreSQL`. A DEFAULT entry leaves its column out of the target list, where the column default fills it as for an omitted column. Any other INSERT has no such form.
 ///
@@ -25,106 +25,34 @@ pub fn single_row_values_query(
     observed: impl FnOnce() -> Result<Option<BTreeSet<String>>, SQLError>,
     implicit_columns: impl FnOnce() -> Result<Option<Vec<String>>, SQLError>,
 ) -> Result<Option<InsertPlan>, SQLError> {
-    let [row] = insert.rows.as_slice() else {
-        return Ok(None);
-    };
-    let set_valued = row
-        .iter()
-        .map(|value| {
-            crate::semantics::sets::static_setness::expression_may_return_set_statically(
-                routines, value,
-            )
+    let control = ProductionControl::uncontrolled();
+    let expanded = single_row_values_query_with_control(
+        routines,
+        insert,
+        || {
+            observed()?
+                .map(|names| Ok(control.finish(names.into_iter().collect(), None)?))
+                .transpose()
+        },
+        || {
+            implicit_columns()?
+                .map(|names| Ok(control.finish(names, None)?))
+                .transpose()
+        },
+        &control,
+    )?;
+    expanded
+        .map(|expanded| {
+            let CommandPlan::Insert(plan) = expanded
+                .finish(&control)?
+                .into_uncontrolled()
+                .expect("ordinary VALUES expansion")
+            else {
+                unreachable!("INSERT VALUES expansion")
+            };
+            Ok(*plan)
         })
-        .collect::<Vec<_>>();
-    if !set_valued.contains(&true) {
-        return Ok(None);
-    }
-    let Some(observed) = observed()? else {
-        return Err(crate::semantics::sets::placement::set_valued_call_error());
-    };
-    let defaults = row.iter().any(|value| matches!(value, ScalarExpr::Default));
-    let targets = if !insert.columns.is_empty() {
-        insert.columns.clone()
-    } else if defaults || !observed.is_empty() {
-        let Some(columns) = implicit_columns()? else {
-            return Ok(None);
-        };
-        columns
-            .into_iter()
-            .take(row.len())
-            .map(AssignmentTarget::from)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let explicit = !insert.columns.is_empty() || defaults;
-    if (explicit || !targets.is_empty()) && targets.len() != row.len() {
-        return Ok(None);
-    }
-    if targets
-        .iter()
-        .zip(&set_valued)
-        .any(|(target, set_valued)| *set_valued && observed.contains(&target.column))
-    {
-        return Err(crate::semantics::sets::placement::set_valued_call_error());
-    }
-    let mut columns = Vec::with_capacity(targets.len());
-    let mut projections = Vec::with_capacity(row.len());
-    for (position, value) in row.iter().enumerate() {
-        if matches!(value, ScalarExpr::Default) {
-            continue;
-        }
-        if explicit {
-            columns.push(targets[position].clone());
-        }
-        projections.push(ProjectionPlan {
-            expr: value.clone(),
-            alias: None,
-        });
-    }
-    let values_input = crate::plan::RuleValuesInput {
-        width: projections.len(),
-        inline: true,
-        defaults: Vec::new(),
-        unresolved: uqa_core::memory::OwnedSet::new(),
-        written: (0..projections.len()).collect(),
-    };
-    let source = QueryPlan {
-        analyzed_output: None,
-        analyzed_source: None,
-        analyzed_grouping: None,
-        relation_privilege_subject: None,
-        relations_bound: insert.relations_bound,
-        ctes: Vec::new(),
-        root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
-            deferred_outer_rewrites: Vec::new(),
-            windows: Vec::new(),
-            projections,
-            privilege_columns: uqa_core::memory::OwnedSet::new(),
-            from: None,
-            r#where: None,
-            compute: ComputePlan::Project,
-            group_by: Vec::new(),
-            grouping_sets: Vec::new(),
-            group_distinct: false,
-            having: None,
-            order_by: Vec::new(),
-            limit: None,
-            with_ties: false,
-            offset: None,
-            distinct: false,
-            distinct_on: Vec::new(),
-            subqueries: insert.subqueries.clone(),
-            access: AccessPathPlan::Row,
-            locking: Vec::new(),
-        })),
-    };
-    let mut expanded = insert.clone();
-    expanded.rows = Vec::new();
-    expanded.columns = columns;
-    expanded.source = Some(Box::new(source));
-    expanded.rule_values_input = Some(values_input);
-    Ok(Some(expanded))
+        .transpose()
 }
 
 /// The columns an INSERT without a column list fills in order: a table's columns or a view's output columns. A materialized view cannot be a target, and its INSERT keeps the form that reports so.

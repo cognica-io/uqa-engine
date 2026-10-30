@@ -15,6 +15,7 @@ mod composite_constants;
 mod demand;
 mod indexes;
 mod inference;
+mod insert_values;
 mod namespaces;
 mod privileges;
 mod retrieval;

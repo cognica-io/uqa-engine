@@ -99,12 +99,28 @@ pub trait ViewRewriteCatalog {
     ) -> Result<Produced<Vec<String>>, SQLError> {
         control.check()?;
         let mut output = ProductionVec::new(*control);
-        for name in self.try_table_columns(name).map_err(|error| {
+        self.visit_table_column_names_with_control(name, control, &mut |name| {
+            output.push_produced(control.copy_text(name)?)?;
+            Ok(())
+        })?;
+        Ok(output.finish()?)
+    }
+
+    /// Native catalogs lend each declared name under its retained table guard; external catalogs may supply their existing owned names.
+    fn visit_table_column_names_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        for column in self.try_table_columns(name).map_err(|error| {
             SQLError::Internal(format!("describe view source `{name}`: {error}"))
         })? {
-            output.push_produced(control.copy_text(&name)?)?;
+            control.check()?;
+            read(&column)?;
         }
-        Ok(output.finish()?)
+        Ok(())
     }
 
     fn try_relation_column_names_with_control(

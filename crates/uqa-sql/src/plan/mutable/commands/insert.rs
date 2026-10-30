@@ -173,6 +173,51 @@ impl MutableCommandPlan {
         Ok(self)
     }
 
+    /// Keep selected target columns in their original buffer, moving each indirection owner with its name and retiring only removed payloads.
+    pub fn retain_insert_columns(
+        mut self,
+        control: &ProductionControl<'_>,
+        mut keep: impl FnMut(
+            usize,
+            &crate::ast::AssignmentTarget<crate::ScalarExpr>,
+        ) -> Result<bool, SQLError>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let CommandPlan::Insert(plan) = &mut self.command else {
+            return Err(SQLError::Internal(
+                "target column retention requires INSERT".into(),
+            ));
+        };
+        let mut fields = self.memory.as_mut().map(|memory| {
+            match body(memory)
+                .field_mut("columns")
+                .as_mut()
+                .expect("INSERT column vector")
+            {
+                RewriteMemory::Fields { fields, .. } => fields,
+                RewriteMemory::Scalar(_) => unreachable!("INSERT column vector owner"),
+            }
+        });
+        let mut retained = 0;
+        for index in 0..plan.columns.len() {
+            control.check()?;
+            if keep(index, &plan.columns[index])? {
+                plan.columns.swap(retained, index);
+                if let Some(fields) = &mut fields {
+                    fields.swap(retained, index);
+                }
+                retained += 1;
+            }
+        }
+        plan.columns.truncate(retained);
+        if let Some(fields) = fields {
+            fields.truncate(retained);
+        }
+        control.check()?;
+        Ok(self)
+    }
+
     /// VALUES leave the command without a payload copy. The command retains its own scalar-query namespace for RETURNING and assignment targets; the new query admits its independent namespace copy.
     pub fn take_insert_rows_query(
         mut self,

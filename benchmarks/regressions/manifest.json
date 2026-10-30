@@ -31446,6 +31446,103 @@
         "case_4_redb::kind_3___delete__",
         "case_4_redb::kind_4___merge__"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_returning_values_reject_large_command_copies_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/insert_values/tests/ownership.rs",
+      "capability": "Set-returning VALUES ownership",
+      "workload": "A four MiB private VALUES literal under a 128 KiB request allowance.",
+      "invariant": "Reject before copying payloads, retain independent siblings and retire partial command owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_returning_values_keep_exact_command_source_and_default_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/insert_values/tests/ownership.rs",
+      "capability": "Set-returning VALUES ownership",
+      "workload": "Explicit and implicit DEFAULT targets, array indirection and scalar-query arenas in set-returning VALUES.",
+      "invariant": "Allocator-observed live bytes equal retained reservations; selected assignments and independent query namespaces preserve their original semantics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "values_discovery_preserves_callback_demand_and_cleans_partial_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/insert_values/tests/ownership.rs",
+      "capability": "Set-returning VALUES ownership",
+      "workload": "Scalar VALUES and set-returning VALUES with partial column discovery, insufficient quota, either cancellation or callback unwind.",
+      "invariant": "Do not invoke undemanded rule or column callbacks; release every partial result, preserve sibling leases and admit a subsequent operation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "event_row_columns_keep_both_images_and_lexical_masking_with_exact_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/schedule_owned/row_columns.rs",
+      "capability": "Set-returning VALUES ownership",
+      "workload": "OLD/NEW columns, whole-row references and a source alias shadowing NEW.",
+      "invariant": "Preserve event image and lexical scope selection with exact retained name ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "event_row_names_reject_before_copying_and_preserve_sibling_allowances",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/schedule_owned/row_columns.rs",
+      "capability": "Set-returning VALUES ownership",
+      "workload": "A four MiB event-row field under a 128 KiB allowance, plus both cancellation scopes.",
+      "invariant": "Reject names before copying, preserve the resource SQLSTATE and leave independent sibling reservations intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_set_returning_values_admit_private_commands_before_copying",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_values.rs",
+      "capability": "Set-returning VALUES ownership",
+      "workload": "Actual set-returning INSERT VALUES on four storage providers with a four MiB private arena and 64 KiB available.",
+      "invariant": "Reject with 53200 before large private command copies, preserve sibling leases, execute the next statement and release every owner on close.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "set_returning_values_preserve_postgresql_defaults_rules_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_values.rs",
+      "capability": "Set-returning VALUES ownership",
+      "workload": "PostgreSQL 18 reference for set-returning VALUES, defaults, array targets, reordered views and NEW-reading rules on four providers.",
+      "invariant": "Keep row expansion, once-per-command rule effects, 0A000 error order, savepoint recovery and persisted rows after reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

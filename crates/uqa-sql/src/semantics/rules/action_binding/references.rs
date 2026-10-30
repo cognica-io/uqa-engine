@@ -6,6 +6,9 @@
 
 //! OLD/NEW reference analysis for rewrite-rule expressions and stored plans.
 
+mod relation;
+pub use relation::relation_rule_row_columns_with_control;
+
 use std::collections::BTreeSet;
 
 use crate::ast::{Expr, SelectStmt, Statement};

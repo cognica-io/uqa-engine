@@ -24,6 +24,26 @@ use uqa_sql::{
 };
 
 impl ViewRewriteCatalog for Engine {
+    fn visit_table_column_names_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        if uqa_sql::semantics::returning::ReturningCatalog::with_table_row_type_with_control(
+            self,
+            name,
+            control,
+            &mut |columns| columns.iter().try_for_each(|column| read(&column.name)),
+        )? {
+            Ok(())
+        } else {
+            Err(SQLError::UnknownTable(
+                control.copy_text(name)?.into_parts().0,
+            ))
+        }
+    }
+
     fn capture_rules(
         &self,
         name: &str,
