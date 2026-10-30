@@ -30919,6 +30919,152 @@
       "capability": "Native view mutation target ownership",
       "workload": "Eight allowances and both cancellation scopes during ACL capture.",
       "invariant": "Partial relation and column ACL outputs are released independently of sibling owners; cancelled capture leaves no allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "embedded_view_expressions_keep_positions_physical_names_and_lazy_namespace_errors",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/owned/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View expression namespace ownership",
+      "workload": "Large scalar payloads, source alias forms, lexical shadowing, partial allowances and both cancellation scopes.",
+      "invariant": "Constructor admission precedes copies; names preserve reference positions, payload addresses and lexical meaning; failure and unwind release all private owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "embedded_view_queries_rename_local_targets_and_preserve_correlated_source_shadowing",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/owned/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View expression namespace ownership",
+      "workload": "Large scalar payloads, source alias forms, lexical shadowing, partial allowances and both cancellation scopes.",
+      "invariant": "Constructor admission precedes copies; names preserve reference positions, payload addresses and lexical meaning; failure and unwind release all private owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_query_alpha_renaming_moves_large_payloads_and_accounts_for_replaced_names",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/owned/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View expression namespace ownership",
+      "workload": "Large scalar payloads, source alias forms, lexical shadowing, partial allowances and both cancellation scopes.",
+      "invariant": "Constructor admission precedes copies; names preserve reference positions, payload addresses and lexical meaning; failure and unwind release all private owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_query_alpha_renaming_preserves_source_forms_and_reference_positions",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/owned/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View expression namespace ownership",
+      "workload": "Large scalar payloads, source alias forms, lexical shadowing, partial allowances and both cancellation scopes.",
+      "invariant": "Constructor admission precedes copies; names preserve reference positions, payload addresses and lexical meaning; failure and unwind release all private owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_query_alpha_renaming_releases_partial_name_replacements_and_preserves_siblings",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/owned/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View expression namespace ownership",
+      "workload": "Large scalar payloads, source alias forms, lexical shadowing, partial allowances and both cancellation scopes.",
+      "invariant": "Constructor admission precedes copies; names preserve reference positions, payload addresses and lexical meaning; failure and unwind release all private owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_query_embedding_rejects_large_copies_before_allocation_and_releases_partial_arenas",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/owned/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View expression namespace ownership",
+      "workload": "Large scalar payloads, source alias forms, lexical shadowing, partial allowances and both cancellation scopes.",
+      "invariant": "Constructor admission precedes copies; names preserve reference positions, payload addresses and lexical meaning; failure and unwind release all private owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_query_embedding_preserves_cancellation_and_releases_callback_failures_and_unwind",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/layer_rewrite/owned/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View expression namespace ownership",
+      "workload": "Large scalar payloads, source alias forms, lexical shadowing, partial allowances and both cancellation scopes.",
+      "invariant": "Constructor admission precedes copies; names preserve reference positions, payload addresses and lexical meaning; failure and unwind release all private owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_contract_validation_borrows_large_values",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/validation/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed view expression validation",
+      "workload": "Four MiB scalar values, first-error ordering and target/source/row-image namespaces.",
+      "invariant": "Read-only reference validation allocates less than 4 KiB for large values and preserves the original diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_layer_validation_borrows_large_values",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/validation/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed view expression validation",
+      "workload": "Four MiB scalar values, first-error ordering and target/source/row-image namespaces.",
+      "invariant": "Read-only reference validation allocates less than 4 KiB for large values and preserves the original diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_expression_validation_preserves_first_errors_and_row_image_namespaces",
+      "source": "crates/uqa-sql/src/semantics/view_rewrite/validation/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed view expression validation",
+      "workload": "Four MiB scalar values, first-error ordering and target/source/row-image namespaces.",
+      "invariant": "Read-only reference validation allocates less than 4 KiB for large values and preserves the original diagnostics."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_automatic_view_queries_preserve_shadowed_aliases_across_all_mutations",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_embedding.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Automatic view expression namespaces",
+      "workload": "PostgreSQL 18.4 INSERT/UPDATE/DELETE/MERGE reference outputs with a correlated expression whose local alias equals its mutation target.",
+      "invariant": "All four providers preserve row-image results, rollback and durable reopening across consuming view expression rewrites."
     }
   ]
 }

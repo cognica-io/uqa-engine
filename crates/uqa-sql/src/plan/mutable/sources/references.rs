@@ -16,6 +16,43 @@ use crate::{
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
 impl MutableSourcePlan {
+    /// Replace an explicit source alias without changing the source's physical or function identity.
+    pub fn replace_alias(
+        mut self,
+        alias: Produced<String>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let current = match &mut self.source {
+            SourcePlan::Table { alias, .. }
+            | SourcePlan::Join { alias, .. }
+            | SourcePlan::Values { alias, .. }
+            | SourcePlan::Subquery { alias, .. }
+            | SourcePlan::Function { alias, .. }
+            | SourcePlan::FunctionGroup { alias, .. } => alias,
+            SourcePlan::RetainedRows(_) => {
+                return Err(SQLError::Internal(
+                    "retained rows have no source alias".into(),
+                ));
+            }
+        };
+        let (alias, lease) = alias.into_parts();
+        let (alias, lease) = control.finish(alias, lease)?.into_parts();
+        let previous_capacity = current.as_ref().map_or(0, String::capacity);
+        *current = Some(alias);
+        if let Some(memory) = &mut self.memory {
+            let RewriteMemory::Fields { direct, .. } = memory else {
+                unreachable!("source constructor")
+            };
+            // Source constructors retain the alias buffer directly beside their metadata.
+            drop(direct.split(previous_capacity));
+            direct.absorb(lease.expect("controlled source alias"));
+        }
+        control.check()?;
+        Ok(self)
+    }
+
     pub fn replace_table_reference(
         mut self,
         name: Option<Produced<String>>,

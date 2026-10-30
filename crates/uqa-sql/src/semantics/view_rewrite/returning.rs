@@ -7,47 +7,11 @@
 //! Automatic-view expression retargeting, check propagation, and RETURNING rewriting.
 
 use super::{
-    embed_layer_expression, layer_column, relation_columns, source_qualifier_matches,
-    AutomaticViewLayer, ExpressionScope, ProjectionPlan, QueryPlan, ReturningAliases, RowSchema,
-    SQLError, ScalarExpr, TriggerEvent, TriggerTiming, ViewCheckOption, ViewCheckPlan,
-    ViewRewriteContext, ViewRuleReturningPlan,
+    embed_layer_expression, layer_column, relation_columns, AutomaticViewLayer, ExpressionScope,
+    ProjectionPlan, QueryPlan, ReturningAliases, RowSchema, SQLError, ScalarExpr, TriggerEvent,
+    TriggerTiming, ViewCheckOption, ViewCheckPlan, ViewRewriteContext, ViewRuleReturningPlan,
 };
 use crate::semantics::DOC_ID_COLUMN;
-
-pub(super) fn retarget_source_expression(
-    expression: &ScalarExpr,
-    layer: &AutomaticViewLayer,
-    desired_qualifier: &str,
-) -> ScalarExpr {
-    let mut expression = expression.clone();
-    crate::plan::rewrite_scalar_expression(&mut expression, &mut |node| {
-        let replacement = match node {
-            ScalarExpr::Column(column) => Some(ScalarExpr::QualifiedColumn {
-                qualifier: desired_qualifier.to_string(),
-                column: crate::ast::ReferenceName::from(layer.physical_source_column(column))
-                    .with_position(column.position()),
-            }),
-            ScalarExpr::QualifiedColumn { qualifier, column }
-                if source_qualifier_matches(
-                    qualifier,
-                    &layer.source_qualifier,
-                    &layer.source_name,
-                ) =>
-            {
-                Some(ScalarExpr::QualifiedColumn {
-                    qualifier: desired_qualifier.to_string(),
-                    column: crate::ast::ReferenceName::from(layer.physical_source_column(column))
-                        .with_position(column.position()),
-                })
-            }
-            _ => None,
-        };
-        if let Some(replacement) = replacement {
-            *node = replacement;
-        }
-    });
-    expression
-}
 
 pub(super) fn rewrite_target_expression(
     services: ViewRewriteContext<'_>,

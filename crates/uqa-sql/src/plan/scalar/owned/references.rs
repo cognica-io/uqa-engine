@@ -16,6 +16,16 @@ impl OwnedScalarExpr {
         qualifier: Option<Produced<String>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
+        Self::positioned_column(column, qualifier, None, control)
+    }
+
+    /// Preserve the source location when a rewrite changes a column's namespace or physical name.
+    pub fn positioned_column(
+        column: Produced<String>,
+        qualifier: Option<Produced<String>>,
+        position: Option<u32>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
         let (column, memory) = column.into_parts();
         let column = control.finish(column, memory)?;
         let qualifier = qualifier
@@ -31,12 +41,15 @@ impl OwnedScalarExpr {
                 (
                     ScalarExpr::QualifiedColumn {
                         qualifier,
-                        column: column.into(),
+                        column: crate::ast::ReferenceName::from(column).with_position(position),
                     },
                     control.combine(column_memory, qualifier_memory),
                 )
             }
-            None => (ScalarExpr::Column(column.into()), column_memory),
+            None => (
+                ScalarExpr::Column(crate::ast::ReferenceName::from(column).with_position(position)),
+                column_memory,
+            ),
         };
         let output = Self {
             expression,
@@ -46,5 +59,32 @@ impl OwnedScalarExpr {
             }),
         };
         output.rewrite(control, Ok)
+    }
+
+    /// Replace only a reference's qualifier. Existing capacity is reused; growth admits a replacement buffer while the original is still live.
+    pub fn replace_qualifier(
+        mut self,
+        qualifier: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        self.assert_owner(control);
+        control.check()?;
+        let current = self.expression.reference_qualifier_mut().ok_or_else(|| {
+            crate::SQLError::Internal("qualifier replacement requires a qualified reference".into())
+        })?;
+        if qualifier.len() <= current.capacity() {
+            current.clear();
+            current.push_str(qualifier);
+        } else {
+            let (value, lease) = control.copy_text(qualifier)?.into_parts();
+            let capacity = current.capacity();
+            *current = value;
+            if let Some(memory) = &mut self.memory {
+                drop(memory.direct.split(capacity));
+                memory.direct.absorb(lease.expect("controlled qualifier"));
+            }
+        }
+        control.check()?;
+        Ok(self)
     }
 }

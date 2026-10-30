@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::plan::RelationalPlan;
 
 fn query(sql: &str) -> Box<QueryPlan> {
     let crate::plan::UnifiedPlan::Query(query) =

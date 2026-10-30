@@ -17,6 +17,9 @@ use super::{
     ViewQueryShape, ViewRewriteContext,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn layer_column<'a>(
     layer: &'a AutomaticViewLayer,
     name: &str,
@@ -200,33 +203,41 @@ pub(super) fn validate_view_expression(
     layer: &AutomaticViewLayer,
     scope: ExpressionScope<'_>,
 ) -> Result<(), SQLError> {
-    let mut expression = expression.clone();
-    let mut error = None;
-    crate::plan::rewrite_scalar_expression(&mut expression, &mut |node| {
-        if error.is_some() {
-            return;
-        }
+    validate_reference_columns(
+        expression,
+        &|column| layer_column(layer, column).is_some(),
+        scope,
+    )
+}
+
+fn validate_reference_columns(
+    expression: &ScalarExpr,
+    contains: &dyn Fn(&str) -> bool,
+    scope: ExpressionScope<'_>,
+) -> Result<(), SQLError> {
+    expression.try_visit(&mut |node| {
         match node {
             ScalarExpr::Column(column) => {
-                let target = layer_column(layer, column).is_some();
+                let target = contains(column);
                 let source = scope
                     .source
                     .is_some_and(|source| source.has_unqualified_column(column));
                 if target && (source || scope.include_excluded) {
-                    error = Some(ambiguous_column(column));
-                } else if !target && !source {
-                    error = Some(SQLError::UnknownColumn(column.to_string()));
+                    return Err(ambiguous_column(column));
+                }
+                if !target && !source {
+                    return Err(SQLError::UnknownColumn(column.to_string()));
                 }
             }
             ScalarExpr::QualifiedColumn { qualifier, column }
-                if scope.target_qualifier(qualifier) && layer_column(layer, column).is_none() =>
+                if scope.target_qualifier(qualifier) && !contains(column) =>
             {
-                error = Some(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
+                return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
             }
             _ => {}
         }
-    });
-    error.map_or(Ok(()), Err)
+        Ok(true)
+    })
 }
 
 fn public_view_columns(
@@ -251,34 +262,7 @@ fn validate_public_view_expression(
     public_columns: &BTreeSet<String>,
     scope: ExpressionScope<'_>,
 ) -> Result<(), SQLError> {
-    let mut expression = expression.clone();
-    let mut error = None;
-    crate::plan::rewrite_scalar_expression(&mut expression, &mut |node| {
-        if error.is_some() {
-            return;
-        }
-        match node {
-            ScalarExpr::Column(column) => {
-                let target = public_columns.contains(column.as_str());
-                let source = scope
-                    .source
-                    .is_some_and(|source| source.has_unqualified_column(column));
-                if target && (source || scope.include_excluded) {
-                    error = Some(ambiguous_column(column));
-                } else if !target && !source {
-                    error = Some(SQLError::UnknownColumn(column.to_string()));
-                }
-            }
-            ScalarExpr::QualifiedColumn { qualifier, column }
-                if scope.target_qualifier(qualifier)
-                    && !public_columns.contains(column.as_str()) =>
-            {
-                error = Some(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
-            }
-            _ => {}
-        }
-    });
-    error.map_or(Ok(()), Err)
+    validate_reference_columns(expression, &|column| public_columns.contains(column), scope)
 }
 
 pub(super) fn validate_public_update_contract(

@@ -50,19 +50,19 @@ mod updatability;
 mod validation;
 
 use correlation::{
-    collect_expression_subquery_ids, delete_ordinary_subquery_ids, dml_analysis_scope,
-    dml_source_schema, insert_conflict_subquery_ids, insert_input_width,
-    merge_matched_subquery_ids, merge_target_only_subquery_ids, returning_subquery_ids,
-    rewrite_correlated_dml_context, schema_public_columns, update_ordinary_subquery_ids,
-    validate_delete_expressions, validate_insert_expressions, validate_merge_expressions,
-    validate_update_expressions, CorrelatedDmlContext,
+    delete_ordinary_subquery_ids, dml_analysis_scope, dml_source_schema,
+    insert_conflict_subquery_ids, insert_input_width, merge_matched_subquery_ids,
+    merge_target_only_subquery_ids, returning_subquery_ids, rewrite_correlated_dml_context,
+    schema_public_columns, update_ordinary_subquery_ids, validate_delete_expressions,
+    validate_insert_expressions, validate_merge_expressions, validate_update_expressions,
+    CorrelatedDmlContext,
 };
 use layer_privileges::LayerPrivileges;
 use returning::{
     add_check_option, bind_unqualified_source_positions, combine_view_predicate, dml_target_width,
     finalize_source_returning, instead_of_trigger_definition, preserve_view_rule_returning,
-    record_view_rule_relation, retarget_source_expression, rewrite_existing_view_checks,
-    rewrite_merge_returning, rewrite_returning, rewrite_target_expression,
+    record_view_rule_relation, rewrite_existing_view_checks, rewrite_merge_returning,
+    rewrite_returning, rewrite_target_expression,
 };
 pub use rewrite_insert::rewrite_insert_to_base;
 pub use rewrite_merge::rewrite_merge_to_base;
