@@ -29715,6 +29715,422 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_rule_binding_uses_the_original_allowance_and_releases_destinations",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_binding.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Four-provider rule binding ownership",
+      "workload": "Selected four MiB replacements and failed RETURNING replacement under 64 KiB remaining native allowance on all four providers.",
+      "invariant": "53200 precedes large copying; clause failure preserves the original statement and exact sibling leases, both cancellations remain 57014 and SQL recovers."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_rule_reference_inspection_borrows_payloads_and_admits_names",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_references.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native rule reference ownership",
+      "workload": "Four-provider rule reference inspection with large unused action payloads and selected names.",
+      "invariant": "Unused payloads stay borrowed; selected names use the original allowance, cancellation remains typed and partial owners release."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_rule_selection_borrows_the_live_generation_and_retains_its_owner",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_selection.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native rule declaration capture",
+      "workload": "Four-provider retained and live catalog generations with large stored rule actions.",
+      "invariant": "Selection retains original declaration addresses and live lookup identity without copying action trees, and releases only its own leases."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_rule_execution_does_not_copy_later_actions_before_an_earlier_error",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_selection.rs",
+      "kind": "lib",
+      "cases": 8,
+      "case_names": [
+        "case_1_memory::temporary_1_false",
+        "case_1_memory::temporary_2_true",
+        "case_2_sqlite_native::temporary_1_false",
+        "case_2_sqlite_native::temporary_2_true",
+        "case_3_sqlite_kv::temporary_1_false",
+        "case_3_sqlite_kv::temporary_2_true",
+        "case_4_redb::temporary_1_false",
+        "case_4_redb::temporary_2_true"
+      ],
+      "capability": "Native rule action error order",
+      "workload": "An early division error before a later four MiB action, temporary and durable rules on all four providers, one MiB remaining allowance and controlled background statistics.",
+      "invariant": "22012 precedes copying the unused action; no mutation publishes, retained memory stays stable and execution recovers after removing the rules."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "a_new_catalog_view_admits_its_restore_before_selecting_rule_actions",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_selection.rs",
+      "kind": "lib",
+      "cases": 2,
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv"
+      ],
+      "capability": "Rule catalog restore admission",
+      "workload": "An explicit sibling ANALYZE commit before native SQLite or SQLite Key/Value restores a durable four MiB rule under one MiB remaining allowance.",
+      "invariant": "Statistics-only native refresh preserves 22012; the Key/Value record copy rejects with 53200 before action binding, then recovers without publishing rows."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "retained_view_rule_selection_keeps_its_catalog_and_original_control",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_selection.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Retained view rule capture",
+      "workload": "Supplied and live rule registry generations with separate retained and invoking controls on all four providers.",
+      "invariant": "The supplied catalog remains authoritative, both cancellation handles survive and selected declaration storage is shared."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_rule_target_columns_borrow_declarations_and_recover",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_targets.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native rule target descriptors",
+      "workload": "Large unused defaults and materialized rows plus selected target names on all four providers.",
+      "invariant": "Descriptor lookup borrows the declaration, admits selected names before copying, preserves original allowance and recovers after rejection."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_rule_target_columns_preserve_live_lookup_and_schema_diagnostics",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_targets.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native rule target lookup order",
+      "workload": "Table, view, materialized view and empty target declarations on all four providers.",
+      "invariant": "Live table-first lookup, names and schema diagnostics retain the existing order and controlled view analysis propagates resource failure."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "rule_target_names_borrow_defaults_and_keep_exact_destination_leases",
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/columns/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule target name production",
+      "workload": "Selected target names alongside large unused defaults and metadata.",
+      "invariant": "Only selected name buffers and their output vector are allocated and their exact lease retires with the result."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "wide_rule_target_names_fail_before_copy_and_release_prior_columns",
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/columns/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule target name production",
+      "workload": "A wide later column after earlier admitted names under a small allowance.",
+      "invariant": "Rejection precedes the large copy and releases every partial name while preserving sibling reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "target_catalog_failure_cancellation_and_unwind_release_partial_names",
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/columns/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule target name production",
+      "workload": "Partial target descriptors interrupted by catalog failure, both cancellations and unwind.",
+      "invariant": "Typed failures retain their original order and every temporary lease retires without changing sibling ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "captured_rules_preserve_event_enablement_order_and_declaration_addresses",
+      "source": "crates/uqa-sql/src/catalog/events/selection/captured/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Captured rule generations",
+      "workload": "Multiple events, enablement modes and replication roles over an immutable rule registry.",
+      "invariant": "Selected declarations preserve name order, firing semantics and original addresses without copying syntax."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "capture_borrows_large_actions_and_keeps_the_original_generation_until_release",
+      "source": "crates/uqa-sql/src/catalog/events/selection/captured/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Captured rule generations",
+      "workload": "Large actions, catalog copy-on-write publication and independent selector lifetime.",
+      "invariant": "Registry mutation cannot change a captured generation; physical selector allocation equals its retained lease and last-reader release is exact."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "captured_iteration_observes_both_cancellations_even_for_empty_selections",
+      "source": "crates/uqa-sql/src/catalog/events/selection/captured/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Captured rule cancellation",
+      "workload": "Both retained and invoking cancellation handles during populated and empty selection.",
+      "invariant": "Cancellation is observed before iteration work and all selector leases retire on error and unwind."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "action_inspection_preserves_scope_callback_and_failure_order",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/inspection/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed rule reference inspection",
+      "workload": "Nested query, DML, CTE and LATERAL action syntax with recording and failing resolvers.",
+      "invariant": "Read-only inspection preserves the binding traversal scope, callback order and first failure without constructing rewritten expressions."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "reference_inspection_borrows_unused_large_action_payloads",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/inspection/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed rule reference inspection",
+      "workload": "Four MiB unused literal payloads in action syntax.",
+      "invariant": "Reference discovery does not copy the payload and retains the original selected row references."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "condition_inspection_borrows_nested_executable_payloads",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/inspection/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed rule condition inspection",
+      "workload": "Nested executable conditions with large retained payloads.",
+      "invariant": "Row-reference discovery borrows the executable tree and preserves selected columns without payload allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "retained_names_and_scope_buffers_match_physical_allocation",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/inspection/tests/ownership.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule scope ownership",
+      "workload": "Lexical qualifier and column owners across nested rule scopes.",
+      "invariant": "Physical live allocation equals the exact retained name, node and vector reservations after scratch retires."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "source_and_required_names_are_rejected_before_large_copies",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/inspection/tests/ownership.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule scope ownership",
+      "workload": "Wide source names and demanded row columns under a bounded allowance.",
+      "invariant": "Admission rejects before case folding or copying large names and partial scope owners release."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "partial_scope_owners_release_on_catalog_failure_cancel_and_unwind",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/inspection/tests/ownership.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule scope ownership",
+      "workload": "Controlled catalog callbacks that fail, cancel either owner or unwind after partial scope construction.",
+      "invariant": "All private names and nodes retire while the original catalog error and sibling reservations survive."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "bound_actions_keep_exact_destination_leases_after_scope_release",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule action syntax production",
+      "workload": "Query, CTE, window, set, INSERT conflict, assignment indirection, UPDATE, DELETE and NOTIFY syntax.",
+      "invariant": "Controlled output matches ordinary binding and its retained reservation equals physical live allocation after scratch scopes retire."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "an_early_binding_error_does_not_copy_unused_action_payloads",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule action syntax error order",
+      "workload": "An early callback error before a later four MiB UPDATE assignment.",
+      "invariant": "Binding reports the original error below 16 KiB allocation without an eager whole-action clone."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "native_rule_replacements_are_admitted_before_copying",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule replacement production",
+      "workload": "Selected native query-row replacements containing four MiB payloads and a later missing column.",
+      "invariant": "The replacement rejects before copying under 16 KiB allowance, and sufficient small inputs preserve the first 42703 diagnostic."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "partial_action_destinations_release_on_each_cancel_error_and_unwind",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule action syntax ownership",
+      "workload": "Partial action binding interrupted by callback failure, both cancellations or unwind with a sibling reservation.",
+      "invariant": "All private destinations retire, sibling ownership survives and subsequent binding recovers."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "star_expansion_moves_payloads_and_retires_its_temporary_buffer",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule expansion ownership",
+      "workload": "Expanded expressions followed by an oversized alias.",
+      "invariant": "Payload addresses survive transfer into the final list; the abandoned expansion buffer lease retires and later rejection releases all private data."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "replacing_returning_keeps_only_live_clause_allocations_and_preserves_the_body",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/tests/returning.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Replaceable rule RETURNING ownership",
+      "workload": "CURRENT, OLD and NEW images, source context append and clause retirement for INSERT, UPDATE and DELETE.",
+      "invariant": "Exact physical allocation deltas equal reservation deltas, body addresses remain unchanged and image order, aliases and absent-image NULLs are preserved."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "rejected_returning_replacements_preserve_the_original_owner_and_recover",
+      "source": "crates/uqa-sql/src/semantics/rules/action_binding/tests/returning.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Replaceable rule RETURNING ownership",
+      "workload": "Partial context append with a four MiB value, exhausted allowance and both cancellation handles.",
+      "invariant": "Rejection does not allocate the large payload or alter the original statement; all partial leases release and later replacement succeeds."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "returning_image_inspection_borrows_large_values_and_names_with_no_allowance",
+      "source": "crates/uqa-sql/src/semantics/rules/returning/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Borrowed rule RETURNING inspection",
+      "workload": "A four MiB literal and large relation qualifier inspected under a zero-byte allowance.",
+      "invariant": "No allocation occurs, the selected OLD image is preserved and either cancellation yields 57014, including empty RETURNING."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "returning_image_selection_preserves_lexical_and_lateral_shadowing",
+      "source": "crates/uqa-sql/src/semantics/rules/returning/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule RETURNING image scope",
+      "workload": "Qualified and unqualified references, nested queries, CTEs, joins, LATERAL and non-LATERAL sources, uppercase and joined aliases.",
+      "invariant": "The independent expected CURRENT/OLD/NEW masks preserve each lexical namespace without copying qualifier indexes."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "returning_image_selection_follows_only_selected_scalar_subqueries",
+      "source": "crates/uqa-sql/src/semantics/rules/returning/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Rule RETURNING image scope",
+      "workload": "Selected, unselected and missing scalar-subquery slots plus constant and empty projections.",
+      "invariant": "Only selected outer scalar-query slots contribute image requirements; unused queries and constants do not add images."
     }
   ]
 }

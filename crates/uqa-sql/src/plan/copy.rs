@@ -19,7 +19,7 @@ mod query;
 mod source;
 mod specialization;
 mod syntax;
-pub(crate) use production::{CollectSyntax, SyntaxProduction};
+pub(crate) use production::{CollectSyntax, SyntaxProduction, SyntaxVector};
 pub(crate) use specialization::copy_specialized_function;
 #[cfg(test)]
 mod tests;

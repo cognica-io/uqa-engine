@@ -36,11 +36,11 @@ fn execute_insert_query_rules<S: Clone + 'static>(
     let _guard = RuleExecutionGuard::enter(&insert.table, RuleEvent::Insert)?;
     let privilege_subject = context.security.privilege_subject(&insert.table)?;
     let definitions = super::rule_returning_columns(context.analysis, &insert.table)?;
-    let request = RuleReturningRequest::from_plan(
+    let request = context.returning_request(
         &insert.returning,
         &insert.returning_aliases,
         &insert.subqueries,
-    );
+    )?;
     let mut outcome = RuleExecutionOutcome::default();
     for rule in rules.iter() {
         let rule = rule?;

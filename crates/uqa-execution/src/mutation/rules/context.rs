@@ -81,6 +81,23 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
             .capture_rules_with_control(table, event, &control)
     }
 
+    pub(super) fn returning_request(
+        &self,
+        returning: &[uqa_sql::plan::ProjectionPlan],
+        aliases: &uqa_sql::ast::ReturningAliases,
+        subqueries: &[uqa_sql::plan::QueryPlan],
+    ) -> Result<super::RuleReturningRequest, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        super::RuleReturningRequest::from_plan_with_control(
+            returning, aliases, subqueries, &control,
+        )
+    }
+
     pub(super) fn execute_action(
         &self,
         statement: uqa_sql::ast::Statement,

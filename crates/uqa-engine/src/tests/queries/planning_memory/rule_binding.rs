@@ -85,6 +85,7 @@ fn native_rule_binding_uses_the_original_allowance_and_releases_destinations(
         assert_eq!(memory.used(), before + occupied.bytes());
         token.reset();
     }
+    returning_replacement(&engine, &control);
     drop(occupied);
     assert_eq!(memory.used(), before);
     assert_eq!(
@@ -98,4 +99,61 @@ fn native_rule_binding_uses_the_original_allowance_and_releases_destinations(
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);
+}
+
+fn returning_replacement(engine: &Engine, control: &ProductionControl<'_>) {
+    use uqa_sql::{
+        ast::ReturningAliases,
+        plan::ProjectionPlan,
+        semantics::rules::{action_binding::BoundRuleStatement, returning::RuleReturningRequest},
+        ScalarExpr,
+    };
+    let syntax = uqa_sql::compile("UPDATE items SET id = 3 RETURNING payload")
+        .unwrap()
+        .remove(0);
+    let columns = BTreeSet::from(["id".into(), "payload".into()]);
+    let mut resolver = RuleQueryResolver {
+        table: "public.items".into(),
+        columns: Vec::new(),
+        old: std::collections::BTreeMap::new(),
+        expressions: std::collections::BTreeMap::new(),
+    };
+    let memory = control.budget().unwrap();
+    let baseline = memory.used();
+    let mut bound =
+        BoundRuleStatement::bind(engine, &syntax, &columns, &mut resolver, control).unwrap();
+    let request = RuleReturningRequest::from_plan_with_control(
+        &[ProjectionPlan {
+            expr: ScalarExpr::Column("payload".into()),
+            alias: None,
+        }],
+        &ReturningAliases::default(),
+        &[],
+        control,
+    )
+    .unwrap();
+    let payload = Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
+    let before = memory.used();
+    let observed = allocation_counter::measure(|| {
+        assert_eq!(
+            bound
+                .augment_returning(Some(&payload), 1, request, &columns)
+                .unwrap_err()
+                .sqlstate(),
+            Some("53200")
+        );
+    });
+    assert!(observed.bytes_total < 16 * 1024, "{observed:?}");
+    assert_eq!(observed.bytes_current, 0);
+    assert_eq!(memory.used(), before);
+    let uqa_sql::ast::Statement::Update(update) = bound.statement() else {
+        panic!("mutation owner");
+    };
+    assert_eq!(update.returning.len(), 1);
+    assert_eq!(update.returning[0].expr, Expr::Column("payload".into()));
+    bound.augment_returning(None, 1, request, &columns).unwrap();
+    assert_eq!(memory.used(), baseline + bound.reserved_bytes());
+    bound.clear_returning().unwrap();
+    drop(bound);
+    assert_eq!(memory.used(), baseline);
 }

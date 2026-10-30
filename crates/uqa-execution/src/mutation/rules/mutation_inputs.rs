@@ -39,11 +39,11 @@ pub fn execute_mutation_query_rules<S: Clone + 'static>(
     let rule_subject = context.security.privilege_subject(statement.table())?;
     let input_subject = scope.privilege_subject()?;
     let definitions = super::rule_returning_columns(context.analysis, statement.table())?;
-    let request = RuleReturningRequest::from_plan(
+    let request = context.returning_request(
         statement.returning(),
         statement.returning_aliases(),
         statement.subqueries(),
-    );
+    )?;
     let binding = crate::query::binding::binding_context(scope)?;
     let (target_schema, source_schema) =
         context.mutation_input_schemas(statement, params, &binding)?;

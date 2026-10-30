@@ -12,6 +12,8 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod returning;
+
 struct Catalog;
 impl RuleSourceCatalog for Catalog {
     fn query_source_columns(&self, _: &str, _: bool) -> Result<Option<Vec<String>>, SQLError> {

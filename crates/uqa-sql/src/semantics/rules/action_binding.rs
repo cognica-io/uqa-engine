@@ -15,6 +15,9 @@ use crate::plpgsql::{bind_statement, ResolvedVariable, VariableResolver};
 use crate::SQLError;
 use uqa_core::memory::{Produced, ProductionControl};
 
+mod owned;
+pub(super) use owned::returning_mut;
+pub use owned::BoundRuleStatement;
 mod query;
 use query::{bind_ctes, bind_from, bind_select_with_scope};
 mod insert;
@@ -79,73 +82,7 @@ pub fn bind_rule_action_with_control(
     resolver: &mut dyn VariableResolver,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Statement>, SQLError> {
-    control.check()?;
-    let production = SyntaxProduction::new(*control);
-    let bound = bind_action(catalog, action, action_columns, resolver, &production)?;
-    production.finish(bound)
-}
-
-fn bind_action(
-    catalog: &dyn RuleSourceCatalog,
-    action: &Statement,
-    action_columns: &BTreeSet<String>,
-    resolver: &mut dyn VariableResolver,
-    production: &SyntaxProduction<'_>,
-) -> Result<Statement, SQLError> {
-    let context = RuleBindingContext::with_control(catalog, true, &production.control());
-    let (returning, action_event) = match action {
-        Statement::Insert(statement) => (&statement.returning, RuleEvent::Insert),
-        Statement::Update(statement) => (&statement.returning, RuleEvent::Update),
-        Statement::Delete(statement) => (&statement.returning, RuleEvent::Delete),
-        _ => {
-            return bind_rule_statement_body(
-                action,
-                resolver,
-                &RuleBindingScope::default(),
-                &context,
-                production,
-            )
-        }
-    };
-    let aliases = match action {
-        Statement::Insert(statement) => &statement.returning_aliases,
-        Statement::Update(statement) => &statement.returning_aliases,
-        Statement::Delete(statement) => &statement.returning_aliases,
-        _ => unreachable!("DML rule action changed statement kind"),
-    };
-    let mut bound = {
-        let mut body_resolver = RuleActionBodyResolver {
-            action_columns,
-            action_event,
-            event_resolver: resolver,
-        };
-        bind_rule_statement_body(
-            action,
-            &mut body_resolver,
-            &RuleBindingScope::default(),
-            &context,
-            production,
-        )?
-    };
-    if returning.is_empty() {
-        return Ok(bound);
-    }
-    let returning = returning::bind_rule_action_returning(
-        returning,
-        action_columns,
-        aliases,
-        action_event,
-        resolver,
-        &context,
-        production,
-    )?;
-    match &mut bound {
-        Statement::Insert(statement) => statement.returning = returning,
-        Statement::Update(statement) => statement.returning = returning,
-        Statement::Delete(statement) => statement.returning = returning,
-        _ => unreachable!("bound DML rule action changed statement kind"),
-    }
-    Ok(bound)
+    BoundRuleStatement::bind(catalog, action, action_columns, resolver, control)?.into_produced()
 }
 
 struct RuleActionBodyResolver<'a, 'resolver> {
