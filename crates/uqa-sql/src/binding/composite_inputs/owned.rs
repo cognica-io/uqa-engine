@@ -23,7 +23,11 @@ use uqa_core::{
     Value,
 };
 
-pub(in crate::binding) fn selected(expression: &ScalarExpr) -> bool {
+pub(in crate::binding) fn selected(mut expression: &ScalarExpr) -> bool {
+    // Assigned result metadata preserves the wrapped input's composite identity requirements.
+    while let ScalarExpr::Collated { expr, .. } = expression {
+        expression = expr;
+    }
     matches!(
         expression,
         ScalarExpr::Cast { .. } | ScalarExpr::TypedLiteral { .. } | ScalarExpr::CompositeRow { .. }

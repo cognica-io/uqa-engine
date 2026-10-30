@@ -178,3 +178,98 @@ fn native_composite_constructor_admits_constant_output_and_recovers(#[case] prov
 fn native_composite_field_copy_admits_constant_output_and_recovers(#[case] provider: Provider) {
     verify(provider, true);
 }
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_prepared_collated_fields_keep_owned_identity_across_rename(#[case] provider: Provider) {
+    for mode in ["force_generic_plan", "force_custom_plan"] {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = provider.open(&directory.path().join("prepared-field.db"));
+        engine.sql("CREATE TYPE saved_pair AS(a integer, b text); CREATE TABLE saved_rows(v saved_pair CHECK ((v).b <> 'bad')); INSERT INTO saved_rows VALUES('(1,x)'); PREPARE saved(text) AS SELECT (v).b AS picked FROM saved_rows WHERE (v).b=$1", &[]).unwrap();
+        engine
+            .sql(&format!("SET plan_cache_mode={mode}"), &[])
+            .unwrap();
+        let read = || {
+            let result = engine.sql("EXECUTE saved('x')", &[]).unwrap();
+            assert_eq!(result.columns, ["picked"]);
+            let picked = match &result.rows[0]["picked"] {
+                Value::Datum(datum) => uqa_sql::expr::datums::read(datum).unwrap(),
+                value => value.clone(),
+            };
+            assert_eq!(picked, Value::Str("x".into()));
+        };
+        read();
+        let retained = engine.session.prepared.read()["saved"].logical_plan.clone();
+        let retention = engine.query_retention_control().unwrap();
+        let memory = retention.memory();
+        let peer = match provider {
+            Provider::Memory => None,
+            _ => Some(engine.new_session().unwrap()),
+        };
+        peer.as_ref()
+            .unwrap_or(&engine)
+            .sql("ALTER TYPE saved_pair RENAME ATTRIBUTE b TO label", &[])
+            .unwrap();
+        read();
+        assert_eq!(
+            engine
+                .sql("SELECT (v).b FROM saved_rows", &[])
+                .unwrap_err()
+                .sqlstate(),
+            Some("42703")
+        );
+        engine
+            .sql(
+                "BEGIN; ALTER TYPE saved_pair RENAME ATTRIBUTE label TO transient",
+                &[],
+            )
+            .unwrap();
+        read();
+        engine.sql("ROLLBACK", &[]).unwrap();
+        read();
+        let entry = engine.session.prepared.read()["saved"].clone();
+        if mode == "force_generic_plan" {
+            assert_eq!(entry.generic_plans, 4);
+            assert_eq!(entry.custom_plans, 0);
+        } else {
+            assert_eq!(entry.generic_plans, 0);
+            assert_eq!(entry.custom_plans, 4);
+        }
+        drop(entry);
+        let mut selected = 0;
+        retained.visit_scalar_expressions(&mut |root| {
+            root.visit(&mut |node| {
+                if let ScalarExpr::Func {
+                    binding: Some(binding),
+                    args,
+                    ..
+                } = node
+                {
+                    if binding.dispatch == Some(FunctionDispatch::FieldSelect) {
+                        assert_eq!(binding.composite_field().unwrap().number, 2);
+                        assert!(
+                            matches!(&args[1], ScalarExpr::Literal(Value::Str(name)) if name == "b")
+                        );
+                        selected += 1;
+                    }
+                }
+            });
+        });
+        assert_eq!(selected, 2);
+        if let Some(peer) = &peer {
+            peer.close().unwrap();
+        }
+        drop(peer);
+        engine.close().unwrap();
+        drop(engine);
+        assert!(
+            memory.used() > 0,
+            "the retained logical plan still owns its payload"
+        );
+        drop(retained);
+        assert_eq!(memory.used(), 0);
+    }
+}

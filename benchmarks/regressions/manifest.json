@@ -31898,6 +31898,35 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prepared_collated_fields_retain_attribute_identity_through_owned_projection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/prepared/composites/tests/ownership.rs",
+      "capability": "Retained composite input identity",
+      "workload": "Prepare collated field selection, concatenated selections and a modifier cast; rename the selected descriptor and project the owned logical plan.",
+      "invariant": "Retain the original attribute number and collation, preserve aliases and envelope count, leave the source immutable and release all request-owned payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_prepared_collated_fields_keep_owned_identity_across_rename",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/composite_constants.rs",
+      "capability": "Retained composite input identity",
+      "workload": "Force generic and custom prepared plans on four providers, rename a composite attribute in the memory session or an independent persistent-provider peer and across rollback, then close the sessions while retaining the original logical input.",
+      "invariant": "Prepared calls retain selected attribute identity and output names; fresh old-name syntax fails with 42703, counters follow the selected policy, and the final retained owner releases its request memory.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }
