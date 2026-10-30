@@ -158,3 +158,40 @@ impl Engine {
         }
     }
 }
+
+impl Engine {
+    /// Retain a table's immutable declaration generation after the original catalog and data refreshes, releasing registry and column guards before callbacks.
+    pub(crate) fn table_column_snapshot_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<std::sync::Arc<Vec<uqa_sql::ast::ColumnDef>>>, SQLError> {
+        control.check()?;
+        self.synchronize_table_catalog()
+            .and_then(|()| self.synchronize_table_data())
+            .map_err(|error| {
+                match uqa_execution::storage_errors::storage_error(
+                    "read table declarations",
+                    &error,
+                ) {
+                    SQLError::Internal(_) => match control.format(format_args!("{error}")) {
+                        Ok(message) => SQLError::Internal(message.into_parts().0),
+                        Err(error) => error.into(),
+                    },
+                    diagnostic => diagnostic,
+                }
+            })?;
+        let candidates =
+            uqa_sql::catalog::resolution::candidates::relation_lookup_candidates_with_control(
+                self, name, control,
+            )?;
+        let table = {
+            let tables = self.storage.tables.read();
+            candidates
+                .iter()
+                .find_map(|relation| tables.get(relation).cloned())
+        };
+        control.check()?;
+        Ok(table.map(|table| table.columns.snapshot()))
+    }
+}

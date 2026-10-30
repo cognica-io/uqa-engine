@@ -88,3 +88,24 @@ impl OwnedScalarExpr {
         Ok(self)
     }
 }
+
+impl OwnedScalarExpr {
+    /// Remove only a column reference's qualifier, preserving its name buffer and parser position.
+    pub fn remove_reference_qualifier(mut self, control: &ProductionControl<'_>) -> Result<Self> {
+        self.assert_owner(control);
+        control.check()?;
+        let ScalarExpr::QualifiedColumn { qualifier, column } = std::mem::replace(
+            &mut self.expression,
+            ScalarExpr::Literal(uqa_core::Value::Null),
+        ) else {
+            panic!("qualifier removal requires a qualified column")
+        };
+        let bytes = qualifier.capacity();
+        drop(qualifier);
+        self.expression = ScalarExpr::Column(column);
+        if let Some(memory) = &mut self.memory {
+            drop(memory.direct.split(bytes));
+        }
+        Ok(self)
+    }
+}

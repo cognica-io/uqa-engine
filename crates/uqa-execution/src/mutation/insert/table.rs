@@ -115,12 +115,19 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     }
     let resources = context.query.source.ctes.production_resources()?;
     let control = resources.control();
-    let prepared_statement = uqa_sql::semantics::conflict::prepare_inference_predicate(
-        planning.inference,
-        stmt,
-        params,
-    )?;
-    let stmt = prepared_statement.as_ref();
+    let prepared_statement =
+        uqa_sql::semantics::conflict::prepare_inference_predicate_with_control(
+            planning.inference,
+            stmt,
+            params,
+            &control,
+        )?;
+    let stmt = prepared_statement.as_ref().map_or(stmt, |command| {
+        let uqa_sql::plan::CommandPlan::Insert(insert) = &**command else {
+            unreachable!("INSERT inference")
+        };
+        insert
+    });
     if let Some(conflict) = stmt.on_conflict.as_ref() {
         uqa_sql::semantics::conflict::validate_conflict_target(
             planning.inference.catalog,

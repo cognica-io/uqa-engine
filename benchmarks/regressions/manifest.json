@@ -31730,6 +31730,174 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_inference_retains_exact_private_command_storage_and_promotes_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/conflict/production_tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_inference_preserves_bypass_and_validation_callback_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/conflict/production_tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_inference_releases_private_work_on_binding_failure_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/conflict/production_tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_inference_rejects_large_unobserved_command_fields_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/conflict/production_tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_observation_borrows_large_unrelated_payloads_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/production/tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_observation_preserves_child_order_and_stops_at_the_first_callback_error",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/production/tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_conflict_inference_admits_the_complete_private_command",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/conflict_inference.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_conflict_metadata_borrows_defaults_and_releases_catalog_guards",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/conflict_inference.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_conflict_metadata_preserves_sequence_dependency_observation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/conflict_inference.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_conflict_inference_preserves_postgresql_binding_effects_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/conflict_inference.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Private INSERT inference, borrowed table declarations and stored sequence dependency observation.",
+      "invariant": "Admit private destinations before copying, transfer surviving payload owners, preserve callback and diagnostic order, and recover after rejection, cancellation or unwind.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_inference_retires_an_expression_buffer_after_all_columns_are_promoted",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/conflict/production_tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Completed column promotion and oversized invalid or missing sequence references.",
+      "invariant": "Retire empty expression buffers and admit diagnostic text before copying while retaining exact sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_sequence_reference_errors_admit_their_selected_text_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/production/tests.rs",
+      "capability": "Conflict inference allocation ownership",
+      "workload": "Completed column promotion and oversized invalid or missing sequence references.",
+      "invariant": "Retire empty expression buffers and admit diagnostic text before copying while retaining exact sibling ownership.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

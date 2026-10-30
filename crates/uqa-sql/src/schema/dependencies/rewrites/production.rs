@@ -4,67 +4,43 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Read sequence dependencies through the shared schema traversal with admitted syntax scratch.
+//! Borrow sequence dependencies through the same ordered traversal as stored-expression rewrites.
 
 use crate::{
     ast::{ColumnType, Expr},
     SQLError,
 };
-use uqa_core::{
-    memory::{MemoryReservation, ProductionControl},
-    Value,
-};
+use uqa_core::{memory::ProductionControl, Value};
+
+#[cfg(test)]
+mod tests;
 
 pub fn visit_sequence_function_references_with_control(
     expression: &Expr,
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    // Keep syntax storage ahead of its lease in drop order, including early traversal failures.
-    struct Scratch {
-        expression: Expr,
-        _memory: Option<MemoryReservation>,
-    }
-    let (expression, memory) =
-        crate::plan::copy::copy_syntax_with_control(expression, control)?.into_parts();
-    let mut scratch = Scratch {
-        expression,
-        _memory: memory,
-    };
-    let mut failure = None;
-    let status = super::super::walk_schema_expr_mut(&mut scratch.expression, &mut |node| {
-        let result = (|| {
-            control.check()?;
-            if let Expr::Func {
-                name,
-                binding,
-                args,
-                ..
-            } = node
-            {
-                if super::is_sequence_function(name, binding.as_ref()) {
-                    if let Some(reference) = args
-                        .first()
-                        .map(|arg| literal(arg, control))
-                        .transpose()?
-                        .flatten()
-                    {
-                        visit(reference)?;
-                    }
+    super::super::walk_schema_expr_with_control(expression, control, &mut |node| {
+        if let Expr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } = node
+        {
+            if super::is_sequence_function(name, binding.as_ref()) {
+                if let Some(reference) = args
+                    .first()
+                    .map(|arg| literal(arg, control))
+                    .transpose()?
+                    .flatten()
+                {
+                    visit(reference)?;
                 }
             }
-            Ok::<_, SQLError>(())
-        })();
-        if let Err(error) = result {
-            failure = Some(error);
-            return Err(String::new());
         }
         Ok(())
-    });
-    if let Some(error) = failure {
-        return Err(error);
-    }
-    status.map_err(SQLError::Internal)
+    })
 }
 
 fn literal<'a>(

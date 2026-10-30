@@ -20,11 +20,19 @@ pub fn resolve_stored_sequence_reference_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, SQLError> {
     control.check()?;
-    let parsed = RelationIdentity::try_borrowed_reference(reference).map_err(|error| {
-        SQLError::Internal(format!(
-            "invalid persisted sequence reference `{reference}`: {error}"
-        ))
-    })?;
+    let parsed = match RelationIdentity::try_borrowed_reference(reference) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            return Err(SQLError::Internal(
+                control
+                    .format(format_args!(
+                        "invalid persisted sequence reference `{reference}`: {error}"
+                    ))?
+                    .into_parts()
+                    .0,
+            ))
+        }
+    };
     let mut candidates = ProductionVec::new(*control);
     catalog.visit_sequence_names_with_control(control, &mut |candidate| {
         if parsed.name == uqa_core::RelationName::decoded(&candidate.name)
@@ -41,9 +49,14 @@ pub fn resolve_stored_sequence_reference_with_control(
         return Ok(control.copy_text(&candidates[0])?);
     }
     if candidates.is_empty() {
-        return Err(SQLError::Internal(format!(
-            "dangling persisted sequence reference `{reference}`"
-        )));
+        return Err(SQLError::Internal(
+            control
+                .format(format_args!(
+                    "dangling persisted sequence reference `{reference}`"
+                ))?
+                .into_parts()
+                .0,
+        ));
     }
     let mut message = ProductionString::new(*control);
     let formatted = write!(

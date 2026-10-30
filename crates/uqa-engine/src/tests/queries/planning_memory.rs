@@ -431,4 +431,5 @@ mod view_privileges;
 
 mod query_arenas;
 
+mod conflict_inference;
 mod mutation_privileges;

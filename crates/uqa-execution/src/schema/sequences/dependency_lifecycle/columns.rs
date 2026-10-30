@@ -16,7 +16,23 @@ impl SequenceDependencyContext<'_> {
         columns: &[ColumnDef],
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Vec<String>>, SQLError> {
+        self.observe_column_sequence_references_with_control(columns, control)?;
+        let mut names = ProductionVec::new(*control);
         for column in columns {
+            names.push_produced(control.copy_text(&column.name)?)?;
+        }
+        Ok(names.finish()?)
+    }
+
+    /// Preserve default-then-generated dependency observation without materializing replacement expression trees.
+    pub fn observe_column_sequence_references_with_control(
+        &self,
+        columns: &[ColumnDef],
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        for column in columns {
+            control.check()?;
             for expression in column.default.iter().chain(
                 column
                     .generated
@@ -34,10 +50,6 @@ impl SequenceDependencyContext<'_> {
                 })?;
             }
         }
-        let mut names = ProductionVec::new(*control);
-        for column in columns {
-            names.push_produced(control.copy_text(&column.name)?)?;
-        }
-        Ok(names.finish()?)
+        Ok(())
     }
 }

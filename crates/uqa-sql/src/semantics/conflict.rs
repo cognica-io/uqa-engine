@@ -12,19 +12,43 @@ use crate::{
     plan::AggregateClassifier,
     plan::{ConflictPlan, ExpressionPlan, InsertPlan},
     routines::RoutineResolution,
-    RowSchema, SQLError, SQLParam, ScalarExpr as Expr,
+    SQLError, SQLParam, ScalarExpr as Expr,
 };
 use std::collections::BTreeSet;
-use uqa_core::Value;
+use uqa_core::{memory::ProductionControl, Value};
+
+mod production;
+pub use production::prepare_inference_predicate_with_control;
 
 pub trait ConflictCatalog {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
+    /// Lend declaration metadata after observing the same stored sequence dependencies as a description. Consumers inspect names, types and constraints, never rewritten default expressions.
+    fn with_column_metadata_with_control(
+        &self,
+        table: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let Some(columns) = self.try_describe_table(table).map_err(SQLError::Internal)? else {
+            return Ok(false);
+        };
+        read(&columns)?;
+        Ok(true)
+    }
     fn enforced_keys(&self, table: &str) -> Result<Vec<EnforcedKey>, String>;
     fn try_declared_table_constraints(&self, table: &str) -> Result<TableConstraintSet, String>;
 }
 /// Capture the stored-expression catalog scope only when an inference expression requires binding.
 pub trait InferenceBindingScope {
     fn binding_scope(&self) -> Result<BindingSnapshot, SQLError>;
+    fn binding_scope_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::binding::production::ControlledBindingSnapshot, SQLError> {
+        control.check()?;
+        self.binding_scope()?.copy_with_control(control)
+    }
 }
 #[derive(Clone, Copy)]
 pub struct InferenceContext<'a> {
@@ -40,152 +64,32 @@ pub fn prepare_inference_predicate<'a>(
     statement: &'a InsertPlan,
     params: &[SQLParam],
 ) -> Result<std::borrow::Cow<'a, InsertPlan>, SQLError> {
-    if statement
-        .on_conflict
-        .as_ref()
-        .is_none_or(|conflict| conflict.predicate.is_none() && conflict.expressions.is_empty())
-    {
+    let control = ProductionControl::uncontrolled();
+    let Some(command) =
+        prepare_inference_predicate_with_control(context, statement, params, &control)?
+    else {
         return Ok(std::borrow::Cow::Borrowed(statement));
-    }
-    let columns = context
-        .catalog
-        .try_describe_table(&statement.table)
-        .map_err(SQLError::Internal)?
-        .ok_or_else(|| SQLError::UnknownTable(statement.table.clone()))?;
-    let schema = RowSchema::with_column_definitions(Some(&statement.target_qualifier), &columns);
-    let mut statement = statement.clone();
-    if let Some(conflict) = &mut statement.on_conflict {
-        for expression in conflict
-            .expressions
-            .iter_mut()
-            .chain(conflict.predicate.iter_mut().map(Box::as_mut))
-        {
-            prepare_inference_expression(
-                context,
-                expression,
-                &statement.target_qualifier,
-                &schema,
-                &columns,
-                params,
-            )?;
-        }
-        // A rewritten view expression can resolve to a simple base-table attribute.
-        let expressions = std::mem::take(&mut conflict.expressions);
-        for expression in expressions {
-            if let Expr::Column(column) = expression {
-                conflict.conflict_columns.push(column.to_string());
-            } else {
-                conflict.expressions.push(expression);
-            }
-        }
-    }
-    Ok(std::borrow::Cow::Owned(statement))
-}
-
-fn prepare_inference_expression(
-    context: InferenceContext<'_>,
-    expression: &mut Expr,
-    qualifier: &str,
-    schema: &RowSchema,
-    columns: &[crate::ast::ColumnDef],
-    params: &[SQLParam],
-) -> Result<(), SQLError> {
-    let mut has_subquery = false;
-    expression.visit(&mut |part| {
-        has_subquery |= matches!(
-            part,
-            Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
-        );
-    });
-    if has_subquery {
-        return Err(predicate_error(
-            "0A000",
-            "cannot use subquery in index inference",
-        ));
-    }
-    if crate::semantics::aggregates::contains_aggregate(context.aggregates, expression) {
-        return Err(predicate_error(
-            "42803",
-            "aggregate functions are not allowed in index inference",
-        ));
-    }
-    if crate::semantics::windows::expr_has_window(expression) {
-        return Err(predicate_error(
-            "42P20",
-            "window functions are not allowed in index inference",
-        ));
-    }
-    let mut plan = ExpressionPlan {
-        scalar: expression.clone(),
-        subqueries: Vec::new(),
     };
-    let binding = context.binding.binding_scope()?;
-    crate::binding::bind_expression_plan_routines_for_storage(
-        context.routines,
-        &mut plan,
-        params,
-        &binding.context(),
-        schema,
-    )?;
-    crate::plan::rewrite_scalar_expression(&mut plan.scalar, &mut |expression| {
-        if let Expr::QualifiedColumn {
-            qualifier: source,
-            column,
-        } = expression
-        {
-            if source == qualifier {
-                *expression = Expr::Column(column.clone());
-            }
-        }
-    });
-    crate::plan::rewrite_scalar_expression(&mut plan.scalar, &mut |expression| {
-        if let Expr::Cast { expr, ty, .. } = expression {
-            if let Expr::Column(name) = expr.as_ref() {
-                if columns.iter().any(|column| {
-                    column.name == *name
-                        && crate::ast::ColumnType::from_sql_name(ty).ok().as_ref()
-                            == Some(&column.ty)
-                }) {
-                    *expression = Expr::Column(name.clone());
-                }
-            }
-        }
-    });
-    *expression = inference_identity(plan.scalar);
-    Ok(())
+    let crate::plan::CommandPlan::Insert(insert) = command
+        .into_uncontrolled()
+        .expect("ordinary inference command")
+    else {
+        unreachable!("INSERT inference")
+    };
+    Ok(std::borrow::Cow::Owned(*insert))
 }
 
-fn inference_identity(mut expression: Expr) -> Expr {
-    // Inference precedes optimization: result envelopes derive from these bound inputs, while stored index syntax retains the explicit COLLATE nodes, typed constants and routine identities themselves.
-    crate::plan::rewrite_scalar_expression(&mut expression, &mut |node| {
-        while matches!(node, Expr::Collated { .. }) {
-            let Expr::Collated { expr, .. } = std::mem::replace(node, Expr::Literal(Value::Null))
-            else {
-                unreachable!("derived result envelope");
-            };
-            *node = *expr;
-        }
-        // Coercion display form is not identity, but the conversion and destination type are.
-        if let Expr::Cast { implicit, .. } = node {
-            *implicit = false;
-        }
-        // An explicit COLLATE remains a node of its own, and the same call over one relation derives the same input collation, so the recorded selection is not identity. A key stored before calls recorded it still matches.
-        if let Expr::Func {
-            binding: Some(binding),
-            ..
-        } = node
-        {
-            binding.input_collation = None;
-        }
-    });
-    expression
-}
-
-fn predicate_error(sqlstate: &str, message: &str) -> SQLError {
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: message.into(),
-    }
+fn inference_identity(expression: Expr) -> Expr {
+    let control = ProductionControl::uncontrolled();
+    production::inference_identity_owned(
+        crate::plan::OwnedScalarExpr::uncontrolled(expression),
+        &control,
+    )
+    .expect("ordinary inference identity")
+    .finish(&control)
+    .expect("ordinary inference scalar")
+    .into_uncontrolled()
+    .expect("ordinary inference ownership")
 }
 
 /// Match the inference expressions analyzed by [`prepare_inference_predicate`] against the stored unique keys.
@@ -430,6 +334,9 @@ fn validate_conflict_columns(
 
 #[cfg(test)]
 mod inference;
+
+#[cfg(test)]
+mod production_tests;
 
 #[cfg(test)]
 mod tests {

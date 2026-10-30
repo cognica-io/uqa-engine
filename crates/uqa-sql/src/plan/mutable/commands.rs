@@ -18,6 +18,7 @@ use uqa_core::{
 
 mod assignments;
 pub(in crate::plan::mutable) mod children;
+mod conflict;
 mod construction;
 mod executable;
 mod inputs;

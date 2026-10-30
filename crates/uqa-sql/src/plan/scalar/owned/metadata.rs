@@ -94,3 +94,23 @@ impl OwnedScalarExpr {
         Ok(self)
     }
 }
+
+impl OwnedScalarExpr {
+    /// Set only a cast's display origin; its destination spelling and complete child retain their existing owners.
+    pub fn set_cast_implicit(
+        mut self,
+        implicit: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        self.assert_owner(control);
+        control.check()?;
+        let ScalarExpr::Cast {
+            implicit: current, ..
+        } = &mut self.expression
+        else {
+            panic!("cast origin requires a cast")
+        };
+        *current = implicit;
+        Ok(self)
+    }
+}
