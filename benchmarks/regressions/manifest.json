@@ -30371,6 +30371,58 @@
       "capability": "Native rule input admission",
       "workload": "Whole rows, fields, row stars, scalar subqueries and local columns named NEW.",
       "invariant": "Scoped reference substitution preserves original plan structure and lazy top-level binding with exact final allocation ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_sequence_dispatch_preserves_bound_and_unbound_session_calls",
+      "source": "crates/uqa-sql/src/expr/call_dispatch/production/tests/sequences.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Controlled sequence dispatch",
+      "workload": "Bound and unbound NEXTVAL, CURRVAL, LASTVAL and SETVAL, including NULL arguments.",
+      "invariant": "The admitted dispatcher invokes the original session hook exactly once and retains the same values and SETVAL flags."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_sequence_validation_preserves_error_order_before_session_effects",
+      "source": "crates/uqa-sql/src/expr/call_dispatch/production/tests/sequences.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Controlled sequence dispatch",
+      "workload": "Invalid sequence argument counts and SETVAL boolean arguments.",
+      "invariant": "Admission preserves ordinary typed diagnostics and performs no session effect after validation failure."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_sequence_names_borrow_retained_text_and_admit_formatting_before_effects",
+      "source": "crates/uqa-sql/src/expr/call_dispatch/production/tests/sequences.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Controlled sequence dispatch",
+      "workload": "A retained four MiB sequence name, exhausted formatting allowance and recovery.",
+      "invariant": "Text names retain pointer identity without a second payload copy; rejected conversion precedes session effects."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "controlled_sequence_cancellation_stops_before_session_effects",
+      "source": "crates/uqa-sql/src/expr/call_dispatch/production/tests/sequences.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Controlled sequence dispatch",
+      "workload": "Either cancelled owner with admitted call arguments and an independent retained value.",
+      "invariant": "Cancelled dispatch releases its arguments, invokes no session hook and preserves the sibling reservation."
     }
   ]
 }

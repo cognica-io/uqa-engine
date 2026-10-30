@@ -6,7 +6,7 @@
 
 //! Stateful sequence dispatch and built-in function-family routing.
 
-use super::{to_i64, value_to_string, EvalContext, Result, SQLError, Value};
+use super::{to_i64, value_to_string_with_control, EvalContext, Result, SQLError, Value};
 
 use uqa_core::memory::{Produced, ProductionControl};
 
@@ -64,6 +64,17 @@ pub(super) fn eval_sequence_function(
     args: &[Value],
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
+    eval_sequence_function_with_control(name, args, ctx, &ProductionControl::uncontrolled())
+        .map(|value| value.into_uncontrolled().expect("ordinary sequence result"))
+}
+
+pub(super) fn eval_sequence_function_with_control(
+    name: &str,
+    args: &[Value],
+    ctx: &EvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let engine = ctx.engine.ok_or_else(|| {
         SQLError::Unsupported(format!(
             "sequence function `{name}` requires an engine hook on the EvalContext"
@@ -87,14 +98,13 @@ pub(super) fn eval_sequence_function(
         });
     }
     if args.iter().any(|argument| matches!(argument, Value::Null)) {
-        return Ok(Value::Null);
+        return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
     let value = match name {
-        "nextval" => engine.nextval(&value_to_string(&args[0])?),
-        "currval" => engine.currval(&value_to_string(&args[0])?),
+        "nextval" => with_sequence_name(&args[0], control, |name| engine.nextval(name)),
+        "currval" => with_sequence_name(&args[0], control, |name| engine.currval(name)),
         "lastval" => engine.lastval(),
-        "setval" => {
-            let seq_name = value_to_string(&args[0])?;
+        "setval" => with_sequence_name(&args[0], control, |seq_name| {
             let n = to_i64(&args[1])?;
             let is_called = match args.get(2) {
                 None => true,
@@ -105,11 +115,25 @@ pub(super) fn eval_sequence_function(
                     )));
                 }
             };
-            engine.setval(&seq_name, n, is_called)
-        }
+            engine.setval(seq_name, n, is_called)
+        }),
         _ => unreachable!("sequence function name was validated above"),
     }?;
-    Ok(Value::Int(value))
+    Ok(control.finish(Value::Int(value), control.empty_reservation())?)
+}
+
+fn with_sequence_name<T>(
+    value: &Value,
+    control: &ProductionControl<'_>,
+    read: impl FnOnce(&str) -> Result<T>,
+) -> Result<T> {
+    control.check()?;
+    if let Value::Str(name) = value {
+        read(name)
+    } else {
+        let name = value_to_string_with_control(value, control)?;
+        read(&name)
+    }
 }
 
 /// `collation` is the call's input collation (`PostgreSQL`'s `inputcollid`), which collation-dependent built-ins consume.

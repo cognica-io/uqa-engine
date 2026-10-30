@@ -149,6 +149,11 @@ fn eval_scalar(
     context: &super::EvalContext<'_>,
     collation: u32,
 ) -> Result<Produced<Value>> {
+    if matches!(name, "nextval" | "currval" | "lastval" | "setval") {
+        return super::super::scalar_dispatch::eval_sequence_function_with_control(
+            name, arguments, context, control,
+        );
+    }
     if matches!(name, "coalesce" | "nullif" | "greatest" | "least") {
         return super::super::scalar_core::selection_with_context(
             name, arguments, control, context,
