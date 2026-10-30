@@ -531,7 +531,7 @@ impl RuleQueryResolver {
         let mut columns = Vec::with_capacity(definitions.len());
         let mut old = BTreeMap::new();
         let mut expressions = BTreeMap::new();
-        for (position, column) in definitions.iter().enumerate() {
+        for column in &definitions {
             let ty = column.ty.catalog_name();
             let null = Expr::Cast {
                 implicit: true,
@@ -542,8 +542,6 @@ impl RuleQueryResolver {
             let metadata = crate::semantics::rules::binding::RuleColumnMetadata {
                 ty: column.ty.clone(),
                 collation_oid: column.collation_oid,
-                uses_document_id: false,
-                position,
             };
             if insert
                 .columns

@@ -20,6 +20,66 @@ use uqa_sql::{
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
+fn native_rule_actions_preserve_every_internal_char_byte(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("rule-byte-values.db"));
+    engine
+        .sql(
+            "CREATE TABLE rule_bytes(id integer, c \"char\");
+        CREATE TABLE rule_byte_log(event text, id integer, old_value integer, new_value integer);
+        CREATE RULE capture_insert AS ON INSERT TO rule_bytes DO ALSO
+            INSERT INTO rule_byte_log VALUES ('I', NEW.id, NULL, NEW.c::integer);
+        CREATE RULE capture_update AS ON UPDATE TO rule_bytes DO ALSO
+            INSERT INTO rule_byte_log SELECT 'U', NEW.id, OLD.c::integer, NEW.c::integer;
+        CREATE RULE capture_delete AS ON DELETE TO rule_bytes DO ALSO
+            INSERT INTO rule_byte_log VALUES ('D', OLD.id, OLD.c::integer, NULL);
+        INSERT INTO rule_bytes SELECT n, (n - 128)::\"char\" FROM generate_series(0, 255) AS s(n);
+        UPDATE rule_bytes SET c = (127 - id)::\"char\";
+        DELETE FROM rule_bytes",
+            &[],
+        )
+        .unwrap();
+    let rows = engine
+        .sql(
+            "SELECT event, id, old_value, new_value FROM rule_byte_log ORDER BY event, id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(rows.rows.len(), 3 * 256, "{provider:?}");
+    for (index, event) in ["D", "I", "U"].into_iter().enumerate() {
+        for id in 0..256 {
+            let offset = index * 256 + id;
+            let id = i64::try_from(id).unwrap();
+            let old = match event {
+                "D" => Value::Int(127 - id),
+                "U" => Value::Int(id - 128),
+                _ => Value::Null,
+            };
+            let new = match event {
+                "I" => Value::Int(id - 128),
+                "U" => Value::Int(127 - id),
+                _ => Value::Null,
+            };
+            for (position, expected) in [Value::Str(event.into()), Value::Int(id), old, new]
+                .into_iter()
+                .enumerate()
+            {
+                assert_eq!(
+                    rows.value_at(offset, position),
+                    Some(&expected),
+                    "{provider:?}: {event}/{id}"
+                );
+            }
+        }
+    }
+    engine.close().unwrap();
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
 fn native_rule_binding_uses_the_original_allowance_and_releases_destinations(
     #[case] provider: Provider,
 ) {

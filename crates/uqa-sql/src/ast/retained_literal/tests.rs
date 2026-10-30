@@ -106,7 +106,23 @@ fn retained_input_preserves_serialization_type_collation_and_value_representatio
         ),
         Expr::Literal(Value::Str("z".repeat(4096))),
     ] {
-        let retained = RetainedInputLiteral::retain(ordinary.clone(), &Storage).unwrap();
+        let (value, declaration, collation) = match &ordinary {
+            Expr::TypedLiteral {
+                value,
+                ty,
+                collation_oid,
+                ..
+            } => (value.clone(), Some(ty.clone()), *collation_oid),
+            Expr::Literal(value) => (value.clone(), None, None),
+            _ => unreachable!(),
+        };
+        let retained =
+            Expr::RetainedLiteral(Box::new(RetainedInputLiteral(RetainedScalarLiteral::new(
+                Storage.retain(value).unwrap(),
+                Some(ColumnType::Text),
+                declaration,
+                collation,
+            ))));
         assert!(matches!(&retained, Expr::RetainedLiteral(_)));
         let bytes = serde_json::to_vec(&retained).unwrap();
         assert_eq!(bytes, serde_json::to_vec(&ordinary).unwrap());
@@ -129,19 +145,5 @@ fn retained_input_preserves_serialization_type_collation_and_value_representatio
                 Some(950)
             );
         }
-    }
-}
-
-#[test]
-fn retained_input_keeps_catalog_types_and_inline_literals_on_existing_paths() {
-    for ordinary in [
-        typed(Value::Str("x".repeat(4096)), "public.domain_text"),
-        Expr::Literal(Value::Int(42)),
-        Expr::Literal(Value::Null),
-    ] {
-        assert_eq!(
-            RetainedInputLiteral::retain(ordinary.clone(), &Storage).unwrap(),
-            ordinary
-        );
     }
 }

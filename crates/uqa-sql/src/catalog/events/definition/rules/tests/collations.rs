@@ -141,8 +141,6 @@ fn projected_rule_input_collations_remain_implicit() {
         let metadata = crate::semantics::rules::binding::RuleColumnMetadata {
             ty: ColumnType::Text,
             collation_oid: Some(oid),
-            uses_document_id: false,
-            position: 0,
         };
         let crate::plan::UnifiedPlan::Query(mut source) = crate::plan::UnifiedPlan::lower(
             crate::compile("SELECT 'x' COLLATE \"C\"")

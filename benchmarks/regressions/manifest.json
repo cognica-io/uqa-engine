@@ -5213,8 +5213,8 @@
       ],
       "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations.rs",
       "capability": "Runtime rule VALUES collation",
-      "workload": "Sixteen PostgreSQL VAR observations across INSERT, UPDATE and DELETE rules substitute actual event values and NULL fields.",
-      "invariant": "Typed value substitution preserves exact values, declared SQL types and implicit collation through AST and plan restoration."
+      "workload": "Sixteen PostgreSQL VAR observations across native INSERT, UPDATE and DELETE rule actions, populated and empty query inputs, and AST/IR restoration.",
+      "invariant": "The current query-input binder and attachment path preserve declared SQL types and implicit collation without materializing event rows as constants."
     },
     {
       "package": "uqa-sql",
@@ -5226,8 +5226,8 @@
       ],
       "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations.rs",
       "capability": "Set-oriented rule input metadata",
-      "workload": "Thirty-two PostgreSQL VAR observations cover source and action-result fields with both populated and empty private VALUES carriers.",
-      "invariant": "The declared collation and type survive runtime source binding and AST/plan restoration independently of input cardinality."
+      "workload": "Thirty-two PostgreSQL VAR observations cover source and action-result fields through the current INSERT/UPDATE/DELETE query-input path with populated and empty sources.",
+      "invariant": "Declared collation and type survive native input binding, executable attachment and AST/IR restoration independently of input cardinality."
     },
     {
       "package": "uqa-sql",
@@ -5279,7 +5279,7 @@
       "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/collations/expanded.rs",
       "capability": "Expanded event-field identity and scope",
       "workload": "Eighty independent PostgreSQL VAR observations cover parenthesized event fields, whole-row star expansion and a locally shadowing NEW relation with different collations.",
-      "invariant": "Scope-aware binding retains declared field types and implicit collations through actual and empty rule inputs and AST/plan restoration without replacing local bindings."
+      "invariant": "The current native input path retains declared field types and implicit collations through populated/empty sources and AST/IR restoration without replacing shadowing local bindings."
     },
     {
       "package": "uqa-execution",
@@ -18236,28 +18236,28 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
-      "test": "retained_rule_layout_keeps_declared_width_collation_and_whole_row_order",
+      "test": "native_rule_layout_keeps_declared_width_collation_and_whole_row_order",
       "cases": 1,
       "case_names": [
         ""
       ],
       "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests.rs",
-      "capability": "Bounded set-oriented rule inputs",
-      "workload": "Differently ordered text/SMALLINT columns, NULL fields and whole OLD/NEW records.",
-      "invariant": "Declared widths, collations, original field order and original event ordinal survive the internal source descriptor."
+      "capability": "Native rule input metadata",
+      "workload": "Unevaluated INSERT inputs with differently ordered SMALLINT/text columns and whole NEW references.",
+      "invariant": "The native query resolver keeps declared widths, implicit collation and physical event-column order before attaching expressions."
     },
     {
       "package": "uqa-sql",
       "kind": "lib",
-      "test": "retained_rule_input_rejects_an_unrelated_source_before_action_binding",
+      "test": "native_rule_inputs_keep_distinct_internal_relations",
       "cases": 1,
       "case_names": [
         ""
       ],
       "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests.rs",
-      "capability": "Bounded set-oriented rule inputs",
-      "workload": "Two distinct opaque owners with the same physical width.",
-      "invariant": "An unrelated descriptor cannot bind or execute an action."
+      "capability": "Native rule input identity",
+      "workload": "Bind the same SELECT rule action twice through actual INSERT query inputs.",
+      "invariant": "Each input has its own captured relation and all references in that action point to its own captured source."
     },
     {
       "package": "uqa-execution",
@@ -19371,7 +19371,7 @@
         ""
       ],
       "source": "crates/uqa-sql/src/ast/retained_literal/tests.rs",
-      "capability": "Retained rule input payloads",
+      "capability": "Retained syntax payloads",
       "workload": "A 1MiB frozen input cloned into 256 plans and lowered through a borrowed admitted path, followed by a 1-byte allowance and cancellation.",
       "invariant": "No clone or lowering decodes the shared value; live allocation remains below 256KiB and failed admission/cancellation preserve their typed errors."
     },
@@ -19384,22 +19384,9 @@
         ""
       ],
       "source": "crates/uqa-sql/src/ast/retained_literal/tests.rs",
-      "capability": "Retained rule input payloads",
+      "capability": "Retained syntax payloads",
       "workload": "Typed and untyped Unicode text through AST serialization, scalar lowering and evaluation.",
       "invariant": "Original JSON encoding, values, declared type and selected collation survive retained input storage."
-    },
-    {
-      "package": "uqa-sql",
-      "kind": "lib",
-      "test": "retained_input_keeps_catalog_types_and_inline_literals_on_existing_paths",
-      "cases": 1,
-      "case_names": [
-        ""
-      ],
-      "source": "crates/uqa-sql/src/ast/retained_literal/tests.rs",
-      "capability": "Retained rule input payloads",
-      "workload": "A named text domain and inline integer/NULL values.",
-      "invariant": "Catalog-defined values and inline literals preserve their existing AST representation and observation boundary."
     },
     {
       "package": "uqa-engine",
@@ -30131,6 +30118,22 @@
       "capability": "Rule RETURNING image scope",
       "workload": "Selected, unselected and missing scalar-subquery slots plus constant and empty projections.",
       "invariant": "Only selected outer scalar-query slots contribute image requirements; unused queries and constants do not add images."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_rule_actions_preserve_every_internal_char_byte",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_binding.rs",
+      "capability": "Native rule event-value preservation",
+      "workload": "All 256 internal char encodings pass through INSERT VALUES, UPDATE SELECT and DELETE VALUES rule actions on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Each provider delivers all 768 exact old/new signed byte values and SQL NULL images through its actual query-input execution path."
     }
   ]
 }

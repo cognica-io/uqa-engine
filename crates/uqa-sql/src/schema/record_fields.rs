@@ -13,7 +13,6 @@ mod ownership;
 #[cfg(test)]
 mod ownership_tests;
 pub use ownership::RecordFields;
-pub(crate) use ownership::RecordMemory;
 
 /// Comparison field types and a selectable tuple descriptor are independent. A set operation can select fields through its left input even when its rows do not share field types.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,23 +116,6 @@ impl RowSchema {
         self
     }
 
-    pub(crate) fn with_physical_record_metadata(
-        mut self,
-        fields: impl IntoIterator<Item = (usize, RecordMetadata)>,
-    ) -> Self {
-        for (slot, fields) in fields {
-            assert!(
-                slot < self.physical_width(),
-                "record metadata requires a physical slot"
-            );
-            Arc::make_mut(&mut self.index)
-                .cold
-                .record_fields
-                .insert(slot, fields);
-        }
-        self
-    }
-
     /// Preserve descriptors when a namespace boundary rebuilds the same logical columns in a compact physical row.
     pub fn with_record_fields_from(self, input: &Self) -> Self {
         let width = self.len().min(input.len());
@@ -172,7 +154,7 @@ mod tests {
         let fields: RecordFields =
             vec![Some(ColumnType::Integer), Some(ColumnType::BigInteger)].into();
         let descriptor = Arc::new(RecordDescriptor {
-            memory: RecordMemory::default(),
+            memory: ownership::RecordMemory::default(),
             types: fields.clone(),
             names: None,
             fields: vec![

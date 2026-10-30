@@ -5,10 +5,10 @@
 //
 
 //! Stored-rule lineage, column requirements, and event row types.
-use super::{action_binding::RuleSourceCatalog, binding::RuleColumnMetadata, RuleCatalog};
+use super::{action_binding::RuleSourceCatalog, RuleCatalog};
 use crate::semantics::returning::ReturningCatalog;
 use crate::{ast::RuleEvent, SQLError};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 #[derive(Clone, Copy)]
 pub struct RuleAnalysisContext<'a> {
     pub rules: &'a dyn RuleCatalog,
@@ -185,51 +185,6 @@ pub fn relation_rule_row_columns(
     } else {
         Ok(Some(columns))
     }
-}
-
-pub fn rule_columns(
-    context: RuleAnalysisContext<'_>,
-    table: &str,
-) -> Result<BTreeMap<String, RuleColumnMetadata>, SQLError> {
-    let columns = context
-        .returning
-        .try_describe_table_row_type(table)
-        .map_err(|error| SQLError::Internal(format!("read rule row type: {error}")))?;
-    if let Some(columns) = columns {
-        return Ok(columns
-            .into_iter()
-            .enumerate()
-            .map(|(position, column)| {
-                let uses_document_id = column.primary_key && column.ty.is_integer();
-                (
-                    column.name,
-                    RuleColumnMetadata {
-                        ty: column.ty,
-                        collation_oid: column.collation_oid,
-                        uses_document_id,
-                        position,
-                    },
-                )
-            })
-            .collect());
-    }
-    Ok(context
-        .sources
-        .rule_relation_definitions(table)?
-        .into_iter()
-        .enumerate()
-        .map(|(position, column)| {
-            (
-                column.name,
-                RuleColumnMetadata {
-                    ty: column.ty,
-                    collation_oid: column.collation_oid,
-                    uses_document_id: false,
-                    position,
-                },
-            )
-        })
-        .collect())
 }
 
 pub fn rule_returning_columns(

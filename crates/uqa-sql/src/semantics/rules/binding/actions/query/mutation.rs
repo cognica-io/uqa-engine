@@ -430,8 +430,6 @@ fn resolver(
             let metadata = crate::semantics::rules::binding::RuleColumnMetadata {
                 ty: column.ty.clone(),
                 collation_oid: column.collation_oid,
-                uses_document_id: false,
-                position,
             };
             expression.scalar = metadata.bind_input(expression.scalar);
             if let Some(rewrite) = rewrite {

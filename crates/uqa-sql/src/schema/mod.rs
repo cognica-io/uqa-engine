@@ -37,9 +37,7 @@ pub use collations::CollationBinding;
 use collations::Collations;
 pub use input_slots::InputSlots;
 pub use record_fields::RecordFields;
-pub(crate) use record_fields::{
-    RecordDescriptor, RecordFieldMetadata, RecordMemory, RecordMetadata,
-};
+pub(crate) use record_fields::{RecordDescriptor, RecordFieldMetadata, RecordMetadata};
 
 const NULL_SLOT: usize = usize::MAX;
 
