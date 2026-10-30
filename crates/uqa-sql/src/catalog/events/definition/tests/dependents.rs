@@ -91,7 +91,7 @@ fn column_dependencies_read_triggers_then_rules_and_include_when_references() {
         .insert(column_dependency());
     partitions.rules.insert(
         relation("parent"),
-        BTreeMap::from([("uses_child".into(), dependent)]),
+        BTreeMap::from([("uses_child".into(), dependent)]).into(),
     );
     let selected = partitions
         .context(&catalog.context())
@@ -115,7 +115,7 @@ fn column_drop_rejects_bound_dependencies_before_rewriting_sources() {
         .insert(column_dependency());
     partitions.rules.insert(
         relation("parent"),
-        BTreeMap::from([("uses_child".into(), dependent)]),
+        BTreeMap::from([("uses_child".into(), dependent)]).into(),
     );
     let result = partitions
         .context(&catalog.context())
@@ -151,7 +151,7 @@ fn removed_relation_candidates_include_referencing_constraints_and_preserve_orig
     ]);
     let rules = RuleCatalog::from([(
         relation("child"),
-        BTreeMap::from([("own_rule".into(), stored_rule("own_rule"))]),
+        BTreeMap::from([("own_rule".into(), stored_rule("own_rule"))]).into(),
     )]);
     let removed = removed_relation_events(&triggers, &rules, &relation("child"))
         .unwrap()

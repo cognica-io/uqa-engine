@@ -16,6 +16,7 @@ pub trait RuleSecurity {
     fn privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError>;
 }
 pub trait RuleStatements<S: Clone + 'static> {
+    fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
     fn execute(
         &self,
         action: uqa_sql::semantics::rules::binding::RuleAction,
@@ -64,6 +65,22 @@ pub struct ViewRuleContext<'a, S: Clone + 'static> {
 impl<S: Clone + 'static> Copy for ViewRuleContext<'_, S> {}
 
 impl<S: Clone + 'static> RuleContext<'_, S> {
+    pub(crate) fn capture_rules(
+        &self,
+        table: &str,
+        event: uqa_sql::ast::RuleEvent,
+    ) -> Result<uqa_sql::catalog::events::selection::CapturedRules, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        self.analysis
+            .rules
+            .capture_rules_with_control(table, event, &control)
+    }
+
     pub(super) fn execute_action(
         &self,
         statement: uqa_sql::ast::Statement,

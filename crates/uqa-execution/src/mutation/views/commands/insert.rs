@@ -131,10 +131,8 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     .mutation
                     .rules
                     .rules
-                    .analysis
-                    .rules
-                    .rules_for(relation, uqa_sql::ast::RuleEvent::Insert)?
-                    .is_empty()
+                    .capture_rules(relation, uqa_sql::ast::RuleEvent::Insert)?
+                    .is_empty()?
                 {
                     has_rules = true;
                     break;

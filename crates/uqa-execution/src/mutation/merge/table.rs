@@ -100,24 +100,19 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
         &target_table,
         crate::row_locks::RelationLockMode::RowExclusive,
     )?;
-    if [
+    let mut has_rules = false;
+    for event in [
         uqa_sql::ast::RuleEvent::Insert,
         uqa_sql::ast::RuleEvent::Update,
         uqa_sql::ast::RuleEvent::Delete,
-    ]
-    .into_iter()
-    .map(|event| {
-        mutation
+    ] {
+        has_rules |= !mutation
             .rules
             .rules
-            .analysis
-            .rules
-            .rules_for(&target_table, event)
-    })
-    .collect::<Result<Vec<_>, SQLError>>()?
-    .iter()
-    .any(|rules| !rules.is_empty())
-    {
+            .capture_rules(&target_table, event)?
+            .is_empty()?;
+    }
+    if has_rules {
         let relation =
             uqa_core::RelationIdentity::from_legacy_name(&target_table).map_err(|error| {
                 SQLError::Internal(format!("decode MERGE relation `{target_table}`: {error}"))

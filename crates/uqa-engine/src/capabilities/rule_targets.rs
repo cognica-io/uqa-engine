@@ -20,6 +20,37 @@ impl uqa_sql::semantics::rules::RuleCatalog for Engine {
     fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
         self.event_lookup_context().rules_for(table, event)
     }
+    fn capture_rules(
+        &self,
+        table: &str,
+        event: RuleEvent,
+    ) -> Result<uqa_sql::catalog::events::selection::CapturedRules, SQLError> {
+        let retained = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
+        self.capture_rules_with_control(table, event, &control)
+    }
+    fn capture_rules_with_control(
+        &self,
+        table: &str,
+        event: RuleEvent,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::catalog::events::selection::CapturedRules, SQLError> {
+        let relation = self
+            .event_analysis_context()
+            .resolve_rule_relation_with_control(table, control)?;
+        let replica = self.session_replication_role_is_replica_with_control(control)?;
+        uqa_sql::catalog::events::selection::CapturedRules::from_catalog(
+            self.durable.rules.snapshot(),
+            relation,
+            event,
+            replica,
+            control,
+        )
+    }
     fn resolve_mutation_target(&self, name: &str, bound: bool) -> Result<String, SQLError> {
         self.resolve_mutation_target_name(name, bound)
     }

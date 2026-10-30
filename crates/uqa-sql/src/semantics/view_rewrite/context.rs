@@ -30,6 +30,25 @@ pub trait ViewRewriteCatalog {
     fn try_describe_table(&self, name: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     fn try_table_columns(&self, name: &str) -> Result<Vec<String>, String>;
     fn rules_for(&self, name: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError>;
+    fn capture_rules(
+        &self,
+        name: &str,
+        event: RuleEvent,
+    ) -> Result<crate::catalog::events::selection::CapturedRules, SQLError> {
+        self.capture_rules_with_control(name, event, &ProductionControl::uncontrolled())
+    }
+    fn capture_rules_with_control(
+        &self,
+        name: &str,
+        event: RuleEvent,
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::catalog::events::selection::CapturedRules, SQLError> {
+        control.check()?;
+        crate::catalog::events::selection::CapturedRules::from_external(
+            self.rules_for(name, event)?,
+            control,
+        )
+    }
     fn rule_definitions_for(
         &self,
         name: &str,
@@ -274,25 +293,20 @@ pub(super) fn relation_suppresses_original_query(
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    Ok(services
+    services
         .catalog
-        .rules_for(table, event)?
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+        .capture_rules(table, event)?
+        .any(|rule| rule.definition.instead && rule.definition.condition.is_none())
 }
 pub(super) fn relation_has_returning_provider(
     services: ViewRewriteContext<'_>,
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    Ok(services
-        .catalog
-        .rules_for(table, event)?
-        .iter()
-        .any(|rule| {
-            rule.definition
-                .actions
-                .iter()
-                .any(crate::semantics::rules::statement_has_returning)
-        }))
+    services.catalog.capture_rules(table, event)?.any(|rule| {
+        rule.definition
+            .actions
+            .iter()
+            .any(crate::semantics::rules::statement_has_returning)
+    })
 }

@@ -29,11 +29,13 @@ pub fn relation_suppresses_original_query(
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    Ok(context
-        .rules
-        .rules_for(table, event)?
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
+        if rule.definition.instead && rule.definition.condition.is_none() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn relation_rules_reference_row(
@@ -41,9 +43,10 @@ pub fn relation_rules_reference_row(
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    for rule in context.rules.rules_for(table, event)? {
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
         let condition_references_row = if rule.bound_condition_plan().is_some() {
-            rule_condition_plan_references_row(&rule)
+            rule_condition_plan_references_row(rule)
         } else {
             rule.definition
                 .condition
@@ -73,11 +76,13 @@ pub fn relation_rules_require_event_rows(
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    Ok(context
-        .rules
-        .rules_for(table, event)?
-        .iter()
-        .any(|rule| rule.definition.condition.is_some() || !rule.definition.actions.is_empty()))
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
+        if rule.definition.condition.is_some() || !rule.definition.actions.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn surviving_view_rules_reference_row(
@@ -116,7 +121,8 @@ pub fn relation_condition_row_columns(
     event: RuleEvent,
 ) -> Result<BTreeSet<String>, SQLError> {
     let mut columns = BTreeSet::new();
-    for rule in context.rules.rules_for(table, event)? {
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
         if let Some((plan, binding)) = rule.bound_condition_plan() {
             columns.extend(super::action_binding::rule_condition_plan_row_columns(
                 plan, binding,
@@ -138,9 +144,10 @@ pub fn relation_rule_row_columns(
     let mut columns = BTreeSet::new();
     let mut references_row = false;
     let mut references_whole_row = false;
-    for rule in context.rules.rules_for(table, event)? {
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
         if let Some((plan, binding)) = rule.bound_condition_plan() {
-            let plan_references_row = rule_condition_plan_references_row(&rule);
+            let plan_references_row = rule_condition_plan_references_row(rule);
             references_row |= plan_references_row;
             references_whole_row |=
                 super::action_binding::rule_condition_plan_references_whole_row(plan);

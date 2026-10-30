@@ -28,6 +28,7 @@ pub struct RetainedViewCatalog<'a> {
     pub resolution: &'a RelationNameResolution,
     pub fallback: &'a dyn ViewRewriteCatalog,
     pub replica: bool,
+    pub control: uqa_core::memory::OwnedProductionControl,
 }
 
 impl RetainedViewCatalog<'_> {
@@ -63,6 +64,28 @@ impl RetainedViewCatalog<'_> {
 }
 
 impl ViewRewriteCatalog for RetainedViewCatalog<'_> {
+    fn capture_rules(
+        &self,
+        name: &str,
+        event: RuleEvent,
+    ) -> Result<selection::CapturedRules, SQLError> {
+        self.capture_rules_with_control(name, event, &self.control.control())
+    }
+    fn capture_rules_with_control(
+        &self,
+        name: &str,
+        event: RuleEvent,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<selection::CapturedRules, SQLError> {
+        let relation = self.relation_with_control(name, control)?;
+        selection::CapturedRules::from_catalog(
+            Arc::clone(&self.catalog.snapshot().definitions.rules),
+            relation,
+            event,
+            self.replica,
+            control,
+        )
+    }
     fn try_table_column_names_with_control(
         &self,
         name: &str,

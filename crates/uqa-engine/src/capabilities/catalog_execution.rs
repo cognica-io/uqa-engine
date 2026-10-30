@@ -300,11 +300,18 @@ impl ViewCatalogCapabilities for Engine {
         catalog: &uqa_execution::catalog::CatalogReadView,
         resolution: &RelationNameResolution,
     ) -> Result<ViewCatalogMetadata, SQLError> {
+        let resources = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
         let retained = uqa_execution::catalog::view::metadata::RetainedViewCatalog {
             catalog,
             resolution,
             fallback: self,
             replica: self.session_replication_role_is_replica(),
+            control: control.capture(),
         };
         let metadata = uqa_sql::semantics::view_rewrite::view_updatability(
             uqa_sql::semantics::view_rewrite::context::ViewRewriteContext {
@@ -326,11 +333,18 @@ impl ViewCatalogCapabilities for Engine {
         catalog: &uqa_execution::catalog::CatalogReadView,
         resolution: &RelationNameResolution,
     ) -> Result<bool, SQLError> {
+        let resources = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
         let retained = uqa_execution::catalog::view::metadata::RetainedViewCatalog {
             catalog,
             resolution,
             fallback: self,
             replica: self.session_replication_role_is_replica(),
+            control: control.capture(),
         };
         uqa_sql::semantics::view_rewrite::has_instead_of_trigger(
             uqa_sql::semantics::view_rewrite::context::ViewRewriteContext {

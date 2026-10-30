@@ -24,6 +24,23 @@ use uqa_sql::{
 };
 
 impl ViewRewriteCatalog for Engine {
+    fn capture_rules(
+        &self,
+        name: &str,
+        event: RuleEvent,
+    ) -> Result<uqa_sql::catalog::events::selection::CapturedRules, SQLError> {
+        uqa_sql::semantics::rules::RuleCatalog::capture_rules(self, name, event)
+    }
+    fn capture_rules_with_control(
+        &self,
+        name: &str,
+        event: RuleEvent,
+        control: &ProductionControl<'_>,
+    ) -> Result<uqa_sql::catalog::events::selection::CapturedRules, SQLError> {
+        uqa_sql::semantics::rules::RuleCatalog::capture_rules_with_control(
+            self, name, event, control,
+        )
+    }
     fn with_view_definition_with_control(
         &self,
         name: &str,

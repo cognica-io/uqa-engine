@@ -56,17 +56,17 @@ fn collect_requirements(
             "cycle while resolving rewrite-rule inputs for `{table}`"
         )));
     }
-    let rules = services.catalog.rules_for(table, event)?;
-    let suppresses = rules
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let rules = services.catalog.capture_rules(table, event)?;
+    let suppresses =
+        rules.any(|rule| rule.definition.instead && rule.definition.condition.is_none())?;
     let mut required = RuleInputRequirements {
         columns: BTreeSet::new(),
-        requires_rows: rules
-            .iter()
-            .any(|rule| rule.definition.condition.is_some() || !rule.definition.actions.is_empty()),
+        requires_rows: rules.any(|rule| {
+            rule.definition.condition.is_some() || !rule.definition.actions.is_empty()
+        })?,
     };
-    for rule in &rules {
+    for rule in rules.iter() {
+        let rule = rule?;
         let Some(columns) = services.catalog.rule_new_row_columns(rule)? else {
             return Ok(None);
         };
@@ -123,8 +123,9 @@ pub fn validate_grouped_rule_inputs(
     let mut table = table.to_owned();
     let mut visited = BTreeSet::new();
     while !columns.is_empty() && visited.insert(table.clone()) {
-        let rules = services.catalog.rules_for(&table, RuleEvent::Update)?;
-        for rule in &rules {
+        let rules = services.catalog.capture_rules(&table, RuleEvent::Update)?;
+        for rule in rules.iter() {
+            let rule = rule?;
             if services
                 .catalog
                 .rule_new_row_columns(rule)?
@@ -136,9 +137,7 @@ pub fn validate_grouped_rule_inputs(
                 });
             }
         }
-        if rules
-            .iter()
-            .any(|rule| rule.definition.instead && rule.definition.condition.is_none())
+        if rules.any(|rule| rule.definition.instead && rule.definition.condition.is_none())?
             || has_instead_of_trigger(services, &table, TriggerEvent::Update)?
         {
             break;

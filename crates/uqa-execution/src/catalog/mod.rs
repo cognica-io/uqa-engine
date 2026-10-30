@@ -167,12 +167,7 @@ pub struct CatalogDefinitionSnapshot {
             BTreeMap<String, uqa_sql::catalog::events::StoredTrigger>,
         >,
     >,
-    pub rules: Arc<
-        BTreeMap<
-            uqa_storage::RelationIdentity,
-            BTreeMap<String, uqa_sql::catalog::events::StoredRule>,
-        >,
-    >,
+    pub rules: Arc<uqa_sql::catalog::events::RuleCatalog>,
 }
 
 impl CatalogReadView {

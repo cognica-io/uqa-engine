@@ -676,11 +676,10 @@ fn active_unconditional_instead_rule(
     relation: &str,
     event: crate::ast::RuleEvent,
 ) -> Result<bool, SQLError> {
-    Ok(services
+    services
         .catalog
-        .rules_for(relation, event)?
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+        .capture_rules(relation, event)?
+        .any(|rule| rule.definition.instead && rule.definition.condition.is_none())
 }
 
 fn has_unconditional_instead_rule(

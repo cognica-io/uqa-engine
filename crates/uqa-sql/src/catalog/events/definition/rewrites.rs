@@ -55,7 +55,7 @@ impl EventAnalysisContext<'_> {
     ) -> Result<bool, SQLError> {
         let mut rules_changed = false;
         for (event_relation, entries) in next_rules {
-            for rule in entries.values_mut() {
+            for rule in std::sync::Arc::make_mut(entries).values_mut() {
                 let references_target = rule
                     .dependencies
                     .as_ref()
@@ -160,14 +160,14 @@ impl EventAnalysisContext<'_> {
     }
     pub fn rewrite_rule_catalog_column(
         &self,
-        rules: &mut BTreeMap<RelationIdentity, BTreeMap<String, StoredRule>>,
+        rules: &mut RuleCatalog,
         dependency: &RuleColumnDependency,
         relation: &RelationIdentity,
         from: &str,
         to: &str,
     ) -> Result<(), String> {
         for (event_relation, entries) in rules {
-            for rule in entries.values_mut() {
+            for rule in std::sync::Arc::make_mut(entries).values_mut() {
                 let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
                     format!(
                         "rule `{}` on `{}` has no bound dependency state",
@@ -271,7 +271,7 @@ impl EventAnalysisContext<'_> {
             let rule = prepared
                 .rules
                 .get_mut(event_relation)
-                .and_then(|entries| entries.get_mut(name))
+                .and_then(|entries| std::sync::Arc::make_mut(entries).get_mut(name))
                 .ok_or_else(|| {
                     format!(
                         "rule `{name}` on `{}` disappeared while dropping a column",

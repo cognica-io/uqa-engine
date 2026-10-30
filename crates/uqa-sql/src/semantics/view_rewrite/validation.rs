@@ -532,16 +532,17 @@ fn validate_merge_rule_free(
     services: ViewRewriteContext<'_>,
     relation: &str,
 ) -> Result<(), SQLError> {
-    let has_rules = [
+    let mut has_rules = false;
+    for event in [
         crate::ast::RuleEvent::Insert,
         crate::ast::RuleEvent::Update,
         crate::ast::RuleEvent::Delete,
-    ]
-    .into_iter()
-    .map(|event| services.catalog.rules_for(relation, event))
-    .collect::<Result<Vec<_>, SQLError>>()?
-    .iter()
-    .any(|rules| !rules.is_empty());
+    ] {
+        has_rules |= !services
+            .catalog
+            .capture_rules(relation, event)?
+            .is_empty()?;
+    }
     if !has_rules {
         return Ok(());
     }
@@ -653,13 +654,11 @@ pub(super) fn validate_direct_view_rule_path(
     event: crate::ast::RuleEvent,
     command: ViewCommand,
 ) -> Result<(), SQLError> {
-    let rules = services.catalog.rules_for(view, event)?;
-    let has_conditional_instead = rules
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_some());
-    let has_unconditional_instead = rules
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let rules = services.catalog.capture_rules(view, event)?;
+    let has_conditional_instead =
+        rules.any(|rule| rule.definition.instead && rule.definition.condition.is_some())?;
+    let has_unconditional_instead =
+        rules.any(|rule| rule.definition.instead && rule.definition.condition.is_none())?;
     if has_conditional_instead && !has_unconditional_instead {
         return Err(view_not_updatable(
             view,

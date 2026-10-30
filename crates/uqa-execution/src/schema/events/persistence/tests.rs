@@ -6,6 +6,7 @@
 
 use super::*;
 use uqa_sql::ast::{EventEnableMode, Statement};
+use uqa_sql::catalog::events::StoredRule;
 struct UnavailableRelations;
 impl EventRelationPersistence for UnavailableRelations {
     fn rule_relation_is_temporary(&self, _: &RelationIdentity) -> bool {
@@ -52,7 +53,10 @@ fn absent_catalog_returns_before_filtering_nonempty_event_snapshots() {
         dependencies: None,
     };
     let relation = RelationIdentity::new("public", "items");
-    let rules = BTreeMap::from([(relation.clone(), BTreeMap::from([("saved".into(), rule)]))]);
+    let rules = BTreeMap::from([(
+        relation.clone(),
+        BTreeMap::from([("saved".into(), rule)]).into(),
+    )]);
     let triggers = BTreeMap::from([(relation, BTreeMap::from([("saved".into(), trigger())]))]);
     persist_rule_catalog_snapshot(None, &UnavailableRelations, &rules).unwrap();
     persist_trigger_catalog_snapshot(None, &UnavailableRelations, &triggers).unwrap();

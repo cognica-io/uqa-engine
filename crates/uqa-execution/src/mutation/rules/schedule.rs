@@ -224,10 +224,9 @@ fn prepare<S: Clone + Send + Sync + 'static>(
             let mut visit = |plan: &mut UpdatePlan| -> Result<bool, SQLError> {
                 lock_and_validate_returning(context, RuleMutation::Update(plan))?;
                 let rules = rule_context.analysis;
-                if rules
-                    .rules
-                    .rules_for(&plan.table, RuleEvent::Update)?
-                    .is_empty()
+                if rule_context
+                    .capture_rules(&plan.table, RuleEvent::Update)?
+                    .is_empty()?
                 {
                     return Ok(true);
                 }
@@ -263,10 +262,9 @@ fn prepare<S: Clone + Send + Sync + 'static>(
             let mut visit = |plan: &mut DeletePlan| -> Result<bool, SQLError> {
                 lock_and_validate_returning(context, RuleMutation::Delete(plan))?;
                 let rules = rule_context.analysis;
-                if rules
-                    .rules
-                    .rules_for(&plan.table, RuleEvent::Delete)?
-                    .is_empty()
+                if rule_context
+                    .capture_rules(&plan.table, RuleEvent::Delete)?
+                    .is_empty()?
                 {
                     return Ok(true);
                 }
@@ -460,8 +458,6 @@ fn plain_table<S: Clone + 'static>(
             .mutation
             .rules
             .rules
-            .analysis
-            .rules
-            .rules_for(input.table(), input.event())?
-            .is_empty())
+            .capture_rules(input.table(), input.event())?
+            .is_empty()?)
 }

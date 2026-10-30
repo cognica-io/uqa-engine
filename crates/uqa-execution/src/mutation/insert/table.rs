@@ -81,10 +81,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     let insert_rules = mutation
         .rules
         .rules
-        .analysis
-        .rules
-        .rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Insert)?;
-    let has_insert_rules = !insert_rules.is_empty();
+        .capture_rules(&stmt.table, uqa_sql::ast::RuleEvent::Insert)?;
+    let has_insert_rules = !insert_rules.is_empty()?;
     let has_view_insert_rules = !stmt.view_rule_relations.is_empty();
     let has_any_insert_rules = has_insert_rules || has_view_insert_rules;
     if stmt.on_conflict.is_some()
@@ -92,10 +90,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             || !mutation
                 .rules
                 .rules
-                .analysis
-                .rules
-                .rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Update)?
-                .is_empty())
+                .capture_rules(&stmt.table, uqa_sql::ast::RuleEvent::Update)?
+                .is_empty()?)
     {
         return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
@@ -195,17 +191,13 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 || mutation
                     .rules
                     .rules
-                    .analysis
-                    .rules
-                    .rules_for(relation, uqa_sql::ast::RuleEvent::Insert)?
-                    .iter()
-                    .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+                    .capture_rules(relation, uqa_sql::ast::RuleEvent::Insert)?
+                    .any(|rule| rule.definition.instead && rule.definition.condition.is_none())?)
         },
     )?;
     let insert_original_query = view_original_query
         && !insert_rules
-            .iter()
-            .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+            .any(|rule| rule.definition.instead && rule.definition.condition.is_none())?;
     if insert_original_query {
         if !stmt.view_rule_relations.is_empty() {
             super::identity_targets::validate_insert_identity_targets(mutation.identities, stmt)?;

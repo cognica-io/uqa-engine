@@ -115,18 +115,24 @@ fn original_query(
     insert: &InsertPlan,
     subjects: &dyn Fn(&str) -> Result<crate::catalog::roles::RoleReference, SQLError>,
 ) -> Result<Option<Box<QueryPlan>>, SQLError> {
-    let rules = context.rules.rules_for(&insert.table, RuleEvent::Insert)?;
-    if rules
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none())
-    {
-        return Ok(None);
+    let rules = context
+        .rules
+        .capture_rules(&insert.table, RuleEvent::Insert)?;
+    for rule in rules.iter() {
+        let rule = rule?;
+        if rule.definition.instead && rule.definition.condition.is_none() {
+            return Ok(None);
+        }
     }
-    let conditions = rules
-        .iter()
-        .filter(|rule| rule.definition.instead)
-        .filter_map(|rule| rule.definition.condition.as_ref())
-        .collect::<Vec<_>>();
+    let mut conditions = Vec::new();
+    for rule in rules.iter() {
+        let rule = rule?;
+        if rule.definition.instead {
+            if let Some(condition) = rule.definition.condition.as_ref() {
+                conditions.push(condition);
+            }
+        }
+    }
     if conditions.is_empty() {
         return Ok(insert.source.clone());
     }

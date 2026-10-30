@@ -94,7 +94,8 @@ fn rule_definitions_use_pinned_catalog_without_replication_filtering() {
         BTreeMap::from([(
             "live".into(),
             stored_rule("live", RuleEvent::Insert, EventEnableMode::Origin),
-        )]),
+        )])
+        .into(),
     );
     let pinned = BTreeMap::from([(
         relation,
@@ -111,7 +112,8 @@ fn rule_definitions_use_pinned_catalog_without_replication_filtering() {
                 "update".into(),
                 stored_rule("update", RuleEvent::Update, EventEnableMode::Always),
             ),
-        ]),
+        ])
+        .into(),
     )]);
     let state = Visibility {
         rules: Some(&pinned),
@@ -157,7 +159,7 @@ fn executable_rules_read_live_catalog_and_current_replication_role() {
         "other_event".into(),
         stored_rule("other_event", RuleEvent::Update, EventEnableMode::Always),
     );
-    partitions.rules.insert(relation, entries);
+    partitions.rules.insert(relation, entries.into());
     let pinned = RuleCatalog::new();
     for (replica, expected) in [
         (false, vec!["always", "origin"]),
@@ -190,7 +192,8 @@ fn rule_presence_uses_live_definitions_including_disabled_rules() {
         BTreeMap::from([(
             "disabled".into(),
             stored_rule("disabled", RuleEvent::Insert, EventEnableMode::Disabled),
-        )]),
+        )])
+        .into(),
     );
     let pinned = RuleCatalog::new();
     let state = Visibility {

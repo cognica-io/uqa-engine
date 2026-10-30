@@ -34,10 +34,7 @@ pub fn execute_mutation_query_rules<S: Clone + 'static>(
     params: &[SQLParam],
     scope: &CteScope<S>,
 ) -> Result<RuleExecutionOutcome, SQLError> {
-    let rules = context
-        .analysis
-        .rules
-        .rules_for(statement.table(), statement.event())?;
+    let rules = context.capture_rules(statement.table(), statement.event())?;
     let _guard = RuleExecutionGuard::enter(statement.table(), statement.event())?;
     let rule_subject = context.security.privilege_subject(statement.table())?;
     let input_subject = scope.privilege_subject()?;
@@ -51,7 +48,8 @@ pub fn execute_mutation_query_rules<S: Clone + 'static>(
     let (target_schema, source_schema) =
         context.mutation_input_schemas(statement, params, &binding)?;
     let mut outcome = RuleExecutionOutcome::default();
-    for rule in rules {
+    for rule in rules.iter() {
+        let rule = rule?;
         for action in &rule.definition.actions {
             let target_columns = rule_action_target_columns(context.analysis.sources, action)?;
             let references_event =
@@ -84,7 +82,7 @@ pub fn execute_mutation_query_rules<S: Clone + 'static>(
             let condition =
                 input
                     .resolver
-                    .condition(context.binding, &rule, &definitions, &rule_subject)?;
+                    .condition(context.binding, rule, &definitions, &rule_subject)?;
             let consumer = if request.captures() && statement_has_returning(action) {
                 if outcome.returning.is_some() {
                     return Err(SQLError::Routine {
@@ -122,7 +120,7 @@ pub fn execute_mutation_query_rules<S: Clone + 'static>(
             super::query_inputs::complete_action(
                 &mut outcome,
                 statement.event(),
-                &rule,
+                rule,
                 action,
                 result,
                 consumer,

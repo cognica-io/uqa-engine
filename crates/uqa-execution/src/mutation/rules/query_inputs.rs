@@ -32,10 +32,7 @@ fn execute_insert_query_rules<S: Clone + 'static>(
     scope: &crate::query::CteScope<S>,
     prune: crate::mutation::views::commands::SourceOutputPruning,
 ) -> Result<RuleExecutionOutcome, SQLError> {
-    let rules = context
-        .analysis
-        .rules
-        .rules_for(&insert.table, RuleEvent::Insert)?;
+    let rules = context.capture_rules(&insert.table, RuleEvent::Insert)?;
     let _guard = RuleExecutionGuard::enter(&insert.table, RuleEvent::Insert)?;
     let privilege_subject = context.security.privilege_subject(&insert.table)?;
     let definitions = super::rule_returning_columns(context.analysis, &insert.table)?;
@@ -45,7 +42,8 @@ fn execute_insert_query_rules<S: Clone + 'static>(
         &insert.subqueries,
     );
     let mut outcome = RuleExecutionOutcome::default();
-    for rule in rules {
+    for rule in rules.iter() {
+        let rule = rule?;
         for action in &rule.definition.actions {
             let target_columns = rule_action_target_columns(context.analysis.sources, action)?;
             let relation = InternalRelationId::allocate();
@@ -57,7 +55,7 @@ fn execute_insert_query_rules<S: Clone + 'static>(
                 &mut resolver,
             )?;
             let condition =
-                resolver.condition(context.binding, &rule, &definitions, &privilege_subject)?;
+                resolver.condition(context.binding, rule, &definitions, &privilege_subject)?;
             let captures = request.captures() && statement_has_returning(action);
             let consumer = if captures {
                 if outcome.returning.is_some() {
@@ -114,7 +112,7 @@ fn execute_insert_query_rules<S: Clone + 'static>(
             complete_action(
                 &mut outcome,
                 RuleEvent::Insert,
-                &rule,
+                rule,
                 action,
                 result,
                 consumer,

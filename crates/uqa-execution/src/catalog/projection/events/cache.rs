@@ -79,7 +79,7 @@ pub(super) fn rule_by_oid(catalog: &CatalogReadView, oid: i64) -> Option<&Stored
     let lookup = catalog.event_definitions.rules.get_or_init(|| {
         let mut by_oid = BTreeMap::new();
         for (relation, rules) in catalog.snapshot().definitions.rules.iter() {
-            for (name, rule) in rules {
+            for (name, rule) in rules.iter() {
                 #[cfg(test)]
                 RULE_ADDRESSES.set(RULE_ADDRESSES.get() + 1);
                 by_oid

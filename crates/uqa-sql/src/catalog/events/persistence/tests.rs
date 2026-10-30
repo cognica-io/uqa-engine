@@ -108,7 +108,7 @@ fn rule_snapshots_exclude_temporary_relations_and_preserve_missing_relation_entr
     let rules = RuleCatalog::from(["missing", "permanent", "temporary"].map(|name| {
         (
             relation(name),
-            BTreeMap::from([("saved".into(), stored_rule(name))]),
+            BTreeMap::from([("saved".into(), stored_rule(name))]).into(),
         )
     }));
     let snapshot = stored_rules_snapshot(&rules, &relations);

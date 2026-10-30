@@ -118,7 +118,7 @@ pub type TriggerCatalog = std::collections::BTreeMap<
 >;
 pub type RuleCatalog = std::collections::BTreeMap<
     uqa_core::RelationIdentity,
-    std::collections::BTreeMap<String, StoredRule>,
+    std::sync::Arc<std::collections::BTreeMap<String, StoredRule>>,
 >;
 pub mod dependencies;
 pub mod renames;

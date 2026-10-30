@@ -21,6 +21,28 @@ pub trait RuleCatalog {
     fn rules_for(&self, table: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError>;
     fn resolve_mutation_target(&self, name: &str, bound: bool) -> Result<String, SQLError>;
 
+    fn capture_rules(
+        &self,
+        table: &str,
+        event: RuleEvent,
+    ) -> Result<crate::catalog::events::selection::CapturedRules, SQLError> {
+        self.capture_rules_with_control(table, event, &ProductionControl::uncontrolled())
+    }
+
+    /// Capture active execution rules at the ordinary lookup boundary. Native catalogs retain the live immutable registry generation without copying its declarations.
+    fn capture_rules_with_control(
+        &self,
+        table: &str,
+        event: RuleEvent,
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::catalog::events::selection::CapturedRules, SQLError> {
+        control.check()?;
+        crate::catalog::events::selection::CapturedRules::from_external(
+            self.rules_for(table, event)?,
+            control,
+        )
+    }
+
     /// External catalogs may supply owned metadata. Native catalogs override this observation to lend the selected immutable rule declarations directly.
     fn visit_rules_with_control(
         &self,

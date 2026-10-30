@@ -100,7 +100,7 @@ impl EventLifecycleContext<'_> {
         let reserved = self.reserve_rule_oid(&relation, &definition.name)?;
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
-        let relation_rules = next.entry(relation).or_default();
+        let relation_rules = std::sync::Arc::make_mut(next.entry(relation).or_default());
         if relation_rules.contains_key(&definition.name) && !definition.or_replace {
             return Err(duplicate_object(
                 "rule",
@@ -191,7 +191,7 @@ impl EventLifecycleContext<'_> {
         let mut next = rules.clone();
         let removed = next
             .get_mut(&relation)
-            .and_then(|entries| entries.remove(&statement.name));
+            .and_then(|entries| std::sync::Arc::make_mut(entries).remove(&statement.name));
         if removed.is_none() {
             if statement.if_exists {
                 self.notice(uqa_sql::SQLNotice::notice(format!(
@@ -202,7 +202,10 @@ impl EventLifecycleContext<'_> {
             }
             return Err(undefined_rule(&statement.name, &table));
         }
-        if next.get(&relation).is_some_and(BTreeMap::is_empty) {
+        if next
+            .get(&relation)
+            .is_some_and(|entries| entries.is_empty())
+        {
             next.remove(&relation);
         }
         self.catalog.publication.persist_rules(&next)?;
@@ -236,7 +239,7 @@ impl EventLifecycleContext<'_> {
         self.writer.prepare_writer()?;
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
-        let entries = next.entry(relation).or_default();
+        let entries = std::sync::Arc::make_mut(next.entry(relation).or_default());
         if entries.contains_key(to) {
             return Err(duplicate_object("rule", to, table));
         }
@@ -265,8 +268,7 @@ impl EventLifecycleContext<'_> {
         self.writer.prepare_writer()?;
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
-        next.entry(relation)
-            .or_default()
+        std::sync::Arc::make_mut(next.entry(relation).or_default())
             .get_mut(name)
             .ok_or_else(|| undefined_rule(name, table))?
             .enabled = mode;

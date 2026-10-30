@@ -97,13 +97,17 @@ impl<'a> RuleMutation<'a> {
         binding: crate::binding::stored_routines::analysis::CatalogRoutineAnalysisContext<'_>,
         subject: &RoleReference,
     ) -> Result<Option<ExpressionPlan>, SQLError> {
-        let rules = context.rules.rules_for(self.table(), self.event())?;
+        let rules = context.rules.capture_rules(self.table(), self.event())?;
         let mut resolver = resolver(context, self, None, None)?;
         let definitions =
             crate::semantics::rules::analysis::rule_returning_columns(context, self.table())?;
         let mut predicates = Vec::new();
         let mut subqueries = Vec::new();
-        for rule in rules.iter().filter(|rule| rule.definition.instead) {
+        for rule in rules.iter() {
+            let rule = rule?;
+            if !rule.definition.instead {
+                continue;
+            }
             let Some(condition) = resolver.condition(binding, rule, &definitions, subject)? else {
                 continue;
             };

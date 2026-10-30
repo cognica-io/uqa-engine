@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
+use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
@@ -121,8 +121,7 @@ pub(super) struct DurableCatalogState {
         CatalogCell<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
     pub(super) triggers:
         CatalogCell<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
-    pub(super) rules:
-        CatalogCell<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredRule>>>,
+    pub(super) rules: CatalogCell<RuleCatalog>,
 }
 
 #[derive(Clone)]
@@ -167,7 +166,7 @@ pub(super) struct DurableCatalogSnapshot {
         Arc<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
     pub(super) triggers:
         Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
-    pub(super) rules: Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredRule>>>,
+    pub(super) rules: Arc<RuleCatalog>,
 }
 
 impl DurableCatalogState {

@@ -169,13 +169,13 @@ pub fn renamed_relation_events(
         }
     }
     if let Some(mut entries) = next_rules.remove(from) {
-        for rule in entries.values_mut() {
+        for rule in std::sync::Arc::make_mut(&mut entries).values_mut() {
             rule.definition.table = to.qualified_name();
         }
         next_rules.insert(to.clone(), entries);
     }
     for entries in next_rules.values_mut() {
-        for rule in entries.values_mut() {
+        for rule in std::sync::Arc::make_mut(entries).values_mut() {
             rewrite_stored_rule_relation(rule, from, to).map_err(|error| {
                 format!(
                     "rewrite rule `{}` relation dependency: {error}",

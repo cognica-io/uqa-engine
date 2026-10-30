@@ -46,6 +46,9 @@ impl RuleSecurity for Engine {
     }
 }
 impl RuleStatements<crate::session::StatementReadSnapshot> for Engine {
+    fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError> {
+        self.query_retention_control()
+    }
     fn execute(
         &self,
         action: uqa_sql::semantics::rules::binding::RuleAction,

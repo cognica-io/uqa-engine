@@ -430,8 +430,8 @@ pub(super) fn record_view_rule_relation(
 ) -> Result<bool, SQLError> {
     let has_rules = !services
         .catalog
-        .rules_for(&layer.canonical_name, event)?
-        .is_empty();
+        .capture_rules(&layer.canonical_name, event)?
+        .is_empty()?;
     if has_rules && !relations.contains(&layer.canonical_name) {
         relations.push(layer.canonical_name.clone());
     }
