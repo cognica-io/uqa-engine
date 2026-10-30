@@ -16,9 +16,9 @@ pub struct OwnedProjection {
 }
 
 pub struct OwnedProjectionIter {
-    projections: std::vec::IntoIter<ProjectionPlan>,
-    memory: Option<RewriteMemory>,
-    index: usize,
+    pub(super) projections: std::vec::IntoIter<ProjectionPlan>,
+    pub(super) memory: Option<RewriteMemory>,
+    pub(super) index: usize,
 }
 
 impl Iterator for OwnedProjectionIter {
@@ -62,13 +62,13 @@ impl Iterator for OwnedProjectionIter {
 
 impl ExactSizeIterator for OwnedProjectionIter {}
 
-struct ProjectionVector {
-    projections: Vec<ProjectionPlan>,
-    memory: Option<RewriteMemory>,
+pub(super) struct ProjectionVector {
+    pub(super) projections: Vec<ProjectionPlan>,
+    pub(super) memory: Option<RewriteMemory>,
 }
 
 impl ProjectionVector {
-    fn new(
+    pub(super) fn new(
         projections: impl ExactSizeIterator<Item = OwnedProjection>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {

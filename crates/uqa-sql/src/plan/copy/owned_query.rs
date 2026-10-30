@@ -166,3 +166,25 @@ impl Copying<'_> {
         Ok(self.take(value))
     }
 }
+
+impl Copying<'_> {
+    pub(in crate::plan) fn take_fields<T>(
+        &mut self,
+        input: crate::plan::mutable::field_vectors::OwnedFields<T>,
+    ) -> Result<T> {
+        self.check()?;
+        assert!(
+            self.fields.as_ref().expect("field destination").is_empty(),
+            "new field destination"
+        );
+        let crate::plan::mutable::field_vectors::OwnedFields { value, memory } = input;
+        let super::RewriteMemory::Fields { direct, fields } =
+            memory.expect("controlled field owner")
+        else {
+            unreachable!("metadata field constructor");
+        };
+        self.memory.absorb(direct);
+        self.fields = Some(fields);
+        Ok(value)
+    }
+}

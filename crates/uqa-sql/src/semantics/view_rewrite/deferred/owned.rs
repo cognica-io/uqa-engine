@@ -107,10 +107,7 @@ impl DeferredOuterRewrite {
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         let outer_columns = control
-            .finish(
-                std::collections::BTreeMap::new(),
-                control.empty_reservation(),
-            )?
+            .finish(super::OuterColumns::new(), control.empty_reservation())?
             .into_shared(control)?;
         Ok(Self {
             outer_columns,

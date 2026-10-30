@@ -14,6 +14,15 @@ use uqa_sql::{
 };
 pub trait RuleSecurity {
     fn privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError>;
+
+    fn privilege_subject_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RoleReference>, SQLError> {
+        control.check()?;
+        self.privilege_subject(table)?.clone_with_control(control)
+    }
 }
 pub trait RuleStatements<S: Clone + 'static> {
     fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;

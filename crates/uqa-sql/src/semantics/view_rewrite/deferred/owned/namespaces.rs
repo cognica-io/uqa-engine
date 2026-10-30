@@ -100,9 +100,7 @@ pub(super) fn merged(
 }
 
 fn finish(
-    outer_columns: std::sync::Arc<
-        Produced<std::collections::BTreeMap<crate::ColumnIdentity, crate::ast::InternalColumnRef>>,
-    >,
+    outer_columns: std::sync::Arc<Produced<super::super::OuterColumns>>,
     replacements: super::super::replacements::Replacements,
     columns: Names,
     qualifiers: Names,

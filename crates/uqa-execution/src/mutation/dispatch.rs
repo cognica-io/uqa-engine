@@ -23,13 +23,17 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views;
-    if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
-        let retained = context.mutation.scopes.read_control()?;
-        let control = uqa_core::memory::ProductionControl::new(
-            retained.memory(),
-            retained.cancellation(),
-            context.mutation.scopes.cancellation(),
-        );
+    let retained = context.mutation.scopes.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.mutation.scopes.cancellation(),
+    );
+
+    if let Some(kind) = rewrite
+        .catalog
+        .target_view_kind_with_control(&stmt.table, &control)?
+    {
         if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
             let _ =
                 view_privileges::ensure_insert_with_control(rewrite.authorization, stmt, &control)?;
@@ -40,15 +44,17 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
                 message: format!("cannot change materialized view \"{}\"", relation.name),
             });
         }
-        if view_rewrite::has_instead_of_trigger(
-            rewrite,
+        if rewrite.catalog.has_trigger_definition_with_control(
             &stmt.table,
+            uqa_sql::ast::TriggerTiming::InsteadOf,
             uqa_sql::ast::TriggerEvent::Insert,
-        )? || uqa_sql::semantics::rules::analysis::relation_suppresses_original_query(
-            context.mutation.rules.rules.analysis,
-            &stmt.table,
-            uqa_sql::ast::RuleEvent::Insert,
-        )? {
+            true,
+            &control,
+        )? || rewrite
+            .catalog
+            .capture_rules_with_control(&stmt.table, uqa_sql::ast::RuleEvent::Insert, &control)?
+            .any(|rule| rule.definition.instead && rule.definition.condition.is_none())?
+        {
             let _ =
                 view_privileges::ensure_insert_with_control(rewrite.authorization, stmt, &control)?;
             let expanded = set_returning_values_query(context, stmt)?;
@@ -63,12 +69,21 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
             );
         }
         let bindings = inherited_ctes
-            .map(crate::query::binding::binding_context)
-            .transpose()?
-            .map(uqa_sql::binding::snapshot::BindingSnapshot::from);
-        let rewritten =
-            view_rewrite::rewrite_insert_to_base(rewrite, stmt, params, bindings.as_ref())?;
-        return run_insert(context, planning, &rewritten, params, inherited_ctes);
+            .map(|scope| crate::query::binding::binding_snapshot_with_control(scope, &control))
+            .transpose()?;
+        let rewritten = view_rewrite::rewrite_insert_owned(
+            rewrite,
+            stmt.copy_for_rewrite(&control)?,
+            params,
+            bindings
+                .as_ref()
+                .map(view_rewrite::ViewRewriteBindings::Controlled),
+            &control,
+        )?;
+        let uqa_sql::plan::CommandPlan::Insert(plan) = &*rewritten else {
+            unreachable!("rewritten INSERT")
+        };
+        return run_insert(context, planning, plan, params, inherited_ctes);
     }
     let expanded = set_returning_values_query(context, stmt)?;
     crate::mutation::insert::table::run_table_insert(
@@ -129,37 +144,56 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views;
-    if rewrite.catalog.target_view_kind(&stmt.target)?.is_some() {
-        let retained = context.mutation.scopes.read_control()?;
-        let control = uqa_core::memory::ProductionControl::new(
-            retained.memory(),
-            retained.cancellation(),
-            context.mutation.scopes.cancellation(),
-        );
+    let retained = context.mutation.scopes.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.mutation.scopes.cancellation(),
+    );
+
+    if rewrite
+        .catalog
+        .target_view_kind_with_control(&stmt.target, &control)?
+        .is_some()
+    {
         let scope = super::merge::analysis::merge_analysis_scope(
             context.mutation.scopes,
             stmt,
             inherited_ctes,
         )?;
-        let bindings = crate::query::binding::binding_context(&scope)?;
-        let source = uqa_sql::binding::analyze_source_plan_schema(
+        let bindings = crate::query::binding::binding_context_with_control(&scope, &control)?;
+        let source = uqa_sql::binding::analyze_source_plan_schema_with_control(
             rewrite.routines,
             &stmt.source,
             params,
-            &bindings,
+            bindings,
             None,
+            &control,
         )?;
-        view_rewrite::validate_public_merge_targets(rewrite, stmt)?;
-        view_rewrite::validate_public_merge_contract(rewrite, stmt, &source)?;
-        return match view_rewrite::merge_view_target_path(rewrite, stmt)? {
+        view_rewrite::validate_public_merge_targets_with_control(rewrite, stmt, &control)?;
+        view_rewrite::validate_public_merge_contract_with_control(
+            rewrite, stmt, &source, &control,
+        )?;
+        return match view_rewrite::merge_view_target_path_with_control(rewrite, stmt, &control)? {
             view_rewrite::MergeViewTargetPath::AutomaticRewrite => {
                 let inherited = inherited_ctes
-                    .map(crate::query::binding::binding_context)
-                    .transpose()?
-                    .map(uqa_sql::binding::snapshot::BindingSnapshot::from);
-                let rewritten =
-                    view_rewrite::rewrite_merge_to_base(rewrite, stmt, params, inherited.as_ref())?;
-                run_merge(context, &rewritten, params, inherited_ctes)
+                    .map(|scope| {
+                        crate::query::binding::binding_snapshot_with_control(scope, &control)
+                    })
+                    .transpose()?;
+                let rewritten = view_rewrite::rewrite_merge_owned(
+                    rewrite,
+                    stmt.copy_for_rewrite(&control)?,
+                    params,
+                    inherited
+                        .as_ref()
+                        .map(view_rewrite::ViewRewriteBindings::Controlled),
+                    &control,
+                )?;
+                let uqa_sql::plan::CommandPlan::Merge(plan) = &*rewritten else {
+                    unreachable!("rewritten MERGE")
+                };
+                run_merge(context, plan, params, inherited_ctes)
             }
             view_rewrite::MergeViewTargetPath::ViewTriggers => {
                 let _ = view_privileges::ensure_merge_with_control(

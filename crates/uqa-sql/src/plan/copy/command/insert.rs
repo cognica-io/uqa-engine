@@ -21,11 +21,13 @@ impl Copying<'_> {
     ) -> Result<InsertPlan> {
         let selected = InsertFields::select(plan, selection);
         Ok(InsertPlan {
-            table: self.text(selected.table)?,
+            table: self.field("table", |copying| copying.text(selected.table))?,
             target_relation_bound: plan.target_relation_bound,
             relations_bound: plan.relations_bound,
             statement_privilege_subject: self.role(plan.statement_privilege_subject.as_ref())?,
-            target_privilege_subject: self.role(plan.target_privilege_subject.as_ref())?,
+            target_privilege_subject: self.field("target_privilege_subject", |copying| {
+                copying.role(plan.target_privilege_subject.as_ref())
+            })?,
             target_qualifier: self.text(selected.qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
@@ -67,19 +69,28 @@ impl Copying<'_> {
             view_checks: self.field("view_checks", |copying| {
                 copying.map(plan.view_checks.iter(), Self::view_check)
             })?,
-            view_rule_relations: self.texts(selected.relations)?,
-            view_rule_insert_plans: self.map(selected.layers.iter(), |copying, input| {
-                Ok(ViewRuleInsertPlan {
-                    relation: copying.text(&input.relation)?,
-                    supplied_columns: copying.texts(&input.supplied_columns)?,
-                    input_columns: copying.texts(&input.input_columns)?,
+            view_rule_relations: self.field("view_rule_relations", |copying| {
+                copying.texts(selected.relations)
+            })?,
+            view_rule_insert_plans: self.field("view_rule_insert_plans", |copying| {
+                copying.map(selected.layers.iter(), |copying, input| {
+                    Ok(ViewRuleInsertPlan {
+                        relation: copying.text(&input.relation)?,
+                        supplied_columns: copying.field("supplied_columns", |copying| {
+                            copying.texts(&input.supplied_columns)
+                        })?,
+                        input_columns: copying.field("input_columns", |copying| {
+                            copying.texts(&input.input_columns)
+                        })?,
+                    })
                 })
             })?,
-            view_rule_returning: plan
-                .view_rule_returning
-                .as_ref()
-                .map(|returning| self.rule_returning(returning))
-                .transpose()?,
+            view_rule_returning: self.field("view_rule_returning", |copying| {
+                plan.view_rule_returning
+                    .as_ref()
+                    .map(|returning| copying.rule_returning(returning))
+                    .transpose()
+            })?,
         })
     }
 

@@ -9,8 +9,10 @@
 use super::{
     ColumnIdentity, DeferredOuterRewrite, OuterReplacement, QueryBlockPlan, RowSchema, ScalarExpr,
 };
+#[cfg(test)]
 use crate::ast::InternalRelationId;
 use std::borrow::Cow;
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 /// Capture outer attributes before adding this query's local namespace. Previously captured identities keep their original row slot in descendant scopes.
@@ -33,6 +35,7 @@ pub fn bind_outer_rewrite_scope<'a>(
 }
 
 impl DeferredOuterRewrite {
+    #[cfg(test)]
     pub(super) fn capture_outer_columns(&mut self) {
         let relation = InternalRelationId::allocate();
         let mut columns = BTreeMap::new();

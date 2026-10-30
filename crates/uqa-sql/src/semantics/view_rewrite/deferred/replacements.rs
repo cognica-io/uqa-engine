@@ -33,7 +33,7 @@ impl Replacements {
             let replacement = OuterReplacement {
                 expression,
                 qualifier: String::new(),
-                _memory: control.combine(identity_memory, expression_memory),
+                memory: control.combine(identity_memory, expression_memory),
             };
             let entry = control
                 .finish((identity, replacement), control.empty_reservation())?
@@ -176,7 +176,7 @@ impl Replacements {
         let value = OuterReplacement {
             expression,
             qualifier,
-            _memory: control.combine(
+            memory: control.combine(
                 identity_memory,
                 control.combine(qualifier_memory, expression_memory),
             ),

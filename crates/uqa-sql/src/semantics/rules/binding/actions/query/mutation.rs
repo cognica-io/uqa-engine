@@ -11,7 +11,7 @@ use super::{
     QueryPlan, RelationalPlan, RuleQueryInput, RuleQueryResolver, SQLError, ScalarExpr, SourcePlan,
 };
 use crate::{
-    ast::{BooleanTest, FunctionBinding, FunctionDispatch, FunctionOrderSyntax, RuleEvent},
+    ast::RuleEvent,
     binding::correlation::{expression_depends_on_outer_row, CorrelationContext},
     catalog::roles::RoleReference,
     plan::{CtePlan, DeletePlan, ExpressionPlan, UpdatePlan},
@@ -19,6 +19,7 @@ use crate::{
     ColumnIdentity, RowSchema,
 };
 
+mod original;
 mod owned;
 pub use owned::OwnedMutationRuleInput;
 
@@ -113,43 +114,16 @@ impl<'a> RuleMutation<'a> {
         binding: crate::binding::stored_routines::analysis::CatalogRoutineAnalysisContext<'_>,
         subject: &RoleReference,
     ) -> Result<Option<ExpressionPlan>, SQLError> {
-        let rules = context.rules.capture_rules(self.table(), self.event())?;
-        let mut resolver = resolver(context, self, None, None)?;
-        let definitions =
-            crate::semantics::rules::analysis::rule_returning_columns(context, self.table())?;
-        let mut predicates = Vec::new();
-        let mut subqueries = Vec::new();
-        for rule in rules.iter() {
-            let rule = rule?;
-            if !rule.definition.instead {
-                continue;
-            }
-            let Some(condition) = resolver.condition(binding, rule, &definitions, subject)? else {
-                continue;
-            };
-            let binding =
-                FunctionBinding::dispatched(FunctionDispatch::BooleanTest(BooleanTest::IsNotTrue));
-            predicates.push(ScalarExpr::Func {
-                name: binding.name.clone(),
-                binding: Some(binding),
-                args: vec![crate::plan::input_projection::append_expression(
-                    &mut subqueries,
-                    condition,
-                )],
-                order_syntax: FunctionOrderSyntax::Ordinary,
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            });
-        }
-        if predicates.is_empty() {
-            return Ok(None);
-        }
-        let expression = ExpressionPlan {
-            scalar: ScalarExpr::And(predicates),
-            subqueries,
-        };
-        Ok(Some(expression))
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        self.original_condition_with_control(context, binding, subject, &control)?
+            .map(|condition| {
+                condition.finish(&control).map(|value| {
+                    value
+                        .into_uncontrolled()
+                        .expect("ordinary original qualification")
+                })
+            })
+            .transpose()
     }
 }
 

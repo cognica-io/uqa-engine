@@ -17,9 +17,8 @@ use crate::{
         resolution::RelationNameResolution,
         view::{StoredViewKind, ViewRewriteDefinition},
     },
-    plan::{QueryPlan, SourcePlan},
     semantics::sets::SetFunctionCatalog,
-    RowSchema, SQLError, SQLParam,
+    RowSchema, SQLError,
 };
 use std::collections::BTreeSet;
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
@@ -249,64 +248,4 @@ pub fn stored_view_schema_with_control(
         services.catalog.restored_view_scope_with_control(control)?,
         control,
     )
-}
-
-pub(super) fn analyze_source_plan_schema(
-    services: ViewRewriteContext<'_>,
-    source: &SourcePlan,
-    params: &[SQLParam],
-    scope: &BindingSnapshot,
-    outer: Option<&RowSchema>,
-) -> Result<RowSchema, SQLError> {
-    crate::binding::analyze_source_plan_schema(
-        services.routines,
-        source,
-        params,
-        &scope.context(),
-        outer,
-    )
-}
-pub(super) fn analyze_query_plan_schema(
-    services: ViewRewriteContext<'_>,
-    query: &QueryPlan,
-    params: &[SQLParam],
-    scope: &BindingSnapshot,
-    outer: Option<&RowSchema>,
-) -> Result<RowSchema, SQLError> {
-    crate::binding::analyze_query_plan_schema(
-        services.routines,
-        query,
-        params,
-        &scope.context(),
-        outer,
-    )
-}
-pub(super) fn target_is_view(
-    services: ViewRewriteContext<'_>,
-    name: &str,
-) -> Result<bool, SQLError> {
-    Ok(services.catalog.target_view_kind(name)?.is_some())
-}
-
-pub(super) fn relation_suppresses_original_query(
-    services: ViewRewriteContext<'_>,
-    table: &str,
-    event: RuleEvent,
-) -> Result<bool, SQLError> {
-    services
-        .catalog
-        .capture_rules(table, event)?
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none())
-}
-pub(super) fn relation_has_returning_provider(
-    services: ViewRewriteContext<'_>,
-    table: &str,
-    event: RuleEvent,
-) -> Result<bool, SQLError> {
-    services.catalog.capture_rules(table, event)?.any(|rule| {
-        rule.definition
-            .actions
-            .iter()
-            .any(crate::semantics::rules::statement_has_returning)
-    })
 }

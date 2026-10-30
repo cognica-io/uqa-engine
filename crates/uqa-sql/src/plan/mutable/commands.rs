@@ -18,12 +18,17 @@ use uqa_core::{
 
 mod assignments;
 pub(in crate::plan::mutable) mod children;
+mod construction;
 mod executable;
 mod inputs;
 mod insert;
+mod metadata;
+mod namespaces;
 mod projections;
 pub(in crate::plan) mod rule_inputs;
 pub(in crate::plan::mutable) mod transformation;
+mod view_columns;
+mod view_metadata;
 pub use assignments::CommandAssignmentSlot;
 pub use children::CommandQuerySlot;
 
@@ -40,8 +45,11 @@ pub enum CommandScalarSlot {
     Returning(usize),
     InsertValue { row: usize, column: usize },
     MergeJoin,
+    ViewCheck(usize),
     MergeCondition(usize),
     MergeValue { clause: usize, value: usize },
+    ConflictExpression(usize),
+    ConflictInferencePredicate,
     ConflictPredicate,
     CallArgument(usize),
     ExecuteParameter(usize),
@@ -71,6 +79,13 @@ impl CommandPlan {
 }
 
 impl MutableCommandPlan {
+    pub(crate) fn from_ordinary(command: CommandPlan) -> Self {
+        Self {
+            command,
+            memory: None,
+        }
+    }
+
     pub(in crate::plan) fn from_rewrite_parts(
         command: CommandPlan,
         memory: Option<RewriteMemory>,
@@ -215,6 +230,15 @@ impl CommandScalarSlot {
             (Self::InsertValue { row, column }, CommandPlan::Insert(plan)) => {
                 Some(&mut plan.rows[row][column])
             }
+            (Self::ViewCheck(index), CommandPlan::Insert(plan)) => {
+                Some(&mut plan.view_checks[index].predicate)
+            }
+            (Self::ViewCheck(index), CommandPlan::Update(plan)) => {
+                Some(&mut plan.view_checks[index].predicate)
+            }
+            (Self::ViewCheck(index), CommandPlan::Merge(plan)) => {
+                Some(&mut plan.view_checks[index].predicate)
+            }
             (Self::MergeJoin, CommandPlan::Merge(plan)) => Some(&mut plan.join_condition),
             (Self::MergeCondition(index), CommandPlan::Merge(plan)) => {
                 use crate::plan::MergeWhenPlan;
@@ -236,6 +260,12 @@ impl CommandScalarSlot {
                     panic!("MERGE clause has insertion values");
                 };
                 Some(&mut values[value])
+            }
+            (Self::ConflictExpression(index), CommandPlan::Insert(plan)) => {
+                Some(&mut plan.on_conflict.as_mut().expect("conflict").expressions[index])
+            }
+            (Self::ConflictInferencePredicate, CommandPlan::Insert(plan)) => {
+                plan.on_conflict.as_mut()?.predicate.as_deref_mut()
             }
             (Self::ConflictPredicate, CommandPlan::Insert(plan)) => {
                 let conflict = plan.on_conflict.as_mut()?;
@@ -279,6 +309,11 @@ impl CommandScalarSlot {
                 .as_mut()
                 .expect("insert cell")
                 .scalar_mut(),
+            Self::ViewCheck(index) => item(input, "view_checks", index)
+                .field_mut("predicate")
+                .as_mut()
+                .expect("view check predicate")
+                .scalar_mut(),
             Self::MergeJoin => input
                 .field_mut("join_condition")
                 .as_mut()
@@ -292,6 +327,20 @@ impl CommandScalarSlot {
             Self::MergeValue { clause, value } => {
                 item(item(input, "when_clauses", clause), "values", value).scalar_mut()
             }
+            Self::ConflictExpression(index) => item(
+                input.field_mut("on_conflict").as_mut().expect("conflict"),
+                "expressions",
+                index,
+            )
+            .scalar_mut(),
+            Self::ConflictInferencePredicate => input
+                .field_mut("on_conflict")
+                .as_mut()
+                .expect("conflict")
+                .field_mut("predicate")
+                .as_mut()
+                .expect("conflict inference predicate")
+                .scalar_mut(),
             Self::ConflictPredicate => input
                 .field_mut("on_conflict")
                 .as_mut()
@@ -319,3 +368,6 @@ fn item<'a>(memory: &'a mut RewriteMemory, name: &str, index: usize) -> &'a mut 
         .as_mut()
         .expect("command vector item")
 }
+
+#[cfg(test)]
+mod tests;

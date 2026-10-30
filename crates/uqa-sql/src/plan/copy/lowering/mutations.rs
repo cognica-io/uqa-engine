@@ -47,11 +47,11 @@ impl Copying<'_> {
             })
         })?;
         Ok(InsertPlan {
-            table: self.text(&statement.table)?,
+            table: self.field("table", |copying| copying.text(&statement.table))?,
             target_relation_bound: statement.target_relation_bound,
             relations_bound: false,
             statement_privilege_subject: None,
-            target_privilege_subject: None,
+            target_privilege_subject: self.field("target_privilege_subject", |_| Ok(None))?,
             target_qualifier: self.text(&statement.target_qualifier)?,
             target_alias: self.optional_text(statement.target_alias.as_deref())?,
             include_descendants: statement.include_descendants,
@@ -70,9 +70,9 @@ impl Copying<'_> {
             returning_aliases: self.returning_aliases(&statement.returning_aliases)?,
             subqueries: self.take_arena(arena)?,
             view_checks: self.field("view_checks", |_| Ok(Vec::new()))?,
-            view_rule_relations: Vec::new(),
-            view_rule_insert_plans: Vec::new(),
-            view_rule_returning: None,
+            view_rule_relations: self.field("view_rule_relations", |_| Ok(Vec::new()))?,
+            view_rule_insert_plans: self.field("view_rule_insert_plans", |_| Ok(Vec::new()))?,
+            view_rule_returning: self.field("view_rule_returning", |_| Ok(None))?,
         })
     }
 
@@ -110,11 +110,11 @@ impl Copying<'_> {
             })
         })?;
         Ok(UpdatePlan {
-            table: self.text(&statement.table)?,
+            table: self.field("table", |copying| copying.text(&statement.table))?,
             target_relation_bound: statement.target_relation_bound,
             relations_bound: false,
             statement_privilege_subject: None,
-            target_privilege_subject: None,
+            target_privilege_subject: self.field("target_privilege_subject", |_| Ok(None))?,
             target_qualifier: self.text(&statement.target_qualifier)?,
             target_alias: self.optional_text(statement.target_alias.as_deref())?,
             include_descendants: statement.include_descendants,
@@ -126,9 +126,9 @@ impl Copying<'_> {
             returning_aliases: self.returning_aliases(&statement.returning_aliases)?,
             subqueries: self.take_arena(arena)?,
             view_checks: self.field("view_checks", |_| Ok(Vec::new()))?,
-            view_rule_relations: Vec::new(),
-            view_rule_update_plans: Vec::new(),
-            view_rule_returning: None,
+            view_rule_relations: self.field("view_rule_relations", |_| Ok(Vec::new()))?,
+            view_rule_update_plans: self.field("view_rule_update_plans", |_| Ok(Vec::new()))?,
+            view_rule_returning: self.field("view_rule_returning", |_| Ok(None))?,
         })
     }
 
@@ -161,11 +161,11 @@ impl Copying<'_> {
             })
         })?;
         Ok(DeletePlan {
-            table: self.text(&statement.table)?,
+            table: self.field("table", |copying| copying.text(&statement.table))?,
             target_relation_bound: statement.target_relation_bound,
             relations_bound: false,
             statement_privilege_subject: None,
-            target_privilege_subject: None,
+            target_privilege_subject: self.field("target_privilege_subject", |_| Ok(None))?,
             target_qualifier: self.text(&statement.target_qualifier)?,
             target_alias: self.optional_text(statement.target_alias.as_deref())?,
             include_descendants: statement.include_descendants,
@@ -175,8 +175,8 @@ impl Copying<'_> {
             returning,
             returning_aliases: self.returning_aliases(&statement.returning_aliases)?,
             subqueries: self.take_arena(arena)?,
-            view_rule_relations: Vec::new(),
-            view_rule_returning: None,
+            view_rule_relations: self.field("view_rule_relations", |_| Ok(Vec::new()))?,
+            view_rule_returning: self.field("view_rule_returning", |_| Ok(None))?,
         })
     }
 
@@ -208,9 +208,9 @@ impl Copying<'_> {
                     copying.lower_cte(cte, aggregates)
                 })
             })?,
-            target: self.text(&statement.target)?,
+            target: self.field("target", |copying| copying.text(&statement.target))?,
             statement_privilege_subject: None,
-            target_privilege_subject: None,
+            target_privilege_subject: self.field("target_privilege_subject", |_| Ok(None))?,
             target_qualifier: self.text(&statement.target_qualifier)?,
             target_alias: self.optional_text(statement.target_alias.as_deref())?,
             include_descendants: statement.include_descendants,

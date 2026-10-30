@@ -21,9 +21,9 @@ impl UnifiedPlan {
     }
 
     /// Stop at the first callback error, without copying syntax or visiting later inputs.
-    pub fn try_visit_scalar_expressions<E>(
-        &self,
-        visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+    pub fn try_visit_scalar_expressions<'a, E>(
+        &'a self,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
     ) -> Result<(), E> {
         match self {
             Self::Query(query) => query.try_visit_scalar_expressions(visit)?,
@@ -33,7 +33,7 @@ impl UnifiedPlan {
     }
 }
 
-impl super::PlanRef<'_> {
+impl<'a> super::PlanRef<'a> {
     pub fn visit_scalar_expressions(self, visit: &mut dyn FnMut(&ScalarExpr)) {
         let Ok(()) = self.try_visit_scalar_expressions(&mut |expression| {
             visit(expression);
@@ -44,7 +44,7 @@ impl super::PlanRef<'_> {
     /// Stop at the first callback error, without copying syntax or visiting later inputs.
     pub fn try_visit_scalar_expressions<E>(
         self,
-        visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
     ) -> Result<(), E> {
         match self {
             Self::Query(query) => query.try_visit_scalar_expressions(visit)?,
@@ -54,9 +54,9 @@ impl super::PlanRef<'_> {
     }
 }
 
-fn try_visit_ctes<E>(
-    ctes: &[CtePlan],
-    visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+fn try_visit_ctes<'a, E>(
+    ctes: &'a [CtePlan],
+    visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
 ) -> Result<(), E> {
     for cte in ctes {
         match &cte.body {
@@ -81,9 +81,9 @@ impl QueryPlan {
     }
 
     /// Stop at the first callback error, without copying syntax or visiting later inputs.
-    pub fn try_visit_scalar_expressions<E>(
-        &self,
-        visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+    pub fn try_visit_scalar_expressions<'a, E>(
+        &'a self,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
     ) -> Result<(), E> {
         try_visit_ctes(&self.ctes, visit)?;
         match &self.root {
@@ -163,9 +163,9 @@ impl SourcePlan {
     }
 
     /// Stop at the first callback error, without copying syntax or visiting later inputs.
-    pub fn try_visit_scalar_expressions<E>(
-        &self,
-        visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+    pub fn try_visit_scalar_expressions<'a, E>(
+        &'a self,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
     ) -> Result<(), E> {
         match self {
             crate::plan::SourcePlan::RetainedRows(_) => {}

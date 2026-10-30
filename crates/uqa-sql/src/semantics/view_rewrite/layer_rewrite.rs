@@ -4,7 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{AutomaticViewLayer, QueryPlan, SQLError, ScalarExpr, SourcePlan, ViewRewriteContext};
+use super::SourcePlan;
+#[cfg(test)]
+use super::{QueryPlan, ScalarExpr};
+#[cfg(test)]
 use uqa_core::memory::ProductionControl;
 
 mod owned;
@@ -52,29 +55,6 @@ fn fresh_query_qualifier(query: &QueryPlan) -> String {
         .expect("ordinary qualifier production")
         .into_uncontrolled()
         .expect("ordinary qualifier ownership")
-}
-
-pub(super) fn embed_layer_expression(
-    services: ViewRewriteContext<'_>,
-    expression: &ScalarExpr,
-    layer: &AutomaticViewLayer,
-    target_qualifier: &str,
-    target_subqueries: &mut Vec<QueryPlan>,
-) -> Result<ScalarExpr, SQLError> {
-    let control = ProductionControl::uncontrolled();
-    let expression = embed_owned(services, expression, layer, target_qualifier, &control)?;
-    let (scalar, arena) = expression.into_parts(&control)?;
-    let scalar = scalar.remap_subquery_ids(&control, &mut |id| id + target_subqueries.len())?;
-    let scalar = scalar
-        .finish(&control)?
-        .into_uncontrolled()
-        .expect("ordinary view expression");
-    let queries = arena
-        .finish(&control)?
-        .into_uncontrolled()
-        .expect("ordinary view queries");
-    target_subqueries.extend(queries);
-    Ok(scalar)
 }
 
 #[cfg(test)]

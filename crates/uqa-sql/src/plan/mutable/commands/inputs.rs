@@ -75,6 +75,11 @@ impl MutableCommandPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
+        let field = if matches!(self.command, CommandPlan::Merge(_)) {
+            "target_predicate"
+        } else {
+            "predicate"
+        };
         let (predicate, queries) = predicate_and_queries(&mut self.command)?;
         let predicate = predicate.take().map(|expression| {
             let memory = self
@@ -82,7 +87,7 @@ impl MutableCommandPlan {
                 .as_mut()
                 .and_then(|memory| {
                     body(memory)
-                        .field_mut("predicate")
+                        .field_mut(field)
                         .as_mut()
                         .expect("predicate constructor")
                         .scalar_mut()
@@ -121,7 +126,7 @@ impl MutableCommandPlan {
         *queries = arena.queries;
         if let Some(owner) = &mut self.memory {
             let body = body(owner);
-            *body.field_mut("predicate") = memory;
+            *body.field_mut(field) = memory;
             *body.field_mut("subqueries") = arena.memory;
         }
         Ok(self)
@@ -154,8 +159,9 @@ fn predicate_and_queries(
     match command {
         CommandPlan::Update(plan) => Ok((&mut plan.predicate, &mut plan.subqueries)),
         CommandPlan::Delete(plan) => Ok((&mut plan.predicate, &mut plan.subqueries)),
+        CommandPlan::Merge(plan) => Ok((&mut plan.target_predicate, &mut plan.subqueries)),
         _ => Err(SQLError::Internal(
-            "qualification edit requires UPDATE or DELETE".into(),
+            "qualification edit requires UPDATE, DELETE or MERGE".into(),
         )),
     }
 }

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Rewrite-rule commands and the surviving original share statement resources, not evaluated event rows.
+//! Rewrite-rule commands and the surviving original retain their own admitted syntax through execution.
 
 use crate::{
     mutation::{
@@ -12,48 +12,27 @@ use crate::{
     },
     query::CteScope,
 };
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_sql::{
-    ast::{RuleEvent, TriggerEvent},
-    plan::{DeletePlan, UpdatePlan},
+    ast::{RuleEvent, TriggerEvent, TriggerTiming},
+    plan::{CommandPlan, DeletePlan, MutableCommandPlan, UpdatePlan},
     semantics::{
-        rules::binding::{MutationRuleInput, RuleMutation},
+        rules::binding::{OwnedMutationRuleInput, RuleMutation},
         view_privileges, view_rewrite,
     },
     SQLError, SQLParam,
 };
 
-enum MutationCommand {
-    Update(UpdatePlan),
-    Delete(DeletePlan),
-}
+type PreparedMutation = (
+    Option<MutableCommandPlan>,
+    Produced<Vec<MutableCommandPlan>>,
+);
 
-impl MutationCommand {
-    fn input(&self) -> RuleMutation<'_> {
-        match self {
-            Self::Update(plan) => RuleMutation::Update(plan),
-            Self::Delete(plan) => RuleMutation::Delete(plan),
-        }
-    }
-
-    fn clear_ctes(&mut self) {
-        match self {
-            Self::Update(plan) => plan.ctes.clear(),
-            Self::Delete(plan) => plan.ctes.clear(),
-        }
-    }
-
-    fn privilege_subject(&self) -> Option<&uqa_sql::catalog::roles::RoleReference> {
-        match self {
-            Self::Update(plan) => plan.statement_privilege_subject.as_ref(),
-            Self::Delete(plan) => plan.statement_privilege_subject.as_ref(),
-        }
-    }
-
-    fn relations_bound(&self) -> bool {
-        match self {
-            Self::Update(plan) => plan.relations_bound,
-            Self::Delete(plan) => plan.relations_bound,
-        }
+fn mutation(command: &CommandPlan) -> RuleMutation<'_> {
+    match command {
+        CommandPlan::Update(plan) => RuleMutation::Update(plan),
+        CommandPlan::Delete(plan) => RuleMutation::Delete(plan),
+        _ => unreachable!("UPDATE/DELETE command schedule"),
     }
 }
 
@@ -63,17 +42,19 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    if plain_table(context, RuleMutation::Update(statement))? {
+    let resources = context.mutation.scopes.read_control()?;
+    let control = ProductionControl::new(
+        resources.memory(),
+        resources.cancellation(),
+        context.mutation.scopes.cancellation(),
+    );
+    let input = RuleMutation::Update(statement);
+    if plain_table(context, input, &control)? {
         return crate::mutation::update::table::run_table_update(
             context, statement, params, inherited,
         );
     }
-    run(
-        context,
-        MutationCommand::Update(statement.clone()),
-        params,
-        inherited,
-    )
+    run(context, input, params, inherited, &control)
 }
 
 pub fn run_delete<S: Clone + Send + Sync + 'static>(
@@ -82,49 +63,61 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    if plain_table(context, RuleMutation::Delete(statement))? {
+    let resources = context.mutation.scopes.read_control()?;
+    let control = ProductionControl::new(
+        resources.memory(),
+        resources.cancellation(),
+        context.mutation.scopes.cancellation(),
+    );
+    let input = RuleMutation::Delete(statement);
+    if plain_table(context, input, &control)? {
         return crate::mutation::delete::run_table_delete(context, statement, params, inherited);
     }
-    run(
-        context,
-        MutationCommand::Delete(statement.clone()),
-        params,
-        inherited,
-    )
+    run(context, input, params, inherited, &control)
 }
 
 fn run<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    statement: MutationCommand,
+    statement: RuleMutation<'_>,
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
+    control: &ProductionControl<'_>,
 ) -> Result<MutationOutput, SQLError> {
-    let (mut original, relations) = prepare(context, &statement, params, inherited)?;
+    let (mut original, relations) = prepare(context, statement, params, inherited, control)?;
     if relations.is_empty() {
         return original.map_or_else(
             || Ok(MutationOutput::from_affected(0)),
-            |original| run_original(context, &original, params, inherited),
+            |original| run_original(context, &original, params, inherited, control),
         );
     }
     let (commands, _running) = statement_end::statement_commands(inherited);
+    let (subject, relations_bound) = match statement {
+        RuleMutation::Update(plan) => (
+            plan.statement_privilege_subject.as_ref(),
+            plan.relations_bound,
+        ),
+        RuleMutation::Delete(plan) => (
+            plan.statement_privilege_subject.as_ref(),
+            plan.relations_bound,
+        ),
+    };
     let mut scope = context
         .mutation
         .scopes
-        .command_scope(statement.privilege_subject(), statement.relations_bound())?;
+        .command_scope(subject, relations_bound)?;
     if let Some(parent) = inherited {
         scope.inherit_cte_bindings(parent);
     }
     scope.set_statement_commands(commands);
-    let input = statement.input();
     let result = (|| {
         crate::query::cte::materialize_command_ctes(
             context.query.source.ctes,
-            input.ctes(),
+            statement.ctes(),
             |control| {
                 uqa_sql::semantics::primary_command_cte_references_with_control(
-                    input.ctes(),
-                    input.subqueries().iter(),
-                    input.source(),
+                    statement.ctes(),
+                    statement.subqueries().iter(),
+                    statement.source(),
                     control,
                 )
             },
@@ -133,31 +126,30 @@ fn run<S: Clone + Send + Sync + 'static>(
         )?;
         let mut output = None;
         let mut affected = 0;
-        for relation in &relations {
-            let input = relation.input();
-            let arena_resources = context.query.source.ctes.production_resources()?;
-            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
-                input.subqueries(),
-                &arena_resources.control(),
-            )?;
+        for relation in relations.iter() {
+            control.check()?;
+            let input = mutation(relation);
+            scope.scalar_subqueries =
+                uqa_sql::plan::RetainedQueryArena::capture(input.subqueries(), control)?;
             let source_schema = context
                 .mutation
                 .rules
                 .rules
                 .source_schema(input, params, &scope)?;
-            let mut projection = match relation {
-                MutationCommand::Update(plan) => super::RuleOutputProjection::update(
+            let mut projection = match &**relation {
+                CommandPlan::Update(plan) => super::RuleOutputProjection::update(
                     context.mutation.preparation.returning,
                     plan,
                     params,
                     &scope,
                 ),
-                MutationCommand::Delete(plan) => super::RuleOutputProjection::delete(
+                CommandPlan::Delete(plan) => super::RuleOutputProjection::delete(
                     context.mutation.preparation.returning,
                     plan,
                     params,
                     &scope,
                 ),
+                _ => unreachable!("scheduled mutation"),
             };
             projection.shape.supplemental_schema = source_schema.as_ref();
             let outcome = super::execute_mutation_query_rules(
@@ -181,145 +173,196 @@ fn run<S: Clone + Send + Sync + 'static>(
                 );
             }
         }
-        if let Some(original) = &mut original {
-            original.clear_ctes();
-            let result = run_original(context, original, params, Some(&scope))?;
+        if let Some(original) = original.take() {
+            let original = original.clear_mutation_ctes(control)?;
+            let result = run_original(context, &original, params, Some(&scope), control)?;
             if output.is_none() {
                 return Ok(result);
             }
         }
         Ok(output.unwrap_or_else(|| MutationOutput::from_affected(affected)))
     })();
-    statement_end::finish_statement(context, params, input.ctes(), Some(&mut scope), result)
+    statement_end::finish_statement(context, params, statement.ctes(), Some(&mut scope), result)
 }
 
 fn prepare<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    statement: &MutationCommand,
+    statement: RuleMutation<'_>,
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
-) -> Result<(Option<MutationCommand>, Vec<MutationCommand>), SQLError> {
+    control: &ProductionControl<'_>,
+) -> Result<PreparedMutation, SQLError> {
     let rewrite = context.mutation.rules.views;
-    let rule_context = &context.mutation.rules.rules;
-    let input = statement.input();
-    let kind = relation_kind(context, statement)?;
-    let trigger = match input.event() {
+    let rules = &context.mutation.rules.rules;
+    let kind = relation_kind(context, statement, control)?;
+    let trigger = match statement.event() {
         RuleEvent::Update => TriggerEvent::Update,
         RuleEvent::Delete => TriggerEvent::Delete,
         _ => unreachable!("mutation event"),
     };
-    let automatic =
-        kind.is_some() && !view_rewrite::has_instead_of_trigger(rewrite, input.table(), trigger)?;
+    let automatic = kind.is_some()
+        && !rewrite.catalog.has_trigger_definition_with_control(
+            statement.table(),
+            TriggerTiming::InsteadOf,
+            trigger,
+            true,
+            control,
+        )?;
     let bindings = inherited
-        .map(crate::query::binding::binding_context)
-        .transpose()?
-        .map(uqa_sql::binding::snapshot::BindingSnapshot::from);
-    let mut relations = Vec::new();
-    // View rewriting owns layer privileges. Rule capture precedes authorization
-    // of the surviving target, since an INSTEAD rule can remove that target.
-    let original = match statement {
-        MutationCommand::Update(plan) => {
-            let mut visit = |plan: &mut UpdatePlan| -> Result<bool, SQLError> {
-                lock_and_validate_returning(context, RuleMutation::Update(plan))?;
-                let rules = rule_context.analysis;
-                if rule_context
-                    .capture_rules(&plan.table, RuleEvent::Update)?
-                    .is_empty()?
-                {
-                    return Ok(true);
-                }
-                relations.push(MutationCommand::Update(plan.clone()));
-                let subject = rule_context.security.privilege_subject(&plan.table)?;
-                MutationRuleInput::qualify_update_original(
-                    rules,
-                    plan,
-                    rule_context.binding,
-                    &subject,
-                )
-            };
-            let mut original = if automatic {
-                view_rewrite::rewrite_update_rule_inputs(
-                    rewrite,
-                    plan,
-                    params,
-                    bindings.as_ref(),
-                    &mut visit,
-                )?
-            } else {
-                Some(plan.clone())
-            };
-            if let Some(plan) = &mut original {
-                validate_update(context, plan)?;
-                if !visit(plan)? {
-                    original = None;
-                }
-            }
-            original.map(MutationCommand::Update)
+        .map(|scope| crate::query::binding::binding_snapshot_with_control(scope, control))
+        .transpose()?;
+    let mut relations = ProductionVec::new(*control);
+    let mut visit = |plan: MutableCommandPlan| -> Result<Option<MutableCommandPlan>, SQLError> {
+        let input = mutation(&plan);
+        lock_and_validate_returning(context, input, control)?;
+        if rules
+            .capture_rules(input.table(), input.event())?
+            .is_empty()?
+        {
+            return Ok(Some(plan));
         }
-        MutationCommand::Delete(plan) => {
-            let mut visit = |plan: &mut DeletePlan| -> Result<bool, SQLError> {
-                lock_and_validate_returning(context, RuleMutation::Delete(plan))?;
-                let rules = rule_context.analysis;
-                if rule_context
-                    .capture_rules(&plan.table, RuleEvent::Delete)?
-                    .is_empty()?
-                {
-                    return Ok(true);
-                }
-                relations.push(MutationCommand::Delete(plan.clone()));
-                let subject = rule_context.security.privilege_subject(&plan.table)?;
-                MutationRuleInput::qualify_delete_original(
-                    rules,
-                    plan,
-                    rule_context.binding,
-                    &subject,
-                )
-            };
-            let mut original = if automatic {
-                view_rewrite::rewrite_delete_rule_inputs(
-                    rewrite,
-                    plan,
-                    params,
-                    bindings.as_ref(),
-                    &mut visit,
-                )?
-            } else {
-                Some(plan.clone())
-            };
-            if let Some(plan) = &mut original {
-                validate_delete(context, plan)?;
-                if !visit(plan)? {
-                    original = None;
-                }
-            }
-            original.map(MutationCommand::Delete)
-        }
+        let snapshot = plan.copy_for_rewrite(control)?;
+        relations.push_produced(control.finish(snapshot, control.empty_reservation())?)?;
+        let subject = rules
+            .security
+            .privilege_subject_with_control(input.table(), control)?;
+        OwnedMutationRuleInput::qualify_original(
+            rules.analysis,
+            plan,
+            rules.binding,
+            &subject,
+            control,
+        )
     };
-    Ok((original, relations))
+    let input = match statement {
+        RuleMutation::Update(plan) => plan.copy_for_rewrite(control)?,
+        RuleMutation::Delete(plan) => plan.copy_for_rewrite(control)?,
+    };
+    let mut original = if automatic {
+        view_rewrite::rewrite_rule_inputs_owned(
+            rewrite,
+            input,
+            params,
+            bindings
+                .as_ref()
+                .map(view_rewrite::ViewRewriteBindings::Controlled),
+            &mut visit,
+            control,
+        )?
+    } else {
+        Some(input)
+    };
+    if let Some(plan) = original.take() {
+        match &*plan {
+            CommandPlan::Update(plan) => validate_update(context, plan, control)?,
+            CommandPlan::Delete(plan) => validate_delete(context, plan, control)?,
+            _ => unreachable!("surviving mutation"),
+        }
+        original = visit(plan)?;
+    }
+    Ok((original, relations.finish()?))
+}
+
+fn lock_and_validate_returning<S: Clone + Send + Sync + 'static>(
+    context: &MutationStatementContext<'_, S>,
+    input: RuleMutation<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    context.query.source.locking.session.lock_relation(
+        input.table(),
+        crate::row_locks::RelationLockMode::RowExclusive,
+    )?;
+    uqa_sql::semantics::rules::validate_rule_returning_contract_with_control(
+        context.mutation.rules.rules.analysis.rules,
+        input.table(),
+        input.event(),
+        !input.returning().is_empty(),
+        control,
+    )
+}
+
+fn run_original<S: Clone + Send + Sync + 'static>(
+    context: &MutationStatementContext<'_, S>,
+    original: &MutableCommandPlan,
+    params: &[SQLParam],
+    inherited: Option<&CteScope<S>>,
+    control: &ProductionControl<'_>,
+) -> Result<MutationOutput, SQLError> {
+    let view = context
+        .mutation
+        .rules
+        .views
+        .catalog
+        .target_view_kind_with_control(mutation(original).table(), control)?
+        .is_some();
+    match &**original {
+        CommandPlan::Update(plan) if view => {
+            crate::mutation::routine_calls::update(context, plan, params, inherited)?;
+            crate::mutation::views::commands::run_view_update_inner(
+                context, plan, params, inherited,
+            )
+        }
+        CommandPlan::Delete(plan) if view => {
+            crate::mutation::routine_calls::delete(context, plan, params, inherited)?;
+            crate::mutation::views::commands::run_view_delete_inner(
+                context, plan, params, inherited,
+            )
+        }
+        CommandPlan::Update(plan) => {
+            crate::mutation::update::table::run_table_update(context, plan, params, inherited)
+        }
+        CommandPlan::Delete(plan) => {
+            crate::mutation::delete::run_table_delete(context, plan, params, inherited)
+        }
+        _ => unreachable!("surviving mutation"),
+    }
+}
+
+fn relation_kind<S: Clone + Send + Sync + 'static>(
+    context: &MutationStatementContext<'_, S>,
+    input: RuleMutation<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<uqa_sql::catalog::view::StoredViewKind>, SQLError> {
+    let rewrite = context.mutation.rules.views;
+    let kind = rewrite
+        .catalog
+        .target_view_kind_with_control(input.table(), control)?;
+    if kind == Some(uqa_sql::catalog::view::StoredViewKind::Materialized) {
+        match input {
+            RuleMutation::Update(plan) => {
+                view_privileges::ensure_update_with_control(rewrite.authorization, plan, control)?;
+            }
+            RuleMutation::Delete(plan) => {
+                view_privileges::ensure_delete_with_control(rewrite.authorization, plan, control)?;
+            }
+        }
+        let relation = uqa_core::RelationIdentity::from_legacy_name(input.table())
+            .map_err(SQLError::Internal)?;
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("cannot change materialized view \"{}\"", relation.name),
+        });
+    }
+    Ok(kind)
 }
 
 fn validate_update<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
     plan: &UpdatePlan,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     if context
         .mutation
         .rules
         .views
         .catalog
-        .target_view_kind(&plan.table)?
+        .target_view_kind_with_control(&plan.table, control)?
         .is_some()
     {
-        let retained = context.mutation.scopes.read_control()?;
-        let control = uqa_core::memory::ProductionControl::new(
-            retained.memory(),
-            retained.cancellation(),
-            context.mutation.scopes.cancellation(),
-        );
         view_privileges::ensure_update_with_control(
             context.mutation.rules.views.authorization,
             plan,
-            &control,
+            control,
         )?;
     } else {
         uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges(
@@ -354,25 +397,20 @@ fn validate_update<S: Clone + Send + Sync + 'static>(
 fn validate_delete<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
     plan: &DeletePlan,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     if context
         .mutation
         .rules
         .views
         .catalog
-        .target_view_kind(&plan.table)?
+        .target_view_kind_with_control(&plan.table, control)?
         .is_some()
     {
-        let retained = context.mutation.scopes.read_control()?;
-        let control = uqa_core::memory::ProductionControl::new(
-            retained.memory(),
-            retained.cancellation(),
-            context.mutation.scopes.cancellation(),
-        );
         view_privileges::ensure_delete_with_control(
             context.mutation.rules.views.authorization,
             plan,
-            &control,
+            control,
         )?;
     } else {
         uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges(
@@ -383,99 +421,17 @@ fn validate_delete<S: Clone + Send + Sync + 'static>(
     Ok(())
 }
 
-fn lock_and_validate_returning<S: Clone + Send + Sync + 'static>(
-    context: &MutationStatementContext<'_, S>,
-    input: RuleMutation<'_>,
-) -> Result<(), SQLError> {
-    context.query.source.locking.session.lock_relation(
-        input.table(),
-        crate::row_locks::RelationLockMode::RowExclusive,
-    )?;
-    uqa_sql::semantics::rules::validate_rule_returning_contract(
-        context.mutation.rules.rules.analysis.rules,
-        input.table(),
-        input.event(),
-        !input.returning().is_empty(),
-    )
-}
-
-fn run_original<S: Clone + Send + Sync + 'static>(
-    context: &MutationStatementContext<'_, S>,
-    original: &MutationCommand,
-    params: &[SQLParam],
-    inherited: Option<&CteScope<S>>,
-) -> Result<MutationOutput, SQLError> {
-    let view = context
-        .mutation
-        .rules
-        .views
-        .catalog
-        .target_view_kind(original.input().table())?
-        .is_some();
-    match original {
-        MutationCommand::Update(plan) if view => {
-            crate::mutation::routine_calls::update(context, plan, params, inherited)?;
-            crate::mutation::views::commands::run_view_update_inner(
-                context, plan, params, inherited,
-            )
-        }
-        MutationCommand::Delete(plan) if view => {
-            crate::mutation::routine_calls::delete(context, plan, params, inherited)?;
-            crate::mutation::views::commands::run_view_delete_inner(
-                context, plan, params, inherited,
-            )
-        }
-        MutationCommand::Update(plan) => {
-            crate::mutation::update::table::run_table_update(context, plan, params, inherited)
-        }
-        MutationCommand::Delete(plan) => {
-            crate::mutation::delete::run_table_delete(context, plan, params, inherited)
-        }
-    }
-}
-
-fn relation_kind<S: Clone + Send + Sync + 'static>(
-    context: &MutationStatementContext<'_, S>,
-    statement: &MutationCommand,
-) -> Result<Option<uqa_sql::catalog::view::StoredViewKind>, SQLError> {
-    let rewrite = context.mutation.rules.views;
-    let input = statement.input();
-    let kind = rewrite.catalog.target_view_kind(input.table())?;
-    if kind == Some(uqa_sql::catalog::view::StoredViewKind::Materialized) {
-        let retained = context.mutation.scopes.read_control()?;
-        let control = uqa_core::memory::ProductionControl::new(
-            retained.memory(),
-            retained.cancellation(),
-            context.mutation.scopes.cancellation(),
-        );
-        match statement {
-            MutationCommand::Update(plan) => {
-                view_privileges::ensure_update_with_control(rewrite.authorization, plan, &control)?;
-            }
-            MutationCommand::Delete(plan) => {
-                view_privileges::ensure_delete_with_control(rewrite.authorization, plan, &control)?;
-            }
-        }
-        let relation = uqa_core::RelationIdentity::from_legacy_name(input.table())
-            .map_err(SQLError::Internal)?;
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("cannot change materialized view \"{}\"", relation.name),
-        });
-    }
-    Ok(kind)
-}
-
 fn plain_table<S: Clone + 'static>(
     context: &MutationStatementContext<'_, S>,
     input: RuleMutation<'_>,
+    control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
     Ok(context
         .mutation
         .rules
         .views
         .catalog
-        .target_view_kind(input.table())?
+        .target_view_kind_with_control(input.table(), control)?
         .is_none()
         && context
             .mutation

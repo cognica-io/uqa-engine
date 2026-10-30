@@ -14,6 +14,7 @@ use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, Produ
 mod command;
 mod generated_sources;
 mod lowering;
+mod owned_mutation;
 mod production;
 mod query;
 mod source;
@@ -232,7 +233,7 @@ impl<'a> Copying<'a> {
         Ok(self.control.finish(value, Some(self.memory))?)
     }
 
-    fn take<T>(&mut self, output: Produced<T>) -> T {
+    pub(in crate::plan) fn take<T>(&mut self, output: Produced<T>) -> T {
         let (value, memory) = output.into_parts();
         self.memory.absorb(memory.expect("controlled plan copy"));
         value

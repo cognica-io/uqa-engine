@@ -10,12 +10,11 @@ use std::collections::BTreeSet;
 
 use crate::ast::{ReturningAliases, TriggerEvent, TriggerTiming};
 use crate::plan::{
-    AssignmentPlan, ComputePlan, ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan,
-    MergePlan, MergeWhenPlan, ProjectionPlan, QueryPlan, RelationalPlan, SourcePlan, UpdatePlan,
-    ViewCheckPlan, ViewRuleInsertPlan, ViewRuleReturningPlan, ViewRuleUpdatePlan,
+    ComputePlan, ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan,
+    MergeWhenPlan, ProjectionPlan, QueryPlan, RelationalPlan, SourcePlan, UpdatePlan,
 };
 use crate::SQLError;
-use crate::{ColumnIdentity, RowSchema, ScalarExpr};
+use crate::{RowSchema, ScalarExpr};
 
 use crate::{
     catalog::view::{StoredViewKind, ViewRewriteDefinition as StoredView},
@@ -26,12 +25,20 @@ use crate::binding::snapshot::BindingSnapshot as CteScope;
 pub mod context;
 use context::{stored_view_schema, ViewRewriteContext};
 
+mod bindings;
 mod captured_projection;
+pub use bindings::ViewRewriteBindings;
 mod columns;
 pub use columns::relation_columns_with_control;
+mod commands;
 mod correlation;
 pub use captured_projection::{capture_view_projection, CapturedViewProjection};
 pub use captured_projection::{capture_view_projection_owned, OwnedCapturedViewProjection};
+pub use commands::{
+    merge_view_target_path_with_control, rewrite_insert_owned, rewrite_merge_owned,
+    rewrite_rule_inputs_owned, validate_public_merge_targets_with_control,
+};
+pub use validation::production::validate_public_merge_contract as validate_public_merge_contract_with_control;
 mod deferred;
 pub use deferred::{
     bind_outer_rewrite_scope, bind_outer_rewrite_scope_with_control,
@@ -49,21 +56,8 @@ pub mod rule_inputs;
 mod updatability;
 mod validation;
 
-use correlation::{
-    delete_ordinary_subquery_ids, dml_analysis_scope, dml_source_schema,
-    insert_conflict_subquery_ids, insert_input_width, merge_matched_subquery_ids,
-    merge_target_only_subquery_ids, returning_subquery_ids, rewrite_correlated_dml_context,
-    schema_public_columns, update_ordinary_subquery_ids, validate_delete_expressions,
-    validate_insert_expressions, validate_merge_expressions, validate_update_expressions,
-    CorrelatedDmlContext,
-};
-use layer_privileges::LayerPrivileges;
-use returning::{
-    add_check_option, bind_unqualified_source_positions, combine_view_predicate, dml_target_width,
-    finalize_source_returning, instead_of_trigger_definition, preserve_view_rule_returning,
-    record_view_rule_relation, rewrite_existing_view_checks, rewrite_merge_returning,
-    rewrite_returning, rewrite_target_expression,
-};
+use correlation::schema_public_columns;
+use returning::instead_of_trigger_definition;
 pub use rewrite_insert::rewrite_insert_to_base;
 pub use rewrite_merge::rewrite_merge_to_base;
 pub use rewrite_update_delete::{
@@ -73,13 +67,7 @@ pub use rewrite_update_delete::{
 pub use rule_inputs::{rule_input_requirements, validate_grouped_rule_inputs};
 pub use updatability::NotUpdatableReason;
 use updatability::{view_not_updatable, ColumnRestriction, ColumnWrite, ViewCommand};
-use validation::{
-    duplicate_assignment, duplicate_insert_column, layer_column, validate_direct_view_rule_path,
-    validate_insert_targets, validate_mapped_columns, validate_merge_targets,
-    validate_public_delete_contract, validate_public_insert_contract,
-    validate_public_update_contract, validate_public_view_targets, validate_update_targets,
-    validate_view_expression, validate_writable_columns, writable_column, ExpressionScope,
-};
+use validation::{duplicate_assignment, duplicate_insert_column, layer_column, ExpressionScope};
 pub use validation::{merge_view_target_path, MergeViewTargetPath};
 pub use validation::{validate_public_merge_contract, validate_public_merge_targets};
 
@@ -267,61 +255,6 @@ pub fn view_query_shape(
     Ok(shape)
 }
 
-/// The catalog name of view `name`.
-fn canonical_view_name(services: ViewRewriteContext<'_>, name: &str) -> Result<String, SQLError> {
-    services
-        .catalog
-        .try_resolve_view_name(name)
-        .map_err(|error| SQLError::Internal(format!("resolve DML view `{name}`: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
-}
-
-/// The layer of view `view` that `command` is rewritten through, or the error `rewriteTargetView` reports when the view's query does not allow the rewrite.
-fn rewritable_layer(
-    services: ViewRewriteContext<'_>,
-    view: &str,
-    command: ViewCommand,
-) -> Result<AutomaticViewLayer, SQLError> {
-    match view_query_shape(services, view)? {
-        Some(ViewQueryShape::Updatable(layer)) => Ok(*layer),
-        Some(ViewQueryShape::NotUpdatable(reason)) => {
-            Err(view_not_updatable(view, command, reason))
-        }
-        None => Err(SQLError::UnknownTable(view.to_string())),
-    }
-}
-
-/// The next layer the rewrite of `command` passes through at view `view`: the first layer, checked already, while `initial` holds it; `None` where an unconditional INSTEAD rule of a view that cannot be rewritten handles the command. As `RewriteQuery` does, conditional INSTEAD rules without an unconditional one are rejected before the view's query is examined.
-fn next_rewritten_layer(
-    services: ViewRewriteContext<'_>,
-    view: &str,
-    initial: &mut Option<AutomaticViewLayer>,
-    rewrite_suppressed: bool,
-    event: crate::ast::RuleEvent,
-    command: ViewCommand,
-) -> Result<Option<AutomaticViewLayer>, SQLError> {
-    if let Some(layer) = initial.take() {
-        return Ok(Some(layer));
-    }
-    if !rewrite_suppressed {
-        validate_direct_view_rule_path(services, view, event, command)?;
-    }
-    match view_query_shape(services, view)? {
-        Some(ViewQueryShape::Updatable(layer)) => Ok(Some(*layer)),
-        shape => {
-            if active_unconditional_instead_rule(services, view, event)? {
-                return Ok(None);
-            }
-            Err(match shape {
-                Some(ViewQueryShape::NotUpdatable(reason)) => {
-                    view_not_updatable(view, command, reason)
-                }
-                _ => SQLError::UnknownTable(view.to_string()),
-            })
-        }
-    }
-}
-
 fn view_query_shape_from_definition(
     services: ViewRewriteContext<'_>,
     canonical_name: &str,
@@ -337,7 +270,6 @@ fn view_query_shape_from_definition(
 }
 
 mod layer_rewrite;
-use layer_rewrite::embed_layer_expression;
 
 pub fn has_instead_of_trigger(
     services: ViewRewriteContext<'_>,

@@ -251,3 +251,56 @@ impl CommandAssignmentSlot {
         }
     }
 }
+
+impl MutableCommandPlan {
+    /// Retarget names independently of assignment bounds and values.
+    pub fn map_assignment_columns(
+        mut self,
+        slot: CommandAssignmentSlot,
+        control: &ProductionControl<'_>,
+        mut map: impl FnMut(&str) -> Result<uqa_core::memory::Produced<String>, SQLError>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let assignment = slot.assignment_mut(&mut self.command);
+        let memory = self.memory.as_mut().map(|memory| {
+            slot.memory_mut(memory)
+                .field_mut("target")
+                .as_mut()
+                .expect("assignment target")
+        });
+        match &mut assignment.target {
+            AssignmentTargets::Single(target) => rename_target(target, memory, control, &mut map)?,
+            AssignmentTargets::Multiple(group) => {
+                let mut memory = memory;
+                for (index, target) in group.targets.iter_mut().enumerate() {
+                    let memory = memory.as_mut().map(|memory| item(memory, "targets", index));
+                    rename_target(target, memory, control, &mut map)?;
+                }
+            }
+        }
+        Ok(self)
+    }
+}
+
+pub(super) fn rename_target(
+    target: &mut crate::ast::AssignmentTarget<ScalarExpr>,
+    memory: Option<&mut RewriteMemory>,
+    control: &ProductionControl<'_>,
+    map: &mut impl FnMut(&str) -> Result<uqa_core::memory::Produced<String>, SQLError>,
+) -> Result<(), SQLError> {
+    let name = map(&target.column)?;
+    let (name, reservation) = name.into_parts();
+    let replacement = control.finish(name, reservation)?;
+    let (name, reservation) = replacement.into_parts();
+    let previous_capacity = target.column.capacity();
+    target.column = name;
+    if let Some(memory) = memory {
+        let RewriteMemory::Fields { direct, .. } = memory else {
+            unreachable!("assignment target owner");
+        };
+        drop(direct.split(previous_capacity));
+        direct.absorb(reservation.expect("controlled target name"));
+    }
+    Ok(())
+}

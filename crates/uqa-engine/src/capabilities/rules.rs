@@ -44,6 +44,15 @@ impl RuleSecurity for Engine {
     fn privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError> {
         self.event_lookup_context().rule_privilege_subject(table)
     }
+
+    fn privilege_subject_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RoleReference>, SQLError> {
+        self.event_lookup_context()
+            .rule_privilege_subject_with_control(table, control)
+    }
 }
 impl RuleStatements<crate::session::StatementReadSnapshot> for Engine {
     fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError> {

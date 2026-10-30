@@ -66,7 +66,7 @@ fn query(sql: &str) -> QueryPlan {
                         subqueries: Vec::new(),
                     },
                     qualifier: "target".into(),
-                    _memory: None,
+                    memory: None,
                 },
             ),
             (
@@ -77,7 +77,7 @@ fn query(sql: &str) -> QueryPlan {
                         subqueries: Vec::new(),
                     },
                     qualifier: "target".into(),
-                    _memory: None,
+                    memory: None,
                 },
             ),
         ])),
@@ -334,7 +334,7 @@ fn each_replacement_captures_only_its_own_retargeted_qualifier() {
                 subqueries: vec![*inner],
             },
             qualifier: "target".into(),
-            _memory: None,
+            memory: None,
         },
     );
     rewrite.replacements.ordinary_mut().insert(
@@ -345,7 +345,7 @@ fn each_replacement_captures_only_its_own_retargeted_qualifier() {
                 subqueries: Vec::new(),
             },
             qualifier: "incoming".into(),
-            _memory: None,
+            memory: None,
         },
     );
     rewrite.capture_outer_columns();

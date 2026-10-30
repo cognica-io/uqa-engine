@@ -31311,6 +31311,141 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_mutation_copies_reject_large_private_arenas_before_allocating",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/commands/tests.rs",
+      "capability": "Consuming view command fields",
+      "workload": "All four mutation bodies with a 4 MiB unused query and five exhausted/partial allowances.",
+      "invariant": "Reject before the large copy, retire partial owners, preserve siblings and reproduce complete syntax after recovery.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_metadata_and_returning_edits_move_existing_owners_and_retire_only_replaced_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/commands/tests.rs",
+      "capability": "Consuming view command fields",
+      "workload": "All mutation kinds with CTEs, retained query payloads, target/authority replacement and RETURNING transfer.",
+      "invariant": "Preserve original arena addresses and match exact physical live-allocation deltas while replacing only selected fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_rule_returning_preserves_first_namespace_and_moves_relation_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/commands/tests.rs",
+      "capability": "Consuming view command fields",
+      "workload": "INSERT, UPDATE and DELETE view-rule relations with a 1 MiB retained RETURNING query namespace.",
+      "invariant": "Move previous relation names, retain only the first RETURNING snapshot and release every copied payload with its command.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_owner_edits_retire_partial_outputs_on_both_cancellations_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/commands/tests.rs",
+      "capability": "Consuming view command fields",
+      "workload": "Original/invoking cancellation and a RETURNING callback panic after projection extraction.",
+      "invariant": "Return 57014 for either cancellation and retire all detached fields and query owners on callback unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "automatic_view_returning_keeps_postgresql_star_order_and_row_images",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_returning.rs",
+      "capability": "Automatic view RETURNING ownership",
+      "workload": "PostgreSQL 18.4 INSERT/UPDATE/MERGE/DELETE wildcard and OLD/NEW fixtures on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Preserve target/source star order, duplicated projected columns, old/new aliases and absent row images, then retain final rows through durable reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_rule_field_failures_retire_private_storage_and_preserve_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/commands/tests.rs",
+      "capability": "Consuming view command fields",
+      "workload": "Partial view-rule descriptor and RETURNING production with large names and exhausted allowances.",
+      "invariant": "Reject before large allocation, retire partial destinations, preserve sibling leases and recover.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "view_field_edits_preserve_exact_storage_from_both_lowered_and_copied_commands",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/commands/tests/view_fields.rs",
+      "capability": "Consuming view command fields",
+      "workload": "Controlled lowering and copying of INSERT, UPDATE and MERGE with bounds, conflict inference, rule descriptors and CHECK OPTION inputs.",
+      "invariant": "Retain original scalar-query storage and match exact live allocation deltas through each independently replaceable field.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "partial_view_column_translation_releases_replacements_on_rejection_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/commands/tests/view_fields.rs",
+      "capability": "Consuming view command fields",
+      "workload": "Two conflict columns, a successful first replacement, then quota rejection, either cancellation or callback unwind.",
+      "invariant": "Release all partially translated names and command storage while independent sibling ownership remains usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "automatic_view_commands_admit_private_plans_before_copying",
+      "cases": 16,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_commands.rs",
+      "capability": "Native automatic view command admission",
+      "workload": "Actual INSERT, UPDATE, DELETE and MERGE execution paths on memory, native SQLite, SQLite Key/Value and redb, with a 4 MiB private arena and only 64 KiB available.",
+      "invariant": "Reject with 53200 before copying large private syntax, retain sibling reservations, execute the next statement successfully and release every owner on close.",
+      "case_names": [
+        "case_1_memory::kind_1___insert__",
+        "case_1_memory::kind_2___update__",
+        "case_1_memory::kind_3___delete__",
+        "case_1_memory::kind_4___merge__",
+        "case_2_sqlite_native::kind_1___insert__",
+        "case_2_sqlite_native::kind_2___update__",
+        "case_2_sqlite_native::kind_3___delete__",
+        "case_2_sqlite_native::kind_4___merge__",
+        "case_3_sqlite_kv::kind_1___insert__",
+        "case_3_sqlite_kv::kind_2___update__",
+        "case_3_sqlite_kv::kind_3___delete__",
+        "case_3_sqlite_kv::kind_4___merge__",
+        "case_4_redb::kind_1___insert__",
+        "case_4_redb::kind_2___update__",
+        "case_4_redb::kind_3___delete__",
+        "case_4_redb::kind_4___merge__"
+      ]
     }
   ]
 }

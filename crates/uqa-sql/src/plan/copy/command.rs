@@ -14,6 +14,46 @@ mod assignments;
 mod insert;
 
 impl Copying<'_> {
+    pub(in crate::plan) fn insert_command(
+        &mut self,
+        plan: &crate::plan::InsertPlan,
+    ) -> Result<CommandPlan> {
+        self.check()?;
+        Ok(CommandPlan::Insert(self.field("value0", |copying| {
+            copying.boxed(|copying| copying.insert(plan))
+        })?))
+    }
+
+    pub(in crate::plan) fn update_command(
+        &mut self,
+        plan: &crate::plan::UpdatePlan,
+    ) -> Result<CommandPlan> {
+        self.check()?;
+        Ok(CommandPlan::Update(self.field("value0", |copying| {
+            copying.boxed(|copying| copying.update(plan))
+        })?))
+    }
+
+    pub(in crate::plan) fn delete_command(
+        &mut self,
+        plan: &crate::plan::DeletePlan,
+    ) -> Result<CommandPlan> {
+        self.check()?;
+        Ok(CommandPlan::Delete(self.field("value0", |copying| {
+            copying.boxed(|copying| copying.delete(plan))
+        })?))
+    }
+
+    pub(in crate::plan) fn merge_command(
+        &mut self,
+        plan: &crate::plan::MergePlan,
+    ) -> Result<CommandPlan> {
+        self.check()?;
+        Ok(CommandPlan::Merge(self.field("value0", |copying| {
+            copying.boxed(|copying| copying.merge(plan))
+        })?))
+    }
+
     pub(super) fn command(&mut self, command: &CommandPlan) -> Result<CommandPlan> {
         self.check()?;
         super::require_mutation(command)?;
@@ -36,11 +76,13 @@ impl Copying<'_> {
 
     pub(super) fn update(&mut self, plan: &UpdatePlan) -> Result<UpdatePlan> {
         Ok(UpdatePlan {
-            table: self.text(&plan.table)?,
+            table: self.field("table", |copying| copying.text(&plan.table))?,
             target_relation_bound: plan.target_relation_bound,
             relations_bound: plan.relations_bound,
             statement_privilege_subject: self.role(plan.statement_privilege_subject.as_ref())?,
-            target_privilege_subject: self.role(plan.target_privilege_subject.as_ref())?,
+            target_privilege_subject: self.field("target_privilege_subject", |copying| {
+                copying.role(plan.target_privilege_subject.as_ref())
+            })?,
             target_qualifier: self.text(&plan.target_qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
@@ -67,32 +109,40 @@ impl Copying<'_> {
             view_checks: self.field("view_checks", |copying| {
                 copying.map(plan.view_checks.iter(), Self::view_check)
             })?,
-            view_rule_relations: self.texts(&plan.view_rule_relations)?,
-            view_rule_update_plans: self.map(
-                plan.view_rule_update_plans.iter(),
-                |copying, input| {
+            view_rule_relations: self.field("view_rule_relations", |copying| {
+                copying.texts(&plan.view_rule_relations)
+            })?,
+            view_rule_update_plans: self.field("view_rule_update_plans", |copying| {
+                copying.map(plan.view_rule_update_plans.iter(), |copying, input| {
                     Ok(ViewRuleUpdatePlan {
                         relation: copying.text(&input.relation)?,
-                        assigned_columns: copying.texts(&input.assigned_columns)?,
-                        input_columns: copying.texts(&input.input_columns)?,
+                        assigned_columns: copying.field("assigned_columns", |copying| {
+                            copying.texts(&input.assigned_columns)
+                        })?,
+                        input_columns: copying.field("input_columns", |copying| {
+                            copying.texts(&input.input_columns)
+                        })?,
                     })
-                },
-            )?,
-            view_rule_returning: plan
-                .view_rule_returning
-                .as_ref()
-                .map(|returning| self.rule_returning(returning))
-                .transpose()?,
+                })
+            })?,
+            view_rule_returning: self.field("view_rule_returning", |copying| {
+                plan.view_rule_returning
+                    .as_ref()
+                    .map(|returning| copying.rule_returning(returning))
+                    .transpose()
+            })?,
         })
     }
 
     pub(super) fn delete(&mut self, plan: &DeletePlan) -> Result<DeletePlan> {
         Ok(DeletePlan {
-            table: self.text(&plan.table)?,
+            table: self.field("table", |copying| copying.text(&plan.table))?,
             target_relation_bound: plan.target_relation_bound,
             relations_bound: plan.relations_bound,
             statement_privilege_subject: self.role(plan.statement_privilege_subject.as_ref())?,
-            target_privilege_subject: self.role(plan.target_privilege_subject.as_ref())?,
+            target_privilege_subject: self.field("target_privilege_subject", |copying| {
+                copying.role(plan.target_privilege_subject.as_ref())
+            })?,
             target_qualifier: self.text(&plan.target_qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
@@ -113,21 +163,26 @@ impl Copying<'_> {
             subqueries: self.field("subqueries", |copying| {
                 copying.map(plan.subqueries.iter(), Self::query)
             })?,
-            view_rule_relations: self.texts(&plan.view_rule_relations)?,
-            view_rule_returning: plan
-                .view_rule_returning
-                .as_ref()
-                .map(|returning| self.rule_returning(returning))
-                .transpose()?,
+            view_rule_relations: self.field("view_rule_relations", |copying| {
+                copying.texts(&plan.view_rule_relations)
+            })?,
+            view_rule_returning: self.field("view_rule_returning", |copying| {
+                plan.view_rule_returning
+                    .as_ref()
+                    .map(|returning| copying.rule_returning(returning))
+                    .transpose()
+            })?,
         })
     }
 
     pub(super) fn merge(&mut self, plan: &MergePlan) -> Result<MergePlan> {
         Ok(MergePlan {
             ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
-            target: self.text(&plan.target)?,
+            target: self.field("target", |copying| copying.text(&plan.target))?,
             statement_privilege_subject: self.role(plan.statement_privilege_subject.as_ref())?,
-            target_privilege_subject: self.role(plan.target_privilege_subject.as_ref())?,
+            target_privilege_subject: self.field("target_privilege_subject", |copying| {
+                copying.role(plan.target_privilege_subject.as_ref())
+            })?,
             target_qualifier: self.text(&plan.target_qualifier)?,
             target_alias: self.optional_text(plan.target_alias.as_deref())?,
             include_descendants: plan.include_descendants,
@@ -189,12 +244,29 @@ impl Copying<'_> {
         &mut self,
         returning: &ViewRuleReturningPlan,
     ) -> Result<ViewRuleReturningPlan> {
+        self.rule_returning_inputs(
+            &returning.relation,
+            &returning.target_qualifier,
+            &returning.returning,
+            &returning.aliases,
+            &returning.subqueries,
+        )
+    }
+
+    pub(in crate::plan) fn rule_returning_inputs(
+        &mut self,
+        relation: &str,
+        qualifier: &str,
+        projections: &[crate::plan::ProjectionPlan],
+        aliases: &crate::ast::ReturningAliases,
+        queries: &[crate::plan::QueryPlan],
+    ) -> Result<ViewRuleReturningPlan> {
         Ok(ViewRuleReturningPlan {
-            relation: self.text(&returning.relation)?,
-            target_qualifier: self.text(&returning.target_qualifier)?,
-            returning: self.map(returning.returning.iter(), Self::projection)?,
-            aliases: self.returning_aliases(&returning.aliases)?,
-            subqueries: self.map(returning.subqueries.iter(), Self::query)?,
+            relation: self.text(relation)?,
+            target_qualifier: self.text(qualifier)?,
+            returning: self.map(projections.iter(), Self::projection)?,
+            aliases: self.returning_aliases(aliases)?,
+            subqueries: self.map(queries.iter(), Self::query)?,
         })
     }
 }

@@ -114,7 +114,9 @@ impl Copying<'_> {
                 copying.lower_optional_scalar_box(conflict.predicate.as_deref(), aggregates, arena)
             })?,
             constraint: self.optional_text(conflict.constraint.as_deref())?,
-            conflict_columns: self.texts(&conflict.conflict_columns)?,
+            conflict_columns: self.field("conflict_columns", |copying| {
+                copying.texts(&conflict.conflict_columns)
+            })?,
             expressions: self.field("expressions", |copying| {
                 copying.map(conflict.expressions.iter(), |copying, expression| {
                     copying.lower_scalar(expression, aggregates, arena)

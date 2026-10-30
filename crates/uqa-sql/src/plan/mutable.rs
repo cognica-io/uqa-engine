@@ -24,6 +24,7 @@ mod deferred;
 pub use deferred::OwnedDeferredRewriteIter;
 mod executable;
 mod expression;
+pub(in crate::plan) mod field_vectors;
 pub(in crate::plan) mod values;
 pub use expression::MutableExpressionPlan;
 pub use values::OwnedValueRow;

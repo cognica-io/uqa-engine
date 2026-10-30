@@ -28,7 +28,9 @@ mod scopes;
 mod sources;
 mod statistics;
 mod subqueries;
+mod view_commands;
 mod view_embedding;
+mod view_returning;
 mod view_shapes;
 mod view_targets;
 

@@ -7,9 +7,9 @@
 //! Borrow command expressions directly, including plans retained by utility commands.
 
 use super::{try_visit_ctes, CommandPlan, QueryPlan, ScalarExpr};
-fn subqueries<E>(
-    values: &[QueryPlan],
-    visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+fn subqueries<'a, E>(
+    values: &'a [QueryPlan],
+    visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
 ) -> Result<(), E> {
     for query in values {
         query.try_visit_scalar_expressions(visit)?;
@@ -27,9 +27,9 @@ impl CommandPlan {
     }
 
     /// Stop at the first callback error, without copying syntax or visiting later inputs.
-    pub fn try_visit_scalar_expressions<E>(
-        &self,
-        visit: &mut dyn FnMut(&ScalarExpr) -> Result<(), E>,
+    pub fn try_visit_scalar_expressions<'a, E>(
+        &'a self,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
     ) -> Result<(), E> {
         match self {
             Self::Insert(_) | Self::Update(_) | Self::Delete(_) | Self::Merge(_) => {

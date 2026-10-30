@@ -13,7 +13,7 @@ use crate::{
 };
 
 impl OwnedAutomaticViewLayer {
-    fn finish(
+    pub(in crate::semantics::view_rewrite) fn finish(
         self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<AutomaticViewLayer>, SQLError> {

@@ -47,7 +47,7 @@ impl DeferredOuterRewrite {
             let replacement = OuterReplacement {
                 expression: ExpressionPlan { scalar, subqueries },
                 qualifier,
-                _memory: control.combine(
+                memory: control.combine(
                     identity_memory,
                     control.combine(
                         qualifier_memory,

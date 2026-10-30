@@ -49,3 +49,57 @@ impl MutableCommandPlan {
         Ok(self)
     }
 }
+
+impl MutableCommandPlan {
+    /// Rewrite RETURNING projections and append embedded queries to the same admitted arena.
+    pub fn map_returning_inputs<I: ExactSizeIterator<Item = crate::plan::OwnedProjection>>(
+        mut self,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(
+            &CommandPlan,
+            crate::plan::OwnedProjectionIter,
+            &mut crate::plan::ScalarQueryArena,
+        ) -> Result<I, SQLError>,
+    ) -> Result<Self, SQLError> {
+        use super::super::projections::{OwnedProjectionIter, ProjectionVector};
+        self.assert_owner(control);
+        control.check()?;
+        let projections = std::mem::take(returning(&mut self.command)?).into_iter();
+        let memory = self.memory.as_mut().and_then(|memory| {
+            memory
+                .field_mut("value0")
+                .as_mut()
+                .expect("mutation body")
+                .field_mut("returning")
+                .take()
+        });
+        let inputs = OwnedProjectionIter {
+            projections,
+            memory,
+            index: 0,
+        };
+        let mut arena = self.take_mutation_arena()?;
+        let replacement = ProjectionVector::new(map(&self.command, inputs, &mut arena)?, control)?;
+        *returning(&mut self.command)? = replacement.projections;
+        if let Some(memory) = &mut self.memory {
+            *memory
+                .field_mut("value0")
+                .as_mut()
+                .expect("mutation body")
+                .field_mut("returning") = replacement.memory;
+        }
+        self.restore_mutation_arena(arena)?;
+        control.check()?;
+        Ok(self)
+    }
+}
+
+fn returning(command: &mut CommandPlan) -> Result<&mut Vec<crate::plan::ProjectionPlan>, SQLError> {
+    match command {
+        CommandPlan::Insert(plan) => Ok(&mut plan.returning),
+        CommandPlan::Update(plan) => Ok(&mut plan.returning),
+        CommandPlan::Delete(plan) => Ok(&mut plan.returning),
+        CommandPlan::Merge(plan) => Ok(&mut plan.returning),
+        _ => Err(SQLError::Internal("RETURNING requires a mutation".into())),
+    }
+}
