@@ -340,6 +340,57 @@ pub struct RuleQueryResolver {
 }
 
 impl VariableResolver for RuleQueryResolver {
+    fn rewrite_with_control(
+        &mut self,
+        reference: crate::plpgsql::RewriteReference<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Expr>>, SQLError> {
+        use crate::{plan::copy::SyntaxProduction, plpgsql::RewriteReference};
+        control.check()?;
+        let production = SyntaxProduction::new(*control);
+        let expression = match reference {
+            RewriteReference::Name(name) | RewriteReference::WholeRow(name) => {
+                let new = name.eq_ignore_ascii_case("new");
+                if !new && !name.eq_ignore_ascii_case("old") {
+                    return Ok(None);
+                }
+                let mut items = production.vector(self.columns.len())?;
+                for (name, expression) in &self.columns {
+                    let expression = if new {
+                        expression.as_ref().map_err(Clone::clone)?
+                    } else {
+                        &self.old[name]
+                    };
+                    items.push(production.copy(expression)?)?;
+                }
+                Expr::Cast {
+                    implicit: true,
+                    expr: production.boxed(Expr::Row(items.finish()?))?,
+                    ty: production.copy(&self.table)?,
+                }
+            }
+            RewriteReference::Qualified { qualifier, column } => {
+                let expression = if qualifier.eq_ignore_ascii_case("new") {
+                    self.columns
+                        .iter()
+                        .find(|(name, _)| name == column)
+                        .map(|(_, value)| value.as_ref().map_err(Clone::clone))
+                        .transpose()?
+                } else if qualifier.eq_ignore_ascii_case("old") {
+                    self.old.get(column)
+                } else {
+                    return Ok(None);
+                };
+                production
+                    .copy(expression.ok_or_else(|| {
+                        SQLError::UnknownColumn(format!("{qualifier}.{column}"))
+                    })?)?
+            }
+            RewriteReference::Parameter(_) | RewriteReference::Internal(_) => return Ok(None),
+        };
+        Ok(Some(production.finish(expression)?))
+    }
+
     fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(None)
     }

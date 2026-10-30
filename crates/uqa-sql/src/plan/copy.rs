@@ -14,10 +14,12 @@ use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, Produ
 mod command;
 mod generated_sources;
 mod lowering;
+mod production;
 mod query;
 mod source;
 mod specialization;
 mod syntax;
+pub(crate) use production::{CollectSyntax, SyntaxProduction};
 pub(crate) use specialization::copy_specialized_function;
 #[cfg(test)]
 mod tests;

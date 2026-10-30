@@ -8,9 +8,9 @@
 use super::{
     cte_output_columns,
     names::{self, Columns, Named},
-    SQLError, CTE,
+    SQLError,
 };
-use crate::ast::{ColumnType, Statement};
+use crate::ast::{ColumnType, Statement, CTE};
 use uqa_core::memory::{OwnedProductionControl, Produced, ProductionControl, ProductionVec};
 
 pub trait RuleSourceCatalog {

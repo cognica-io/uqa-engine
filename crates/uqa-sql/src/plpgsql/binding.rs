@@ -8,6 +8,8 @@
 
 use super::{Expr, FromClause, MergeWhen, Projection, Result, SelectStmt, Statement, Value, CTE};
 use crate::ast::InternalColumnRef;
+mod rewrite;
+pub use rewrite::RewriteReference;
 
 /// Runtime datum value together with the concrete SQL type declared by PL/pgSQL. The type is optional for composite fields and pseudo-types whose runtime carrier already identifies their category.
 #[derive(Debug, Clone)]
@@ -44,6 +46,43 @@ impl ResolvedVariable {
 /// Resolves routine variables while a compiled expression / statement
 /// is being specialized for one execution.
 pub trait VariableResolver {
+    /// Native expression producers override this operation and admit the selected replacement before construction. External callbacks retain their own construction policy; this default copies their completed result into the caller's syntax owner.
+    fn rewrite_with_control(
+        &mut self,
+        reference: RewriteReference<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Expr>>> {
+        control.check()?;
+        reference
+            .resolve(self)?
+            .map(|value| {
+                if control.budget().is_none() {
+                    Ok(control.finish(value, None)?)
+                } else {
+                    crate::plan::copy::copy_syntax_with_control(&value, control)
+                }
+            })
+            .transpose()
+    }
+
+    /// List expansion has a separate constructor because scalar whole-row references remain one expression.
+    fn expand_with_control(
+        &mut self,
+        qualifier: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<Expr>>>> {
+        control.check()?;
+        self.rewrite_qualified_star(qualifier)?
+            .map(|value| {
+                if control.budget().is_none() {
+                    Ok(control.finish(value, None)?)
+                } else {
+                    crate::plan::copy::copy_syntax_with_control(&value, control)
+                }
+            })
+            .transpose()
+    }
+
     /// External resolvers may retain their own callback allocation policy. Native activations override this producer and admit values and type descriptors before copying them.
     fn resolve_input_with_control(
         &mut self,

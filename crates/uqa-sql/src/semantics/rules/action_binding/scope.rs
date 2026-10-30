@@ -52,10 +52,6 @@ impl RuleSourceNames {
     }
 }
 impl RuleBindingScope {
-    pub(super) fn from_qualifiers(qualifiers: &BTreeSet<String>) -> Self {
-        Self::from_qualifiers_with_control(qualifiers, &ProductionControl::uncontrolled())
-            .expect("ordinary scope")
-    }
     pub(super) fn from_qualifiers_with_control(
         qualifiers: &BTreeSet<String>,
         control: &ProductionControl<'_>,

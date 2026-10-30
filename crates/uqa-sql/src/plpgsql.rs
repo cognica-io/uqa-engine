@@ -507,7 +507,9 @@ use lowering_expression::{lower_expr, lower_expr_list, lower_full_statement};
 use lowering_statement::{lower_block, lower_cursor_scroll_options};
 use parsing::{lower_row_fields, normalize_condition};
 
-pub use binding::{bind_expr, bind_select, bind_statement, ResolvedVariable, VariableResolver};
+pub use binding::{
+    bind_expr, bind_select, bind_statement, ResolvedVariable, RewriteReference, VariableResolver,
+};
 pub use conditions::{condition_sqlstate, condition_sqlstates};
 pub use lowering_expression::compile_expression_text;
 pub use options::{compile_options, CompileOptions, VariableConflict};

@@ -20,6 +20,7 @@ mod privileges;
 mod retrieval;
 mod retrieval_analysis;
 mod routine_results;
+mod rule_binding;
 mod scalar_rewrite;
 mod scopes;
 mod sources;
