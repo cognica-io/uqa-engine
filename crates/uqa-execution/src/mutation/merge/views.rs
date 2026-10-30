@@ -626,8 +626,12 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
                 snapshot,
             } = pair_view_merge_rows(read_context, &target, plan, params, ctes)?;
             let source_relation = uqa_sql::ast::InternalRelationId::allocate();
-            let supplied_columns =
-                uqa_sql::semantics::merge::merge_supplied_columns(plan, &target.columns);
+            let resources = context.query.source.ctes.production_resources()?;
+            let supplied_columns = uqa_sql::semantics::merge::merge_supplied_columns_with_control(
+                plan,
+                &target.columns,
+                &resources.control(),
+            )?;
             let action_context = ViewMergeActionContext {
                 assignment,
                 triggers,

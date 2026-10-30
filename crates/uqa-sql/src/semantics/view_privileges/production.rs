@@ -7,6 +7,7 @@
 //! View authorization borrows one immutable definition and owns only selected subjects and request scratch.
 
 use super::{TableAclPrivilege, TargetSelectPrivilegeRequest, ViewPrivilegeCatalog};
+use crate::semantics::mutation_privileges::merge::MergePrivileges;
 use crate::{
     catalog::{roles::RoleReference, stored_view::StoredView},
     plan::{
@@ -15,7 +16,7 @@ use crate::{
     },
     SQLError, ScalarExpr,
 };
-use uqa_core::memory::{Produced, ProductionControl, ProductionMap, ProductionVec};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 fn with_target<T>(
     services: &dyn ViewPrivilegeCatalog,
@@ -503,25 +504,16 @@ fn check_insert_columns(
     Ok(())
 }
 
-struct MergePrivileges<'c, 'a> {
-    requires_delete: bool,
-    requires_any_insert: bool,
-    privileges: ProductionMap<'c, (TableAclPrivilege, &'a str), ()>,
-}
 fn merge_requirements<'c, 'a>(
     statement: &'a MergePlan,
     available: &'a [String],
     control: &ProductionControl<'c>,
 ) -> Result<MergePrivileges<'c, 'a>, SQLError> {
-    let mut requires_delete = false;
-    let mut requires_any_insert = false;
-    let mut privileges = ProductionMap::new(*control);
+    let mut selected = MergePrivileges::new(control);
     for clause in &statement.when_clauses {
         control.check()?;
         match clause {
-            MergeWhenPlan::InsertNotMatched {
-                columns, values, ..
-            } => {
+            MergeWhenPlan::InsertNotMatched { columns, .. } => {
                 crate::assignment::targets::validate_repeated_targets_with_control(
                     columns.iter(),
                     true,
@@ -533,18 +525,6 @@ fn merge_requirements<'c, 'a>(
                     columns.iter().map(|target| target.column.as_str()),
                     control,
                 )?;
-                if columns.is_empty() && values.is_empty() {
-                    requires_any_insert = true;
-                } else if columns.is_empty() {
-                    for column in available.iter().take(values.len()) {
-                        privileges.insert_copy((TableAclPrivilege::Insert, column.as_str()), ())?;
-                    }
-                } else {
-                    for target in columns {
-                        privileges
-                            .insert_copy((TableAclPrivilege::Insert, target.column.as_str()), ())?;
-                    }
-                }
             }
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
@@ -563,21 +543,10 @@ fn merge_requirements<'c, 'a>(
                         .flat_map(|assignment| assignment.target.column_names()),
                     control,
                 )?;
-                for column in assignments
-                    .iter()
-                    .flat_map(|assignment| assignment.target.column_names())
-                {
-                    privileges.insert_copy((TableAclPrivilege::Update, column), ())?;
-                }
             }
-            MergeWhenPlan::DeleteMatched { .. }
-            | MergeWhenPlan::DeleteNotMatchedBySource { .. } => requires_delete = true,
             _ => {}
         }
+        selected.record(clause, available)?;
     }
-    Ok(MergePrivileges {
-        requires_delete,
-        requires_any_insert,
-        privileges,
-    })
+    Ok(selected)
 }

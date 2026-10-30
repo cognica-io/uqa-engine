@@ -38,10 +38,13 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
+    let resources = context.query.source.ctes.production_resources()?;
+    let control = resources.control();
     let privilege_expressions =
-        uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges(
+        uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges_with_control(
             context.mutation.privileges,
             stmt,
+            &control,
         )?;
     let (statement_commands, _running_statement) =
         statement_end::statement_commands(inherited_ctes);

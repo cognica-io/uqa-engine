@@ -365,9 +365,10 @@ fn validate_update<S: Clone + Send + Sync + 'static>(
             control,
         )?;
     } else {
-        uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges(
+        uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges_with_control(
             context.mutation.privileges,
             plan,
+            control,
         )?;
         if plan.view_rule_update_plans.is_empty() {
             let columns = context.mutation.preparation.referential.assignment.columns;
@@ -413,9 +414,10 @@ fn validate_delete<S: Clone + Send + Sync + 'static>(
             control,
         )?;
     } else {
-        uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges(
+        uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges_with_control(
             context.mutation.privileges,
             plan,
+            control,
         )?;
     }
     Ok(())

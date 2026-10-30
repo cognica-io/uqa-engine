@@ -16,7 +16,8 @@ use crate::query::{
 use uqa_sql::{
     plan::MergePlan,
     semantics::{
-        merge::ensure_merge_mutation_privileges, privileges::TargetSelectPrivilegeRequest,
+        merge::ensure_merge_mutation_privileges_with_control,
+        privileges::TargetSelectPrivilegeRequest,
         view_privileges::merge_privilege_expressions_with_control,
     },
     SQLError,
@@ -50,13 +51,13 @@ pub(in crate::mutation) fn ensure_merge_privileges<S: Clone + 'static>(
     stmt: &MergePlan,
     inherited: Option<&CteScope<S>>,
 ) -> Result<(), SQLError> {
-    ensure_merge_mutation_privileges(mutation.privileges, stmt)?;
     let retained = mutation.scopes.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
         retained.memory(),
         retained.cancellation(),
         mutation.scopes.cancellation(),
     );
+    ensure_merge_mutation_privileges_with_control(mutation.privileges, stmt, &control)?;
     let expressions = merge_privilege_expressions_with_control(stmt, &control)?;
     let target_scope = mutation
         .preparation

@@ -17,6 +17,17 @@ use uqa_sql::{
 
 pub trait MutationTargetResolution {
     fn resolve_target(&self, name: &str, bound: bool) -> Result<String, SQLError>;
+    /// Native resolvers admit the selected name; external resolvers keep their original callback.
+    fn resolve_target_with_control(
+        &self,
+        name: &str,
+        bound: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        control.check()?;
+        let resolved = self.resolve_target(name, bound)?;
+        Ok(control.copy_text(&resolved)?)
+    }
 }
 pub struct MutationCommandContext<'a, S: Clone + 'static> {
     pub statement: MutationStatementContext<'a, S>,

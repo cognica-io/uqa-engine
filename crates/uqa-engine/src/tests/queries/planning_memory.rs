@@ -430,3 +430,5 @@ mod rule_targets;
 mod view_privileges;
 
 mod query_arenas;
+
+mod mutation_privileges;

@@ -45,15 +45,28 @@ impl TableAuthorizationContext<'_> {
         name: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Vec<String>>, SQLError> {
-        let (_, table) = self.bound_table_for_security_with_control(name, control)?;
         let mut names = ProductionVec::new(*control);
-        table.with_columns_with_control(control, &mut |columns| {
-            for column in columns {
-                names.push_produced(control.copy_text(&column.name)?)?;
-            }
+        self.visit_bound_table_column_names_with_control(name, control, &mut |name| {
+            names.push_produced(control.copy_text(name)?)?;
             Ok(())
         })?;
         Ok(names.finish()?)
+    }
+
+    pub fn visit_bound_table_column_names_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let (_, table) = self.bound_table_for_security_with_control(name, control)?;
+        table.with_columns_with_control(control, &mut |columns| {
+            for column in columns {
+                control.check()?;
+                read(&column.name)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn ensure_table_privilege_for_with_control(

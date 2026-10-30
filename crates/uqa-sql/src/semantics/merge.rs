@@ -10,25 +10,17 @@ use crate::{
     plan::{MergePlan, MergeWhenPlan, ProjectionPlan},
     SQLError, SQLParam,
 };
-use std::collections::BTreeSet;
 
 /// The union of target columns of every MERGE UPDATE action, which `PostgreSQL` uses when selecting generated-column dependencies even if a different action is selected for a particular row.
 #[must_use]
 pub fn merge_update_columns(statement: &MergePlan) -> Vec<String> {
-    statement
-        .when_clauses
-        .iter()
-        .filter_map(|clause| match clause {
-            MergeWhenPlan::UpdateMatched { assignments, .. }
-            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => Some(assignments),
-            _ => None,
-        })
-        .flatten()
-        .flat_map(|assignment| assignment.target.column_names())
-        .map(str::to_owned)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+    merge_update_columns_with_control(
+        statement,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary MERGE update names")
+    .into_uncontrolled()
+    .expect("ordinary MERGE update names")
 }
 
 #[expect(
@@ -268,122 +260,45 @@ pub fn merge_returning_source_schema(
     crate::RowSchema::with_physical_internal_aliases(source_schema, &aliases)
 }
 
-/// The columns a `MERGE` supplies, as `PostgreSQL` records them in its target's `insertedCols` and `updatedCols`: those each `INSERT` action fills and those each `UPDATE` action sets.
+pub use super::mutation_privileges::merge::{
+    ensure_merge_mutation_privileges_with_control, merge_supplied_columns_with_control,
+    merge_target_columns_with_control, merge_update_columns_with_control,
+};
+
+/// The ordered columns supplied by all MERGE INSERT and UPDATE actions.
 pub fn merge_target_columns(
     catalog: &dyn super::mutation_privileges::MutationPrivilegeCatalog,
-    stmt: &MergePlan,
+    statement: &MergePlan,
 ) -> Result<Vec<String>, SQLError> {
-    let table_columns = catalog.bound_table_column_names(&stmt.target)?;
-    Ok(merge_supplied_columns(stmt, &table_columns))
+    Ok(merge_target_columns_with_control(
+        catalog,
+        statement,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary MERGE target names"))
 }
 
-/// The columns the actions of a `MERGE` supply, as [`merge_target_columns`] finds them, for a target whose columns `target_columns` lists in order.
-pub fn merge_supplied_columns(stmt: &MergePlan, target_columns: &[String]) -> Vec<String> {
-    let mut supplied = Vec::new();
-    for clause in &stmt.when_clauses {
-        match clause {
-            MergeWhenPlan::InsertNotMatched {
-                columns, values, ..
-            } => supplied.extend(merge_insert_columns(target_columns, columns, values)),
-            MergeWhenPlan::UpdateMatched { assignments, .. }
-            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                supplied.extend(
-                    assignments
-                        .iter()
-                        .flat_map(|assignment| assignment.target.column_names())
-                        .map(str::to_owned),
-                );
-            }
-            _ => {}
-        }
-    }
-    supplied
-}
-
-/// The columns an `INSERT` action fills: those it names, or else the leading columns of the table, one for each value; `DEFAULT VALUES` fills none.
-fn merge_insert_columns<T, V>(
-    table_columns: &[String],
-    columns: &[crate::ast::AssignmentTarget<T>],
-    values: &[V],
-) -> Vec<String> {
-    if columns.is_empty() {
-        table_columns.iter().take(values.len()).cloned().collect()
-    } else {
-        columns.iter().map(|target| target.column.clone()).collect()
-    }
+pub fn merge_supplied_columns(statement: &MergePlan, available: &[String]) -> Vec<String> {
+    merge_supplied_columns_with_control(
+        statement,
+        available,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary MERGE supplied names")
+    .into_uncontrolled()
+    .expect("ordinary MERGE supplied names")
 }
 
 pub fn ensure_merge_mutation_privileges(
     catalog: &dyn super::mutation_privileges::MutationPrivilegeCatalog,
-    stmt: &MergePlan,
+    statement: &MergePlan,
 ) -> Result<(), SQLError> {
-    let mut column_privileges = BTreeSet::new();
-    let mut requires_delete = false;
-    let mut requires_any_insert = false;
-    let table_columns = catalog.bound_table_column_names(&stmt.target)?;
-    let privilege_subject = stmt
-        .target_privilege_subject
-        .clone()
-        .unwrap_or_else(|| catalog.current_role());
-    for clause in &stmt.when_clauses {
-        match clause {
-            MergeWhenPlan::InsertNotMatched {
-                columns, values, ..
-            } => {
-                if columns.is_empty() && values.is_empty() {
-                    requires_any_insert = true;
-                } else {
-                    let columns = merge_insert_columns(&table_columns, columns, values);
-                    column_privileges.extend(columns.into_iter().map(|column| {
-                        (
-                            crate::catalog::security::table::TableAclPrivilege::Insert,
-                            column,
-                        )
-                    }));
-                }
-            }
-            MergeWhenPlan::UpdateMatched { assignments, .. }
-            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                column_privileges.extend(
-                    assignments
-                        .iter()
-                        .flat_map(|assignment| assignment.target.targets())
-                        .map(|target| {
-                            (
-                                crate::catalog::security::table::TableAclPrivilege::Update,
-                                target.column.clone(),
-                            )
-                        }),
-                );
-            }
-            MergeWhenPlan::DeleteMatched { .. }
-            | MergeWhenPlan::DeleteNotMatchedBySource { .. } => requires_delete = true,
-            _ => {}
-        }
-    }
-    if requires_delete {
-        catalog.ensure_table_privilege_for(
-            &stmt.target,
-            &privilege_subject,
-            crate::catalog::security::table::TableAclPrivilege::Delete,
-        )?;
-    }
-    if requires_any_insert {
-        catalog.ensure_any_column_privilege_for(
-            &stmt.target,
-            &privilege_subject,
-            crate::catalog::security::table::TableAclPrivilege::Insert,
-        )?;
-    }
-    for (privilege, column) in column_privileges {
-        catalog.ensure_column_privilege_for(
-            &stmt.target,
-            &column,
-            &privilege_subject,
-            privilege,
-        )?;
-    }
-    Ok(())
+    ensure_merge_mutation_privileges_with_control(
+        catalog,
+        statement,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 pub fn merge_returning_schema(

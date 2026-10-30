@@ -31598,6 +31598,138 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_target_names_admit_only_the_selected_prefix_and_ignore_output_labels",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/mutation_privileges/tests.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "Selected INSERT prefixes, four MiB unused declarations and output aliases, and rejected explicit target names.",
+      "invariant": "Observe width without labels; admit only selected names and retain exact live leases before copying.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_authorization_borrows_explicit_subjects_and_retains_expression_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/mutation_privileges/tests.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "A four MiB explicit subject and original UPDATE assignment, predicate and RETURNING references.",
+      "invariant": "Borrow the original subject and expression identities, retaining only the exact admitted reference buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_authorization_preserves_defaults_conflict_and_merge_callback_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/mutation_privileges/tests.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "DEFAULT VALUES, ON CONFLICT and mixed MERGE actions with duplicate target names.",
+      "invariant": "Preserve role/catalog/privilege demand, sorted unique authorization and ordered diagnostic targets.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_authorization_releases_partial_outputs_errors_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/mutation_privileges/tests.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "Partial DELETE reference admission, selected callback error and unwind, and both cancellation owners.",
+      "invariant": "Preserve typed resource and callback errors, release private storage and retain sibling reservations through recovery.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_mutation_target_names_observe_only_demanded_columns",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/mutation_privileges.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "Four MiB unused native table declarations while only 64 KiB remains, across INSERT and MERGE on all four providers.",
+      "invariant": "Avoid unused names, preserve exact selected-name leases, both cancellations and native SQL recovery.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_mutation_authorization_bounds_expression_workspace_and_recovers",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/mutation_privileges.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "Wide UPDATE/DELETE RETURNING references with a 16 KiB available request allowance on four providers.",
+      "invariant": "Reject before excessive reference growth with 53200, preserve sibling leases and recover normal mutations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_view_authorization_borrows_role_guards_without_allocation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/mutation_privileges.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "Native view, column and any-column authorization with a zero-byte allowance on four providers.",
+      "invariant": "Lend native role and membership guards without allocating wrapper boxes or changing permission results.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_mutation_authorization_matches_postgresql_and_survives_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/mutation_privileges.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "PostgreSQL 18 reference for column grants, defaults, conflicts, MERGE, EXPLAIN and denials on four providers.",
+      "invariant": "Keep RETURNING rows, 42501/42703 diagnostics, savepoint recovery and persisted rows/grants after reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_explain_mutation_authorization_admits_its_private_command_copy",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/mutation_privileges.rs",
+      "capability": "Mutation privilege ownership",
+      "workload": "Restricted native EXPLAIN authorization over a four MiB private command arena with 64 KiB available on all four providers.",
+      "invariant": "Admit the complete command and selected target before copying, preserve 53200/57014 and sibling ownership, and recover EXPLAIN and real mutations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

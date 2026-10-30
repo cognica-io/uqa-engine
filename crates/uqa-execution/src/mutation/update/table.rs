@@ -83,17 +83,19 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             })
         }))?;
     }
+    let resources = context.query.source.ctes.production_resources()?;
+    let control = resources.control();
     let privilege_expressions =
-        uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges(
+        uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges_with_control(
             context.mutation.privileges,
             stmt,
+            &control,
         )?;
-    let assigned_columns = stmt
-        .assignments
-        .iter()
-        .flat_map(|assignment| assignment.target.column_names())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let assigned_columns =
+        uqa_sql::semantics::mutation_privileges::assignment_column_names_with_control(
+            &stmt.assignments,
+            &control,
+        )?;
     let statement_relation = crate::mutation::constraints::statement_relation(
         context.mutation.preparation.referential.constraints,
         &stmt.table,

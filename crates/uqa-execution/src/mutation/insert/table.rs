@@ -113,6 +113,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             !view_returning.returning.is_empty(),
         )?;
     }
+    let resources = context.query.source.ctes.production_resources()?;
+    let control = resources.control();
     let prepared_statement = uqa_sql::semantics::conflict::prepare_inference_predicate(
         planning.inference,
         stmt,
@@ -126,7 +128,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             conflict,
         )?;
     }
-    let conflict_update_columns = if let Some(ConflictPlan {
+    let conflict_update_columns_owner = if let Some(ConflictPlan {
         action: ConflictActionPlan::Update { assignments, .. },
         ..
     }) = stmt.on_conflict.as_ref()
@@ -141,15 +143,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             false,
         )?;
         Some(
-            assignments
-                .iter()
-                .flat_map(|assignment| assignment.target.column_names())
-                .map(str::to_owned)
-                .collect::<Vec<_>>(),
+            uqa_sql::semantics::mutation_privileges::assignment_column_names_with_control(
+                assignments,
+                &control,
+            )?,
         )
     } else {
         None
     };
+    let conflict_update_columns = conflict_update_columns_owner
+        .as_ref()
+        .map(|columns| columns.as_slice());
     if stmt.view_rule_relations.is_empty() && !stmt.columns.is_empty() {
         validate_mutation_targets(
             assignment.columns,
@@ -168,17 +172,20 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         params,
         inherited_ctes.map(|scope| scope as &dyn uqa_sql::semantics::returning::ReturningScope),
     )?;
-    uqa_sql::semantics::mutation_privileges::ensure_insert_target_privileges(
+    uqa_sql::semantics::mutation_privileges::ensure_insert_target_privileges_with_control(
         mutation.privileges,
         stmt,
-        conflict_update_columns.as_deref(),
+        conflict_update_columns,
+        &control,
     )?;
     // The columns the statement supplies, which its constraint violations show to a role that may not read the table.
     let supplied_columns =
-        uqa_sql::semantics::mutation_privileges::insert_target_columns(mutation.privileges, stmt)?
-            .into_iter()
-            .chain(conflict_update_columns.iter().flatten().cloned())
-            .collect::<Vec<_>>();
+        uqa_sql::semantics::mutation_privileges::insert_constraint_columns_with_control(
+            mutation.privileges,
+            stmt,
+            conflict_update_columns,
+            &control,
+        )?;
     let statement_relation = crate::mutation::constraints::statement_relation(
         preparation.referential.constraints,
         &stmt.table,
@@ -215,21 +222,20 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 &[],
             )?
             .is_empty();
-    let has_before_update_statement_trigger =
-        if let Some(columns) = conflict_update_columns.as_deref() {
-            !triggers
-                .catalog
-                .triggers_for(
-                    &stmt.table,
-                    uqa_sql::ast::TriggerTiming::Before,
-                    uqa_sql::ast::TriggerEvent::Update,
-                    false,
-                    columns,
-                )?
-                .is_empty()
-        } else {
-            false
-        };
+    let has_before_update_statement_trigger = if let Some(columns) = conflict_update_columns {
+        !triggers
+            .catalog
+            .triggers_for(
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::Before,
+                uqa_sql::ast::TriggerEvent::Update,
+                false,
+                columns,
+            )?
+            .is_empty()
+    } else {
+        false
+    };
     let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
         Some(snapshot) => Some(snapshot),
         None if has_before_insert_statement_trigger
@@ -246,7 +252,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             &StatementEvent::new(&stmt.table, uqa_sql::ast::TriggerEvent::Insert, &[]),
         )?;
     }
-    if let Some(columns) = conflict_update_columns.as_deref() {
+    if let Some(columns) = conflict_update_columns {
         statement_commands.after_triggers().fire_before_statement(
             &triggers,
             &StatementEvent::new(&stmt.table, uqa_sql::ast::TriggerEvent::Update, columns),
@@ -328,7 +334,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         id_column,
                         identity_source,
                     },
-                    conflict_update_columns: conflict_update_columns.as_deref(),
+                    conflict_update_columns,
                     statement_commands: &statement_commands,
                 })?;
                 if let Some(queries) = &query_rules {
@@ -476,7 +482,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     statement,
                     params,
                     &snapshot_scope,
-                    conflict_update_columns.as_deref().unwrap_or(&[]),
+                    conflict_update_columns.unwrap_or(&[]),
                     &id_column,
                     identity_source,
                     target_table,
@@ -561,7 +567,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 &insert_statement_events(
                     &stmt.table,
                     insert_original_query,
-                    conflict_update_columns.as_deref(),
+                    conflict_update_columns,
                 ),
                 events.into_after_rows(),
             )?;

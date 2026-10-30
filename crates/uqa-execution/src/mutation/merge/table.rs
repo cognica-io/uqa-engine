@@ -88,16 +88,22 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let (statement_commands, _running_statement) =
         statement_end::statement_commands(inherited_ctes);
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
-    let target_table = stmt.target.clone();
+    let resources = context.query.source.ctes.production_resources()?;
+    let control = resources.control();
+    let target_table = &stmt.target;
     // The columns the statement supplies, which its constraint violations show to a role that may not read the table.
-    let supplied_columns =
-        uqa_sql::semantics::merge::merge_target_columns(mutation.privileges, stmt)?;
+    let supplied_columns = uqa_sql::semantics::merge::merge_target_columns_with_control(
+        mutation.privileges,
+        stmt,
+        &control,
+    )?;
     let statement_relation =
-        crate::mutation::constraints::statement_relation(constraints, &target_table)?;
+        crate::mutation::constraints::statement_relation(constraints, target_table)?;
     let statement = ConstraintStatement::new(&statement_relation, &supplied_columns);
-    let update_targets = uqa_sql::semantics::merge::merge_update_columns(stmt);
+    let update_targets =
+        uqa_sql::semantics::merge::merge_update_columns_with_control(stmt, &control)?;
     referential.locking.session.lock_relation(
-        &target_table,
+        target_table,
         crate::row_locks::RelationLockMode::RowExclusive,
     )?;
     let mut has_rules = false;
@@ -109,12 +115,12 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
         has_rules |= !mutation
             .rules
             .rules
-            .capture_rules(&target_table, event)?
+            .capture_rules(target_table, event)?
             .is_empty()?;
     }
     if has_rules {
         let relation =
-            uqa_core::RelationIdentity::from_legacy_name(&target_table).map_err(|error| {
+            uqa_core::RelationIdentity::from_legacy_name(target_table).map_err(|error| {
                 SQLError::Internal(format!("decode MERGE relation `{target_table}`: {error}"))
             })?;
         return Err(SQLError::Routine {
@@ -126,7 +132,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let target_tables = referential
         .locking
         .catalog
-        .hierarchy_scan_tables(&target_table, stmt.include_descendants)?;
+        .hierarchy_scan_tables(target_table, stmt.include_descendants)?;
     let statement_events = super::statement_events::MergeStatementEvents::from_plan(stmt);
     let mut ctes = mutation
         .scopes
@@ -137,7 +143,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
     if ctes.command_cte_snapshot().is_none()
         && (stmt.ctes.iter().any(|cte| cte.body.modifies_data())
-            || statement_events.has_before_statement_trigger(&triggers, &target_table)?)
+            || statement_events.has_before_statement_trigger(&triggers, target_table)?)
     {
         ctes.set_command_cte_snapshot(Some(std::sync::Arc::new(context.snapshots.capture()?)));
     }
@@ -165,8 +171,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 &stmt.returning_aliases,
                 Some(&source_schema),
             )?;
-            let null_target_row =
-                dml_null_target_row(assignment.rows, &target_table, &target_qual)?;
+            let null_target_row = dml_null_target_row(assignment.rows, target_table, &target_qual)?;
             validate_merge_action_scopes(
                 preparation.returning.routines,
                 stmt,
@@ -186,7 +191,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             statement_end::fire_before_statements(
                 &statement_commands,
                 &triggers,
-                &statement_events.before_statements(&target_table),
+                &statement_events.before_statements(target_table),
             )?;
             crate::query::cte::materialize_command_ctes(
                 context.query.source.ctes,
@@ -275,7 +280,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                     };
                     let target_row = dml_target_row_for_storage(
                         read_assignment.rows,
-                        &target_table,
+                        target_table,
                         storage_table,
                         &target_qual,
                         doc_id,
@@ -406,7 +411,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 let mut target_row = match (pair.doc_id, pair.target_document.as_ref()) {
                     (Some(doc_id), Some(document)) => dml_target_row_for_storage(
                         assignment.rows,
-                        &target_table,
+                        target_table,
                         pair.storage_table.as_deref().ok_or_else(|| {
                             SQLError::Internal("MERGE target row lost its physical relation".into())
                         })?,
@@ -414,7 +419,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         doc_id,
                         document,
                     )?,
-                    _ => dml_null_target_row(assignment.rows, &target_table, &target_qual)?,
+                    _ => dml_null_target_row(assignment.rows, target_table, &target_qual)?,
                 };
                 let mut joined = dml_join_rows(&target_row, &pair.source_row);
                 if recheck_matches && pair.doc_id.is_some() {
@@ -437,7 +442,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 pair.target_document = None;
                                 target_row = dml_null_target_row(
                                     assignment.rows,
-                                    &target_table,
+                                    target_table,
                                     &target_qual,
                                 )?;
                                 joined = dml_join_rows(&target_row, &pair.source_row);
@@ -461,7 +466,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                     pair.storage_table = None;
                     pair.doc_id = None;
                     pair.target_document = None;
-                    target_row = dml_null_target_row(assignment.rows, &target_table, &target_qual)?;
+                    target_row = dml_null_target_row(assignment.rows, target_table, &target_qual)?;
                     joined = dml_join_rows(&target_row, &pair.source_row);
                 }
                 let action_row = match pair.kind {
@@ -472,7 +477,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 match select_merge_action(
                     assignment,
                     stmt,
-                    &target_table,
+                    target_table,
                     pair.kind,
                     pair.doc_id,
                     pair.target_document.as_ref(),
@@ -522,7 +527,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             doc_id,
                             &old_document,
                             triggered_document,
-                            &target_table,
+                            target_table,
                             params,
                             true,
                             &update_targets,
@@ -555,7 +560,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             services: assignment,
                             constraints,
                             statement,
-                            table: &target_table,
+                            table: target_table,
                             storage_table: &new_storage_table,
                             target_qualifier: &target_qual,
                             doc_id: checked_doc_id,
@@ -583,7 +588,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 build_merge_returning_row(
                                     &preparation.returning,
                                     MergeReturningRow {
-                                        target_table: &target_table,
+                                        target_table,
                                         target_qual: &target_qual,
                                         images: MutationRowImages {
                                             old: Some(MutationRowImage {
@@ -676,7 +681,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 build_merge_returning_row(
                                     &preparation.returning,
                                     MergeReturningRow {
-                                        target_table: &target_table,
+                                        target_table,
                                         target_qual: &target_qual,
                                         images: MutationRowImages {
                                             old: Some(MutationRowImage {
@@ -711,12 +716,12 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                     SelectedMergeAction::Insert { mut document } => {
                         let (auto_id_col, id_column, identity_source) = insert_identity_columns(
                             mutation.identities,
-                            &target_table,
+                            target_table,
                             "MERGE INSERT",
                         )?;
                         let prepared_auto_identity = prepare_auto_increment_identity(
                             mutation.identities,
-                            &target_table,
+                            target_table,
                             &id_column,
                             identity_source,
                             auto_id_col.as_deref(),
@@ -727,7 +732,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         let storage_table = partition_insert_target(
                             constraints,
                             statement,
-                            &target_table,
+                            target_table,
                             &document,
                             params,
                             true,
@@ -783,7 +788,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         let trigger_target = partition_insert_target(
                             constraints,
                             statement,
-                            &target_table,
+                            target_table,
                             &document,
                             params,
                             true,
@@ -812,7 +817,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             services: assignment,
                             constraints,
                             statement,
-                            table: &target_table,
+                            table: target_table,
                             storage_table: &storage_table,
                             target_qualifier: &target_qual,
                             doc_id,
@@ -859,7 +864,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 build_merge_returning_row(
                                     &preparation.returning,
                                     MergeReturningRow {
-                                        target_table: &target_table,
+                                        target_table,
                                         target_qual: &target_qual,
                                         images: MutationRowImages {
                                             old: None,
@@ -906,11 +911,11 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 let auto_id_column = mutation
                     .identities
                     .catalog
-                    .auto_increment_column(&target_table)
+                    .auto_increment_column(target_table)
                     .map_err(|error| dml_storage_error("MERGE INSERT", error))?;
                 persist_auto_increment_identity(
                     mutation.identities,
-                    &target_table,
+                    target_table,
                     auto_id_column.as_deref(),
                     "persist MERGE INSERT identity",
                 )?;
@@ -935,13 +940,13 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
             statement_end::end_command(
                 &statement_commands,
                 &triggers,
-                &statement_events.after_statements(&target_table),
+                &statement_events.after_statements(target_table),
                 events.into_after_rows(),
             )?;
             if !stmt.returning.is_empty() {
                 let projections = expanded_merge_returning_projections(
                     preparation.returning.catalog,
-                    &target_table,
+                    target_table,
                     &target_qual,
                     &stmt.returning_aliases,
                     source_rows.row_schema(),
@@ -955,7 +960,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 return dml_returning_result_with_projections(
                     preparation.returning,
                     DmlReturningShape {
-                        table: &target_table,
+                        table: target_table,
                         target_qualifier: &target_qual,
                         aliases: &stmt.returning_aliases,
                         returning: &stmt.returning,
