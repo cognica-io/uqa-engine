@@ -281,6 +281,25 @@ fn target_with_system_columns(
     (columns, types)
 }
 
+/// Observe declared output width without constructing or copying public labels.
+pub fn query_plan_output_width_with_control(
+    mut plan: &crate::plan::QueryPlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<usize>, SQLError> {
+    loop {
+        control.check()?;
+        match &plan.root {
+            crate::plan::RelationalPlan::QueryBlock(block) => {
+                return Ok(Some(block.projections.len()))
+            }
+            crate::plan::RelationalPlan::SetOp { left, .. } => plan = left,
+            crate::plan::RelationalPlan::Values { rows, .. } => {
+                return Ok(rows.first().map(Vec::len))
+            }
+        }
+    }
+}
+
 pub fn query_plan_output_columns(plan: &crate::plan::QueryPlan) -> Option<Vec<String>> {
     match &plan.root {
         crate::plan::RelationalPlan::QueryBlock(block) => {

@@ -267,6 +267,44 @@ impl ViewPrivilegeCatalog for Engine {
     ) -> Result<RoleReference, SQLError> {
         RoleReference::from_identity(identity, &self.durable.roles.read())
     }
+    fn ensure_view_privilege_for_with_control(
+        &self,
+        name: &str,
+        view: &StoredView,
+        subject: &RoleReference,
+        privilege: TableAclPrivilege,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        uqa_sql::catalog::security::view_authorization::ViewAuthorizationContext { roles: self }
+            .ensure_view_privilege_for_with_control(name, view, subject, privilege, control)
+    }
+    fn ensure_view_column_privilege_for_with_control(
+        &self,
+        name: &str,
+        view: &StoredView,
+        column: &str,
+        subject: &RoleReference,
+        privilege: TableAclPrivilege,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        uqa_sql::catalog::security::view_authorization::ViewAuthorizationContext { roles: self }
+            .ensure_view_column_privilege_for_with_control(
+                name, view, column, subject, privilege, control,
+            )
+    }
+    fn ensure_any_view_column_privilege_for_with_control(
+        &self,
+        name: &str,
+        view: &StoredView,
+        subject: &RoleReference,
+        privilege: TableAclPrivilege,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        uqa_sql::catalog::security::view_authorization::ViewAuthorizationContext { roles: self }
+            .ensure_any_view_column_privilege_for_with_control(
+                name, view, subject, privilege, control,
+            )
+    }
     fn ensure_view_privilege_for(
         &self,
         name: &str,
@@ -299,9 +337,19 @@ impl ViewPrivilegeCatalog for Engine {
         &self,
         request: TargetSelectPrivilegeRequest<'_, '_>,
     ) -> Result<(), SQLError> {
-        let mut scope = super::query_scope::new_for_current_routine(self);
-        uqa_execution::query::privileges::ensure_target_table_select_for_expressions(
-            request, &mut scope,
+        self.ensure_target_select_with_control(
+            request,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+    }
+    fn ensure_target_select_with_control(
+        &self,
+        request: TargetSelectPrivilegeRequest<'_, '_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_current_routine_with_control(self, control)?;
+        uqa_execution::query::privileges::ensure_target_table_select_for_expressions_with_control(
+            request, &scope, control,
         )
     }
 }

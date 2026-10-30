@@ -137,7 +137,21 @@ pub fn ensure_select_privileges_for_source_expressions<S: Clone>(
     expressions: &[&ScalarExpr],
     ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {
-    with_scope(ctes, |scope| {
+    ensure_select_privileges_for_source_expressions_with_control(
+        source,
+        expressions,
+        ctes,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn ensure_select_privileges_for_source_expressions_with_control<S: Clone>(
+    source: &SourcePlan,
+    expressions: &[&ScalarExpr],
+    ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    with_scope_with_control(ctes, control, |scope| {
         logical::ensure_select_privileges_for_source_expressions(source, expressions, scope)
     })
 }
@@ -165,45 +179,21 @@ pub fn ensure_select_privileges_for_table_expressions<S: Clone>(
 use uqa_sql::semantics::privileges::TargetSelectPrivilegeRequest;
 pub fn ensure_target_table_select_for_expressions<S: Clone>(
     request: TargetSelectPrivilegeRequest<'_, '_>,
-    ctes: &mut CteScope<S>,
+    ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {
-    let TargetSelectPrivilegeRequest {
-        table,
-        privilege_subject,
-        target_qualifier,
-        returning_aliases,
-        expressions,
-        subqueries,
-        required_columns,
-    } = request;
-    let relation =
-        uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-    let target_qualifiers = BTreeSet::from([
-        target_qualifier.to_string(),
-        table.to_string(),
-        relation.name,
-        returning_aliases.old.clone(),
-        returning_aliases.new.clone(),
-    ]);
-    ctes.scalar_subqueries = subqueries.into();
-    if let Some(subject) = privilege_subject {
-        let scope = ctes.enter_privilege_subject(subject.clone());
-        ensure_select_privileges_for_table_expressions(
-            table,
-            &target_qualifiers,
-            expressions,
-            subqueries,
-            required_columns,
-            &scope,
-        )
-    } else {
-        ensure_select_privileges_for_table_expressions(
-            table,
-            &target_qualifiers,
-            expressions,
-            subqueries,
-            required_columns,
-            ctes,
-        )
-    }
+    ensure_target_table_select_for_expressions_with_control(
+        request,
+        ctes,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn ensure_target_table_select_for_expressions_with_control<S: Clone>(
+    request: TargetSelectPrivilegeRequest<'_, '_>,
+    ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    with_scope_with_control(ctes, control, |scope| {
+        logical::ensure_target_select(request, scope)
+    })
 }

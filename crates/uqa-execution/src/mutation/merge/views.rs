@@ -699,12 +699,21 @@ fn pair_view_merge_rows<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<ViewMergeRows<S>, SQLError> {
+    let retained = read_context.mutation.scopes.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        read_context.mutation.scopes.cancellation(),
+    );
     let source_privilege_expressions =
-        uqa_sql::semantics::view_privileges::merge_privilege_expressions(plan);
-    crate::query::privileges::ensure_select_privileges_for_source_expressions(
+        uqa_sql::semantics::view_privileges::merge_privilege_expressions_with_control(
+            plan, &control,
+        )?;
+    crate::query::privileges::ensure_select_privileges_for_source_expressions_with_control(
         &plan.source,
         &source_privilege_expressions,
         ctes,
+        &control,
     )?;
     let source_rows =
         build_join_spill_with_ctes(&read_context.query.source, &plan.source, params, ctes)?;

@@ -31065,6 +31065,142 @@
       "capability": "Automatic view expression namespaces",
       "workload": "PostgreSQL 18.4 INSERT/UPDATE/DELETE/MERGE reference outputs with a correlated expression whose local alias equals its mutation target.",
       "invariant": "All four providers preserve row-image results, rollback and durable reopening across consuming view expression rewrites."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_mutation_authorization_borrows_unused_definition_payloads",
+      "source": "crates/uqa-sql/src/semantics/view_privileges/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_authorization_admits_subjects_and_scratch_and_retires_partial_results",
+      "source": "crates/uqa-sql/src/semantics/view_privileges/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_authorization_releases_selected_failures_both_cancellations_and_unwind",
+      "source": "crates/uqa-sql/src/semantics/view_privileges/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_authorization_rejects_large_subjects_before_copying_and_preserves_owner_selection",
+      "source": "crates/uqa-sql/src/semantics/view_privileges/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_authorization_preserves_column_diagnostics_and_merge_privilege_order",
+      "source": "crates/uqa-sql/src/semantics/view_privileges/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "target_privilege_scope_borrows_arenas_and_restores_inherited_authority",
+      "source": "crates/uqa-sql/src/semantics/privileges/ownership_tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "bound_relation_checks_preserve_every_table_and_column_privilege",
+      "source": "crates/uqa-sql/src/catalog/security/table/selection/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "view_access_borrows_complete_acl_metadata_and_preserves_cancellation",
+      "source": "crates/uqa-sql/src/catalog/security/view_authorization/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "View mutation authorization ownership",
+      "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
+      "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_view_authorization_borrows_definitions_and_arenas_and_retains_the_request_allowance",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_privileges.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native view mutation authorization",
+      "workload": "All mutation authorization adapters with large unused stored definitions and scalar-query arenas; PostgreSQL 18.4 column-privilege outputs, denied commands and durable reopen.",
+      "invariant": "All four providers avoid payload copies, reject owned scratch at the original allowance, preserve cancellation/recovery and match PostgreSQL rows and SQLSTATEs."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_view_column_authorization_matches_postgresql_and_survives_reopen",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_privileges.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native view mutation authorization",
+      "workload": "All mutation authorization adapters with large unused stored definitions and scalar-query arenas; PostgreSQL 18.4 column-privilege outputs, denied commands and durable reopen.",
+      "invariant": "All four providers avoid payload copies, reject owned scratch at the original allowance, preserve cancellation/recovery and match PostgreSQL rows and SQLSTATEs."
     }
   ]
 }

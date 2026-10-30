@@ -42,10 +42,20 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
         .catalog
         .target_view_kind(target)?
         .is_some();
+    let retained = mutation.scopes.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        mutation.scopes.cancellation(),
+    );
     match &command {
         CommandPlan::Insert(plan) => {
             if view {
-                view_privileges::ensure_insert(mutation.rules.views.authorization, plan)?;
+                view_privileges::ensure_insert_with_control(
+                    mutation.rules.views.authorization,
+                    plan,
+                    &control,
+                )?;
             } else {
                 let columns =
                     plan.on_conflict
@@ -70,7 +80,11 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
         }
         CommandPlan::Update(plan) => {
             if view {
-                view_privileges::ensure_update(mutation.rules.views.authorization, plan)?;
+                view_privileges::ensure_update_with_control(
+                    mutation.rules.views.authorization,
+                    plan,
+                    &control,
+                )?;
             } else {
                 mutation_privileges::ensure_update_target_privileges(mutation.privileges, plan)?;
             }
@@ -78,7 +92,11 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
         }
         CommandPlan::Delete(plan) => {
             if view {
-                view_privileges::ensure_delete(mutation.rules.views.authorization, plan)?;
+                view_privileges::ensure_delete_with_control(
+                    mutation.rules.views.authorization,
+                    plan,
+                    &control,
+                )?;
             } else {
                 mutation_privileges::ensure_delete_target_privileges(mutation.privileges, plan)?;
             }
@@ -86,7 +104,11 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
         }
         CommandPlan::Merge(plan) => {
             if view {
-                view_privileges::ensure_merge(mutation.rules.views.authorization, plan)?;
+                view_privileges::ensure_merge_with_control(
+                    mutation.rules.views.authorization,
+                    plan,
+                    &control,
+                )?;
             } else {
                 super::super::merge::analysis::ensure_merge_privileges(mutation, plan, None)?;
             }

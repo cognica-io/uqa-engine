@@ -10,7 +10,7 @@ use crate::{
     ast::{AssignmentStep, AssignmentTarget},
     ColumnType, SQLError,
 };
-use std::collections::BTreeMap;
+use uqa_core::memory::{ProductionControl, ProductionMap};
 
 mod types;
 pub use types::{assignment_input_type_with_control, field_assignment_types_with_control};
@@ -41,10 +41,19 @@ pub fn validate_repeated_targets<'a, E: 'a>(
     targets: impl IntoIterator<Item = &'a AssignmentTarget<E>>,
     insert: bool,
 ) -> Result<(), SQLError> {
-    let mut seen = BTreeMap::new();
+    validate_repeated_targets_with_control(targets, insert, &ProductionControl::uncontrolled())
+}
+
+pub fn validate_repeated_targets_with_control<'a, E: 'a>(
+    targets: impl IntoIterator<Item = &'a AssignmentTarget<E>>,
+    insert: bool,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    let mut seen = ProductionMap::new(*control);
     for target in targets {
         let whole = target.is_whole_column();
-        if let Some(previous) = seen.insert(&target.column, whole) {
+        if let Some(previous) = seen.insert_copy(target.column.as_str(), whole)? {
             if whole || previous {
                 return Err(if insert {
                     error(

@@ -4,8 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SELECT authorization observes bound ACLs without constructing a display-name copy.
+//! Relation authorization observes bound ACLs without constructing a display-name copy.
 
+use super::TableAclPrivilege;
 use crate::{
     ast::RoleAttribute,
     catalog::{
@@ -24,18 +25,29 @@ use crate::{
 use std::collections::BTreeMap;
 use uqa_core::memory::ProductionControl;
 
-pub struct SelectPrivileges<'a, 'c> {
-    pub subject: &'a RoleReference,
+pub struct RelationPrivileges<'a, 'c, Subject: ?Sized = RoleReference> {
+    pub subject: &'a Subject,
     pub roles: &'a BTreeMap<String, RoleDefinition>,
     pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
     pub control: ProductionControl<'c>,
 }
 
-impl SelectPrivileges<'_, '_> {
+pub type SelectPrivileges<'a, 'c> = RelationPrivileges<'a, 'c>;
+
+impl<Subject: RoleSubject + ?Sized> RelationPrivileges<'_, '_, Subject> {
     pub fn relation(
         &self,
         security: &BoundTableSecurity,
         column: Option<&str>,
+    ) -> Result<bool, SQLError> {
+        self.relation_for(security, column, TableAclPrivilege::Select)
+    }
+
+    pub fn relation_for(
+        &self,
+        security: &BoundTableSecurity,
+        column: Option<&str>,
+        privilege: TableAclPrivilege,
     ) -> Result<bool, SQLError> {
         self.validate(
             security.role_owner,
@@ -46,6 +58,7 @@ impl SelectPrivileges<'_, '_> {
             security.role_owner,
             security.acl.as_deref(),
             column.and_then(|name| security.column_acls.get(name).map(Vec::as_slice)),
+            privilege,
         )
     }
 
@@ -70,10 +83,15 @@ impl SelectPrivileges<'_, '_> {
         let column = column
             .and_then(|name| security?.columns.get(name))
             .map(|entry| entry.acl.as_slice());
-        self.allowed(RoleIdentity::BOOTSTRAP, Some(table), column)
+        self.allowed(
+            RoleIdentity::BOOTSTRAP,
+            Some(table),
+            column,
+            TableAclPrivilege::Select,
+        )
     }
 
-    fn validate<'a>(
+    pub(in crate::catalog::security) fn validate<'a>(
         &self,
         owner: RoleIdentity,
         table: Option<&'a [BoundTableAclEntry]>,
@@ -111,11 +129,12 @@ impl SelectPrivileges<'_, '_> {
         Ok(())
     }
 
-    fn allowed(
+    pub(in crate::catalog::security) fn allowed(
         &self,
         owner: RoleIdentity,
         table: Option<&[BoundTableAclEntry]>,
         column: Option<&[BoundTableAclEntry]>,
+        privilege: TableAclPrivilege,
     ) -> Result<bool, SQLError> {
         if self
             .subject
@@ -125,7 +144,7 @@ impl SelectPrivileges<'_, '_> {
             return Ok(true);
         }
         let table_allowed = match table {
-            Some(acl) => self.acl_allowed(acl)?,
+            Some(acl) => self.acl_allowed(acl, privilege)?,
             None => role_inherits_with_control(
                 self.roles,
                 self.memberships,
@@ -137,13 +156,17 @@ impl SelectPrivileges<'_, '_> {
         if table_allowed {
             return Ok(true);
         }
-        column.map_or(Ok(false), |acl| self.acl_allowed(acl))
+        column.map_or(Ok(false), |acl| self.acl_allowed(acl, privilege))
     }
 
-    fn acl_allowed(&self, acl: &[BoundTableAclEntry]) -> Result<bool, SQLError> {
+    fn acl_allowed(
+        &self,
+        acl: &[BoundTableAclEntry],
+        privilege: TableAclPrivilege,
+    ) -> Result<bool, SQLError> {
         for entry in acl {
             self.control.check()?;
-            if entry.privileges.select {
+            if entry.privileges.intersects(privilege.mask()) {
                 if let Some(role) = entry.role {
                     if role_inherits_with_control(
                         self.roles,

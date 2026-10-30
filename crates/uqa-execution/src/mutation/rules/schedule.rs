@@ -306,7 +306,17 @@ fn validate_update<S: Clone + Send + Sync + 'static>(
         .target_view_kind(&plan.table)?
         .is_some()
     {
-        view_privileges::ensure_update(context.mutation.rules.views.authorization, plan)?;
+        let retained = context.mutation.scopes.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            context.mutation.scopes.cancellation(),
+        );
+        view_privileges::ensure_update_with_control(
+            context.mutation.rules.views.authorization,
+            plan,
+            &control,
+        )?;
     } else {
         uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges(
             context.mutation.privileges,
@@ -349,7 +359,17 @@ fn validate_delete<S: Clone + Send + Sync + 'static>(
         .target_view_kind(&plan.table)?
         .is_some()
     {
-        view_privileges::ensure_delete(context.mutation.rules.views.authorization, plan)?;
+        let retained = context.mutation.scopes.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            context.mutation.scopes.cancellation(),
+        );
+        view_privileges::ensure_delete_with_control(
+            context.mutation.rules.views.authorization,
+            plan,
+            &control,
+        )?;
     } else {
         uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges(
             context.mutation.privileges,
@@ -418,12 +438,18 @@ fn relation_kind<S: Clone + Send + Sync + 'static>(
     let input = statement.input();
     let kind = rewrite.catalog.target_view_kind(input.table())?;
     if kind == Some(uqa_sql::catalog::view::StoredViewKind::Materialized) {
+        let retained = context.mutation.scopes.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            context.mutation.scopes.cancellation(),
+        );
         match statement {
             MutationCommand::Update(plan) => {
-                view_privileges::ensure_update(rewrite.authorization, plan)?;
+                view_privileges::ensure_update_with_control(rewrite.authorization, plan, &control)?;
             }
             MutationCommand::Delete(plan) => {
-                view_privileges::ensure_delete(rewrite.authorization, plan)?;
+                view_privileges::ensure_delete_with_control(rewrite.authorization, plan, &control)?;
             }
         }
         let relation = uqa_core::RelationIdentity::from_legacy_name(input.table())

@@ -270,3 +270,69 @@ fn denied_materialized_view_keeps_its_relation_kind_in_the_fallback_error() {
     );
     catalog.assert_released();
 }
+
+#[test]
+fn view_access_borrows_complete_acl_metadata_and_preserves_cancellation() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let catalog = Catalog::default();
+    let mut view = view(StoredViewKind::View);
+    view.security
+        .column_acls
+        .insert("unused".repeat(1 << 20), Vec::new());
+    let budget = MemoryBudget::new(64 << 10);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let sibling = budget.reserve(37).unwrap();
+    for privilege in TableAclPrivilege::ALL {
+        let observed = allocation_counter::measure(|| {
+            catalog
+                .context()
+                .ensure_view_privilege_for_with_control(
+                    "public.v", &view, "owner", privilege, &control,
+                )
+                .unwrap();
+            catalog
+                .context()
+                .ensure_view_column_privilege_for_with_control(
+                    "public.v", &view, "allowed", "owner", privilege, &control,
+                )
+                .unwrap();
+            catalog
+                .context()
+                .ensure_any_view_column_privilege_for_with_control(
+                    "public.v", &view, "owner", privilege, &control,
+                )
+                .unwrap();
+        });
+        assert!(observed.bytes_total < 4096, "{observed:?}");
+        assert_eq!(budget.used(), 37);
+        catalog.assert_released();
+    }
+    for token in [&original, &invoking] {
+        token.cancel();
+        let calls = catalog.reads.get();
+        assert_eq!(
+            catalog
+                .context()
+                .ensure_view_privilege_for_with_control(
+                    "public.v",
+                    &view,
+                    "owner",
+                    TableAclPrivilege::Update,
+                    &control
+                )
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(catalog.reads.get(), calls);
+        assert_eq!(budget.used(), 37);
+        token.reset();
+    }
+    drop(sibling);
+    assert_eq!(budget.used(), 0);
+}

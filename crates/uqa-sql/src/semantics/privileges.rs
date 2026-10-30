@@ -607,7 +607,7 @@ pub fn ensure_select_privileges_for_table_expressions(
 ) -> Result<(), SQLError> {
     let (universe, required) = table_expression_dependencies(
         table,
-        qualifiers,
+        qualifiers.iter().map(String::as_str),
         expressions,
         subqueries,
         required_columns,
@@ -616,9 +616,9 @@ pub fn ensure_select_privileges_for_table_expressions(
     ensure_required_select(&universe, &required, ctes)
 }
 
-fn table_expression_dependencies(
+fn table_expression_dependencies<'a>(
     table: &str,
-    qualifiers: &BTreeSet<String>,
+    qualifiers: impl IntoIterator<Item = &'a str>,
     expressions: &[&ScalarExpr],
     subqueries: &[QueryPlan],
     required_columns: &[String],
@@ -633,12 +633,7 @@ fn table_expression_dependencies(
     else {
         return Err(SQLError::UnknownTable(table.to_string()));
     };
-    let lineage = relation_lineage(
-        &relation,
-        qualifiers.iter().map(String::as_str),
-        &[],
-        &control,
-    )?;
+    let lineage = relation_lineage(&relation, qualifiers, &[], &control)?;
     let mut universe = SourceLineage::default();
     let mut required = Required::new();
     for column in required_columns {
@@ -673,4 +668,40 @@ pub struct TargetSelectPrivilegeRequest<'a, 'expr> {
     pub expressions: &'a [&'expr ScalarExpr],
     pub subqueries: &'a [QueryPlan],
     pub required_columns: &'a [String],
+}
+
+/// Target authorization borrows the command's arena and overrides only the requested authority.
+pub fn ensure_target_select(
+    request: TargetSelectPrivilegeRequest<'_, '_>,
+    inherited: &CteScope<'_, impl AsRef<[QueryPlan]>>,
+) -> Result<(), SQLError> {
+    let control = inherited.control();
+    control.check()?;
+    let relation = uqa_core::RelationIdentity::try_borrowed_reference(request.table)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    let name = control.format(format_args!("{}", relation.name))?;
+    let mut qualifiers = [
+        request.target_qualifier,
+        request.table,
+        name.as_str(),
+        request.returning_aliases.old.as_str(),
+        request.returning_aliases.new.as_str(),
+    ];
+    qualifiers.sort_unstable();
+    let mut scope = inherited.reborrow()?;
+    scope.scalar_subqueries = request.subqueries;
+    if let Some(subject) = request.privilege_subject {
+        scope.relation_privilege_subject = Some(subject.clone_with_control(&control)?);
+    }
+    let (universe, required) = table_expression_dependencies(
+        request.table,
+        qualifiers.iter().enumerate().filter_map(|(index, value)| {
+            (index == 0 || qualifiers[index - 1] != *value).then_some(*value)
+        }),
+        request.expressions,
+        request.subqueries,
+        request.required_columns,
+        &scope,
+    )?;
+    ensure_required_select(&universe, &required, &scope)
 }

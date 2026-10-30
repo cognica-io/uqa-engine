@@ -170,3 +170,72 @@ fn borrowed_acl_validation_does_not_copy_wide_column_metadata() {
     drop(sibling);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn bound_relation_checks_preserve_every_table_and_column_privilege() {
+    let roles = roles();
+    let memberships = BTreeMap::new();
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for granted in TableAclPrivilege::ALL {
+        for subject in ["uqa", "reader", "missing"] {
+            let check = RelationPrivileges {
+                subject,
+                roles: &roles,
+                memberships: &memberships,
+                control,
+            };
+            let grant = |role| BoundTableAclEntry {
+                role,
+                grantor: RoleIdentity::BOOTSTRAP,
+                privileges: granted.mask(),
+                grant_options: TablePrivileges::default(),
+            };
+            for acl in [
+                None,
+                Some(vec![]),
+                Some(vec![grant(None)]),
+                Some(vec![grant(Some(roles["reader"].identity()))]),
+            ] {
+                let mut security = BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP);
+                security.acl = acl;
+                security
+                    .column_acls
+                    .insert("secret".into(), vec![grant(None)]);
+                let names = security.resolve(&roles).unwrap();
+                for requested in TableAclPrivilege::ALL {
+                    for column in [None, Some("id"), Some("secret")] {
+                        let expected = column.map_or_else(
+                            || {
+                                table::role_has_table_privilege(
+                                    &names,
+                                    subject,
+                                    requested,
+                                    &roles,
+                                    &memberships,
+                                )
+                            },
+                            |column| {
+                                table::role_has_column_privilege(
+                                    &names,
+                                    column,
+                                    subject,
+                                    requested,
+                                    &roles,
+                                    &memberships,
+                                )
+                            },
+                        );
+                        assert_eq!(
+                            check.relation_for(&security, column, requested).unwrap(),
+                            expected,
+                            "{subject}: {granted:?}/{requested:?}/{column:?}"
+                        );
+                        assert_eq!(budget.used(), 0);
+                    }
+                }
+            }
+        }
+    }
+}

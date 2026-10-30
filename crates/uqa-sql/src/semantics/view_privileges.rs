@@ -6,469 +6,137 @@
 
 //! Privilege checks at each view boundary before DML rewrite or trigger dispatch.
 
-use crate::catalog::roles::RoleReference;
-use std::collections::BTreeSet;
-
-use crate::plan::{
-    ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan, MergeWhenPlan, UpdatePlan,
-};
-use crate::SQLError;
-
 use super::privileges::TargetSelectPrivilegeRequest;
-use crate::catalog::security::table::TableAclPrivilege;
-use crate::catalog::stored_view::StoredView;
+use crate::{
+    catalog::{roles::RoleReference, security::table::TableAclPrivilege, stored_view::StoredView},
+    plan::{DeletePlan, InsertPlan, MergePlan, UpdatePlan},
+    SQLError,
+};
 use uqa_core::memory::{Produced, ProductionControl};
 
-pub fn next_layer_privilege_subject_with_control(
-    services: &dyn ViewPrivilegeCatalog,
-    name: &str,
-    rewritten_subject: Option<&RoleReference>,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<RoleReference>, SQLError> {
-    let mut result = None;
-    services.with_view_definition_with_control(name, control, &mut |view| {
-        let view = view.ok_or_else(|| SQLError::UnknownTable(name.to_owned()))?;
-        if view.output_columns.is_none() {
-            return Err(SQLError::Internal(format!(
-                "loaded view `{name}` has no durable public column metadata"
-            )));
-        }
-        let subject = match rewritten_subject {
-            Some(subject) => subject.clone_with_control(control)?,
-            None => services.current_role_with_control(control)?,
-        };
-        result = Some(if view.security_invoker() {
-            subject
-        } else {
-            services.bound_role_with_control(view.security.role_owner, control)?
-        });
-        Ok(())
-    })?;
-    result.ok_or_else(|| {
-        SQLError::Internal("view privilege catalog did not supply its definition".into())
-    })
-}
+mod production;
+pub use production::{
+    ensure_delete_with_control, ensure_insert_with_control, ensure_merge_with_control,
+    ensure_update_with_control, merge_privilege_expressions_with_control,
+    next_layer_privilege_subject_with_control,
+};
 
-fn view_target(
-    services: &dyn ViewPrivilegeCatalog,
-    name: &str,
-) -> Result<(StoredView, Vec<String>), SQLError> {
-    let view = services
-        .view_definition(name)?
-        .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-    let columns = view.output_columns.clone().ok_or_else(|| {
-        SQLError::Internal(format!(
-            "loaded view `{name}` has no durable public column metadata"
-        ))
-    })?;
-    Ok((view, columns))
-}
-
-fn privilege_subject(
-    services: &dyn ViewPrivilegeCatalog,
-    rewritten_subject: Option<&RoleReference>,
-) -> RoleReference {
-    rewritten_subject.map_or_else(|| services.current_role(), Clone::clone)
-}
-
-fn next_privilege_subject(
-    services: &dyn ViewPrivilegeCatalog,
-    view: &StoredView,
-    subject: RoleReference,
-) -> Result<RoleReference, SQLError> {
-    if view.security_invoker() {
-        Ok(subject)
-    } else {
-        services.bound_role(view.security.role_owner)
-    }
-}
-
-/// The role whose privileges the layer after view `name` is checked with: the view's owner, or for a `security_invoker` view the role `name` itself is checked as, `rewritten_subject` or else the current role.
+/// The next view layer uses the view owner unless `security_invoker` retains the invoking subject.
 pub fn next_layer_privilege_subject(
     services: &dyn ViewPrivilegeCatalog,
     name: &str,
     rewritten_subject: Option<&RoleReference>,
 ) -> Result<RoleReference, SQLError> {
-    let (view, _) = view_target(services, name)?;
-    next_privilege_subject(
+    Ok(next_layer_privilege_subject_with_control(
         services,
-        &view,
-        privilege_subject(services, rewritten_subject),
-    )
-}
-
-fn validate_columns(
-    name: &str,
-    available: &[String],
-    requested: &[String],
-) -> Result<(), SQLError> {
-    for column in requested {
-        if !available.contains(column) {
-            return Err(SQLError::UnknownColumn(format!("{name}.{column}")));
-        }
-    }
-    Ok(())
-}
-
-fn validate_insert_columns(statement: &InsertPlan, available: &[String]) -> Result<(), SQLError> {
-    crate::assignment::targets::validate_repeated_targets(&statement.columns, true)?;
-    validate_columns(
-        &statement.table,
-        available,
-        &statement
-            .columns
-            .iter()
-            .map(|target| target.column.clone())
-            .collect::<Vec<_>>(),
-    )
-}
-
-fn assigned_column_names(assignments: &[crate::plan::AssignmentPlan]) -> Vec<String> {
-    assignments
-        .iter()
-        .flat_map(|assignment| assignment.target.column_names())
-        .map(str::to_owned)
-        .collect()
+        name,
+        rewritten_subject,
+        &ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary view privilege subject"))
 }
 
 pub fn ensure_insert(
     services: &dyn ViewPrivilegeCatalog,
     statement: &InsertPlan,
 ) -> Result<RoleReference, SQLError> {
-    let (view, available) = view_target(services, &statement.table)?;
-    validate_insert_columns(statement, &available)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
-    let default_values = statement.source.is_none()
-        && statement.columns.is_empty()
-        && statement.rows.iter().all(Vec::is_empty);
-    if default_values {
-        services.ensure_any_view_column_privilege_for(
-            &statement.table,
-            &view,
-            &subject,
-            TableAclPrivilege::Insert,
-        )?;
-    } else {
-        let columns = if statement.columns.is_empty() {
-            let supplied = statement.source.as_deref().map_or_else(
-                || statement.rows.first().map(Vec::len),
-                |source| {
-                    crate::semantics::projection::query_plan_output_columns(source)
-                        .map(|columns| columns.len())
-                },
-            );
-            supplied.map_or_else(
-                || available.clone(),
-                |width| available.iter().take(width).cloned().collect(),
-            )
-        } else {
-            statement
-                .columns
-                .iter()
-                .map(|target| target.column.clone())
-                .collect()
-        };
-        for column in columns {
-            services.ensure_view_column_privilege_for(
-                &statement.table,
-                &view,
-                &column,
-                &subject,
-                TableAclPrivilege::Insert,
-            )?;
-        }
-    }
-    let mut expressions = statement
-        .returning
-        .iter()
-        .map(|projection| &projection.expr)
-        .collect::<Vec<_>>();
-    if let Some(conflict) = &statement.on_conflict {
-        expressions.extend(conflict.expressions.iter());
-        expressions.extend(conflict.predicate.iter().map(Box::as_ref));
-    }
-    let required_columns = if let Some(ConflictPlan {
-        conflict_columns,
-        action:
-            ConflictActionPlan::Update {
-                assignments,
-                predicate,
-            },
-        ..
-    }) = statement.on_conflict.as_ref()
-    {
-        let update_columns = assigned_column_names(assignments);
-        crate::assignment::targets::validate_repeated_targets(
-            assignments
-                .iter()
-                .flat_map(|assignment| assignment.target.targets()),
-            false,
-        )?;
-        validate_columns(&statement.table, &available, &update_columns)?;
-        for column in &update_columns {
-            services.ensure_view_column_privilege_for(
-                &statement.table,
-                &view,
-                column,
-                &subject,
-                TableAclPrivilege::Update,
-            )?;
-        }
-        expressions.extend(
-            assignments
-                .iter()
-                .flat_map(crate::plan::AssignmentPlan::expressions),
-        );
-        expressions.extend(predicate.iter().map(Box::as_ref));
-        conflict_columns.as_slice()
-    } else {
-        &[]
-    };
-    services.ensure_target_select(TargetSelectPrivilegeRequest {
-        table: &statement.table,
-        privilege_subject: Some(&subject),
-        target_qualifier: &statement.target_qualifier,
-        returning_aliases: &statement.returning_aliases,
-        expressions: &expressions,
-        subqueries: &statement.subqueries,
-        required_columns,
-    })?;
-    next_privilege_subject(services, &view, subject)
+    Ok(
+        ensure_insert_with_control(services, statement, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary view privilege subject"),
+    )
 }
 
 pub fn ensure_update(
     services: &dyn ViewPrivilegeCatalog,
     statement: &UpdatePlan,
 ) -> Result<RoleReference, SQLError> {
-    let (view, available) = view_target(services, &statement.table)?;
-    let columns = statement
-        .assignments
-        .iter()
-        .flat_map(|assignment| assignment.target.column_names())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    crate::assignment::targets::validate_repeated_targets(
-        statement
-            .assignments
-            .iter()
-            .flat_map(|assignment| assignment.target.targets()),
-        false,
-    )?;
-    validate_columns(&statement.table, &available, &columns)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
-    for column in &columns {
-        services.ensure_view_column_privilege_for(
-            &statement.table,
-            &view,
-            column,
-            &subject,
-            TableAclPrivilege::Update,
-        )?;
-    }
-    let expressions = statement
-        .assignments
-        .iter()
-        .flat_map(crate::plan::AssignmentPlan::expressions)
-        .chain(statement.predicate.iter())
-        .chain(
-            statement
-                .returning
-                .iter()
-                .map(|projection| &projection.expr),
-        )
-        .collect::<Vec<_>>();
-    services.ensure_target_select(TargetSelectPrivilegeRequest {
-        table: &statement.table,
-        privilege_subject: Some(&subject),
-        target_qualifier: &statement.target_qualifier,
-        returning_aliases: &statement.returning_aliases,
-        expressions: &expressions,
-        subqueries: &statement.subqueries,
-        required_columns: &[],
-    })?;
-    next_privilege_subject(services, &view, subject)
+    Ok(
+        ensure_update_with_control(services, statement, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary view privilege subject"),
+    )
 }
 
 pub fn ensure_delete(
     services: &dyn ViewPrivilegeCatalog,
     statement: &DeletePlan,
 ) -> Result<RoleReference, SQLError> {
-    let (view, _) = view_target(services, &statement.table)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
-    services.ensure_view_privilege_for(
-        &statement.table,
-        &view,
-        &subject,
-        TableAclPrivilege::Delete,
-    )?;
-    let expressions = statement
-        .predicate
-        .iter()
-        .chain(
-            statement
-                .returning
-                .iter()
-                .map(|projection| &projection.expr),
-        )
-        .collect::<Vec<_>>();
-    services.ensure_target_select(TargetSelectPrivilegeRequest {
-        table: &statement.table,
-        privilege_subject: Some(&subject),
-        target_qualifier: &statement.target_qualifier,
-        returning_aliases: &statement.returning_aliases,
-        expressions: &expressions,
-        subqueries: &statement.subqueries,
-        required_columns: &[],
-    })?;
-    next_privilege_subject(services, &view, subject)
+    Ok(
+        ensure_delete_with_control(services, statement, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary view privilege subject"),
+    )
 }
 
 pub fn ensure_merge(
     services: &dyn ViewPrivilegeCatalog,
     statement: &MergePlan,
 ) -> Result<RoleReference, SQLError> {
-    let (view, available) = view_target(services, &statement.target)?;
-    let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
-    let mut requires_delete = false;
-    let mut requires_any_insert = false;
-    let mut column_privileges = BTreeSet::new();
-    for clause in &statement.when_clauses {
-        match clause {
-            MergeWhenPlan::InsertNotMatched {
-                columns, values, ..
-            } => {
-                crate::assignment::targets::validate_repeated_targets(columns, true)?;
-                validate_columns(
-                    &statement.target,
-                    &available,
-                    &columns
-                        .iter()
-                        .map(|target| target.column.clone())
-                        .collect::<Vec<_>>(),
-                )?;
-                if columns.is_empty() && values.is_empty() {
-                    requires_any_insert = true;
-                } else {
-                    let columns: Vec<String> = if columns.is_empty() {
-                        available.iter().take(values.len()).cloned().collect()
-                    } else {
-                        columns.iter().map(|target| target.column.clone()).collect()
-                    };
-                    column_privileges.extend(
-                        columns
-                            .into_iter()
-                            .map(|column| (TableAclPrivilege::Insert, column)),
-                    );
-                }
-            }
-            MergeWhenPlan::UpdateMatched { assignments, .. }
-            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                let columns = assigned_column_names(assignments);
-                crate::assignment::targets::validate_repeated_targets(
-                    assignments
-                        .iter()
-                        .flat_map(|assignment| assignment.target.targets()),
-                    false,
-                )?;
-                validate_columns(&statement.target, &available, &columns)?;
-                column_privileges.extend(
-                    columns
-                        .into_iter()
-                        .map(|column| (TableAclPrivilege::Update, column)),
-                );
-            }
-            MergeWhenPlan::DeleteMatched { .. }
-            | MergeWhenPlan::DeleteNotMatchedBySource { .. } => requires_delete = true,
-            _ => {}
-        }
-    }
-    if requires_delete {
-        services.ensure_view_privilege_for(
-            &statement.target,
-            &view,
-            &subject,
-            TableAclPrivilege::Delete,
-        )?;
-    }
-    if requires_any_insert {
-        services.ensure_any_view_column_privilege_for(
-            &statement.target,
-            &view,
-            &subject,
-            TableAclPrivilege::Insert,
-        )?;
-    }
-    for (privilege, column) in column_privileges {
-        services.ensure_view_column_privilege_for(
-            &statement.target,
-            &view,
-            &column,
-            &subject,
-            privilege,
-        )?;
-    }
-    let expressions = merge_privilege_expressions(statement);
-    services.ensure_target_select(TargetSelectPrivilegeRequest {
-        table: &statement.target,
-        privilege_subject: Some(&subject),
-        target_qualifier: &statement.target_qualifier,
-        returning_aliases: &statement.returning_aliases,
-        expressions: &expressions,
-        subqueries: &statement.subqueries,
-        required_columns: &[],
-    })?;
-    next_privilege_subject(services, &view, subject)
+    Ok(
+        ensure_merge_with_control(services, statement, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary view privilege subject"),
+    )
 }
 
-pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> {
-    let mut expressions = vec![&stmt.join_condition];
-    expressions.extend(stmt.target_predicate.iter());
-    expressions.extend(stmt.returning.iter().map(|projection| &projection.expr));
-    for clause in &stmt.when_clauses {
-        match clause {
-            MergeWhenPlan::UpdateMatched {
-                condition,
-                assignments,
-            }
-            | MergeWhenPlan::UpdateNotMatchedBySource {
-                condition,
-                assignments,
-            } => {
-                expressions.extend(condition.iter());
-                expressions.extend(
-                    assignments
-                        .iter()
-                        .flat_map(crate::plan::AssignmentPlan::expressions),
-                );
-            }
-            MergeWhenPlan::InsertNotMatched {
-                condition,
-                columns,
-                values,
-                ..
-            } => {
-                expressions.extend(condition.iter());
-                expressions.extend(
-                    columns
-                        .iter()
-                        .flat_map(crate::ast::AssignmentTarget::expressions),
-                );
-                expressions.extend(values);
-            }
-            MergeWhenPlan::DeleteMatched { condition }
-            | MergeWhenPlan::DeleteNotMatchedBySource { condition }
-            | MergeWhenPlan::NothingMatched { condition }
-            | MergeWhenPlan::NothingNotMatched { condition }
-            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                expressions.extend(condition.iter());
-            }
-        }
-    }
-    expressions
+pub fn merge_privilege_expressions(statement: &MergePlan) -> Vec<&crate::ScalarExpr> {
+    merge_privilege_expressions_with_control(statement, &ProductionControl::uncontrolled())
+        .expect("ordinary merge privilege expressions")
+        .into_uncontrolled()
+        .expect("ordinary merge privilege expressions")
 }
 
 /// Authorization access to one loaded view and the current statement's SELECT privileges.
 pub trait ViewPrivilegeCatalog {
+    fn ensure_target_select_with_control(
+        &self,
+        request: TargetSelectPrivilegeRequest<'_, '_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.ensure_target_select(request)?;
+        Ok(control.check()?)
+    }
+    fn ensure_view_privilege_for_with_control(
+        &self,
+        name: &str,
+        view: &StoredView,
+        subject: &RoleReference,
+        privilege: TableAclPrivilege,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.ensure_view_privilege_for(name, view, subject, privilege)?;
+        Ok(control.check()?)
+    }
+    fn ensure_view_column_privilege_for_with_control(
+        &self,
+        name: &str,
+        view: &StoredView,
+        column: &str,
+        subject: &RoleReference,
+        privilege: TableAclPrivilege,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.ensure_view_column_privilege_for(name, view, column, subject, privilege)?;
+        Ok(control.check()?)
+    }
+    fn ensure_any_view_column_privilege_for_with_control(
+        &self,
+        name: &str,
+        view: &StoredView,
+        subject: &RoleReference,
+        privilege: TableAclPrivilege,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.ensure_any_view_column_privilege_for(name, view, subject, privilege)?;
+        Ok(control.check()?)
+    }
+
     /// External authorization catalogs retain their existing callback boundary; native adapters lend their immutable generation.
     fn with_view_definition_with_control(
         &self,
@@ -539,3 +207,6 @@ pub trait ViewPrivilegeCatalog {
         request: TargetSelectPrivilegeRequest<'_, '_>,
     ) -> Result<(), SQLError>;
 }
+
+#[cfg(test)]
+mod tests;

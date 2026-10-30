@@ -8,7 +8,8 @@
 use crate::mutation::{command_scope::CommandScopeSource, statement::MutationExecutionContext};
 use crate::query::{
     privileges::{
-        ensure_select_privileges_for_source_expressions, ensure_target_table_select_for_expressions,
+        ensure_select_privileges_for_source_expressions_with_control,
+        ensure_target_table_select_for_expressions_with_control,
     },
     CteScope,
 };
@@ -16,7 +17,7 @@ use uqa_sql::{
     plan::MergePlan,
     semantics::{
         merge::ensure_merge_mutation_privileges, privileges::TargetSelectPrivilegeRequest,
-        view_privileges::merge_privilege_expressions,
+        view_privileges::merge_privilege_expressions_with_control,
     },
     SQLError,
 };
@@ -49,14 +50,20 @@ pub(in crate::mutation) fn ensure_merge_privileges<S: Clone + 'static>(
     inherited: Option<&CteScope<S>>,
 ) -> Result<(), SQLError> {
     ensure_merge_mutation_privileges(mutation.privileges, stmt)?;
-    let expressions = merge_privilege_expressions(stmt);
-    let mut target_scope = mutation
+    let retained = mutation.scopes.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        mutation.scopes.cancellation(),
+    );
+    let expressions = merge_privilege_expressions_with_control(stmt, &control)?;
+    let target_scope = mutation
         .preparation
         .referential
         .assignment
         .scopes
         .current_routine_scope();
-    ensure_target_table_select_for_expressions(
+    ensure_target_table_select_for_expressions_with_control(
         TargetSelectPrivilegeRequest {
             table: &stmt.target,
             privilege_subject: stmt.target_privilege_subject.as_ref(),
@@ -66,10 +73,16 @@ pub(in crate::mutation) fn ensure_merge_privileges<S: Clone + 'static>(
             subqueries: &stmt.subqueries,
             required_columns: &[],
         },
-        &mut target_scope,
+        &target_scope,
+        &control,
     )?;
     let scope = merge_analysis_scope(mutation.scopes, stmt, inherited)?;
-    ensure_select_privileges_for_source_expressions(&stmt.source, &expressions, &scope)
+    ensure_select_privileges_for_source_expressions_with_control(
+        &stmt.source,
+        &expressions,
+        &scope,
+        &control,
+    )
 }
 
 /// Reject an INSERT action whose VALUES contain a set-returning call before the merge runs. `PostgreSQL` analyzes that list like a target list, and its executor rejects the call when it initializes the action, whether or not the action ever fires.

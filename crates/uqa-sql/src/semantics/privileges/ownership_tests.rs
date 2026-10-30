@@ -22,6 +22,7 @@ struct Catalog {
     reads: Cell<usize>,
     fail_at: Cell<usize>,
     unwind: Cell<bool>,
+    expected_subject: Option<RoleReference>,
 }
 
 impl Catalog {
@@ -32,6 +33,7 @@ impl Catalog {
             reads: Cell::new(0),
             fail_at: Cell::new(usize::MAX),
             unwind: Cell::new(false),
+            expected_subject: None,
         }
     }
     fn scope<'a>(&'a self, control: &ProductionControl<'_>) -> CteScope<'a, &'a [QueryPlan]> {
@@ -87,8 +89,11 @@ impl PrivilegeCatalog for Catalog {
         _: &RelationNameResolution,
         _: &PrivilegeRelation,
         _: Option<&str>,
-        _: &RoleReference,
+        subject: &RoleReference,
     ) -> Result<bool, SQLError> {
+        if let Some(expected) = &self.expected_subject {
+            assert_eq!(subject, expected);
+        }
         Ok(true)
     }
 }
@@ -248,6 +253,58 @@ fn catalog_error_and_consumer_unwind_release_partial_join_lineage() {
     catalog.fail_at.set(usize::MAX);
     ensure_select_privileges_for_query(&query, &scope).unwrap();
     assert_eq!(budget.used(), baseline);
+    drop(scope);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn target_privilege_scope_borrows_arenas_and_restores_inherited_authority() {
+    let mut catalog = Catalog::new(vec!["id".into(), "secret".into()]);
+    catalog.expected_subject = Some("captured".into());
+    let budget = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let scope = catalog.scope(&control);
+    let before = budget.used();
+    let mut unused = query("SELECT 1");
+    let RelationalPlan::QueryBlock(block) = &mut unused.root else {
+        panic!("block")
+    };
+    block.projections[0].expr = ScalarExpr::Literal(uqa_core::Value::Str("x".repeat(4 << 20)));
+    let arena = [query("SELECT secret FROM public.input"), unused];
+    let expressions = [
+        ScalarExpr::ScalarSubquery(0),
+        ScalarExpr::QualifiedColumn {
+            qualifier: "input".into(),
+            column: "id".into(),
+        },
+    ];
+    let references = expressions.iter().collect::<Vec<_>>();
+    let aliases = crate::ast::ReturningAliases::default();
+    let subject = RoleReference::from("captured");
+    let observed = allocation_counter::measure(|| {
+        ensure_target_select(
+            TargetSelectPrivilegeRequest {
+                table: "public.input",
+                privilege_subject: Some(&subject),
+                target_qualifier: "target",
+                returning_aliases: &aliases,
+                expressions: &references,
+                subqueries: &arena,
+                required_columns: &[],
+            },
+            &scope,
+        )
+        .unwrap();
+    });
+    assert!(observed.bytes_total < 64 << 10, "{observed:?}");
+    assert_eq!(observed.bytes_current, 0);
+    assert_eq!(budget.used(), before);
+    assert!(scope.scalar_subqueries.is_empty());
+    assert_eq!(
+        scope.privilege_subject().unwrap(),
+        &RoleReference::from("reader")
+    );
     drop(scope);
     assert_eq!(budget.used(), 0);
 }

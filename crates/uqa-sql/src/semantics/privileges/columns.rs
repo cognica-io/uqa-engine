@@ -105,7 +105,7 @@ pub fn for_target_expressions(
     scope.include_authorization_only_columns = false;
     let (_, required) = super::table_expression_dependencies(
         table,
-        qualifiers,
+        qualifiers.iter().map(String::as_str),
         expressions,
         scope.scalar_subqueries,
         &[],

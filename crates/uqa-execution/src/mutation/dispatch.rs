@@ -24,8 +24,15 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
 ) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views;
     if let Some(kind) = rewrite.catalog.target_view_kind(&stmt.table)? {
+        let retained = context.mutation.scopes.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            context.mutation.scopes.cancellation(),
+        );
         if kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
-            let _ = view_privileges::ensure_insert(rewrite.authorization, stmt)?;
+            let _ =
+                view_privileges::ensure_insert_with_control(rewrite.authorization, stmt, &control)?;
             let relation = uqa_core::RelationIdentity::from_legacy_name(&stmt.table)
                 .map_err(SQLError::Internal)?;
             return Err(SQLError::Routine {
@@ -42,7 +49,8 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
             &stmt.table,
             uqa_sql::ast::RuleEvent::Insert,
         )? {
-            let _ = view_privileges::ensure_insert(rewrite.authorization, stmt)?;
+            let _ =
+                view_privileges::ensure_insert_with_control(rewrite.authorization, stmt, &control)?;
             let expanded = set_returning_values_query(context, stmt)?;
             let stmt = expanded.as_ref().unwrap_or(stmt);
             super::routine_calls::insert(context, stmt, params, inherited_ctes)?;
@@ -122,6 +130,12 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
 ) -> Result<MutationOutput, SQLError> {
     let rewrite = context.mutation.rules.views;
     if rewrite.catalog.target_view_kind(&stmt.target)?.is_some() {
+        let retained = context.mutation.scopes.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            context.mutation.scopes.cancellation(),
+        );
         let scope = super::merge::analysis::merge_analysis_scope(
             context.mutation.scopes,
             stmt,
@@ -148,7 +162,11 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
                 run_merge(context, &rewritten, params, inherited_ctes)
             }
             view_rewrite::MergeViewTargetPath::ViewTriggers => {
-                let _ = view_privileges::ensure_merge(rewrite.authorization, stmt)?;
+                let _ = view_privileges::ensure_merge_with_control(
+                    rewrite.authorization,
+                    stmt,
+                    &control,
+                )?;
                 super::routine_calls::merge(context, stmt, params, inherited_ctes)?;
                 super::merge::views::run_view_merge(context, stmt, params, inherited_ctes)
             }
