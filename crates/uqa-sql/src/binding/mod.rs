@@ -124,7 +124,7 @@ use crate::semantics::{
     TableFunctionTypeRequest,
 };
 use crate::RowSchema;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[cfg(test)]
 thread_local! {
@@ -157,7 +157,7 @@ struct SchemaScope {
     set_placement: crate::semantics::sets::placement::SetPlacement,
     /// The set-returning calls analyzed so far at this query level. Two readings differ exactly when an expression analyzed between them contains one, as `PostgreSQL` compares `p_last_srf`.
     set_calls: usize,
-    stored_whole_rows: BTreeMap<String, ScalarExpr>,
+    stored_whole_rows: [Option<crate::plan::OwnedScalarExpr>; 2],
     /// The parameters of the SQL routine whose body is bound, as the outermost scope: a reference that resolves into them, because no column of any query level takes its name, becomes the positional parameter it names.
     routine_parameters: Option<RoutineParameterScope>,
     /// Select reference resolution, complete stored binding, or prepared composite identity retention.

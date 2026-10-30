@@ -20,7 +20,7 @@ fn expression(sql: &str) -> Expr {
     query.projections.remove(0).expr
 }
 
-fn catalog_fixture() -> Catalog {
+pub(super) fn catalog_fixture() -> Catalog {
     let mut a = ColumnDef::nullable("a", ColumnType::Integer);
     a.default = Some(expression("(SELECT 17)"));
     let mut b = ColumnDef::nullable("b", ColumnType::Array(Box::new(ColumnType::Integer)));
@@ -28,7 +28,7 @@ fn catalog_fixture() -> Catalog {
     Catalog(vec![a, b])
 }
 
-fn normalize(plan: &UnifiedPlan) -> serde_json::Value {
+pub(super) fn normalize(plan: &UnifiedPlan) -> serde_json::Value {
     fn visit(value: &mut serde_json::Value, identities: &mut BTreeMap<u64, u64>) {
         match value {
             serde_json::Value::Object(fields) => {

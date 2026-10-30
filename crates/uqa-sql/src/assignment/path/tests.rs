@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::ast::ArraySliceBounds;
 use crate::expr::{
     composites::{CompositeAttribute, CompositeTypeDescriptor},
     enums::EnumTypeLabels,

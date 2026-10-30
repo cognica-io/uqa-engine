@@ -68,26 +68,50 @@ pub fn array_assignment_type<E>(
     target: &AssignmentTarget<E>,
     declared: &ColumnType,
 ) -> Result<ColumnType, SQLError> {
+    Ok(array_assignment_type_with_control(
+        target,
+        declared,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary array assignment type"))
+}
+
+pub fn array_assignment_type_with_control<E>(
+    target: &AssignmentTarget<E>,
+    declared: &ColumnType,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<ColumnType>, SQLError> {
+    control.check()?;
     let mut base = declared;
     while let ColumnType::Domain { base: inner, .. } = base {
+        control.check()?;
         base = inner;
     }
     if let Some(AssignmentStep::Field(field)) = target.indirection.first() {
         return Err(error("42804", format!(
             "cannot assign to field \"{field}\" of column \"{}\" because its type {} is not a composite type",
-            target.column, declared.sql_name()
+            target.column, &*declared.sql_name_with_control(control)?
         )));
     }
     let array = match base {
-        ColumnType::Array(_) => base.clone(),
-        ColumnType::Int2Vector => ColumnType::Array(Box::new(ColumnType::SmallInteger)),
-        ColumnType::OidVector => ColumnType::Array(Box::new(ColumnType::Oid)),
+        ColumnType::Array(_) => base.clone_with_control(control)?,
+        ColumnType::Int2Vector | ColumnType::OidVector => {
+            let output = crate::plan::copy::SyntaxProduction::new(*control);
+            let element = if matches!(base, ColumnType::Int2Vector) {
+                ColumnType::SmallInteger
+            } else {
+                ColumnType::Oid
+            };
+            let array = ColumnType::Array(output.boxed(element)?);
+            output.finish(array)?
+        }
         _ => {
             return Err(error(
                 "42804",
                 format!(
                     "cannot subscript type {} because it does not support subscripting",
-                    declared.sql_name()
+                    &*declared.sql_name_with_control(control)?
                 ),
             ))
         }
@@ -97,13 +121,13 @@ pub fn array_assignment_type<E>(
         .iter()
         .find(|step| matches!(step, AssignmentStep::Field(_)))
     {
-        let mut element = &array;
+        let mut element = &*array;
         while let ColumnType::Array(inner) = element {
             element = inner;
         }
         return Err(error("42804", format!(
             "cannot assign to field \"{field}\" of column \"{}\" because its type {} is not a composite type",
-            target.column, element.sql_name()
+            target.column, &*element.sql_name_with_control(control)?
         )));
     }
     if target.indirection.len() > 6 {
@@ -138,10 +162,12 @@ impl<E> AssignmentLevel<'_, E> {
 
 /// Group an assignment's indirection into fields and subscript groups, in order.
 pub fn assignment_levels<E>(steps: &[AssignmentStep<E>]) -> Vec<AssignmentLevel<'_, E>> {
-    level_iter(steps).collect()
+    assignment_level_iter(steps).collect()
 }
 
-fn level_iter<E>(steps: &[AssignmentStep<E>]) -> impl Iterator<Item = AssignmentLevel<'_, E>> {
+pub(crate) fn assignment_level_iter<E>(
+    steps: &[AssignmentStep<E>],
+) -> impl Iterator<Item = AssignmentLevel<'_, E>> {
     let mut remaining = steps;
     std::iter::from_fn(move || {
         let first = remaining.first()?;
@@ -260,18 +286,31 @@ pub fn validate_assignment_result<E>(
     target: &AssignmentTarget<E>,
     declared: &ColumnType,
 ) -> Result<(), SQLError> {
+    validate_assignment_result_with_control(
+        target,
+        declared,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn validate_assignment_result_with_control<E>(
+    target: &AssignmentTarget<E>,
+    declared: &ColumnType,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     // A field write rebuilds the column's own composite value.
     if target.is_whole_column() || has_field_step(target) {
         return Ok(());
     }
-    let container = array_assignment_type(target, declared)?;
+    let container = array_assignment_type_with_control(target, declared, control)?;
     if !crate::type_resolution::explicit_type_compatible(&container, declared) {
         return Err(error(
             "42846",
             format!(
                 "cannot cast type {} to {}",
-                container.sql_name(),
-                declared.sql_name()
+                &*container.sql_name_with_control(control)?,
+                &*declared.sql_name_with_control(control)?
             ),
         ));
     }

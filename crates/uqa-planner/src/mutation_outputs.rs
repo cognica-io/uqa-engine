@@ -6,7 +6,7 @@
 
 //! Prune unused, side-effect-free mutation-source output slots without changing row shape.
 mod owned;
-pub(crate) use owned::prune_unused_query_outputs_owned;
+pub use owned::prune_unused_query_outputs_owned;
 
 use std::collections::BTreeSet;
 use uqa_core::Value;

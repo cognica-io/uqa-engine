@@ -43,7 +43,7 @@ pub(in crate::semantics::rules) fn produce_rule_returning(
     source_index: Option<&Expr>,
     event_width: usize,
     request: RuleReturningRequest,
-    target_columns: &BTreeSet<String>,
+    target_columns: &dyn crate::semantics::rules::action_binding::ActionColumns,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Vec<Projection>>>, SQLError> {
     control.check()?;
@@ -164,7 +164,7 @@ fn rewrite_image(
 #[derive(Clone, Copy)]
 struct ImageScope<'a> {
     target_qualifier: &'a str,
-    target_columns: &'a BTreeSet<String>,
+    target_columns: &'a dyn crate::semantics::rules::action_binding::ActionColumns,
     aliases: &'a ReturningAliases,
 }
 

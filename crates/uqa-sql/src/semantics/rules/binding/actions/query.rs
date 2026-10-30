@@ -17,6 +17,8 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod resolver;
+pub use resolver::{OwnedRuleQueryResolver, RuleInputColumns};
 mod schedule;
 pub use schedule::InsertRuleQueries;
 mod assignments;

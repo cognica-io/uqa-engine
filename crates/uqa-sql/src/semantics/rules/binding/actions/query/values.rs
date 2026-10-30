@@ -19,6 +19,7 @@ use uqa_core::Value;
 pub(super) use crate::plan::RuleValuesInput as ValuesInput;
 
 mod owned;
+pub(super) use owned::default_expression as default_expression_with_control;
 
 impl ValuesInput {
     pub(crate) fn describe(insert: &InsertPlan) -> Result<Option<Self>, SQLError> {

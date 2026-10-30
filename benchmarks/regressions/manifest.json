@@ -30332,6 +30332,45 @@
       "capability": "Admitted rule assignment types",
       "workload": "A four MiB declared type under a small allowance and either cancelled owner.",
       "invariant": "Full-path and final-type selection reject before copying and preserve independent reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_insert_resolvers_preserve_native_actions_defaults_and_inline_queries",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/resolver.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native rule input admission",
+      "workload": "Six INSERT inputs spanning inline and multirow VALUES, defaults, scalar subqueries, partial array targets and SELECT sources.",
+      "invariant": "Native input templates retain exact physical allocation ownership and preserve bound relational actions and pruning positions."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "insert_resolver_admission_and_cancellation_leave_sibling_owners_intact",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/resolver.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native rule input admission",
+      "workload": "A four MiB unused default under a small allowance, both cancelled owners and a later successful input.",
+      "invariant": "Admission rejects before declaration copies, propagates typed errors and releases only failed input owners."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_rule_condition_rows_preserve_fields_query_scopes_and_lazy_structure",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/resolver.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native rule input admission",
+      "workload": "Whole rows, fields, row stars, scalar subqueries and local columns named NEW.",
+      "invariant": "Scoped reference substitution preserves original plan structure and lazy top-level binding with exact final allocation ownership."
     }
   ]
 }

@@ -23,7 +23,7 @@ use uqa_core::memory::{OwnedProductionControl, Produced, ProductionControl, Prod
 
 #[derive(Default)]
 struct RuleRowReferenceDetector {
-    qualifier: Option<String>,
+    qualifier: Option<&'static str>,
     whole_row: bool,
 }
 
@@ -120,7 +120,11 @@ impl RuleRowReferenceDetector {
     fn observe(&mut self, qualifier: &str, whole_row: bool) {
         if qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new") {
             if self.qualifier.is_none() {
-                self.qualifier = Some(qualifier.to_ascii_lowercase());
+                self.qualifier = Some(if qualifier.eq_ignore_ascii_case("old") {
+                    "old"
+                } else {
+                    "new"
+                });
             }
             self.whole_row |= whole_row;
         }
@@ -144,7 +148,7 @@ pub fn first_rule_row_reference_in_expr(
 ) -> Option<String> {
     let mut detector = RuleRowReferenceDetector::default();
     let _ = inspection::expression(expr, &mut detector, shadowed);
-    detector.qualifier
+    detector.qualifier.map(str::to_owned)
 }
 
 pub fn first_rule_row_reference_in_select(
@@ -153,7 +157,7 @@ pub fn first_rule_row_reference_in_select(
 ) -> Option<String> {
     let mut detector = RuleRowReferenceDetector::default();
     let _ = inspection::select(catalog, select, &mut detector);
-    detector.qualifier
+    detector.qualifier.map(str::to_owned)
 }
 
 pub fn rule_expr_references_row(expr: &Expr) -> bool {
@@ -186,7 +190,7 @@ pub fn first_rule_row_reference_in_statement(
         .collect();
     let mut detector = RuleRowReferenceDetector::default();
     inspection::action(catalog, statement, &columns, &mut detector)?;
-    Ok(detector.qualifier)
+    Ok(detector.qualifier.map(str::to_owned))
 }
 
 pub fn rule_statement_references_row(
@@ -328,6 +332,41 @@ pub fn rule_new_row_columns_with_control(
         inspection::action_with_control(catalog, action, &columns, &mut collector, control)?;
     }
     if collector.whole_row {
+        return Ok(None);
+    }
+    let mut output = ProductionVec::new(*control);
+    for column in collector.columns {
+        output.push_produced(column)?;
+    }
+    Ok(Some(output.finish()?))
+}
+
+/// Preserve action/condition inspection order while admitting selected names under the request.
+pub fn rule_action_input_columns_with_control(
+    catalog: &dyn super::RuleSourceCatalog,
+    action: &Statement,
+    condition: Option<&Expr>,
+    action_columns: &dyn super::ActionColumns,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<String>>>, SQLError> {
+    let mut collector = RuleRowColumnCollector::new(control);
+    inspection::action_with_control(catalog, action, action_columns, &mut collector, control)?;
+    if let Some(condition) = condition {
+        inspection::expression_with_control(condition, &mut collector, &BTreeSet::new(), control)?;
+    }
+    let mut detector = RuleRowReferenceDetector::default();
+    inspection::action_with_control(catalog, action, action_columns, &mut detector, control)?;
+    if !detector.whole_row {
+        if let Some(condition) = condition {
+            inspection::expression_with_control(
+                condition,
+                &mut detector,
+                &BTreeSet::new(),
+                control,
+            )?;
+        }
+    }
+    if detector.whole_row {
         return Ok(None);
     }
     let mut output = ProductionVec::new(*control);

@@ -204,3 +204,19 @@ pub fn rule_action_target_columns(
         .map(|(column, _)| column)
         .collect())
 }
+
+/// Borrow native target names without copying unrelated declaration payloads.
+pub fn rule_action_target_columns_with_control(
+    catalog: &dyn RuleSourceCatalog,
+    action: &Statement,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<String>>, SQLError> {
+    control.check()?;
+    let target = match action {
+        Statement::Insert(action) => &action.table,
+        Statement::Update(action) => &action.table,
+        Statement::Delete(action) => &action.table,
+        _ => return Ok(control.finish(Vec::new(), control.empty_reservation())?),
+    };
+    catalog.rule_relation_columns_with_control(target, control)
+}

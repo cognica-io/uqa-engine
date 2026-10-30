@@ -31,7 +31,7 @@ use uqa_sql::{
 };
 use uqa_storage::document_store::Document;
 
-pub type SourceOutputPruning = fn(
+pub type OrdinarySourceOutputPruning = fn(
     &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
     &dyn uqa_sql::routines::RoutineResolution,
     &mut QueryPlan,
@@ -39,6 +39,22 @@ pub type SourceOutputPruning = fn(
     usize,
     &dyn Fn(&str) -> bool,
 ) -> Result<(), SQLError>;
+pub type OwnedSourceOutputPruning = fn(
+    &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    &dyn uqa_sql::routines::RoutineResolution,
+    uqa_sql::plan::MutableQueryPlan,
+    &dyn Fn(usize) -> bool,
+    usize,
+    &dyn Fn(&str) -> bool,
+    &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::plan::MutableQueryPlan, SQLError>;
+
+#[derive(Clone, Copy)]
+pub struct SourceOutputPruning {
+    pub ordinary: OrdinarySourceOutputPruning,
+    pub owned: OwnedSourceOutputPruning,
+}
+
 mod checks;
 mod insert;
 mod update_delete;
@@ -62,7 +78,7 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
             .enumerate()
             .filter_map(|(position, column)| required_columns.contains(column).then_some(position))
             .collect::<BTreeSet<_>>();
-        prune_source_outputs(
+        (prune_source_outputs.ordinary)(
             context.source.volatility,
             context.source.relational.catalog,
             &mut query,

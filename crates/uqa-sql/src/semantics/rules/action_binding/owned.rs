@@ -16,7 +16,6 @@ use crate::{
     plpgsql::VariableResolver,
     SQLError,
 };
-use std::collections::BTreeSet;
 use uqa_core::memory::{MemoryReservation, OwnedProductionControl, Produced, ProductionControl};
 
 /// Only SQL-owned operations can replace a clause; callers borrow the complete statement without detaching its allocation owners.
@@ -31,7 +30,7 @@ impl BoundRuleStatement {
     pub fn bind(
         catalog: &dyn RuleSourceCatalog,
         action: &Statement,
-        action_columns: &BTreeSet<String>,
+        action_columns: &dyn super::ActionColumns,
         resolver: &mut dyn VariableResolver,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
@@ -142,7 +141,7 @@ impl BoundRuleStatement {
         source_index: Option<&crate::ast::Expr>,
         event_width: usize,
         request: crate::semantics::rules::returning::RuleReturningRequest,
-        target_columns: &BTreeSet<String>,
+        target_columns: &dyn super::ActionColumns,
     ) -> Result<(), SQLError> {
         if let Some(output) = crate::semantics::rules::returning::produce_rule_returning(
             &self.statement,

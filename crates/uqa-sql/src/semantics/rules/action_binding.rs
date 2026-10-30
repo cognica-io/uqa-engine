@@ -24,6 +24,7 @@ mod insert;
 mod inspection;
 use insert::bind_insert;
 mod names;
+pub use names::ActionColumns;
 mod namespace;
 mod references;
 mod returning;
@@ -34,10 +35,10 @@ mod tests;
 pub use references::{
     first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
     first_rule_row_reference_in_statement, rule_action_has_set_operation,
-    rule_condition_plan_references_whole_row, rule_condition_plan_row_columns,
-    rule_expr_references_row, rule_expr_references_whole_row, rule_expr_row_columns,
-    rule_new_row_columns, rule_new_row_columns_with_control, rule_statement_references_row,
-    rule_statement_references_whole_row, rule_statement_row_columns,
+    rule_action_input_columns_with_control, rule_condition_plan_references_whole_row,
+    rule_condition_plan_row_columns, rule_expr_references_row, rule_expr_references_whole_row,
+    rule_expr_row_columns, rule_new_row_columns, rule_new_row_columns_with_control,
+    rule_statement_references_row, rule_statement_references_whole_row, rule_statement_row_columns,
 };
 pub use returning::expand_rule_action_returning_stars;
 pub use row_expansion::expand_rule_action_row_stars;
@@ -53,7 +54,10 @@ pub fn action_target_qualifier_referenced(
 
 mod context;
 use context::RuleBindingContext;
-pub use context::{rule_action_target_columns, rule_action_target_row_type, RuleSourceCatalog};
+pub use context::{
+    rule_action_target_columns, rule_action_target_columns_with_control,
+    rule_action_target_row_type, RuleSourceCatalog,
+};
 
 /// Bind an action's event-row OLD/NEW references while preserving the action
 /// row-image aliases visible to its DML RETURNING clause.
@@ -78,7 +82,7 @@ pub fn bind_rule_action(
 pub fn bind_rule_action_with_control(
     catalog: &dyn RuleSourceCatalog,
     action: &Statement,
-    action_columns: &BTreeSet<String>,
+    action_columns: &dyn ActionColumns,
     resolver: &mut dyn VariableResolver,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Statement>, SQLError> {

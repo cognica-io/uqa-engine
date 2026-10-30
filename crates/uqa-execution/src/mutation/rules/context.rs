@@ -140,6 +140,38 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
         )
     }
 
+    pub(super) fn execute_bound_action(
+        &self,
+        statement: &uqa_sql::semantics::rules::action_binding::BoundRuleStatement,
+        input: Option<uqa_sql::semantics::rules::binding::OwnedRuleQueryInput>,
+        params: &[uqa_sql::SQLParam],
+        scope: &crate::query::CteScope<S>,
+        subject: &RoleReference,
+        consumer: Option<std::rc::Rc<dyn crate::query::consumer::QueryRowConsumer + '_>>,
+    ) -> Result<StatementOutput, SQLError> {
+        let _stored =
+            uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition();
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        self.statements.execute(
+            uqa_sql::semantics::rules::binding::RuleAction::bind_with_control(
+                self.analysis,
+                self.returning.aggregates,
+                statement,
+                input,
+                &control,
+            )?,
+            params,
+            Some(scope),
+            subject,
+            consumer,
+        )
+    }
+
     pub(super) fn source_schema(
         &self,
         input: uqa_sql::semantics::rules::binding::RuleMutation<'_>,

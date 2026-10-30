@@ -6,8 +6,6 @@
 
 //! Rewrite-rule action `RETURNING` namespace binding.
 
-use std::collections::BTreeSet;
-
 use crate::ast::{ColumnType, Expr, Projection, ReturningAliases, RuleEvent, Statement};
 use crate::plpgsql::{ResolvedVariable, RewriteReference, VariableResolver};
 use crate::SQLError;
@@ -15,7 +13,7 @@ use uqa_core::memory::{Produced, ProductionControl};
 
 pub(super) fn bind_rule_action_returning(
     returning: &[Projection],
-    action_columns: &BTreeSet<String>,
+    action_columns: &dyn super::ActionColumns,
     aliases: &ReturningAliases,
     action_event: RuleEvent,
     event_resolver: &mut dyn VariableResolver,

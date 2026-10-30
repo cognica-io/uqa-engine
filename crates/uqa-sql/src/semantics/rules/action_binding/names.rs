@@ -165,7 +165,7 @@ impl std::ops::Deref for Columns {
 }
 
 /// Action row membership is shared by ordinary binding and admitted read-only inspection.
-pub(super) trait ActionColumns {
+pub trait ActionColumns {
     fn contains(&self, name: &str) -> bool;
     fn contains_folded(&self, name: &str) -> bool;
 }
@@ -180,6 +180,15 @@ impl ActionColumns for std::collections::BTreeSet<String> {
 impl ActionColumns for Names {
     fn contains(&self, name: &str) -> bool {
         Self::contains(self, name)
+    }
+    fn contains_folded(&self, name: &str) -> bool {
+        self.iter().any(|column| column.eq_ignore_ascii_case(name))
+    }
+}
+
+impl ActionColumns for Vec<String> {
+    fn contains(&self, name: &str) -> bool {
+        self.iter().any(|column| column == name)
     }
     fn contains_folded(&self, name: &str) -> bool {
         self.iter().any(|column| column.eq_ignore_ascii_case(name))

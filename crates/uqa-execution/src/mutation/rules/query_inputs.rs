@@ -11,15 +11,17 @@ use crate::{
     mutation::returning::ReturningRows, query::consumer::QueryRowConsumer,
     statement::plan_executor::StatementOutput,
 };
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
+use uqa_core::memory::ProductionControl;
 use uqa_sql::{
     ast::{InternalRelationId, RuleEvent, Statement},
     plan::InsertPlan,
     semantics::rules::{
-        action_binding::{bind_rule_action, rule_action_target_columns},
-        binding::{RuleQueryInput, RuleQueryResolver},
-        clear_statement_returning,
-        returning::{augment_rule_returning_action, validate_rule_returning_provider_width},
+        action_binding::{
+            rule_action_target_columns_with_control, ActionColumns, BoundRuleStatement,
+        },
+        binding::{OwnedRuleQueryInput, OwnedRuleQueryResolver, RuleInputColumns},
+        returning::validate_rule_returning_provider_width,
         statement_has_returning,
     },
     SQLError, SQLParam,
@@ -41,53 +43,65 @@ fn execute_insert_query_rules<S: Clone + 'static>(
         &insert.returning_aliases,
         &insert.subqueries,
     )?;
+    let retained = context.statements.read_control()?;
+    let control = ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.cancellation,
+    );
     let mut outcome = RuleExecutionOutcome::default();
     for rule in rules.iter() {
         let rule = rule?;
         for action in &rule.definition.actions {
-            let target_columns = rule_action_target_columns(context.analysis.sources, action)?;
-            let relation = InternalRelationId::allocate();
-            let mut resolver = RuleQueryResolver::from_insert(context.analysis, insert, relation)?;
-            let mut bound = bind_rule_action(
+            let target_columns = rule_action_target_columns_with_control(
                 context.analysis.sources,
                 action,
-                &target_columns,
-                &mut resolver,
+                &control,
             )?;
-            let condition =
-                resolver.condition(context.binding, rule, &definitions, &privilege_subject)?;
-            let captures = request.captures() && statement_has_returning(action);
-            let consumer = if captures {
-                if outcome.returning.is_some() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "0A000".into(),
-                        message: "cannot have RETURNING lists in multiple rules".into(),
-                    });
-                }
-                Some(returning_consumer(
-                    context,
-                    &definitions,
-                    action,
-                    &mut bound,
-                    request,
-                    &target_columns,
-                )?)
-            } else {
-                clear_statement_returning(&mut bound);
-                None
-            };
+            let relation = InternalRelationId::allocate();
+            let mut resolver = OwnedRuleQueryResolver::from_insert_with_control(
+                context.analysis,
+                insert,
+                relation,
+                &control,
+            )?;
+            let mut bound = BoundRuleStatement::bind(
+                context.analysis.sources,
+                action,
+                &*target_columns,
+                &mut resolver,
+                &control,
+            )?;
+            let condition = resolver.condition_with_control(
+                context.binding,
+                rule,
+                &definitions,
+                &privilege_subject,
+                &control,
+            )?;
+            let consumer = returning_consumer(
+                context,
+                &definitions,
+                action,
+                &mut bound,
+                request,
+                &*target_columns,
+                outcome.returning.is_some(),
+            )?;
             let input = if matches!(action, Statement::Notify { .. }) {
                 None
             } else {
-                let required = resolver.input_columns(
+                let required = resolver.input_columns_with_control(
                     context.analysis,
                     insert,
                     action,
                     rule.definition.condition.as_ref(),
-                    &target_columns,
+                    &*target_columns,
+                    &control,
                 )?;
-                let query = copy_rule_input_query(context, insert, scope, required, prune)?;
-                Some(RuleQueryInput {
+                let query =
+                    copy_rule_input_query(context, insert, scope, required, prune, &control)?;
+                Some(OwnedRuleQueryInput {
                     query,
                     inline: insert
                         .rule_values_input
@@ -95,11 +109,12 @@ fn execute_insert_query_rules<S: Clone + 'static>(
                         .is_some_and(uqa_sql::plan::RuleValuesInput::is_inline),
                     relation,
                     condition,
-                    expressions: resolver.expressions,
+                    expressions: control
+                        .finish(resolver.expressions, control.empty_reservation())?,
                 })
             };
-            let result = context.execute_action(
-                bound,
+            let result = context.execute_bound_action(
+                &bound,
                 input,
                 params,
                 scope,
@@ -126,18 +141,24 @@ fn copy_rule_input_query<S: Clone + 'static>(
     context: &RuleContext<'_, S>,
     insert: &InsertPlan,
     scope: &crate::query::CteScope<S>,
-    required: Option<(BTreeSet<usize>, usize)>,
+    required: Option<RuleInputColumns>,
     prune: crate::mutation::views::commands::SourceOutputPruning,
-) -> Result<uqa_sql::plan::QueryPlan, SQLError> {
-    let mut query = insert.source.as_deref().expect("query input").clone();
-    if let Some((positions, width)) = required {
-        prune(
+    control: &ProductionControl<'_>,
+) -> Result<uqa_sql::plan::MutableQueryPlan, SQLError> {
+    let mut query = insert
+        .source
+        .as_deref()
+        .expect("query input")
+        .copy_for_rewrite(control)?;
+    if let Some(required) = required {
+        query = (prune.owned)(
             context.volatility,
             context.returning.routines,
-            &mut query,
-            &positions,
-            width,
+            query,
+            &|position| required.positions.binary_search(&position).is_ok(),
+            required.width,
             &|name| insert.ctes.iter().any(|cte| cte.name == name) || scope.contains_cte_name(name),
+            control,
         )?;
     }
     Ok(query)
@@ -185,10 +206,21 @@ fn returning_consumer<'a, S: Clone + 'static>(
     context: &RuleContext<'a, S>,
     definitions: &'a [uqa_sql::ast::ColumnDef],
     action: &Statement,
-    bound: &mut Statement,
+    bound: &mut BoundRuleStatement,
     request: RuleReturningRequest,
-    target_columns: &BTreeSet<String>,
-) -> Result<Rc<super::returning::RuleReturningConsumer<'a>>, SQLError> {
+    target_columns: &dyn ActionColumns,
+    previous: bool,
+) -> Result<Option<Rc<super::returning::RuleReturningConsumer<'a>>>, SQLError> {
+    if !request.captures() || !statement_has_returning(action) {
+        bound.clear_returning()?;
+        return Ok(None);
+    }
+    if previous {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "cannot have RETURNING lists in multiple rules".into(),
+        });
+    }
     let provider = uqa_sql::semantics::rules::returning::rule_action_returning_schema(
         context.analysis.sources,
         context.returning,
@@ -197,8 +229,8 @@ fn returning_consumer<'a, S: Clone + 'static>(
         definitions,
     )?;
     validate_rule_returning_provider_width(provider.len(), definitions.len())?;
-    augment_rule_returning_action(bound, None, definitions.len(), request, target_columns)?;
-    Ok(Rc::new(super::returning::RuleReturningConsumer::new(
+    bound.augment_returning(None, definitions.len(), request, target_columns)?;
+    Ok(Some(Rc::new(super::returning::RuleReturningConsumer::new(
         context.assignment,
         definitions,
         context.projection,
@@ -206,7 +238,7 @@ fn returning_consumer<'a, S: Clone + 'static>(
             context.memory.work_mem_bytes()?,
             context.cancellation.clone(),
         ),
-    )))
+    ))))
 }
 
 pub fn run_insert_query_rules<S: Clone + 'static>(

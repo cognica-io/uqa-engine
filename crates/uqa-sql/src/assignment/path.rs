@@ -6,11 +6,9 @@
 
 //! Evaluate each partial-write operand once, then rebuild its typed containers.
 
-use super::{containers, targets};
+use super::containers;
 use crate::{
-    ast::{
-        ArraySliceBounds, AssignmentBinding, AssignmentPathStep, AssignmentStep, AssignmentTarget,
-    },
+    ast::{AssignmentBinding, AssignmentPathStep, AssignmentTarget},
     expr::{composites::CompositeTypeCatalog, SQLValueCatalog},
     ColumnType, SQLError,
 };
@@ -18,6 +16,9 @@ use uqa_core::{
     memory::{Produced, ProductionControl, ProductionVec},
     Value,
 };
+
+mod production;
+pub use production::bind_with_control;
 
 #[cfg(test)]
 mod physical_tests;
@@ -30,53 +31,14 @@ pub fn bind<E>(
     types: &[ColumnType],
     composites: Option<&dyn CompositeTypeCatalog>,
 ) -> Result<AssignmentBinding, SQLError> {
-    let levels = targets::assignment_levels(&target.indirection);
-    let mut path = Vec::with_capacity(levels.len());
-    let mut next_argument = 1;
-    for (level, ty) in levels.iter().zip(types) {
-        path.push(match level {
-            targets::AssignmentLevel::Field(field) => {
-                let mut base = ty;
-                while let ColumnType::Domain { base: inner, .. } = base {
-                    base = inner;
-                }
-                let ColumnType::Composite(reference) = base else {
-                    return Err(SQLError::Internal(
-                        "field assignment lost its composite type".into(),
-                    ));
-                };
-                let descriptor = crate::expr::composites::descriptor(composites, reference.oid)?;
-                let (_, attribute) = descriptor
-                    .attribute(field)
-                    .ok_or_else(|| SQLError::UnknownColumn((*field).to_owned()))?;
-                AssignmentPathStep::Field {
-                    type_oid: reference.oid,
-                    number: attribute.number,
-                }
-            }
-            targets::AssignmentLevel::Subscripts(steps) => {
-                let slice = level.is_slice();
-                let mut bounds = ArraySliceBounds::default();
-                for (dimension, step) in steps.iter().enumerate() {
-                    if let AssignmentStep::Slice { lower, upper } = step {
-                        bounds.omit(dimension, lower.is_none(), upper.is_none());
-                    }
-                }
-                let first_argument = next_argument;
-                next_argument += steps.len() * if slice { 2 } else { 1 };
-                AssignmentPathStep::Subscripts {
-                    first_argument,
-                    dimensions: steps.len(),
-                    slice,
-                    bounds,
-                }
-            }
-        });
-    }
-    Ok(AssignmentBinding {
-        path,
-        value_argument: next_argument,
-    })
+    Ok(bind_with_control(
+        target,
+        types,
+        composites,
+        &ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary assignment binding"))
 }
 
 /// Evaluated subscript groups use `PostgreSQL`'s fixed maximum dimensionality.

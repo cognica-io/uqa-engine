@@ -18,7 +18,7 @@ use uqa_sql::{
     SQLError, ScalarExpr,
 };
 
-pub(crate) fn prune_unused_query_outputs_owned(
+pub fn prune_unused_query_outputs_owned(
     volatility: &dyn VolatilityCatalog,
     routines: &dyn RoutineResolution,
     query: MutableQueryPlan,

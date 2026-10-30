@@ -6,7 +6,7 @@
 
 //! Assignment type traversal borrows indirection and admits each selected declaration before copying it.
 
-use super::{error, level_iter, AssignmentLevel, AssignmentStep, AssignmentTarget};
+use super::{assignment_level_iter, error, AssignmentLevel, AssignmentStep, AssignmentTarget};
 use crate::{
     expr::composites::{descriptor_with_control, CompositeTypeCatalog},
     plan::copy::SyntaxProduction,
@@ -24,7 +24,7 @@ pub fn field_assignment_types_with_control<E>(
 ) -> Result<Produced<Vec<ColumnType>>, SQLError> {
     let mut types = Buffer::new(control);
     types.push(declared.clone_with_control(control)?, control)?;
-    for level in level_iter(&target.indirection) {
+    for level in assignment_level_iter(&target.indirection) {
         let next = next_type(
             target,
             types.last().expect("declared type"),
@@ -51,7 +51,7 @@ pub fn assignment_input_type_with_control<E>(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ColumnType>, SQLError> {
     let mut current = declared.clone_with_control(control)?;
-    for level in level_iter(&target.indirection) {
+    for level in assignment_level_iter(&target.indirection) {
         current = next_type(target, &current, level, composites, control)?;
     }
     Ok(current)

@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 
 mod collations;
 mod owned;
+mod resolver;
 
 struct Catalog(Vec<ColumnDef>);
 impl RuleSourceCatalog for Catalog {

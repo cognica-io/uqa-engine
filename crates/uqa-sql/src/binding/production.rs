@@ -183,7 +183,7 @@ impl SchemaScope {
             merge_returning: false,
             set_placement: crate::semantics::sets::placement::SetPlacement::Expanding,
             set_calls: 0,
-            stored_whole_rows: std::collections::BTreeMap::new(),
+            stored_whole_rows: [None, None],
             routine_parameters: None,
             scalar_binding: super::ScalarBindingMode::Stored,
             variable_sites: None,

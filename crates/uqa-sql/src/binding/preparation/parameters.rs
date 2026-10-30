@@ -73,6 +73,7 @@ pub(super) struct ParameterTypes<'a> {
     canonicalize_parameters: bool,
     composite_inputs: Option<AnalysisMap<NonNull<ScalarExpr>, OwnedScalarExpr>>,
     reference_sites: Option<AnalysisMap<NonNull<ScalarExpr>, usize>>,
+    reference_inputs: Option<AnalysisMap<NonNull<ScalarExpr>, ConvertedInput>>,
     control: OwnedProductionControl,
 }
 
@@ -437,6 +438,7 @@ impl<'a> ParameterTypes<'a> {
             canonicalize_parameters: false,
             composite_inputs: None,
             reference_sites: None,
+            reference_inputs: None,
             control: control.capture(),
         })
     }
@@ -447,11 +449,16 @@ impl<'a> ParameterTypes<'a> {
 
     pub(super) fn with_reference_retention(mut self) -> Self {
         self.reference_sites = Some(AnalysisMap::new(&self.control()));
+        self.reference_inputs = Some(AnalysisMap::new(&self.control()));
         self
     }
 
     pub(super) fn take_reference_constants(&mut self) -> InputConstants {
         let mut references = InputConstants::new(&self.control());
+        references.0 = self
+            .reference_inputs
+            .take()
+            .expect("reference input observation mode");
         references.9 = std::mem::take(&mut self.row_expansions);
         references.10 = std::mem::take(&mut self.rewritten_blocks);
         references.11 = self
@@ -547,7 +554,33 @@ impl<'a> ParameterTypes<'a> {
                     session_dependent: false,
                 },
             )?;
+        } else if let Some(references) = &mut self.reference_inputs {
+            references.insert(
+                NonNull::from(expression),
+                ConvertedInput {
+                    expression: ScalarExpr::InternalColumn(column).copy_for_rewrite(&control)?,
+                    session_dependent: false,
+                },
+            )?;
         }
+        Ok(())
+    }
+
+    pub(super) fn retain_stored_expansion(
+        &mut self,
+        expression: &ScalarExpr,
+        replacement: OwnedScalarExpr,
+    ) -> Result<(), SQLError> {
+        self.reference_inputs
+            .as_mut()
+            .expect("stored reference observation mode")
+            .insert(
+                NonNull::from(expression),
+                ConvertedInput {
+                    expression: replacement,
+                    session_dependent: false,
+                },
+            )?;
         Ok(())
     }
 

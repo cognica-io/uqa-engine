@@ -162,7 +162,7 @@ fn insert(command: &MutableCommandPlan) -> Result<&InsertPlan, SQLError> {
     Ok(insert)
 }
 
-fn default_expression(
+pub(in crate::semantics::rules::binding::actions::query) fn default_expression(
     context: RuleAnalysisContext<'_>,
     column: &ColumnDef,
     control: &ProductionControl<'_>,

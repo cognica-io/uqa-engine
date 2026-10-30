@@ -18,6 +18,58 @@ use uqa_core::Value;
 mod nodes;
 
 impl Preparation<'_> {
+    pub(super) fn retain_stored_reference(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+    ) -> Result<(), SQLError> {
+        self.scope.control().check()?;
+        if let Some(outer) = self.scope.stored_expression_outer.as_ref() {
+            let identity = match expression {
+                ScalarExpr::Column(column) => Some((None, column.as_str())),
+                ScalarExpr::QualifiedColumn { qualifier, column } => {
+                    Some((Some(qualifier.as_str()), column.as_str()))
+                }
+                _ => None,
+            };
+            if let (Some((qualifier, column)), Some(start)) = (
+                identity,
+                input.physical_width().checked_sub(outer.physical_width()),
+            ) {
+                let identity = crate::ColumnIdentity::from_parts_with_control(
+                    qualifier,
+                    column,
+                    &self.scope.control(),
+                )?;
+                if let Some(slot) = input
+                    .physical_slot_for_identity(&identity)
+                    .filter(|slot| *slot >= start)
+                {
+                    if let Some(column) = outer.unique_internal_column_for_slot(slot - start) {
+                        self.parameters
+                            .retain_stored_reference(expression, column)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn retain_stored_scalar_references(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+    ) -> Result<(), SQLError> {
+        expression.try_visit(&mut |node| {
+            self.retain_stored_reference(node, input)?;
+            if let Some(row) = self.scope.stored_whole_row(node, input) {
+                let replacement = row.copy_for_rewrite(&self.scope.control())?;
+                self.parameters.retain_stored_expansion(node, replacement)?;
+            }
+            Ok(true)
+        })
+    }
+
     /// The common type of the inputs of the construct `context`, as `select_common_type` chooses it, with the unknown inputs coerced to it.
     pub(super) fn common(
         &mut self,
@@ -84,35 +136,17 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
-        if let Some(outer) = self.scope.stored_expression_outer.as_ref() {
-            let identity = match expression {
-                ScalarExpr::Column(column) => Some((None, column.as_str())),
-                ScalarExpr::QualifiedColumn { qualifier, column } => {
-                    Some((Some(qualifier.as_str()), column.as_str()))
-                }
-                _ => None,
-            };
-            if let (Some((qualifier, column)), Some(start)) = (
-                identity,
-                input.physical_width().checked_sub(outer.physical_width()),
-            ) {
-                let identity = crate::ColumnIdentity::from_parts_with_control(
-                    qualifier,
-                    column,
-                    &self.scope.control(),
-                )?;
-                if let Some(slot) = input
-                    .physical_slot_for_identity(&identity)
-                    .filter(|slot| *slot >= start)
-                {
-                    if let Some(column) = outer.unique_internal_column_for_slot(slot - start) {
-                        self.parameters
-                            .retain_stored_reference(expression, column)?;
-                    }
-                }
-            }
-        }
-        let value = self.expression_inner(expression, input, subqueries)?;
+        self.retain_stored_reference(expression, input)?;
+        let value = if let Some(row) = self.scope.stored_whole_row(expression, input) {
+            let owner = self.scope.control().capture();
+            let replacement = row.copy_for_rewrite(&owner.control())?;
+            let value = self.expression_inner(&replacement, input, subqueries)?;
+            self.parameters
+                .retain_stored_expansion(expression, replacement)?;
+            value
+        } else {
+            self.expression_inner(expression, input, subqueries)?
+        };
         self.parameters
             .collations
             .record(expression, value.derivation)?;

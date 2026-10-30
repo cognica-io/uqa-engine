@@ -147,7 +147,11 @@ impl uqa_execution::mutation::entry::MutationCommandBoundary<StatementReadSnapsh
                 statement: engine.mutation_statement_context(),
                 inference: engine.inference_context(),
                 returning: engine.returning_analysis_context(),
-                prune_source_outputs: uqa_planner::mutation_outputs::prune_unused_query_outputs,
+                prune_source_outputs:
+                    uqa_execution::mutation::views::commands::SourceOutputPruning {
+                        ordinary: uqa_planner::mutation_outputs::prune_unused_query_outputs,
+                        owned: uqa_planner::mutation_outputs::prune_unused_query_outputs_owned,
+                    },
             })
         })
     }

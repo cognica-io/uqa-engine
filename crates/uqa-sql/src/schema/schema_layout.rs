@@ -198,6 +198,21 @@ impl RowSchema {
             .filter(|slot| *slot != NULL_SLOT)
     }
 
+    pub(crate) fn has_qualified_slot_before(&self, qualifier: &str, boundary: usize) -> bool {
+        self.identities()
+            .iter()
+            .enumerate()
+            .any(|(logical, identity)| {
+                identity.qualifier() == Some(qualifier)
+                    && self.slot(logical).unwrap_or(NULL_SLOT) < boundary
+            })
+            || self
+                .index
+                .aliases
+                .iter()
+                .any(|(identity, slot)| identity.qualifier() == Some(qualifier) && *slot < boundary)
+    }
+
     /// Physical projection layout for `qualifier.*` in relation-column order. Hidden identities introduced by `JOIN ... USING` remain selectable, so each side's wildcard retains its own merged-column value.
     pub fn qualified_star_layout(
         &self,
