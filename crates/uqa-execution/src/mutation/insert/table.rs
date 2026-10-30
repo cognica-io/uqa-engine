@@ -41,7 +41,7 @@ use crate::{
     query::CteScope,
 };
 use std::{rc::Rc, sync::Arc};
-use uqa_sql::assignment::columns::validate_mutation_targets;
+use uqa_sql::assignment::columns::validate_mutation_targets_with_control;
 use uqa_sql::{
     plan::{ConflictActionPlan, ConflictPlan, InsertPlan, QueryPlan},
     semantics::{
@@ -140,7 +140,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         ..
     }) = stmt.on_conflict.as_ref()
     {
-        validate_mutation_targets(
+        validate_mutation_targets_with_control(
             assignment.columns,
             &stmt.table,
             assignments
@@ -148,6 +148,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 .flat_map(|assignment| assignment.target.targets()),
             "INSERT ON CONFLICT DO UPDATE",
             false,
+            &control,
         )?;
         Some(
             uqa_sql::semantics::mutation_privileges::assignment_column_names_with_control(
@@ -162,16 +163,21 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         .as_ref()
         .map(|columns| columns.as_slice());
     if stmt.view_rule_relations.is_empty() && !stmt.columns.is_empty() {
-        validate_mutation_targets(
+        validate_mutation_targets_with_control(
             assignment.columns,
             &stmt.table,
             stmt.columns.iter(),
             "INSERT",
             true,
+            &control,
         )?;
     }
     if stmt.view_rule_relations.is_empty() {
-        super::identity_targets::validate_insert_identity_targets(mutation.identities, stmt)?;
+        super::identity_targets::validate_insert_identity_targets(
+            mutation.identities,
+            stmt,
+            &control,
+        )?;
     }
     uqa_sql::semantics::returning::validate_insert_returning(
         planning.returning,
@@ -214,7 +220,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             .any(|rule| rule.definition.instead && rule.definition.condition.is_none())?;
     if insert_original_query {
         if !stmt.view_rule_relations.is_empty() {
-            super::identity_targets::validate_insert_identity_targets(mutation.identities, stmt)?;
+            super::identity_targets::validate_insert_identity_targets(
+                mutation.identities,
+                stmt,
+                &control,
+            )?;
         }
         crate::mutation::routine_calls::insert(context, stmt, params, inherited_ctes)?;
     }
@@ -343,6 +353,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     },
                     conflict_update_columns,
                     statement_commands: &statement_commands,
+                    control,
                 })?;
                 if let Some(queries) = &query_rules {
                     crate::mutation::rules::run_insert_query_rules(
@@ -373,12 +384,13 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     stmt.columns.clone()
                 };
             if view_original_query {
-                validate_mutation_targets(
+                validate_mutation_targets_with_control(
                     assignment.columns,
                     &stmt.table,
                     columns.iter(),
                     "INSERT",
                     true,
+                    &control,
                 )?;
             }
 
@@ -404,11 +416,13 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let mut events = crate::mutation::events::MutationEventQueue::default();
             let mut has_prepared_effect = false;
             let mut has_prepared_auto_identity = false;
-            let discarded_identities = super::identity_targets::user_value_identity_columns(
-                mutation.identities,
-                stmt,
-                columns.iter().map(|column| column.column.as_str()),
-            )?;
+            let discarded_identities =
+                super::identity_targets::user_value_identity_columns_with_control(
+                    mutation.identities,
+                    stmt,
+                    columns.iter().map(|column| column.column.as_str()),
+                    &control,
+                )?;
             for row in &stmt.rows {
                 cancel.check()?;
                 if row.len() > columns.len() || (!implicit_columns && row.len() != columns.len()) {

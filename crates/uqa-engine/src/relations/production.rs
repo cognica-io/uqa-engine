@@ -166,6 +166,31 @@ impl Engine {
         name: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<std::sync::Arc<Vec<uqa_sql::ast::ColumnDef>>>, SQLError> {
+        Ok(self
+            .table_state_snapshot_with_control(name, control)?
+            .map(|table| table.columns.snapshot()))
+    }
+
+    pub(crate) fn with_table_column_metadata_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&[uqa_sql::ast::ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        let Some(columns) = self.table_column_snapshot_with_control(name, control)? else {
+            return Ok(false);
+        };
+        self.sequence_dependency_context()
+            .observe_column_sequence_references_with_control(&columns, control)?;
+        read(&columns)?;
+        Ok(true)
+    }
+
+    pub(crate) fn table_state_snapshot_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<std::sync::Arc<crate::TableState>>, SQLError> {
         control.check()?;
         self.synchronize_table_catalog()
             .and_then(|()| self.synchronize_table_data())
@@ -192,6 +217,6 @@ impl Engine {
                 .find_map(|relation| tables.get(relation).cloned())
         };
         control.check()?;
-        Ok(table.map(|table| table.columns.snapshot()))
+        Ok(table)
     }
 }

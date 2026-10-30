@@ -62,6 +62,7 @@ pub fn insert_source_expression_rows(
 
 pub struct InsertSelectConsumer<S: Clone + 'static> {
     pub state: RefCell<InsertSelectConsumerState<S>>,
+    production: uqa_core::memory::OwnedProductionControl,
 }
 
 pub struct InsertSelectIdentity {
@@ -84,7 +85,7 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     /// The catalog name of the relation the statement names.
     pub statement_relation: String,
     /// The identity columns whose source values `OVERRIDING USER VALUE` discards.
-    pub discarded_identities: std::collections::BTreeSet<String>,
+    pub discarded_identities: uqa_core::memory::OwnedSet<uqa_core::memory::Produced<String>>,
     pub result_width: Option<usize>,
     pub prepared_schema: crate::RowSchema,
     pub prepared_buffer: Option<crate::SpillBuffer>,
@@ -116,6 +117,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         snapshot_scope: CteScope<S>,
         identity: InsertSelectIdentity,
         conflict_update_columns: Vec<String>,
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         let InsertSelectIdentity {
             auto_id_column,
@@ -124,6 +126,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         } = identity;
         let prepared_schema = prepared_insert_spill_schema();
         Ok(Self {
+            production: control.capture(),
             state: RefCell::new(InsertSelectConsumerState {
                 stmt: stmt.clone(),
                 params: params.to_vec(),
@@ -135,7 +138,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 columns: None,
                 supplied_columns: Vec::new(),
                 statement_relation: String::new(),
-                discarded_identities: std::collections::BTreeSet::new(),
+                discarded_identities: uqa_core::memory::OwnedSet::new(),
                 result_width: None,
                 prepared_schema,
                 prepared_buffer: Some(crate::SpillBuffer::new(
@@ -183,6 +186,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         source_columns: &[String],
         _schema: &crate::RowSchema,
     ) -> Result<(), SQLError> {
+        let control = self.production.control();
         let mut state = self.state.borrow_mut();
         let result_width = source_columns.len();
         let implicit_columns = state.stmt.columns.is_empty();
@@ -203,12 +207,13 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         } else {
             state.stmt.columns.clone()
         };
-        uqa_sql::assignment::columns::validate_mutation_targets(
+        uqa_sql::assignment::columns::validate_mutation_targets_with_control(
             services.rows.referential.assignment.columns,
             &state.stmt.table,
             columns.iter(),
             "INSERT SELECT",
             true,
+            &control,
         )?;
         if result_width > columns.len() || (!implicit_columns && result_width != columns.len()) {
             return Err(SQLError::TypeMismatch(format!(
@@ -226,11 +231,13 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             }
             return Ok(());
         }
-        state.discarded_identities = super::identity_targets::user_value_identity_columns(
-            services.identities,
-            &state.stmt,
-            columns.iter().map(|column| column.column.as_str()),
-        )?;
+        state.discarded_identities =
+            super::identity_targets::user_value_identity_columns_with_control(
+                services.identities,
+                &state.stmt,
+                columns.iter().map(|column| column.column.as_str()),
+                &control,
+            )?;
         state.statement_relation = crate::mutation::constraints::statement_relation(
             services.rows.referential.constraints,
             &state.stmt.table,

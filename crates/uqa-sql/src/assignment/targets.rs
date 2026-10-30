@@ -55,16 +55,21 @@ pub fn validate_repeated_targets_with_control<'a, E: 'a>(
         let whole = target.is_whole_column();
         if let Some(previous) = seen.insert_copy(target.column.as_str(), whole)? {
             if whole || previous {
-                return Err(if insert {
-                    error(
-                        "42701",
-                        format!("column \"{}\" specified more than once", target.column),
-                    )
+                let sqlstate = control.copy_text(if insert { "42701" } else { "42601" })?;
+                let message = if insert {
+                    control.format(format_args!(
+                        "column \"{}\" specified more than once",
+                        target.column
+                    ))?
                 } else {
-                    error(
-                        "42601",
-                        format!("multiple assignments to same column \"{}\"", target.column),
-                    )
+                    control.format(format_args!(
+                        "multiple assignments to same column \"{}\"",
+                        target.column
+                    ))?
+                };
+                return Err(SQLError::Routine {
+                    sqlstate: sqlstate.into_parts().0,
+                    message: message.into_parts().0,
                 });
             }
         }

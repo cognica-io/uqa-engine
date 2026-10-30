@@ -18,7 +18,7 @@ use crate::mutation::{
 };
 use crate::query::CteScope;
 use uqa_sql::{
-    assignment::columns::validate_mutation_targets,
+    assignment::columns::validate_mutation_targets_with_control,
     plan::{MergePlan, MergeWhenPlan},
     SQLError, SQLParam,
 };
@@ -91,6 +91,7 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
     action_row: &crate::OwnedPhysicalRow,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<SelectedMergeAction, SQLError> {
     for clause in &stmt.when_clauses {
         let (condition, applies) = match clause {
@@ -222,12 +223,13 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                         target_columns.len()
                     )));
                 }
-                validate_mutation_targets(
+                validate_mutation_targets_with_control(
                     services.columns,
                     target_table,
                     target_columns.iter(),
                     "MERGE INSERT",
                     true,
+                    control,
                 )?;
                 let mut document = Document::new();
                 for (index, column) in target_columns.iter().take(values.len()).enumerate() {

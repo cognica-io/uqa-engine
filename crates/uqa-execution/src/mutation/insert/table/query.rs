@@ -26,6 +26,7 @@ pub(super) struct InsertQueryExecution<'a, S: Clone + 'static> {
     pub identity: InsertSelectIdentity,
     pub conflict_update_columns: Option<&'a [String]>,
     pub statement_commands: &'a Arc<StatementCommands>,
+    pub control: uqa_core::memory::ProductionControl<'a>,
 }
 
 pub(super) fn run<S: Clone + Send + Sync + 'static>(
@@ -41,6 +42,7 @@ pub(super) fn run<S: Clone + Send + Sync + 'static>(
         identity,
         conflict_update_columns,
         statement_commands: _,
+        control,
     } = &request;
     let InsertSelectIdentity {
         auto_id_column: auto_id_col,
@@ -63,6 +65,7 @@ pub(super) fn run<S: Clone + Send + Sync + 'static>(
             identity_source: *identity_source,
         },
         conflict_update_columns.unwrap_or(&[]).to_vec(),
+        control,
     )?);
     let overlay = MutationOverlayScope::new(mutation.state);
     crate::query::statement::execute_query_plan_output(

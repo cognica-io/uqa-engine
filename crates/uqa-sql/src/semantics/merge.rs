@@ -370,12 +370,25 @@ pub fn validate_merge_target_columns(
     catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
     stmt: &MergePlan,
 ) -> Result<(), SQLError> {
-    use crate::assignment::columns::validate_mutation_targets;
+    validate_merge_target_columns_with_control(
+        catalog,
+        stmt,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn validate_merge_target_columns_with_control(
+    catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
+    stmt: &MergePlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    use crate::assignment::columns::validate_mutation_targets_with_control;
     for clause in &stmt.when_clauses {
         match clause {
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                validate_mutation_targets(
+                validate_mutation_targets_with_control(
                     catalog,
                     &stmt.target,
                     assignments
@@ -383,39 +396,51 @@ pub fn validate_merge_target_columns(
                         .flat_map(|assignment| assignment.target.targets()),
                     "MERGE UPDATE",
                     false,
+                    control,
                 )?;
             }
-            MergeWhenPlan::InsertNotMatched { columns, .. } => validate_mutation_targets(
-                catalog,
-                &stmt.target,
-                columns.iter(),
-                "MERGE INSERT",
-                true,
-            )?,
+            MergeWhenPlan::InsertNotMatched { columns, .. } => {
+                validate_mutation_targets_with_control(
+                    catalog,
+                    &stmt.target,
+                    columns.iter(),
+                    "MERGE INSERT",
+                    true,
+                    control,
+                )?;
+            }
             _ => {}
         }
     }
-    validate_merge_identity_targets(catalog, stmt)
+    validate_merge_identity_targets(catalog, stmt, control)
 }
 
 /// Reject a `MERGE` update that assigns a `GENERATED ALWAYS` identity column anything but `DEFAULT`, and an insert that supplies a value for one without an `OVERRIDING` clause, whether or not a row reaches the action.
 fn validate_merge_identity_targets(
     catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
     stmt: &MergePlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    let identity = super::generated_values::GeneratedValueColumns::of(catalog, &stmt.target)?;
+    let identity = super::generated_values::GeneratedValueColumns::of_with_control(
+        catalog,
+        &stmt.target,
+        control,
+    )?;
     for clause in &stmt.when_clauses {
         match clause {
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                identity.validate_update(assignments.iter().flat_map(|assignment| {
-                    assignment.target.targets().iter().map(move |target| {
-                        (
-                            target.column.as_str(),
-                            matches!(assignment.value, crate::ScalarExpr::Default),
-                        )
-                    })
-                }))?;
+                identity.validate_update_with_control(
+                    assignments.iter().flat_map(|assignment| {
+                        assignment.target.targets().iter().map(move |target| {
+                            (
+                                target.column.as_str(),
+                                matches!(assignment.value, crate::ScalarExpr::Default),
+                            )
+                        })
+                    }),
+                    control,
+                )?;
             }
             MergeWhenPlan::InsertNotMatched {
                 columns,
@@ -423,26 +448,36 @@ fn validate_merge_identity_targets(
                 values,
                 ..
             } => {
-                let targets = if columns.is_empty() {
-                    catalog
-                        .try_describe_table(&stmt.target)
-                        .map_err(|error| {
-                            SQLError::Internal(format!("read MERGE target columns: {error}"))
-                        })?
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|column| column.name)
-                        .collect::<Vec<_>>()
+                let implicit = if columns.is_empty() {
+                    crate::assignment::columns::declared_column_names_with_control(
+                        catalog,
+                        &stmt.target,
+                        control,
+                    )
+                    .map_err(|error| match error {
+                        SQLError::Internal(message) => match control
+                            .format(format_args!("read MERGE target columns: {message}"))
+                        {
+                            Ok(message) => SQLError::Internal(message.into_parts().0),
+                            Err(error) => error.into(),
+                        },
+                        error => error,
+                    })?
                 } else {
-                    columns.iter().map(|target| target.column.clone()).collect()
+                    None
                 };
-                identity.validate_insert(
-                    targets.iter().map(String::as_str).zip(
+                let targets = implicit
+                    .iter()
+                    .flat_map(|names| names.iter().map(String::as_str))
+                    .chain(columns.iter().map(|target| target.column.as_str()));
+                identity.validate_insert_with_control(
+                    targets.zip(
                         values
                             .iter()
                             .map(|value| !matches!(value, crate::ScalarExpr::Default)),
                     ),
                     *overriding,
+                    control,
                 )?;
             }
             _ => {}

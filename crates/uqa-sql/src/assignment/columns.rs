@@ -10,8 +10,13 @@ use crate::{
     ast::{ColumnDef, ColumnType, Expr, GeneratedColumnKind},
     SQLError,
 };
-use std::collections::BTreeSet;
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::{memory::ProductionControl, Value};
+
+pub(crate) mod production;
+pub use production::{
+    declared_column_names_with_control, validate_mutation_columns_with_control,
+    validate_mutation_targets_with_control,
+};
 pub type ColumnCatalogError = Box<dyn std::error::Error>;
 
 /// What a written value needs to know of its column.
@@ -36,6 +41,32 @@ pub trait AssignmentColumnCatalog {
     fn try_describe_table(&self, table: &str)
         -> Result<Option<Vec<ColumnDef>>, ColumnCatalogError>;
     fn columns_declared(&self, table: &str) -> Result<bool, ColumnCatalogError>;
+    /// Lend one declaration generation after observing the same default/generated sequence dependencies as a full description. Call the reader exactly once for a found table and do no catalog work afterwards. Consumers inspect names, types and flags; expression consumers still request resolved expressions.
+    fn with_column_metadata_with_control(
+        &self,
+        table: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let Some(columns) = self
+            .try_describe_table(table)
+            .map_err(|error| catalog_error(error, control))?
+        else {
+            return Ok(false);
+        };
+        read(&columns)?;
+        Ok(true)
+    }
+    fn columns_declared_with_control(
+        &self,
+        table: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        self.columns_declared(table)
+            .map_err(|error| catalog_error(error, control))
+    }
     fn try_column_insert_default_expr(
         &self,
         table: &str,
@@ -71,8 +102,11 @@ pub trait AssignmentColumnCatalog {
         }))
     }
 }
-fn dml_storage_error(action: &str, error: impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("{action} failed in storage backend: {error}"))
+fn catalog_error(error: ColumnCatalogError, control: &ProductionControl<'_>) -> SQLError {
+    match control.format(format_args!("{error}")) {
+        Ok(message) => SQLError::Internal(message.into_parts().0),
+        Err(error) => error.into(),
+    }
 }
 fn ddl_storage_error(action: &str, error: ColumnCatalogError) -> SQLError {
     crate::catalog::errors::storage_error(action, error.as_ref())
@@ -128,45 +162,13 @@ pub fn validate_mutation_columns<'a>(
     columns: impl IntoIterator<Item = &'a str>,
     action: &str,
 ) -> Result<(), SQLError> {
-    let definitions = catalog
-        .try_describe_table(table)
-        .map_err(|err| dml_storage_error(action, err))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    // Programmatically-created document tables intentionally have no SQL
-    // schema and retain their open-field behavior. SQL CREATE TABLE always
-    // supplies definitions, and those targets must reject misspelled or
-    // repeated mutation columns instead of persisting arbitrary fields.
-    if definitions.is_empty() {
-        let declared = catalog
-            .columns_declared(table)
-            .map_err(|error| dml_storage_error(action, error))?;
-        if !declared {
-            return Ok(());
-        }
-    }
-    let known: BTreeSet<&str> = definitions
-        .iter()
-        .map(|definition| definition.name.as_str())
-        .collect();
-    let mut seen = BTreeSet::new();
-    for column in columns {
-        if !seen.insert(column) {
-            return Err(SQLError::TypeMismatch(format!(
-                "{action}: column `{column}` is specified more than once"
-            )));
-        }
-        if !known.contains(column) {
-            let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-            return Err(SQLError::Routine {
-                sqlstate: "42703".into(),
-                message: format!(
-                    "column \"{column}\" of relation \"{}\" does not exist",
-                    relation.name
-                ),
-            });
-        }
-    }
-    Ok(())
+    validate_mutation_columns_with_control(
+        catalog,
+        table,
+        columns,
+        action,
+        &ProductionControl::uncontrolled(),
+    )
 }
 
 /// The sequence `DEFAULT` draws an identity column's value from, or `None` for a column that is not an identity column.
@@ -198,12 +200,12 @@ pub fn validate_mutation_targets<'a, E: 'a>(
     action: &str,
     insert: bool,
 ) -> Result<(), SQLError> {
-    let targets = targets.into_iter().collect::<Vec<_>>();
-    super::targets::validate_repeated_targets(targets.iter().copied(), insert)?;
-    let mut seen = BTreeSet::new();
-    let names = targets
-        .iter()
-        .map(|target| target.column.as_str())
-        .filter(|name| seen.insert(*name));
-    validate_mutation_columns(catalog, table, names, action)
+    validate_mutation_targets_with_control(
+        catalog,
+        table,
+        targets,
+        action,
+        insert,
+        &ProductionControl::uncontrolled(),
+    )
 }

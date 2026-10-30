@@ -372,7 +372,7 @@ fn validate_update<S: Clone + Send + Sync + 'static>(
         )?;
         if plan.view_rule_update_plans.is_empty() {
             let columns = context.mutation.preparation.referential.assignment.columns;
-            uqa_sql::assignment::columns::validate_mutation_targets(
+            uqa_sql::assignment::columns::validate_mutation_targets_with_control(
                 columns,
                 &plan.table,
                 plan.assignments
@@ -380,16 +380,24 @@ fn validate_update<S: Clone + Send + Sync + 'static>(
                     .flat_map(|assignment| assignment.target.targets()),
                 "UPDATE",
                 false,
+                control,
             )?;
-            uqa_sql::semantics::generated_values::GeneratedValueColumns::of(columns, &plan.table)?
-                .validate_update(plan.assignments.iter().flat_map(|assignment| {
+            uqa_sql::semantics::generated_values::GeneratedValueColumns::of_with_control(
+                columns,
+                &plan.table,
+                control,
+            )?
+            .validate_update_with_control(
+                plan.assignments.iter().flat_map(|assignment| {
                     assignment.target.targets().iter().map(move |target| {
                         (
                             target.column.as_str(),
                             matches!(assignment.value, uqa_sql::ScalarExpr::Default),
                         )
                     })
-                }))?;
+                }),
+                control,
+            )?;
         }
     }
     Ok(())

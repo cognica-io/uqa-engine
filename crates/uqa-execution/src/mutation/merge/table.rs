@@ -150,7 +150,11 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let arena_resources = context.query.source.ctes.production_resources()?;
     ctes.scalar_subqueries =
         uqa_sql::plan::RetainedQueryArena::capture(&stmt.subqueries, &arena_resources.control())?;
-    uqa_sql::semantics::merge::validate_merge_target_columns(assignment.columns, stmt)?;
+    uqa_sql::semantics::merge::validate_merge_target_columns_with_control(
+        assignment.columns,
+        stmt,
+        &control,
+    )?;
     let statement_snapshot = ctes.command_cte_snapshot();
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
@@ -484,6 +488,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                     action_row,
                     params,
                     &snapshot_ctes,
+                    &control,
                 )? {
                     SelectedMergeAction::Nothing => {}
                     SelectedMergeAction::Update {

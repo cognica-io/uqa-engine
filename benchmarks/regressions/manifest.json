@@ -31927,6 +31927,106 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "assignment_column_validation_preserves_input_and_catalog_observation_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/columns/production/tests.rs",
+      "capability": "Mutation declaration ownership",
+      "workload": "Observe target capture, duplicate checks, description, lazy name iteration, empty declared tables and open document tables.",
+      "invariant": "Preserve diagnostic and callback order while borrowing targets and retaining only admitted name indexes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "assignment_declaration_selection_retains_only_admitted_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/columns/production/tests.rs",
+      "capability": "Mutation declaration ownership",
+      "workload": "Select names and generation flags beside a four-MiB unused default; then select an oversized generated name.",
+      "invariant": "Borrow unused declarations, admit selected destinations before allocation, retain exact live leases and preserve sibling ownership on rejection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "generated_column_validation_consumes_targets_then_uses_declaration_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/columns/production/tests.rs",
+      "capability": "Mutation declaration ownership",
+      "workload": "Supply generated and identity targets in reverse declaration order with DEFAULT and OVERRIDING variants.",
+      "invariant": "Consume all supplied flags before table-order validation and preserve PostgreSQL SQLSTATE, message, detail and hint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "assignment_validation_bounds_diagnostics_and_releases_cancelled_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/assignment/columns/production/tests.rs",
+      "capability": "Mutation declaration ownership",
+      "workload": "Reject an oversized unknown-column diagnostic and cancel each request owner during supplied-target observation.",
+      "invariant": "Bound temporary allocation before error construction and release scratch without retiring retained columns or sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_assignment_metadata_borrows_unused_defaults_and_owns_selected_names",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/assignment_columns.rs",
+      "capability": "Mutation declaration ownership",
+      "workload": "Validate mutation targets and select generation flags/names beside a four-MiB unused default under a 64-KiB remaining allowance on four providers.",
+      "invariant": "Avoid full declaration copies, retain exact selected-name ownership, release catalog guards, reject zero allowance and both cancellations, and recover without consuming identity values.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_assignment_metadata_preserves_sequence_observation_before_validation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/assignment_columns.rs",
+      "capability": "Mutation declaration ownership",
+      "workload": "Rename a default sequence, validate selected targets, inject a dangling stored reference and restore it on four providers.",
+      "invariant": "Preserve dependency errors before target use, storage diagnostic context, no sequence consumption during metadata observation and cleanup.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_generated_assignment_validation_preserves_postgresql_effects_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/assignment_columns.rs",
+      "capability": "Mutation declaration ownership",
+      "workload": "Exercise empty INSERT/UPDATE/MERGE sources, reversed invalid targets, OVERRIDING, source effects, generic/custom execution, rollback, EXPLAIN and persistent reopen.",
+      "invariant": "Match independently captured PostgreSQL diagnostics, sequence consumption and final rows; preserve no-effect EXPLAIN and session resource cleanup.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

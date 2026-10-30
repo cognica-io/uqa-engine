@@ -292,14 +292,9 @@ impl uqa_sql::semantics::conflict::ConflictCatalog for Engine {
         control: &uqa_core::memory::ProductionControl<'_>,
         read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
     ) -> Result<bool, SQLError> {
-        let Some(columns) = self.table_column_snapshot_with_control(table, control)? else {
-            return Ok(false);
-        };
-        self.sequence_dependency_context()
-            .observe_column_sequence_references_with_control(&columns, control)?;
-        read(&columns)?;
-        Ok(true)
+        self.with_table_column_metadata_with_control(table, control, read)
     }
+
     fn enforced_keys(&self, table: &str) -> Result<Vec<EnforcedKey>, String> {
         Engine::enforced_keys(self, table).map_err(|error| error.to_string())
     }

@@ -60,8 +60,10 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             !view_returning.returning.is_empty(),
         )?;
     }
+    let resources = context.query.source.ctes.production_resources()?;
+    let control = resources.control();
     if stmt.view_rule_update_plans.is_empty() {
-        uqa_sql::assignment::columns::validate_mutation_targets(
+        uqa_sql::assignment::columns::validate_mutation_targets_with_control(
             context.mutation.preparation.referential.assignment.columns,
             &stmt.table,
             stmt.assignments
@@ -69,22 +71,25 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 .flat_map(|assignment| assignment.target.targets()),
             "UPDATE",
             false,
+            &control,
         )?;
-        uqa_sql::semantics::generated_values::GeneratedValueColumns::of(
+        uqa_sql::semantics::generated_values::GeneratedValueColumns::of_with_control(
             context.mutation.preparation.referential.assignment.columns,
             &stmt.table,
+            &control,
         )?
-        .validate_update(stmt.assignments.iter().flat_map(|assignment| {
-            assignment.target.targets().iter().map(move |target| {
-                (
-                    target.column.as_str(),
-                    matches!(assignment.value, crate::ScalarExpr::Default),
-                )
-            })
-        }))?;
+        .validate_update_with_control(
+            stmt.assignments.iter().flat_map(|assignment| {
+                assignment.target.targets().iter().map(move |target| {
+                    (
+                        target.column.as_str(),
+                        matches!(assignment.value, crate::ScalarExpr::Default),
+                    )
+                })
+            }),
+            &control,
+        )?;
     }
-    let resources = context.query.source.ctes.production_resources()?;
-    let control = resources.control();
     let privilege_expressions =
         uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges_with_control(
             context.mutation.privileges,
