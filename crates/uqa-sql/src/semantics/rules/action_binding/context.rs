@@ -53,6 +53,16 @@ pub trait RuleSourceCatalog {
     }
     fn rule_relation_definitions(&self, name: &str)
         -> Result<Vec<crate::ast::ColumnDef>, SQLError>;
+    /// External catalogs may return an owned declaration; native catalogs override this to admit copies directly from retained inputs.
+    fn rule_relation_definitions_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Vec<crate::ast::ColumnDef>>, SQLError> {
+        control.check()?;
+        let columns = self.rule_relation_definitions(name)?;
+        crate::plan::copy::copy_syntax_with_control(&columns, control)
+    }
 }
 
 pub(super) struct RuleBindingContext<'a> {

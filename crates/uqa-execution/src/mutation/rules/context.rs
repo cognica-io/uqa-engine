@@ -65,6 +65,23 @@ pub struct ViewRuleContext<'a, S: Clone + 'static> {
 impl<S: Clone + 'static> Copy for ViewRuleContext<'_, S> {}
 
 impl<S: Clone + 'static> RuleContext<'_, S> {
+    pub(super) fn returning_columns(
+        &self,
+        table: &str,
+    ) -> Result<uqa_core::memory::Produced<Vec<uqa_sql::ast::ColumnDef>>, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        uqa_sql::semantics::rules::analysis::rule_returning_columns_with_control(
+            self.analysis,
+            table,
+            &control,
+        )
+    }
+
     pub(crate) fn capture_rules(
         &self,
         table: &str,

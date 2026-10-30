@@ -32,7 +32,7 @@ impl Rows<'_> {
 }
 impl ReturningCatalog for Rows<'_> {
     fn try_describe_table_row_type(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        panic!("controlled rule names must borrow their row declaration")
+        panic!("controlled rule metadata must borrow its row declaration")
     }
     fn with_table_row_type_with_control(
         &self,
@@ -58,6 +58,123 @@ impl ReturningCatalog for Rows<'_> {
     fn view_schema(&self, _: &str) -> Result<Option<RowSchema>, SQLError> {
         panic!("event views use their current restored definition")
     }
+}
+
+#[test]
+fn rule_definitions_preserve_metadata_and_own_exact_destination_storage() {
+    let crate::ast::Statement::CreateTable(table) = crate::compile(
+        "CREATE TABLE items (n text COLLATE \"C\" DEFAULT repeat('payload', 2), id integer NOT NULL)",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("table declaration")
+    };
+    let rows = Rows::new(table.columns);
+    let catalog = Catalog::default();
+    let mut context = catalog.context();
+    context.returning.catalog = &rows;
+    let memory = MemoryBudget::new(16 * 1024);
+    let sibling = memory.reserve(37).unwrap();
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut output = None;
+    let measured = allocation_counter::measure(|| {
+        output = Some(
+            context
+                .rule_relation_definitions_with_control("items", &control)
+                .unwrap(),
+        );
+    });
+    let output = output.unwrap();
+    assert_eq!(
+        serde_json::to_value(&*output).unwrap(),
+        serde_json::to_value(&rows.columns).unwrap()
+    );
+    assert_eq!(
+        usize::try_from(measured.bytes_current).unwrap(),
+        output.reserved_bytes()
+    );
+    assert_eq!(memory.used(), sibling.bytes() + output.reserved_bytes());
+    drop(output);
+    assert_eq!(memory.used(), sibling.bytes());
+}
+
+#[test]
+fn rule_definition_defaults_are_admitted_before_copying() {
+    let mut wide = ColumnDef::nullable("payload", ColumnType::Text);
+    wide.default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+    let rows = Rows::new(vec![ColumnDef::nullable("id", ColumnType::Integer), wide]);
+    let catalog = Catalog::default();
+    let mut context = catalog.context();
+    context.returning.catalog = &rows;
+    let memory = MemoryBudget::new(8 * 1024);
+    let sibling = memory.reserve(37).unwrap();
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let measured = allocation_counter::measure(|| {
+        assert_eq!(
+            context
+                .rule_relation_definitions_with_control("items", &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("53200")
+        );
+    });
+    assert!(measured.bytes_total < 16 * 1024, "{measured:?}");
+    assert_eq!(memory.used(), sibling.bytes());
+}
+
+#[test]
+fn rule_definition_failure_cancellation_and_unwind_retire_partial_output() {
+    let memory = MemoryBudget::new(8 * 1024);
+    let sibling = memory.reserve(37).unwrap();
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let catalog = Catalog::default();
+    let mut rows = Rows::new(vec![ColumnDef::nullable("n", ColumnType::Integer)]);
+    for token in [&original, &invoking] {
+        rows.interrupt = Some(token);
+        let mut context = catalog.context();
+        context.returning.catalog = &rows;
+        assert_eq!(
+            context
+                .rule_relation_definitions_with_control("items", &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), sibling.bytes());
+        token.reset();
+    }
+    rows.interrupt = None;
+    let mut context = catalog.context();
+    context.returning.catalog = &rows;
+    rows.fail.set(true);
+    assert_eq!(
+        context
+            .rule_relation_definitions_with_control("items", &control)
+            .unwrap_err()
+            .to_string(),
+        "internal error: read rule columns: catalog unavailable"
+    );
+    assert_eq!(memory.used(), sibling.bytes());
+    rows.fail.set(false);
+    rows.unwind.set(true);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        context.rule_relation_definitions_with_control("items", &control)
+    }))
+    .is_err());
+    assert_eq!(memory.used(), sibling.bytes());
+    rows.unwind.set(false);
+    assert_eq!(
+        context
+            .rule_relation_definitions_with_control("items", &control)
+            .unwrap()[0]
+            .name,
+        "n"
+    );
+    assert_eq!(memory.used(), sibling.bytes());
 }
 
 #[test]

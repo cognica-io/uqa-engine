@@ -29831,7 +29831,7 @@
       ],
       "capability": "Native rule target lookup order",
       "workload": "Table, view, materialized view and empty target declarations on all four providers.",
-      "invariant": "Live table-first lookup, names and schema diagnostics retain the existing order and controlled view analysis propagates resource failure."
+      "invariant": "Live table-first lookup, complete declarations, names and schema diagnostics retain the existing order; native RETURNING and target-definition production preserve every observed field."
     },
     {
       "package": "uqa-sql",
@@ -30134,6 +30134,61 @@
       "capability": "Native rule event-value preservation",
       "workload": "All 256 internal char encodings pass through INSERT VALUES, UPDATE SELECT and DELETE VALUES rule actions on memory, native SQLite, SQLite Key/Value and redb.",
       "invariant": "Each provider delivers all 768 exact old/new signed byte values and SQL NULL images through its actual query-input execution path."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "rule_definitions_preserve_metadata_and_own_exact_destination_storage",
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/columns/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native rule declaration ownership",
+      "workload": "Complete table declarations with defaults, constraints, types and collations.",
+      "invariant": "The immutable output preserves every declaration field and retains exactly its independently measured allocation until drop."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "rule_definition_defaults_are_admitted_before_copying",
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/columns/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native rule declaration ownership",
+      "workload": "A four MiB default following an already admitted column under an eight KiB allowance.",
+      "invariant": "Rejection precedes the large payload copy and releases partial output while preserving sibling reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "rule_definition_failure_cancellation_and_unwind_retire_partial_output",
+      "source": "crates/uqa-sql/src/catalog/events/definition/rules/columns/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native rule declaration ownership",
+      "workload": "Borrowed declarations interrupted after production by catalog failure, either cancellation handle or unwind.",
+      "invariant": "Original diagnostic context and cancellation SQLSTATE survive; all partial output retires and the producer recovers."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_rule_definitions_use_the_request_allowance_before_copying",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_targets.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native rule declaration ownership",
+      "workload": "Four MiB table defaults through native catalog and RETURNING producers and actual rule execution on every provider.",
+      "invariant": "The original request rejects before copying, retains exact successful output leases, releases failed execution input and permits subsequent ordinary SQL."
     }
   ]
 }

@@ -38,7 +38,7 @@ pub fn execute_mutation_query_rules<S: Clone + 'static>(
     let _guard = RuleExecutionGuard::enter(statement.table(), statement.event())?;
     let rule_subject = context.security.privilege_subject(statement.table())?;
     let input_subject = scope.privilege_subject()?;
-    let definitions = super::rule_returning_columns(context.analysis, statement.table())?;
+    let definitions = context.returning_columns(statement.table())?;
     let request = context.returning_request(
         statement.returning(),
         statement.returning_aliases(),

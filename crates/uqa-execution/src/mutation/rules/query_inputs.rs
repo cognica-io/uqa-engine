@@ -35,7 +35,7 @@ fn execute_insert_query_rules<S: Clone + 'static>(
     let rules = context.capture_rules(&insert.table, RuleEvent::Insert)?;
     let _guard = RuleExecutionGuard::enter(&insert.table, RuleEvent::Insert)?;
     let privilege_subject = context.security.privilege_subject(&insert.table)?;
-    let definitions = super::rule_returning_columns(context.analysis, &insert.table)?;
+    let definitions = context.returning_columns(&insert.table)?;
     let request = context.returning_request(
         &insert.returning,
         &insert.returning_aliases,

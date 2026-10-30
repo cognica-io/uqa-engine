@@ -200,3 +200,37 @@ pub fn rule_returning_columns(
     }
     context.sources.rule_relation_definitions(table)
 }
+
+pub fn rule_returning_columns_with_control(
+    context: RuleAnalysisContext<'_>,
+    table: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<Vec<crate::ast::ColumnDef>>, SQLError> {
+    control.check()?;
+    let mut output = uqa_core::memory::ProductionVec::new(*control);
+    let found = context
+        .returning
+        .with_table_row_type_with_control(table, control, &mut |columns| {
+            for column in columns {
+                output.push_produced(crate::plan::copy::copy_syntax_with_control(
+                    column, control,
+                )?)?;
+            }
+            Ok(())
+        })
+        .map_err(|error| match error {
+            SQLError::Internal(message) => {
+                match control.format(format_args!("read rule RETURNING row type: {message}")) {
+                    Ok(message) => SQLError::Internal(message.into_parts().0),
+                    Err(error) => error.into(),
+                }
+            }
+            other => other,
+        })?;
+    if found {
+        return Ok(output.finish()?);
+    }
+    context
+        .sources
+        .rule_relation_definitions_with_control(table, control)
+}

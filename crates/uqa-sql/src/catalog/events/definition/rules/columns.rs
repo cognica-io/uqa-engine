@@ -4,13 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Rule target names borrow live declarations and retain only the admitted output.
+//! Rule metadata borrows live declarations and admits each owned destination.
 
 use super::{EventAnalysisContext, SQLError};
+use crate::{
+    ast::{ColumnDef, ColumnType},
+    plan::copy::{copy_syntax_with_control, SyntaxProduction},
+    RowSchema,
+};
 use uqa_core::{
     memory::{Produced, ProductionControl, ProductionVec},
     RelationIdentity, RelationName,
 };
+
+enum Declaration<'a> {
+    Table(&'a [ColumnDef]),
+    View(&'a RowSchema),
+}
 
 impl EventAnalysisContext<'_> {
     pub fn rule_relation_column_names_with_control(
@@ -18,16 +28,69 @@ impl EventAnalysisContext<'_> {
         name: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Vec<String>>, SQLError> {
-        control.check()?;
         let mut output = ProductionVec::new(*control);
+        self.with_rule_declaration(name, control, &mut |declaration| {
+            match declaration {
+                Declaration::Table(columns) => {
+                    for column in columns {
+                        output.push_produced(control.copy_text(&column.name)?)?;
+                    }
+                }
+                Declaration::View(schema) => {
+                    for (index, column) in schema.columns().iter().enumerate() {
+                        output.push_produced(
+                            control.copy_text(schema.public_name(index).unwrap_or(column))?,
+                        )?;
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        Ok(output.finish()?)
+    }
+
+    pub fn rule_relation_definitions_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Vec<ColumnDef>>, SQLError> {
+        let mut output = ProductionVec::new(*control);
+        self.with_rule_declaration(name, control, &mut |declaration| {
+            match declaration {
+                Declaration::Table(columns) => {
+                    for column in columns {
+                        output.push_produced(copy_syntax_with_control(column, control)?)?;
+                    }
+                }
+                Declaration::View(schema) => {
+                    for (index, column) in schema.columns().iter().enumerate() {
+                        let syntax = SyntaxProduction::new(*control);
+                        let mut column = ColumnDef::nullable(
+                            syntax.text(schema.public_name(index).unwrap_or(column))?,
+                            syntax.copy(schema.column_type(index).unwrap_or(&ColumnType::Text))?,
+                        );
+                        column.collation_oid = schema.column_collation(index);
+                        output.push_produced(syntax.finish(column)?)?;
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        Ok(output.finish()?)
+    }
+
+    fn with_rule_declaration(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(Declaration<'_>) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
         let found = self
             .returning
             .catalog
             .with_table_row_type_with_control(name, control, &mut |columns| {
-                for column in columns {
-                    output.push_produced(control.copy_text(&column.name)?)?;
-                }
-                Ok(())
+                read(Declaration::Table(columns))
             })
             .map_err(|error| match error {
                 SQLError::Internal(message) => {
@@ -36,7 +99,7 @@ impl EventAnalysisContext<'_> {
                 other => other,
             })?;
         if found {
-            return Ok(output.finish()?);
+            return Ok(());
         }
         let reference = RelationIdentity::try_borrowed_reference(name).map_err(|error| {
             internal(
@@ -51,19 +114,14 @@ impl EventAnalysisContext<'_> {
                 let schema = self
                     .catalog
                     .stored_view_schema_with_control(view, control)?;
-                for (index, column) in schema.columns().iter().enumerate() {
-                    output.push_produced(
-                        control.copy_text(schema.public_name(index).unwrap_or(column))?,
-                    )?;
-                }
-                Ok(())
+                read(Declaration::View(&schema))
             })?;
         if !found {
             return Err(SQLError::UnknownTable(
                 control.copy_text(name)?.into_parts().0,
             ));
         }
-        Ok(output.finish()?)
+        Ok(())
     }
 }
 
