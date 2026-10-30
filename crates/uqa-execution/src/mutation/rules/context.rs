@@ -65,6 +65,26 @@ pub struct ViewRuleContext<'a, S: Clone + 'static> {
 impl<S: Clone + 'static> Copy for ViewRuleContext<'_, S> {}
 
 impl<S: Clone + 'static> RuleContext<'_, S> {
+    pub(crate) fn bind_insert_queries(
+        &self,
+        insert: &uqa_sql::plan::InsertPlan,
+        subject: &RoleReference,
+    ) -> Result<uqa_sql::semantics::rules::binding::OwnedInsertRuleQueries, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        uqa_sql::semantics::rules::binding::OwnedInsertRuleQueries::bind(
+            self.analysis,
+            insert,
+            &|table| self.security.privilege_subject(table),
+            subject,
+            &control,
+        )
+    }
+
     pub(super) fn returning_columns(
         &self,
         table: &str,

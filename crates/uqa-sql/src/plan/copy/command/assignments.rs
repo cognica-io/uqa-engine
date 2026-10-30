@@ -14,8 +14,16 @@ impl Copying<'_> {
         &mut self,
         target: &AssignmentTarget<ScalarExpr>,
     ) -> Result<AssignmentTarget<ScalarExpr>> {
+        self.assignment_target_named(target, &target.column)
+    }
+
+    pub(super) fn assignment_target_named(
+        &mut self,
+        target: &AssignmentTarget<ScalarExpr>,
+        name: &str,
+    ) -> Result<AssignmentTarget<ScalarExpr>> {
         Ok(AssignmentTarget {
-            column: self.text(&target.column)?,
+            column: self.text(name)?,
             indirection: self.field("indirection", |copying| {
                 copying.map(target.indirection.iter(), |copying, step| {
                     Ok(match step {

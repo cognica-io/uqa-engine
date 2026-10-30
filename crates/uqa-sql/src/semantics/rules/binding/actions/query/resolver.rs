@@ -39,6 +39,10 @@ pub struct OwnedRuleQueryResolver {
 }
 
 impl OwnedRuleQueryResolver {
+    pub(in crate::semantics::rules::binding::actions::query) fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
     pub fn reserved_bytes(&self) -> usize {
         self.table.reserved_bytes()
             + self.columns.reserved_bytes()

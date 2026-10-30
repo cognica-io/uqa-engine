@@ -212,6 +212,7 @@ impl ValuesInput {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn finish(&self, mut source: Box<QueryPlan>) -> Box<QueryPlan> {
         if self.inline || self.defaults.is_empty() {
             return source;

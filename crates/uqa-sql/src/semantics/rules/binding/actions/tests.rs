@@ -23,6 +23,7 @@ mod collations;
 mod mutation_owned;
 mod owned;
 mod resolver;
+mod schedule_owned;
 
 struct Catalog(Vec<ColumnDef>);
 impl RuleSourceCatalog for Catalog {
@@ -130,14 +131,15 @@ fn native_action(catalog: &Catalog, sql: &str, action: &Statement, restore: bool
     };
     let (mut resolver, input) = match command.as_ref() {
         CommandPlan::Insert(insert) => {
-            let queries = InsertRuleQueries::bind(
+            let queries = OwnedInsertRuleQueries::bind(
                 catalog.analysis(),
                 insert,
                 &|_| Ok("owner".into()),
                 &"caller".into(),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
             )
             .unwrap();
-            let insert = &queries.relations[0];
+            let insert = queries.relations().next().unwrap();
             let relation = InternalRelationId::allocate();
             let resolver =
                 RuleQueryResolver::from_insert(catalog.analysis(), insert, relation).unwrap();

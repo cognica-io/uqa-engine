@@ -26,6 +26,17 @@ use uqa_core::{
 };
 
 impl ValuesInput {
+    pub(in crate::semantics::rules::binding::actions::query) fn initial_source_with_control(
+        &self,
+        context: RuleAnalysisContext<'_>,
+        command: MutableCommandPlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<MutableQueryPlan, SQLError> {
+        let (command, columns) = input_columns(context, command, self.width, control)?;
+        let (_, source) = command.take_insert_rows_query(control)?;
+        self.source_with_control(source, &columns, control)
+    }
+
     /// Convert a VALUES action into its query input before attaching the event relation. Existing INSERT SELECT sources already own their query and remain unchanged.
     pub fn prepare_action_with_control(
         context: RuleAnalysisContext<'_>,
@@ -92,7 +103,7 @@ impl ValuesInput {
         })
     }
 
-    fn project_layer_with_control(
+    pub(in crate::semantics::rules::binding::actions::query) fn project_layer_with_control(
         &self,
         context: RuleAnalysisContext<'_>,
         command: MutableCommandPlan,

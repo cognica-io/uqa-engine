@@ -30595,6 +30595,74 @@
       "capability": "Controlled sequence dispatch",
       "workload": "Either cancelled owner with admitted call arguments and an independent retained value.",
       "invariant": "Cancelled dispatch releases its arguments, invokes no session hook and preserves the sibling reservation."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_insert_schedules_preserve_view_defaults_and_original_qualifications",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/schedule_owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native INSERT rule schedule admission",
+      "workload": "Seven INSERT forms through two view layers with defaults, conditional INSTEAD rules, scalar queries and unconditional suppression.",
+      "invariant": "Admitted schedules preserve every relation query and original predicate, source authority, DEFAULT provenance and exact live allocation ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "insert_layer_selection_discards_large_replaced_inputs_before_copying",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/schedule_owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native INSERT rule schedule admission",
+      "workload": "A retained four MiB SELECT input and discarded multi-MiB view metadata under a 64 KiB allowance.",
+      "invariant": "Layer selection admits only retained fields and never copies replaced source or nested view scheduling metadata."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "insert_scheduling_rejects_original_payloads_and_preserves_live_siblings",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/schedule_owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native INSERT rule schedule admission",
+      "workload": "Four MiB VALUES payloads across several failing admission limits with an independent sibling reservation.",
+      "invariant": "Every denied destination fails before payload allocation or subject lookup and releases only the incomplete schedule."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "insert_schedule_cancellation_and_subject_failure_release_only_their_owners",
+      "source": "crates/uqa-sql/src/semantics/rules/binding/actions/tests/schedule_owned.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native INSERT rule schedule admission",
+      "workload": "Both invoking cancellation handles, subject lookup errors, unwinding and recovery.",
+      "invariant": "Failed or unwinding scheduling retires all partial owners while preserving independently retained siblings."
+    },
+    {
+      "package": "uqa-engine",
+      "test": "native_insert_rule_schedules_reject_before_copies_and_recover",
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_schedules.rs",
+      "kind": "lib",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "capability": "Native INSERT rule schedule admission",
+      "workload": "Native catalog adapters and four MiB VALUES/SELECT inputs, followed by two-view default and conditional-rule execution on all providers.",
+      "invariant": "Construction rejects before copying and public INSERT recovery preserves target/log effects and durable reopen results."
     }
   ]
 }

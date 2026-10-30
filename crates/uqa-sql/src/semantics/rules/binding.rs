@@ -8,7 +8,7 @@
 
 mod actions;
 pub use actions::{
-    InsertRuleQueries, MutationRuleInput, OwnedMutationRuleInput, OwnedRuleQueryInput,
+    MutationRuleInput, OwnedInsertRuleQueries, OwnedMutationRuleInput, OwnedRuleQueryInput,
     OwnedRuleQueryResolver, RuleAction, RuleInputColumns, RuleMutation, RuleQueryInput,
     RuleQueryResolver,
 };

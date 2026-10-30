@@ -20,7 +20,9 @@ use std::collections::{BTreeMap, BTreeSet};
 mod resolver;
 pub use resolver::{OwnedRuleQueryResolver, RuleInputColumns};
 mod schedule;
-pub use schedule::InsertRuleQueries;
+#[cfg(test)]
+pub(super) use schedule::reference::InsertRuleQueries;
+pub use schedule::OwnedInsertRuleQueries;
 mod assignments;
 mod conditions;
 mod mutation;
@@ -255,6 +257,7 @@ fn attach_query(
     }
 }
 
+#[cfg(test)]
 fn add_condition(
     predicate: &mut Option<ScalarExpr>,
     subqueries: &mut Vec<QueryPlan>,

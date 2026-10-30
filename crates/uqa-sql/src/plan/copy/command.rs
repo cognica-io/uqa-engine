@@ -6,11 +6,12 @@
 
 use super::{Copying, Result};
 use crate::plan::{
-    CommandPlan, DeletePlan, InsertPlan, MergePlan, RuleValuesInput, UpdatePlan, ViewCheckPlan,
-    ViewRuleInsertPlan, ViewRuleReturningPlan, ViewRuleUpdatePlan,
+    CommandPlan, DeletePlan, MergePlan, RuleValuesInput, UpdatePlan, ViewCheckPlan,
+    ViewRuleReturningPlan, ViewRuleUpdatePlan,
 };
 
 mod assignments;
+mod insert;
 
 impl Copying<'_> {
     pub(super) fn command(&mut self, command: &CommandPlan) -> Result<CommandPlan> {
@@ -30,69 +31,6 @@ impl Copying<'_> {
                 CommandPlan::Merge(self.boxed(|copying| copying.merge(plan))?)
             }
             _ => unreachable!("mutation command selected above"),
-        })
-    }
-
-    pub(super) fn insert(&mut self, plan: &InsertPlan) -> Result<InsertPlan> {
-        Ok(InsertPlan {
-            table: self.text(&plan.table)?,
-            target_relation_bound: plan.target_relation_bound,
-            relations_bound: plan.relations_bound,
-            statement_privilege_subject: self.role(plan.statement_privilege_subject.as_ref())?,
-            target_privilege_subject: self.role(plan.target_privilege_subject.as_ref())?,
-            target_qualifier: self.text(&plan.target_qualifier)?,
-            target_alias: self.optional_text(plan.target_alias.as_deref())?,
-            include_descendants: plan.include_descendants,
-            columns: self.field("columns", |copying| {
-                copying.map(plan.columns.iter(), Self::assignment_target)
-            })?,
-            overriding: plan.overriding,
-            ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
-            rows: self.field("rows", |copying| copying.rows(&plan.rows))?,
-            source: self.field("source", |copying| {
-                plan.source
-                    .as_ref()
-                    .map(|source| copying.boxed(|copying| copying.query(source)))
-                    .transpose()
-            })?,
-            rule_values_input: self.field("rule_values_input", |copying| {
-                plan.rule_values_input
-                    .as_ref()
-                    .map(|input| copying.rule_values(input))
-                    .transpose()
-            })?,
-            on_conflict: self.field("on_conflict", |copying| {
-                plan.on_conflict
-                    .as_ref()
-                    .map(|conflict| copying.conflict(conflict))
-                    .transpose()
-            })?,
-            returning: self.field("returning", |copying| {
-                copying.map(plan.returning.iter(), Self::projection)
-            })?,
-            returning_aliases: self.returning_aliases(&plan.returning_aliases)?,
-            subqueries: self.field("subqueries", |copying| {
-                copying.map(plan.subqueries.iter(), Self::query)
-            })?,
-            view_checks: self.field("view_checks", |copying| {
-                copying.map(plan.view_checks.iter(), Self::view_check)
-            })?,
-            view_rule_relations: self.texts(&plan.view_rule_relations)?,
-            view_rule_insert_plans: self.map(
-                plan.view_rule_insert_plans.iter(),
-                |copying, input| {
-                    Ok(ViewRuleInsertPlan {
-                        relation: copying.text(&input.relation)?,
-                        supplied_columns: copying.texts(&input.supplied_columns)?,
-                        input_columns: copying.texts(&input.input_columns)?,
-                    })
-                },
-            )?,
-            view_rule_returning: plan
-                .view_rule_returning
-                .as_ref()
-                .map(|returning| self.rule_returning(returning))
-                .transpose()?,
         })
     }
 

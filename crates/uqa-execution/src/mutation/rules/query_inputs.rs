@@ -244,14 +244,14 @@ fn returning_consumer<'a, S: Clone + 'static>(
 pub fn run_insert_query_rules<S: Clone + 'static>(
     rules: &RuleContext<'_, S>,
     context: crate::mutation::returning::ReturningExecutionContext<'_, S>,
-    queries: &uqa_sql::semantics::rules::binding::InsertRuleQueries,
+    queries: &uqa_sql::semantics::rules::binding::OwnedInsertRuleQueries,
     params: &[SQLParam],
     scope: &crate::query::CteScope<S>,
     prune: crate::mutation::views::commands::SourceOutputPruning,
 ) -> Result<crate::mutation::output::MutationOutput, SQLError> {
     let mut output = None;
     let mut affected = 0;
-    for insert in queries.relations.iter().rev() {
+    for insert in queries.relations().rev() {
         let projection = super::RuleOutputProjection::insert(context, insert, params, scope);
         let outcome = execute_insert_query_rules(
             &rules.with_projection(&projection),

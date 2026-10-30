@@ -10,6 +10,62 @@ use super::{CommandPlan, MutableCommandPlan, MutableQueryPlan, RewriteMemory, SQ
 use crate::plan::{copy::Copying, InsertPlan, QueryPlan, RelationalPlan, RuleValuesInput};
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
+impl InsertPlan {
+    /// Copy one rule relation without a source or nested view schedule. The first VALUES layer alone retains rows; later layers receive an independently owned input query.
+    pub fn copy_rule_layer_for_rewrite(
+        &self,
+        layer: Option<&crate::plan::ViewRuleInsertPlan>,
+        rows: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<MutableCommandPlan, SQLError> {
+        control.check()?;
+        if let Some(mut copying) = Copying::for_rewrite(*control) {
+            let command = copying.insert_rule_layer_command(self, layer, rows)?;
+            return Ok(MutableCommandPlan::from_rewrite_parts(
+                command,
+                Some(copying.into_rewrite_memory()),
+            ));
+        }
+        let mut plan = self.clone();
+        plan.source = None;
+        if !rows {
+            plan.rows.clear();
+        }
+        plan.view_rule_insert_plans.clear();
+        plan.view_rule_relations.clear();
+        if let Some(layer) = layer {
+            plan.table.clone_from(&layer.relation);
+            plan.target_qualifier.clone_from(&layer.relation);
+            plan.columns = layer
+                .supplied_columns
+                .iter()
+                .zip(&self.columns)
+                .map(|(name, target)| {
+                    let mut target = target.clone();
+                    target.column.clone_from(name);
+                    target
+                })
+                .collect();
+            plan.returning.clear();
+            if let Some(returning) = self
+                .view_rule_returning
+                .as_ref()
+                .filter(|returning| returning.relation == layer.relation)
+            {
+                plan.target_qualifier
+                    .clone_from(&returning.target_qualifier);
+                plan.returning.clone_from(&returning.returning);
+                plan.returning_aliases.clone_from(&returning.aliases);
+                plan.subqueries.clone_from(&returning.subqueries);
+            }
+        }
+        Ok(MutableCommandPlan::from_rewrite_parts(
+            CommandPlan::Insert(Box::new(plan)),
+            None,
+        ))
+    }
+}
+
 impl MutableCommandPlan {
     pub fn map_insert_source(
         mut self,

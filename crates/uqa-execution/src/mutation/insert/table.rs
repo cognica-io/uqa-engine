@@ -282,12 +282,10 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             scope.scalar_subqueries = stmt.subqueries.as_slice().into();
             let query_rules = (has_any_insert_rules || stmt.rule_values_input.is_some())
                 .then(|| {
-                    uqa_sql::semantics::rules::binding::InsertRuleQueries::bind(
-                        mutation.rules.rules.analysis,
-                        stmt,
-                        &|table| mutation.rules.rules.security.privilege_subject(table),
-                        scope.privilege_subject()?,
-                    )
+                    mutation
+                        .rules
+                        .rules
+                        .bind_insert_queries(stmt, scope.privilege_subject()?)
                 })
                 .transpose()?;
             if let Some(queries) = &query_rules {

@@ -15,6 +15,13 @@ pub(crate) enum Buffer<T> {
 }
 
 impl<T> Buffer<T> {
+    pub(crate) fn reserved_bytes(&self) -> usize {
+        match self {
+            Self::Ordinary(_) => 0,
+            Self::Controlled(values) => values.capacity() * std::mem::size_of::<T>(),
+        }
+    }
+
     pub(crate) fn new(control: &ProductionControl<'_>) -> Self {
         control.budget().map_or_else(
             || Self::Ordinary(Vec::new()),

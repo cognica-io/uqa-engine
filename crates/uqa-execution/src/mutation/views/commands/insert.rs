@@ -140,19 +140,11 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             }
             let query_rules = (has_rules || stmt.rule_values_input.is_some())
                 .then(|| {
-                    uqa_sql::semantics::rules::binding::InsertRuleQueries::bind(
-                        context.mutation.rules.rules.analysis,
-                        stmt,
-                        &|table| {
-                            context
-                                .mutation
-                                .rules
-                                .rules
-                                .security
-                                .privilege_subject(table)
-                        },
-                        ctes.privilege_subject()?,
-                    )
+                    context
+                        .mutation
+                        .rules
+                        .rules
+                        .bind_insert_queries(stmt, ctes.privilege_subject()?)
                 })
                 .transpose()?;
             if let Some(queries) = &query_rules {
