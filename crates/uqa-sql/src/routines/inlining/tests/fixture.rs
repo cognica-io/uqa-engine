@@ -15,10 +15,10 @@ use crate::{
     routines::{
         registration::RoutineSupportAuthority,
         resolution::{RoutineOverloadCatalog, RoutineOverloadContext, RoutineTypeSnapshot},
-        SQLUserFunction,
+        RoutineBody, SQLUserFunction,
     },
     type_resolution::{BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload},
-    SQLNotice,
+    ColumnType, SQLNotice,
 };
 use std::{
     collections::BTreeMap,

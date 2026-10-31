@@ -33,7 +33,7 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
             RoleDefinition::from_create(
                 &CreateRoleStmt {
                     name: name.into(),
-                    attributes,
+                    attributes: attributes.into_iter().collect(),
                     connection_limit: -1,
                     in_roles: Vec::new(),
                     role_members: Vec::new(),

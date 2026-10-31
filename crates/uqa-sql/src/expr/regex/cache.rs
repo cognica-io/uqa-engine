@@ -82,6 +82,21 @@ impl RegexCache {
         self.budget.shares_allowance(budget)
     }
 
+    /// Reservations currently retained by idle cache entries and their index.
+    /// Active invocations temporarily own removed entries and are not included.
+    pub fn reserved_bytes(&self) -> usize {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        entries.memory.as_ref().map_or(0, MemoryReservation::bytes)
+            + entries
+                .values
+                .iter()
+                .map(|entry| entry.pattern.capacity() + entry.regex.reserved_bytes())
+                .sum::<usize>()
+    }
+
     /// Release all idle patterns and their index allocation. Active invocations retain their owned state until they finish, then discard it if still cleared.
     pub fn clear(&self) {
         let mut entries = self

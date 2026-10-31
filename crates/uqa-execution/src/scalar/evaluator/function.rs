@@ -33,7 +33,7 @@ pub(super) fn evaluate_expression(
     if let Some(clause) = uqa_sql::catalog::collations::expression::scalar_clause(expression)? {
         return eval_scalar_inner(clause.argument, context, control);
     }
-    initialize_call(name, binding, context)?;
+    initialize_call(name, binding, context, control)?;
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         if let Some(result) = uqa_sql::expr::eval_distinct_boolean(dispatch, args.len(), |index| {
             let value = eval_scalar_inner(&args[index], context, control)?;
@@ -50,9 +50,10 @@ fn initialize_call(
     name: &str,
     binding: Option<&FunctionBinding>,
     context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     if let (Some(binding), Some(hook)) = (binding, context.function_hook()) {
-        hook.require_builtin_execute(binding)?;
+        hook.require_builtin_execute_with_control(binding, control)?;
     }
     if binding.is_some_and(|binding| binding.builtin)
         && uqa_sql::semantics::sets::static_setness::builtin_call_returns_set(name, binding)
@@ -115,6 +116,18 @@ fn evaluate_function(
         arguments
     };
     if control.budget().is_some() {
+        if let (Some(binding), Some(hook)) = (binding, context.function_hook()) {
+            if !binding.builtin {
+                return hook
+                    .call_bound_user_function_with_control(binding, &arguments, control)
+                    .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())));
+            }
+            if let Some(result) =
+                hook.call_bound_builtin_function_with_control(binding, &arguments, control)
+            {
+                return result;
+            }
+        }
         return uqa_sql::expr::eval_builtin_function_call_with_control(
             name,
             binding,

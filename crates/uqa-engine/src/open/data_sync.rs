@@ -241,7 +241,7 @@ impl Engine {
                         table.object_id(),
                     )?
                     .invalidates_existing_statistics();
-                *table.column_stats.write() = stats;
+                *table.column_stats.write() = stats.into();
                 table
                     .column_stats_loaded
                     .store(true, std::sync::atomic::Ordering::Release);

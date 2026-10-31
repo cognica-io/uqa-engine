@@ -41,9 +41,9 @@ pub fn execute_filter_physical_rows<S: Clone + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Vec<crate::OwnedPhysicalRow>, SQLError> {
+    let evaluator = context.evaluator(params, ctes)?;
     let scan: Box<dyn PhysicalOperator + '_> =
         Box::new(TableScan::from_physical_rows(schema, rows));
-    let evaluator = context.evaluator(params, ctes);
     let mut filter = Filter::with_evaluator(scan, predicate, evaluator);
     Ok(run_to_batches(&mut filter)
         .map_err(physical_exec_error)?
@@ -59,7 +59,41 @@ pub fn execute_filter_physical_rows<S: Clone + 'static>(
 pub fn execute_query_block_operator_output<'a, S: Clone + 'static>(
     context: RelationalContext<'a, S>,
     operator: Box<dyn PhysicalOperator + 'a>,
-    predicate: Option<ScalarExpr>,
+    predicate: Option<&ScalarExpr>,
+    statement: &'a QueryBlockPlan,
+    original: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope<S>,
+    columns: Vec<String>,
+    output_mode: QueryOutputMode<'_>,
+) -> Result<QueryOutput, SQLError> {
+    let (operator, predicate) = OperatorBuild::run(operator, |_| {
+        let resources = context.expressions.production_resources()?;
+        Ok(predicate
+            .map(|predicate| predicate.copy_for_rewrite(&resources.control()))
+            .transpose()?)
+    })?;
+    execute_query_block_operator_output_owned(
+        context,
+        operator,
+        predicate,
+        statement,
+        original,
+        params,
+        ctes,
+        columns,
+        output_mode,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
+pub fn execute_query_block_operator_output_owned<'a, S: Clone + 'static>(
+    context: RelationalContext<'a, S>,
+    operator: Box<dyn PhysicalOperator + 'a>,
+    predicate: Option<uqa_sql::plan::OwnedScalarExpr>,
     statement: &'a QueryBlockPlan,
     original: &'a QueryBlockPlan,
     params: &'a [SQLParam],
@@ -68,8 +102,8 @@ pub fn execute_query_block_operator_output<'a, S: Clone + 'static>(
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
     let runtime = context.runtime;
-    let type_resolver = context.expression_scope(ctes.clone());
     let (operator, exists_key_projection) = OperatorBuild::run(operator, |operator| {
+        let type_resolver = context.expression_scope(ctes)?;
         Ok(matches!(&output_mode, QueryOutputMode::ExistsKeySet(_))
             && matches!(statement.compute, ComputePlan::Project)
             && statement.order_by.is_empty()
@@ -92,7 +126,8 @@ pub fn execute_query_block_operator_output<'a, S: Clone + 'static>(
             && original.distinct_on.is_empty())
     })?;
     if exists_key_projection {
-        let evaluator = context.evaluator(params, ctes);
+        let (operator, evaluator) =
+            OperatorBuild::run(operator, |_| context.evaluator(params, ctes))?;
         let operator =
             attach_relational_filter(context, operator, predicate, params, ctes, &evaluator)?;
         return collect_exists_key_operator(columns, operator, &statement.projections, evaluator);
@@ -156,7 +191,7 @@ pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
     OperatorBuild::build(operator, |operator| {
         if original.distinct {
             let work_mem_bytes = physical_work_mem_bytes(runtime)?;
-            let resolver = context.expression_scope(ctes.clone());
+            let resolver = context.expression_scope(ctes)?;
             if original.distinct_on.is_empty() {
                 let mut ordered = false;
                 let mut support = uqa_sql::type_resolution::ComparisonKeySupport::default();
@@ -176,13 +211,14 @@ pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
                     key_types.push(ty.cloned());
                 }
                 support.require_implementation("DISTINCT")?;
+                let evaluator = context.evaluator(params, ctes)?;
                 if ordered && support.ordering {
                     operator.wrap(|input| {
                         crate::distinct::ordered::operator(
                             input,
                             keys,
                             key_types,
-                            context.evaluator(params, ctes),
+                            evaluator,
                             work_mem_bytes,
                         )
                     });
@@ -190,7 +226,7 @@ pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
                     operator.wrap(|input| {
                         Box::new(
                             Distinct::all_with_work_mem(input, work_mem_bytes)
-                                .with_evaluator(context.evaluator(params, ctes)),
+                                .with_evaluator(evaluator),
                         )
                     });
                 } else {
@@ -198,7 +234,7 @@ pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
                         Box::new(Distinct::on_with_work_mem(
                             input,
                             keys,
-                            context.evaluator(params, ctes),
+                            evaluator,
                             work_mem_bytes,
                         ))
                     });
@@ -246,13 +282,14 @@ pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
                     key_types.push(ty);
                 }
                 support.require_implementation("DISTINCT")?;
+                let evaluator = context.evaluator(params, ctes)?;
                 if ordered && support.ordering {
                     operator.wrap(|input| {
                         crate::distinct::ordered::operator(
                             input,
                             distinct_on,
                             key_types,
-                            context.evaluator(params, ctes),
+                            evaluator,
                             work_mem_bytes,
                         )
                     });
@@ -261,7 +298,7 @@ pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
                         Box::new(Distinct::on_with_work_mem(
                             input,
                             distinct_on,
-                            context.evaluator(params, ctes),
+                            evaluator,
                             work_mem_bytes,
                         ))
                     });
@@ -284,7 +321,7 @@ pub(crate) fn prepare_query_block_output_operator<'a, S: Clone + 'static>(
                 for (index, column) in &resjunk.order_by {
                     ordering.order_by[*index].expr = ScalarExpr::InternalColumn(*column);
                 }
-                let evaluator = context.evaluator(params, ctes);
+                let evaluator = context.evaluator(params, ctes)?;
                 let keys = resolved_sort_keys(
                     &ordering,
                     &output,

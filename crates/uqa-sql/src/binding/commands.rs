@@ -6,10 +6,7 @@
 
 //! Static RETURNING schemas for command CTEs.
 
-use super::{
-    projection_star_columns, ColumnType, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
-    SourcePlan,
-};
+use super::{RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan};
 use crate::plan::{CommandPlan, CtePlanBody};
 use crate::routines::RoutineResolution;
 
@@ -19,37 +16,62 @@ pub fn analyze_prepared_command_schema(
     params: &[SQLParam],
     ctes: &super::BindingContext,
 ) -> Result<Option<RowSchema>, SQLError> {
+    analyze_prepared_command_schema_with_control(
+        routines,
+        command,
+        params,
+        ctes.copy_with_control(&uqa_core::memory::ProductionControl::uncontrolled())?,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn analyze_prepared_command_schema_with_control(
+    routines: &dyn RoutineResolution,
+    command: &CommandPlan,
+    params: &[SQLParam],
+    ctes: super::production::ControlledBindingContext<'_>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<RowSchema>, SQLError> {
+    control.check()?;
     if let CommandPlan::Explain { options, .. } = command {
-        return options.result_schema().map(Some);
+        return options.result_schema_with_control(control).map(Some);
     }
     if command.mutation_target().is_none() {
         return Ok(None);
     }
-    let mut scope = SchemaScope::for_analysis(ctes)?;
+    let mut scope = SchemaScope::for_analysis_with_control(ctes, control)?;
     scope.set_command_lookup_mode(command);
     let previous = scope.bind_cte_schemas(routines, command.ctes(), params, None)?;
     let result = (|| {
         let (target, expression, _) =
             scope.command_expression_schema(routines, command, params, None)?;
-        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
-        let conflict_input = RowSchema::join(&expression, &excluded, std::iter::empty::<String>());
-        let conflict_expressions = match command {
-            CommandPlan::Insert(insert) => insert
-                .on_conflict
-                .as_ref()
-                .map(|conflict| match &conflict.action {
-                    crate::plan::ConflictActionPlan::Update {
-                        assignments,
-                        predicate,
-                    } => assignments
-                        .iter()
-                        .flat_map(crate::plan::AssignmentPlan::expressions)
-                        .chain(predicate.as_deref())
-                        .collect::<Vec<_>>(),
-                    crate::plan::ConflictActionPlan::Nothing => Vec::new(),
-                })
-                .unwrap_or_default(),
-            _ => Vec::new(),
+        let excluded =
+            RowSchema::with_relation_qualifier_with_control(&target, "excluded", control)?;
+        let conflict_input = RowSchema::join_with_control(
+            &expression,
+            &excluded,
+            std::iter::empty::<String>(),
+            control,
+        )?;
+        let is_conflict_expression = |scalar: &ScalarExpr| {
+            let CommandPlan::Insert(insert) = command else {
+                return false;
+            };
+            let Some(conflict) = &insert.on_conflict else {
+                return false;
+            };
+            let crate::plan::ConflictActionPlan::Update {
+                assignments,
+                predicate,
+            } = &conflict.action
+            else {
+                return false;
+            };
+            assignments
+                .iter()
+                .flat_map(crate::plan::AssignmentPlan::expressions)
+                .chain(predicate.as_deref())
+                .any(|candidate| std::ptr::eq(candidate, scalar))
         };
         if let CommandPlan::Insert(insert) = command {
             if let Some(source) = &insert.source {
@@ -57,16 +79,14 @@ pub fn analyze_prepared_command_schema(
             }
         }
         for scalar in command.expressions() {
+            control.check()?;
             if matches!(command, CommandPlan::Merge(_)) {
                 continue;
             }
             scope.bind_expression_type(
                 routines,
                 scalar,
-                if conflict_expressions
-                    .iter()
-                    .any(|candidate| std::ptr::eq(*candidate, scalar))
-                {
+                if is_conflict_expression(scalar) {
                     &conflict_input
                 } else {
                     &expression
@@ -243,28 +263,16 @@ impl SchemaScope {
             }
             let returning =
                 crate::semantics::returning::command_returning_projections(command, &target)?;
-            let mut columns = Vec::new();
-            let mut types: Vec<Option<ColumnType>> = Vec::new();
-            let mut records = Vec::new();
-            let mut collations = super::projection::OutputCollations::default();
+            let owner = self.control().capture();
+            let control = owner.control();
+            let mut output = super::projection::ProjectionOutput::new(control);
             for projection in &returning {
                 let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
                     &expression
                 } else {
                     &star
                 };
-                if let Some(star) = projection_star_columns(&projection.expr, expansion)? {
-                    records.extend(
-                        super::record_fields::star_metadata(&projection.expr, expansion)
-                            .unwrap_or_default(),
-                    );
-                    for (column, ty, collation) in star {
-                        collations.push(types.len(), ty.as_ref(), collation);
-                        columns.push(column);
-                        types.push(ty);
-                    }
-                } else {
-                    columns.push(crate::semantics::projection_label_at(projection));
+                if !output.star(&projection.expr, expansion)? {
                     let metadata = self.bind_projection_metadata(
                         routines,
                         &projection.expr,
@@ -272,14 +280,14 @@ impl SchemaScope {
                         command.scalar_subqueries(),
                         params,
                     )?;
-                    collations.push(types.len(), metadata.ty.as_ref(), metadata.collation);
-                    types.push(metadata.ty);
-                    records.push(metadata.record);
+                    crate::semantics::with_projection_label(projection, &control, |label| {
+                        output.push(label, metadata)
+                    })?;
                 }
             }
             crate::semantics::returning::validate_returning_width(
                 command.returning().unwrap_or_default(),
-                columns.len(),
+                output.len(),
             )?;
             if let Some(error) = crate::semantics::virtual_relation_mutation_error(
                 self.catalog.as_ref(),
@@ -291,14 +299,7 @@ impl SchemaScope {
             for projection in &returning {
                 self.collations.validate_expression(&projection.expr)?;
             }
-            Ok(collations
-                .apply(RowSchema::with_types(columns, types))
-                .with_record_metadata(
-                    records
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(index, record)| record.map(|record| (index, record))),
-                ))
+            output.finish()
         })();
         self.restore_cte_schemas(previous);
         result

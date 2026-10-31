@@ -6,10 +6,7 @@
 
 //! Ordered FROM analysis, including lateral scopes and join coercion.
 
-use super::super::{
-    operator_join_relation_schemas, overlay_outer_schema, rename_schema, JoinSchemaBinding,
-    SourcePlan, SourceScope,
-};
+use super::super::{overlay_outer_schema_with_control, JoinSchemaBinding, SourcePlan, SourceScope};
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
 use crate::semantics::sets::placement::SetPlacement;
@@ -32,11 +29,11 @@ impl Preparation<'_> {
     ) -> Result<RowSchema, SQLError> {
         let schema = self.source_in_scope_inner(source, subqueries, scope)?;
         let schema = if scope.retain_names {
-            SourceScope::describe_output(source, schema)
+            SourceScope::describe_output_with_control(source, schema, &self.scope.control())?
         } else {
             schema
         };
-        self.parameters.retain_source_schema(source, &schema);
+        self.parameters.retain_source_schema(source, &schema)?;
         Ok(schema)
     }
 
@@ -49,7 +46,7 @@ impl Preparation<'_> {
         if matches!(source, SourcePlan::Join { .. }) {
             return self.join_source(source, subqueries, scope);
         }
-        let input = scope.input(source);
+        let input = scope.input_with_control(source, &self.scope.control())?;
         let outer = input.as_ref();
         match source {
             crate::plan::SourcePlan::RetainedRows(source) => return Ok(source.schema().clone()),
@@ -66,16 +63,17 @@ impl Preparation<'_> {
                         self.routines,
                         source,
                         subqueries,
-                        &self.parameters.values(),
+                        &self.parameters.values()?,
                         outer,
                     );
                 }
                 let output = self.values(rows, subqueries, outer)?;
-                return Ok(rename_schema(
-                    &output.schema(),
+                return crate::binding::projection::rename_schema_with_control(
+                    &output.schema(&self.scope.control())?,
                     column_aliases,
                     alias.as_deref(),
-                ));
+                    &self.scope.control(),
+                );
             }
             SourcePlan::Subquery {
                 body,
@@ -88,8 +86,17 @@ impl Preparation<'_> {
                     SourcePlan::Subquery {
                         captured_output: Some(relation),
                         ..
-                    } => RowSchema::capture_output(&schema, *relation),
-                    _ => rename_schema(&schema, column_aliases, alias.as_deref()),
+                    } => RowSchema::capture_output_with_control(
+                        &schema,
+                        *relation,
+                        &self.scope.control(),
+                    )?,
+                    _ => crate::binding::projection::rename_schema_with_control(
+                        &schema,
+                        column_aliases,
+                        alias.as_deref(),
+                        &self.scope.control(),
+                    )?,
                 });
             }
             SourcePlan::Function {
@@ -108,7 +115,7 @@ impl Preparation<'_> {
                     outer,
                 )? {
                     self.parameters
-                        .retain_source_binding(std::ptr::NonNull::from(binding), selected);
+                        .retain_source_binding(std::ptr::NonNull::from(binding), selected)?;
                 }
             }
             SourcePlan::FunctionGroup { functions, .. } => {
@@ -120,7 +127,7 @@ impl Preparation<'_> {
             self.routines,
             source,
             subqueries,
-            &self.parameters.values(),
+            &self.parameters.values()?,
             outer,
         )
     }
@@ -144,7 +151,8 @@ impl Preparation<'_> {
         };
         let left_source = left;
         let left = self.source_in_scope(left_source, subqueries, scope.with_names())?;
-        let preceding = scope.right_namespace(left_source, &left, *kind);
+        let preceding =
+            scope.right_namespace_with_control(left_source, &left, *kind, &self.scope.control())?;
         let right = self.source_in_scope(
             right,
             subqueries,
@@ -177,12 +185,20 @@ impl Preparation<'_> {
         else {
             unreachable!("join inputs belong to a join source")
         };
-        let condition = scope.condition();
+        let condition = scope.condition_with_control(&self.scope.control())?;
         let outer = condition.as_ref();
         if let Some(on) = on {
-            let joined = RowSchema::join(left, right, std::iter::empty::<String>());
-            let joined = crate::binding::with_query_table_pseudo_columns(&joined);
-            let input = overlay_outer_schema(&joined, outer);
+            let joined = RowSchema::join_with_control(
+                left,
+                right,
+                std::iter::empty::<String>(),
+                &self.scope.control(),
+            )?;
+            let joined = crate::binding::with_query_table_pseudo_columns_with_control(
+                &joined,
+                &self.scope.control(),
+            )?;
+            let input = overlay_outer_schema_with_control(&joined, outer, &self.scope.control())?;
             self.in_placement(SetPlacement::JoinCondition, |analysis| {
                 analysis.require_boolean(on, &input, subqueries, "JOIN/ON")
             })?;
@@ -198,7 +214,7 @@ impl Preparation<'_> {
             left,
             right,
             subqueries,
-            params: &self.parameters.values(),
+            params: &self.parameters.values()?,
             outer,
         })
     }
@@ -219,7 +235,7 @@ impl Preparation<'_> {
                 outer,
             )? {
                 self.parameters
-                    .retain_source_binding(std::ptr::NonNull::from(&function.binding), selected);
+                    .retain_source_binding(std::ptr::NonNull::from(&function.binding), selected)?;
             }
         }
         Ok(())
@@ -234,7 +250,7 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
-    ) -> Result<Option<FunctionBinding>, SQLError> {
+    ) -> Result<Option<uqa_core::memory::Produced<FunctionBinding>>, SQLError> {
         let calls = self.set_calls();
         let selected = self.in_placement(SetPlacement::FromFunction, |analysis| {
             analysis.source_function_inputs(name, binding, relations, args, subqueries, outer)
@@ -251,15 +267,17 @@ impl Preparation<'_> {
         args: &[ScalarExpr],
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
-    ) -> Result<Option<FunctionBinding>, SQLError> {
+    ) -> Result<Option<uqa_core::memory::Produced<FunctionBinding>>, SQLError> {
         let local = crate::semantics::builtin_function_dispatch_name(name);
         if crate::registry::is_operator_join_table_function(&local) {
-            let (left, right) = operator_join_relation_schemas(
-                &self.scope.catalog,
-                &self.scope.resolution,
-                relations,
-            )?;
-            let constant = RowSchema::default();
+            let (left, right) =
+                crate::binding::catalog_sources::operator_join_relation_schemas_with_control(
+                    &self.scope.catalog,
+                    &self.scope.resolution,
+                    relations,
+                    &self.scope.control(),
+                )?;
+            let constant = RowSchema::empty_with_control(&self.scope.control())?;
             for (position, argument) in args.iter().enumerate() {
                 let input = match position {
                     0 => &left,
@@ -270,7 +288,10 @@ impl Preparation<'_> {
             }
             return Ok(None);
         }
-        let input = outer.cloned().unwrap_or_default();
+        let input = match outer {
+            Some(outer) => outer.clone(),
+            None => RowSchema::empty_with_control(&self.scope.control())?,
+        };
         self.call(name, binding, args, &input, subqueries)
     }
 }

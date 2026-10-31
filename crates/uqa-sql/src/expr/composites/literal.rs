@@ -48,16 +48,26 @@ pub fn evaluate_with_control(
     let Some(engine) = engine else {
         return control.copy_value(value).map_err(Into::into);
     };
-    let ty = engine
-        .resolve_type_name(ty)
-        .map_err(SQLError::Internal)?
-        .map(|ty| ty.retain_external_with_control(control))
-        .transpose()?;
+    let ty = engine.resolve_type_name_with_control(ty, control)?;
     control.check()?;
     match ty.as_deref() {
         Some(ty) => materialize(value, ty, engine, control),
         None => control.copy_value(value).map_err(Into::into),
     }
+}
+
+/// Preserve a decoded constant's admitted payload when descriptor adaptation is unnecessary.
+pub fn evaluate_owned_with_control(
+    value: Produced<Value>,
+    ty: &str,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
+    if engine.is_none() || !inspect_records(&value, &mut || control.check().map_err(Into::into))? {
+        return Ok(value);
+    }
+    evaluate_with_control(&value, ty, engine, control)
 }
 
 fn materialize(

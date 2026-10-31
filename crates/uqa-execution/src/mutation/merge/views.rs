@@ -15,16 +15,14 @@ use crate::mutation::{
     rows::{context::MutationExpressionContext, join_rows as dml_join_rows},
     statement_end,
     triggers::context::TriggerContext,
-    views::commands::{materialize_view_rows, target_row, SourceOutputPruning, TriggerViewChecks},
+    views::commands::{materialize_view_rows, resolve_view_target, target_row, TriggerViewChecks},
 };
 use crate::query::{scope::StatementCommands, sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_core::Value;
 use uqa_sql::{
     plan::{MergePlan, MergeWhenPlan},
-    semantics::view_mutation::{
-        resolve_view_target, target_columns, ViewMutationTarget as ViewDmlTarget,
-    },
+    semantics::view_mutation::{target_columns, ViewMutationTarget as ViewDmlTarget},
     SQLError, SQLParam, ScalarExpr,
 };
 mod codec;
@@ -588,7 +586,6 @@ fn execute_view_merge_pairs<S: Clone + 'static>(
 
 pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     plan: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
@@ -601,18 +598,15 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         target,
         events,
         statement_snapshot,
-    } = prepare_view_merge(
-        context.mutation.rules.views,
-        mutation.scopes,
-        triggers,
-        context.snapshots,
-        plan,
-        params,
-        inherited_ctes,
-    )?;
+    } = prepare_view_merge(context, plan, params, inherited_ctes)?;
     super::analysis::reject_set_valued_inserts(context.query.source.ctes.routines, plan)?;
-    let (statement_commands, _running_statement) =
-        begin_view_merge_statement(inherited_ctes, triggers, &events, &target)?;
+    let (statement_commands, _running_statement) = begin_view_merge_statement(
+        context.query.source.ctes,
+        inherited_ctes,
+        triggers,
+        &events,
+        &target,
+    )?;
     let mut statement_scope = None;
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
@@ -635,10 +629,14 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
                 source_rows,
                 pairings,
                 snapshot,
-            } = pair_view_merge_rows(read_context, prune, &target, plan, params, ctes)?;
+            } = pair_view_merge_rows(read_context, &target, plan, params, ctes)?;
             let source_relation = uqa_sql::ast::InternalRelationId::allocate();
-            let supplied_columns =
-                uqa_sql::semantics::merge::merge_supplied_columns(plan, &target.columns);
+            let resources = context.query.source.ctes.production_resources()?;
+            let supplied_columns = uqa_sql::semantics::merge::merge_supplied_columns_with_control(
+                plan,
+                &target.columns,
+                &resources.control(),
+            )?;
             let action_context = ViewMergeActionContext {
                 assignment,
                 triggers,
@@ -705,31 +703,32 @@ struct ViewMergeRows<S: Clone + 'static> {
 /// Read the MERGE's source and the view's rows under the statement's snapshot and pair them.
 fn pair_view_merge_rows<S: Clone + Send + Sync + 'static>(
     read_context: &MutationStatementContext<'_, S>,
-    prune: SourceOutputPruning,
     target: &ViewDmlTarget,
     plan: &MergePlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<ViewMergeRows<S>, SQLError> {
+    let retained = read_context.mutation.scopes.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        read_context.mutation.scopes.cancellation(),
+    );
     let source_privilege_expressions =
-        uqa_sql::semantics::view_privileges::merge_privilege_expressions(plan);
-    crate::query::privileges::ensure_select_privileges_for_source_expressions(
+        uqa_sql::semantics::view_privileges::merge_privilege_expressions_with_control(
+            plan, &control,
+        )?;
+    crate::query::privileges::ensure_select_privileges_for_source_expressions_with_control(
         &plan.source,
         &source_privilege_expressions,
         ctes,
+        &control,
     )?;
     let source_rows =
         build_join_spill_with_ctes(&read_context.query.source, &plan.source, params, ctes)?;
-    let mut target_scope = ctes.returning_statement_snapshot_scope();
-    let candidates = materialize_view_rows(
-        &read_context.query,
-        prune,
-        target,
-        None,
-        params,
-        &mut target_scope,
-    )?;
-    let snapshot = ctes.returning_statement_snapshot_scope();
+    let mut target_scope = ctes.returning_statement_snapshot_scope_with_control(&control)?;
+    let candidates = materialize_view_rows(&read_context.query, target, params, &mut target_scope)?;
+    let snapshot = ctes.returning_statement_snapshot_scope_with_control(&control)?;
     let pairings = build_view_merge_pairings(PairingInput {
         expressions: read_context
             .mutation
@@ -754,6 +753,7 @@ fn pair_view_merge_rows<S: Clone + Send + Sync + 'static>(
 
 /// The statement a view MERGE belongs to, with the BEFORE STATEMENT triggers of the view fired for the MERGE's actions.
 fn begin_view_merge_statement<S: Clone>(
+    context: crate::query::cte::CteExecutionContext<'_, S>,
     inherited_ctes: Option<&CteScope<S>>,
     triggers: &TriggerContext<'_>,
     events: &super::statement_events::MergeStatementEvents,
@@ -765,7 +765,8 @@ fn begin_view_merge_statement<S: Clone>(
     ),
     SQLError,
 > {
-    let (statement_commands, running_statement) = statement_end::statement_commands(inherited_ctes);
+    let (statement_commands, running_statement) =
+        statement_end::statement_commands(context, inherited_ctes)?;
     statement_end::fire_before_statements(
         &statement_commands,
         triggers,
@@ -785,7 +786,10 @@ fn initialize_view_merge_scope<S: Clone>(
     statement_snapshot: Option<std::sync::Arc<S>>,
 ) -> Result<(), SQLError> {
     if let Some(parent) = inherited_ctes {
-        ctes.inherit_cte_bindings(parent);
+        ctes.inherit_cte_bindings_with_control(
+            parent,
+            &context.query.source.ctes.production_resources()?.control(),
+        )?;
     }
     ctes.set_statement_commands(std::sync::Arc::clone(statement_commands));
     ctes.set_command_cte_snapshot(statement_snapshot);
@@ -803,25 +807,28 @@ fn initialize_view_merge_scope<S: Clone>(
         params,
         ctes,
     )?;
-    ctes.scalar_subqueries = plan.subqueries.as_slice().into();
+    let arena_resources = context.query.source.ctes.production_resources()?;
+    ctes.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(&plan.subqueries, &arena_resources.control())?;
     Ok(())
 }
 
 struct PreparedViewMerge<S> {
-    target: ViewDmlTarget,
+    target: uqa_core::memory::Produced<ViewDmlTarget>,
     events: super::statement_events::MergeStatementEvents,
     statement_snapshot: Option<std::sync::Arc<S>>,
 }
 fn prepare_view_merge<S: Clone + 'static>(
-    rewrite: uqa_sql::semantics::view_rewrite::context::ViewRewriteContext<'_>,
-    scopes: &dyn crate::mutation::command_scope::CommandScopeSource<S>,
-    triggers: &TriggerContext<'_>,
-    snapshots: &dyn crate::query::statement::context::SnapshotSource<S>,
+    context: &MutationStatementContext<'_, S>,
     plan: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<PreparedViewMerge<S>, SQLError> {
-    let target = resolve_view_target(rewrite, &plan.target)?;
+    let rewrite = context.mutation.rules.views;
+    let scopes = context.mutation.scopes;
+    let triggers = &context.mutation.preparation.referential.triggers;
+    let snapshots = context.snapshots;
+    let target = resolve_view_target(context, &plan.target)?;
     let analysis_scope = super::analysis::merge_analysis_scope(scopes, plan, inherited_ctes)?;
     uqa_sql::semantics::view_mutation::validate_view_merge_contract(
         rewrite,

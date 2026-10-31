@@ -12,7 +12,7 @@ use crate::{
     Engine,
 };
 use std::sync::Arc;
-use uqa_execution::query::recheck_source::LockRowsRecheckSource;
+use uqa_execution::query::recheck_source::LockRowsRecheckInput;
 use uqa_execution::query::relational::{
     QueryExpressionFactory, RelationalContext, RowLockOperatorFactory,
 };
@@ -32,6 +32,28 @@ impl Engine {
 }
 
 impl QueryExpressionFactory<StatementReadSnapshot> for Engine {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        let retained = self.query_retention_control()?;
+        Ok(uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.query_runtime_view().cancellation,
+        )
+        .capture())
+    }
+
+    fn optimize_owned_catalog_scalar(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        uqa_planner::statement_planning::schema_expressions::optimize_owned_catalog_scalar(
+            &self.statement_planning_context(),
+            expression,
+            control,
+        )
+    }
+
     fn optimize_catalog_scalar(&self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         uqa_planner::statement_planning::schema_expressions::optimize_catalog_scalar(
             &self.statement_planning_context(),
@@ -39,8 +61,9 @@ impl QueryExpressionFactory<StatementReadSnapshot> for Engine {
         )
     }
 
-    fn bind_scope(&self, scope: CteScope) -> Arc<dyn SetFunctionRuntime + '_> {
-        Arc::new(ScopedEngineHook::owned(self, scope))
+    fn bind_scope(&self, scope: &CteScope) -> Result<Arc<dyn SetFunctionRuntime + '_>, SQLError> {
+        let resources = self.production_resources()?;
+        Ok(ScopedEngineHook::owned(self, scope, &resources.control())?)
     }
 
     fn prepare_predicate<'a>(
@@ -66,7 +89,7 @@ impl RowLockOperatorFactory<StatementReadSnapshot> for Engine {
         params: &'a [SQLParam],
         scope: &CteScope,
         max_rows: Option<u64>,
-        recheck: Option<LockRowsRecheckSource<StatementReadSnapshot>>,
+        recheck: Option<LockRowsRecheckInput<'_, StatementReadSnapshot>>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
         uqa_execution::query::locking::attach_lock_rows(
             self.row_lock_context(),

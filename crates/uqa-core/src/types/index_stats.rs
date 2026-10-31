@@ -6,9 +6,16 @@
 
 //! Index statistics shared by planners and scorers.
 
-use super::{BTreeMap, FieldName};
+use super::FieldName;
+use crate::memory::OwnedMap;
+use keys::{TermIdentity, TermKey, TermRef, VectorKey};
 
+mod keys;
+mod owned;
+#[cfg(test)]
+mod tests;
 mod vector;
+pub use owned::{IndexStatsBuilder, OwnedIndexStats};
 pub use vector::{
     DiskANNIndexStats, DiskANNQueryStats, VectorGeneration, VectorPopulationStats,
     VectorQueryRoute, VectorReadStats,
@@ -20,9 +27,8 @@ pub struct IndexStats {
     pub total_docs: u64,
     pub avg_doc_length: f64,
     pub dimensions: u32,
-    doc_freqs: BTreeMap<(FieldName, String), u64>,
-    unpaired_doc_freqs: BTreeMap<(FieldName, Vec<u16>), u64>,
-    vector_queries: BTreeMap<FieldName, Vec<(Vec<u32>, DiskANNQueryStats)>>,
+    doc_freqs: OwnedMap<TermKey, u64>,
+    vector_queries: OwnedMap<VectorKey, DiskANNQueryStats>,
 }
 
 impl IndexStats {
@@ -33,9 +39,8 @@ impl IndexStats {
             total_docs,
             avg_doc_length: 0.0,
             dimensions: 0,
-            doc_freqs: BTreeMap::new(),
-            unpaired_doc_freqs: BTreeMap::new(),
-            vector_queries: BTreeMap::new(),
+            doc_freqs: OwnedMap::new(),
+            vector_queries: OwnedMap::new(),
         }
     }
 
@@ -46,52 +51,61 @@ impl IndexStats {
         query: &[f32],
         stats: DiskANNQueryStats,
     ) {
-        let entries = self.vector_queries.entry(field.into()).or_default();
-        if let Some((_, existing)) = entries.iter_mut().find(|(bits, _)| same_query(bits, query)) {
+        let field = field.into();
+        if let Some(existing) = self
+            .vector_queries
+            .get_mut_by(|key| key.compare(&field, query))
+        {
             *existing = stats;
         } else {
-            entries.push((query.iter().map(|value| value.to_bits()).collect(), stats));
+            self.vector_queries.insert(
+                VectorKey {
+                    field,
+                    bits: query.iter().map(|value| value.to_bits()).collect(),
+                },
+                stats,
+            );
         }
     }
 
     pub fn diskann_query(&self, field: &str, query: &[f32]) -> Option<&DiskANNQueryStats> {
-        self.vector_queries
-            .get(field)?
-            .iter()
-            .find_map(|(bits, stats)| same_query(bits, query).then_some(stats))
+        self.vector_queries.get_by(|key| key.compare(field, query))
     }
 
     pub fn doc_freq(&self, field: &str, term: &str) -> u64 {
         self.doc_freqs
-            .get(&(field.to_string(), term.to_string()))
+            .get_by(|key| key.compare(field, TermRef::Scalar(term)))
             .copied()
             .unwrap_or(0)
     }
 
     pub fn set_doc_freq(&mut self, field: impl Into<FieldName>, term: impl Into<String>, df: u64) {
-        self.doc_freqs.insert((field.into(), term.into()), df);
+        self.doc_freqs.insert(
+            TermKey {
+                field: field.into(),
+                term: TermIdentity::Scalar(term.into()),
+            },
+            df,
+        );
     }
 
     /// Exact UTF-16 lookup, including isolated surrogates. Scalar terms share identity with the string API.
     pub fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> u64 {
-        match String::from_utf16(term) {
-            Ok(text) => self.doc_freq(field, &text),
-            Err(_) => self
-                .unpaired_doc_freqs
-                .get(&(field.to_owned(), term.to_vec()))
-                .copied()
-                .unwrap_or(0),
-        }
+        self.doc_freqs
+            .get_by(|key| key.compare(field, TermRef::Units(term)))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Retain raw term identity without replacing unpaired units or creating a second representation for scalar text.
     pub fn set_doc_freq_utf16(&mut self, field: impl Into<FieldName>, term: Vec<u16>, df: u64) {
-        match String::from_utf16(&term) {
-            Ok(text) => self.set_doc_freq(field, text, df),
-            Err(_) => {
-                self.unpaired_doc_freqs.insert((field.into(), term), df);
-            }
-        }
+        self.doc_freqs.insert(
+            TermKey {
+                field: field.into(),
+                term: TermIdentity::Units(term),
+            },
+            df,
+        );
     }
 
     /// Builder-style insert that returns the modified [`IndexStats`].
@@ -104,12 +118,4 @@ impl IndexStats {
         self.set_doc_freq(field, term, df);
         self
     }
-}
-
-fn same_query(bits: &[u32], query: &[f32]) -> bool {
-    bits.len() == query.len()
-        && bits
-            .iter()
-            .zip(query)
-            .all(|(bits, value)| *bits == value.to_bits())
 }

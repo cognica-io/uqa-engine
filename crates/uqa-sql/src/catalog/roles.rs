@@ -93,7 +93,7 @@ impl RoleDefinition {
             object_id,
             revision: 1,
             name: statement.name.clone(),
-            attributes: statement.attributes.clone(),
+            attributes: statement.attributes.iter().copied().collect(),
             connection_limit: statement.connection_limit,
         }
     }

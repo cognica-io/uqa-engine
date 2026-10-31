@@ -134,20 +134,43 @@ impl ExplainOptions {
     }
 
     pub fn result_schema(&self) -> Result<RowSchema, SQLError> {
+        self.result_schema_with_control(&uqa_core::memory::ProductionControl::uncontrolled())
+    }
+
+    pub fn result_schema_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<RowSchema, SQLError> {
         let mut ty = ColumnType::Text;
         for option in &self.options {
+            control.check()?;
             if option.name == "format" {
-                ty = match option.text()?.as_ref() {
-                    "xml" => ColumnType::Xml,
-                    "json" => ColumnType::Json,
-                    _ => ColumnType::Text,
-                };
+                ty =
+                    match &option.value {
+                        Some(
+                            ExplainOptionValue::String(value) | ExplainOptionValue::Float(value),
+                        ) if value == "xml" => ColumnType::Xml,
+                        Some(
+                            ExplainOptionValue::String(value) | ExplainOptionValue::Float(value),
+                        ) if value == "json" => ColumnType::Json,
+                        Some(_) => ColumnType::Text,
+                        None => {
+                            return Err(diagnostic(
+                                "42601",
+                                control
+                                    .format(format_args!("{} requires a parameter", option.name))?
+                                    .into_parts()
+                                    .0,
+                            ))
+                        }
+                    };
             }
         }
-        Ok(RowSchema::with_types(
-            vec!["QUERY PLAN".into()],
-            vec![Some(ty)],
-        ))
+        RowSchema::with_column_metadata_with_control(
+            None,
+            [("QUERY PLAN", Some(&ty), None)],
+            control,
+        )
     }
 
     pub fn interpret(&self) -> Result<ExplainSettings, SQLError> {

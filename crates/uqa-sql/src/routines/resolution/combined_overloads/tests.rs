@@ -7,9 +7,10 @@
 use super::*;
 use crate::routines::{
     declaration::RoutineTypeCatalog,
-    resolution::{RoutineOverloadCatalog, RoutineTypeSnapshot},
-    CompiledFunctionBody, RoutineBody,
+    resolution::{RoutineCallKind, RoutineOverloadCatalog, RoutineTypeSnapshot},
+    CompiledFunctionBody, RoutineBody, SQLUserFunction,
 };
+use std::sync::Arc;
 
 struct Catalog {
     routines: Vec<Arc<SQLUserFunction>>,

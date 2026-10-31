@@ -10,7 +10,7 @@ use super::{Binder, BindingCall, ColumnType, SQLError};
 use crate::type_resolution::functions::{compatible_array_argument, compatible_array_result_type};
 
 /// The `anycompatible` family layout of a built-in array function, named by the function whose argument roles it shares.
-fn layout(name: &str) -> Option<(&'static str, usize)> {
+pub(super) fn layout(name: &str) -> Option<(&'static str, usize)> {
     Some(match name {
         "array_append" => ("array_append", 2),
         "array_prepend" => ("array_prepend", 2),
@@ -52,7 +52,11 @@ impl Binder<'_, '_> {
             );
         }
         let Some(array) = self
-            .semantic(compatible_array_result_type(family, &known, &self.control))?
+            .semantic(compatible_array_result_type(
+                family,
+                &known,
+                &self.context.control,
+            ))?
             .flatten()
         else {
             return Ok(());

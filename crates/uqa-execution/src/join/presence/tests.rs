@@ -8,6 +8,7 @@ use super::*;
 use crate::{
     HashJoin, NestedLoopJoin, RowSchemaExecution, ScalarEvalContext, ScalarExpr, TableScan,
 };
+use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, JoinKind};
 use uqa_sql::expr::RowLookup;
 use uqa_sql::{ColumnType, ResultRow};
@@ -205,4 +206,34 @@ fn malformed_whole_row_markers_are_not_treated_as_absent_rows() {
             .to_string()
             .contains("presence for r is unavailable or invalid"));
     }
+}
+
+#[test]
+fn output_batches_keep_nullable_schema_owners_after_the_operator_retires() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let memory = MemoryBudget::new(1 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let mut operator =
+        input_with_control(Box::new(scan("r", vec![Value::Null])), true, &control).unwrap();
+    operator.open().unwrap();
+    let batch = operator.next().unwrap().unwrap();
+    operator.close().unwrap();
+    drop(operator);
+    assert!(
+        memory.used() > 0,
+        "the result schema must retain its admitted metadata"
+    );
+    let view = batch.schema.view(&batch.rows[0]);
+    assert_eq!(
+        crate::eval_scalar(
+            &ScalarExpr::QualifiedStar("r".into()),
+            &ScalarEvalContext::from_row_lookup(&view, &[])
+        )
+        .unwrap(),
+        Value::Record(vec![("k".into(), Value::Null)].into())
+    );
+    drop(batch);
+    assert_eq!(memory.used(), 0);
 }

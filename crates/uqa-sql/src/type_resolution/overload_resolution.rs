@@ -47,10 +47,8 @@ pub use signature::match_function_signature;
 pub(super) use signature::{match_signature_with_control, SignatureParameters};
 
 mod type_names;
-pub(super) use type_names::{
-    builtin_canonical_type_name, canonical_column_type_name_with_control,
-    canonical_routine_type_name_with_control,
-};
+pub use type_names::canonical_routine_type_name_with_control;
+pub(super) use type_names::{builtin_canonical_type_name, canonical_column_type_name_with_control};
 pub use type_names::{
     canonical_column_type_name, canonical_routine_type_name, parse_enum_type_identity,
 };
@@ -160,7 +158,7 @@ pub fn routine_type_category(type_name: &str) -> char {
     canonical_type_category(&canonical_routine_type_name(type_name))
 }
 
-fn canonical_type_category(canonical: &str) -> char {
+pub(super) fn canonical_type_category(canonical: &str) -> char {
     if canonical.ends_with("[]") {
         return 'A';
     }
@@ -191,7 +189,7 @@ pub fn routine_type_is_preferred(type_name: &str) -> bool {
     canonical_type_is_preferred(&canonical_routine_type_name(type_name))
 }
 
-fn canonical_type_is_preferred(type_name: &str) -> bool {
+pub(super) fn canonical_type_is_preferred(type_name: &str) -> bool {
     matches!(
         type_name,
         "bool" | "float8" | "oid" | "text" | "timestamptz" | "interval" | "varbit"
@@ -199,8 +197,10 @@ fn canonical_type_is_preferred(type_name: &str) -> bool {
 }
 
 mod ranking;
+pub(crate) use builtin::match_builtin as match_builtin_with_control;
+pub(crate) use candidates::{Candidates, RankingCandidates};
 pub use ranking::rank_function_matches;
-pub(super) use ranking::rank_function_matches_with_control;
+pub(crate) use ranking::rank_function_matches_with_control;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchedBuiltinFunction {
@@ -231,10 +231,12 @@ impl RankedFunctionMatch for MatchedBuiltinFunction {
 }
 
 mod builtin;
-pub(crate) use builtin::resolve_local_builtin_call_with_control;
 pub use builtin::{
     builtin_binding_matches, builtin_name_matches, match_builtin_function_call,
     match_builtin_function_overload, resolve_local_builtin_overload,
+};
+pub(crate) use builtin::{
+    builtin_binding_matches_with_control, resolve_local_builtin_call_with_control,
 };
 pub(super) use builtin::{
     resolve_local_builtin_overload_with_control, select_local_builtin_with_control,

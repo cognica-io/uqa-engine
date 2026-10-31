@@ -9,10 +9,17 @@
 use crate::plan::{ExpressionPlan, QueryBlockPlan, QueryPlan, RelationalPlan};
 use crate::{ColumnIdentity, RowSchema, SQLError, ScalarExpr};
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod capture;
+mod owned;
+type OuterColumns = uqa_core::memory::OwnedMap<ColumnIdentity, crate::ast::InternalColumnRef>;
 mod scope;
+pub use owned::{
+    bind_outer_rewrite_scope_with_control, resolve_outer_expression_rewrites_owned,
+    resolve_outer_rewrites_owned, resolve_outer_sources_owned,
+};
 mod sources;
 pub use sources::{resolve_outer_source_rewrites, resolve_outer_sources};
 #[cfg(test)]
@@ -36,33 +43,60 @@ pub fn resolve_outer_expression_rewrites(
 /// An outer-column rewrite retained across an open native row descriptor. Names in an intervening query scope shadow these substitutions, even when their values are NULL.
 #[derive(Debug, Clone)]
 pub struct DeferredOuterRewrite {
-    outer_columns: Arc<BTreeMap<ColumnIdentity, crate::ast::InternalColumnRef>>,
-    replacements: Arc<BTreeMap<ColumnIdentity, OuterReplacement>>,
+    outer_columns: Arc<uqa_core::memory::Produced<OuterColumns>>,
+    replacements: replacements::Replacements,
     pub(super) shadowed_qualifiers: uqa_core::memory::OwnedSet<String>,
     pub(super) shadowed_columns: uqa_core::memory::OwnedSet<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct OuterReplacement {
     expression: ExpressionPlan,
     qualifier: String,
+    memory: Option<uqa_core::memory::MemoryReservation>,
+}
+
+fn ordinary_outer_columns(
+    columns: BTreeMap<ColumnIdentity, crate::ast::InternalColumnRef>,
+) -> Arc<uqa_core::memory::Produced<OuterColumns>> {
+    Arc::new(
+        uqa_core::memory::ProductionControl::uncontrolled()
+            .finish(columns.into_iter().collect::<OuterColumns>(), None)
+            .expect("ordinary outer columns"),
+    )
+}
+
+mod replacements;
+mod transformation;
+
+impl Clone for OuterReplacement {
+    fn clone(&self) -> Self {
+        Self {
+            expression: self.expression.clone(),
+            qualifier: self.qualifier.clone(),
+            memory: None,
+        }
+    }
 }
 
 /// Bind a pending rewrite to the complete local source descriptor without changing its retained syntax. An open descriptor cannot decide that an absent name belongs to the outer scope.
+pub(crate) fn has_resolvable_outer_rewrites(block: &QueryBlockPlan, local: &RowSchema) -> bool {
+    !block.deferred_outer_rewrites.is_empty()
+        && (!local.columns_are_open(None)
+            || block.deferred_outer_rewrites.iter().any(|rewrite| {
+                rewrite
+                    .replacements
+                    .keys()
+                    .any(|identity| identity.qualifier().is_some())
+            }))
+}
+
 pub fn resolve_outer_rewrites<'a>(
     block: &'a QueryBlockPlan,
     local: &RowSchema,
 ) -> Cow<'a, QueryBlockPlan> {
     let open = local.columns_are_open(None);
-    if block.deferred_outer_rewrites.is_empty()
-        || open
-            && !block.deferred_outer_rewrites.iter().any(|rewrite| {
-                rewrite
-                    .replacements
-                    .keys()
-                    .any(|identity| identity.qualifier().is_some())
-            })
-    {
+    if !has_resolvable_outer_rewrites(block, local) {
         return Cow::Borrowed(block);
     }
     let mut block = block.clone();
@@ -70,12 +104,16 @@ pub fn resolve_outer_rewrites<'a>(
         rewrite.add_namespace(local);
         if open {
             let mut pending = rewrite.clone();
-            Arc::make_mut(&mut pending.replacements)
+            pending
+                .replacements
+                .ordinary_mut()
                 .retain(|identity, _| identity.qualifier().is_none());
             if !pending.replacements.is_empty() {
                 block.deferred_outer_rewrites.push(pending);
             }
-            Arc::make_mut(&mut rewrite.replacements)
+            rewrite
+                .replacements
+                .ordinary_mut()
                 .retain(|identity, _| identity.qualifier().is_some());
         }
         rewrite.block(&mut block);
@@ -90,7 +128,7 @@ impl DeferredOuterRewrite {
     ) -> Result<Self, SQLError> {
         Ok(Self {
             outer_columns: Arc::clone(&self.outer_columns),
-            replacements: Arc::clone(&self.replacements),
+            replacements: self.replacements.clone(),
             shadowed_qualifiers: copying.set(&self.shadowed_qualifiers, |copying, name| {
                 copying.text(name)
             })?,
@@ -102,8 +140,8 @@ impl DeferredOuterRewrite {
     /// Bind expressions whose original input attributes already have internal identities. Nested query namespaces resolve their own names before consulting these outer replacements.
     pub(crate) fn from_inputs(inputs: BTreeMap<ColumnIdentity, ExpressionPlan>) -> Self {
         Self {
-            outer_columns: Arc::new(BTreeMap::new()),
-            replacements: Arc::new(
+            outer_columns: ordinary_outer_columns(BTreeMap::new()),
+            replacements: replacements::Replacements::ordinary(
                 inputs
                     .into_iter()
                     .map(|(identity, expression)| {
@@ -112,6 +150,7 @@ impl DeferredOuterRewrite {
                             OuterReplacement {
                                 expression,
                                 qualifier: String::new(),
+                                memory: None,
                             },
                         )
                     })
@@ -126,108 +165,27 @@ impl DeferredOuterRewrite {
         self.expression(&mut expression.scalar, &mut expression.subqueries);
     }
 
-    pub(super) fn rebase(
-        &mut self,
-        context: &super::correlation::CorrelatedRewriteContext<'_>,
-    ) -> Result<(), SQLError> {
-        for replacement in Arc::make_mut(&mut self.replacements).values_mut() {
-            super::correlation::rewrite_outer_expression(context, &mut replacement.expression)?;
-        }
-        self.capture_outer_columns();
-        Ok(())
-    }
-
-    pub(super) fn capture(
-        context: &super::correlation::CorrelatedRewriteContext<'_>,
-        block: &QueryBlockPlan,
-        shadowed_qualifiers: &BTreeSet<String>,
-        shadowed_columns: &BTreeSet<String>,
-    ) -> Result<Self, SQLError> {
-        let references = column_references(block);
-        let mut replacements = BTreeMap::new();
-        for column in &context.layer.columns {
-            for qualifier in std::iter::once(None).chain(
-                context
-                    .target_qualifiers
-                    .iter()
-                    .map(|qualifier| Some(qualifier.as_str())),
-            ) {
-                let identity = qualifier.map_or_else(
-                    || ColumnIdentity::unqualified(&column.name),
-                    |qualifier| ColumnIdentity::qualified(qualifier, &column.name),
-                );
-                if !references.contains(&identity) {
-                    continue;
-                }
-                let mut subqueries = Vec::new();
-                let scalar = super::embed_layer_expression(
-                    context.services,
-                    &column.expression,
-                    context.layer,
-                    qualifier.unwrap_or(context.default_target_qualifier),
-                    &mut subqueries,
-                )?;
-                replacements.insert(
-                    identity,
-                    OuterReplacement {
-                        expression: ExpressionPlan { scalar, subqueries },
-                        qualifier: qualifier
-                            .unwrap_or(context.default_target_qualifier)
-                            .to_owned(),
-                    },
-                );
-            }
-        }
-        if let Some(source) = context.source {
-            for column in super::schema_public_columns(source) {
-                if !references.contains(&ColumnIdentity::unqualified(&column)) {
-                    continue;
-                }
-                let Some(qualifier) = source
-                    .unqualified_position(&column)
-                    .and_then(|position| source.identity(position))
-                    .and_then(ColumnIdentity::qualifier)
-                else {
-                    continue;
-                };
-                replacements
-                    .entry(ColumnIdentity::unqualified(&column))
-                    .or_insert_with(|| OuterReplacement {
-                        expression: ExpressionPlan {
-                            scalar: ScalarExpr::qualified_column(qualifier, &column),
-                            subqueries: Vec::new(),
-                        },
-                        qualifier: qualifier.to_owned(),
-                    });
-            }
-        }
-        let mut rewrite = Self {
-            outer_columns: Arc::new(BTreeMap::new()),
-            replacements: Arc::new(replacements),
-            shadowed_qualifiers: shadowed_qualifiers.iter().cloned().collect(),
-            shadowed_columns: shadowed_columns.iter().cloned().collect(),
-        };
-        rewrite.capture_outer_columns();
-        Ok(rewrite)
-    }
-
     pub(crate) fn expressions(&self) -> impl Iterator<Item = &ExpressionPlan> {
         self.replacements
             .values()
             .map(|replacement| &replacement.expression)
     }
 
-    pub(crate) fn visit_scalar_expressions(&self, visit: &mut dyn FnMut(&ScalarExpr)) {
+    pub(crate) fn try_visit_scalar_expressions<'a, E>(
+        &'a self,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
+    ) -> Result<(), E> {
         for expression in self.expressions() {
-            visit(&expression.scalar);
+            visit(&expression.scalar)?;
             for query in &expression.subqueries {
-                query.visit_scalar_expressions(visit);
+                query.try_visit_scalar_expressions(visit)?;
             }
         }
+        Ok(())
     }
 
     pub(crate) fn rewrite_scalar_expressions(&mut self, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
-        for replacement in Arc::make_mut(&mut self.replacements).values_mut() {
+        for replacement in self.replacements.ordinary_mut().values_mut() {
             let expression = &mut replacement.expression;
             crate::plan::rewrite_scalar_expression(&mut expression.scalar, rewrite);
             for query in &mut expression.subqueries {
@@ -258,7 +216,9 @@ impl DeferredOuterRewrite {
         let mut rewrite = self.clone();
         rewrite.add_namespace(local);
         if local.columns_are_open(None) {
-            Arc::make_mut(&mut rewrite.replacements)
+            rewrite
+                .replacements
+                .ordinary_mut()
                 .retain(|identity, _| identity.qualifier().is_some());
         }
         rewrite
@@ -349,7 +309,7 @@ impl DeferredOuterRewrite {
                     .iter_mut()
                     .find(|previous| Arc::ptr_eq(&previous.outer_columns, &self.outer_columns))
                 {
-                    Arc::make_mut(&mut previous.replacements).extend(
+                    previous.replacements.ordinary_mut().extend(
                         self.replacements
                             .iter()
                             .map(|(identity, expression)| (identity.clone(), expression.clone())),
@@ -393,48 +353,19 @@ impl DeferredOuterRewrite {
     }
 }
 
-fn column_references(block: &QueryBlockPlan) -> BTreeSet<ColumnIdentity> {
-    let mut references = BTreeSet::new();
-    let mut visit = |expression: &ScalarExpr| {
-        expression.visit(&mut |node| match node {
-            ScalarExpr::Column(column) => {
-                references.insert(ColumnIdentity::unqualified(column));
-            }
-            ScalarExpr::QualifiedColumn { qualifier, column } => {
-                references.insert(ColumnIdentity::qualified(qualifier, column));
-            }
-            _ => {}
-        });
-    };
-    for expression in block
-        .projections
-        .iter()
-        .map(|projection| &projection.expr)
-        .chain(block.r#where.iter())
-        .chain(&block.group_by)
-        .chain(block.grouping_sets.iter().flatten())
-        .chain(block.having.iter())
-        .chain(block.order_by.iter().map(|order| &order.expr))
-        .chain(block.limit.iter())
-        .chain(block.offset.iter())
-        .chain(&block.distinct_on)
-        .chain(
-            block
-                .windows
-                .iter()
-                .flat_map(|window| window.spec.expressions()),
-        )
-    {
-        visit(expression);
+impl uqa_core::memory::ObserveAllocations for DeferredOuterRewrite {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        let Self {
+            outer_columns: _,
+            replacements: _,
+            shadowed_qualifiers,
+            shadowed_columns,
+        } = self;
+        observer.child(shadowed_qualifiers)?;
+        observer.child(shadowed_columns)?;
+        Ok(())
     }
-    if let Some(source) = &block.from {
-        source.visit_scalar_expressions(&mut visit);
-    }
-    for query in &block.subqueries {
-        query.visit_scalar_expressions(&mut visit);
-    }
-    for rewrite in &block.deferred_outer_rewrites {
-        rewrite.visit_scalar_expressions(&mut visit);
-    }
-    references
 }

@@ -14,7 +14,7 @@ pub struct PreparedStatement {
     name: String,
     source: Arc<uqa_sql::Statement>,
     owner: Weak<crate::state::SessionContext>,
-    definition: Weak<uqa_sql::plan::UnifiedPlan>,
+    definition: Weak<()>,
 }
 
 /// Preparation-time parameter and positional result descriptors.
@@ -26,7 +26,9 @@ pub struct PreparedStatementDescription {
 impl PreparedStatement {
     fn matches(&self, engine: &Engine, entry: &super::PreparedStatementPlan) -> bool {
         self.owner.ptr_eq(&Arc::downgrade(&engine.session))
-            && self.definition.ptr_eq(&Arc::downgrade(&entry.source_plan))
+            && self
+                .definition
+                .ptr_eq(&Arc::downgrade(&entry.definition_identity))
     }
 
     fn invalid(&self) -> SQLError {
@@ -82,7 +84,7 @@ impl Engine {
                     name,
                     source,
                     owner: Arc::downgrade(&engine.session),
-                    definition: Arc::downgrade(&entry.source_plan),
+                    definition: Arc::downgrade(&entry.definition_identity),
                 })
             },
         )
@@ -132,9 +134,10 @@ impl Engine {
             },
             |entry| {
                 if let Some(definition) =
-                    uqa_planner::statement_planning::prepared::selection::describe_entry(
+                    uqa_planner::statement_planning::prepared::selection::describe_entry_with_control(
                         &self.prepared_definition_context(),
                         &entry,
+                        &<Self as uqa_execution::routines::context::RoutineStatements>::planning_resources(self)?.control(),
                     )?
                 {
                     let mut registry = self.session.prepared.write();
@@ -142,12 +145,12 @@ impl Engine {
                         .get_mut(&statement.name)
                         .filter(|current| statement.matches(self, current))
                         .ok_or_else(|| statement.invalid())?;
-                    if Arc::ptr_eq(&current.logical_plan, &entry.logical_plan) {
+                    if current.logical_plan.ptr_eq(&entry.logical_plan) {
                         current.record_analysis(definition);
                     }
                 }
                 Ok(PreparedStatementDescription {
-                    parameter_types: entry.parameter_types,
+                    parameter_types: entry.parameter_types.to_vec(),
                     result_schema: entry.result_schema,
                 })
             },
@@ -183,7 +186,7 @@ impl Engine {
                 self.execute_compiled_prepared(
                     &statement.name,
                     Arc::clone(&statement.source),
-                    sql.as_deref(),
+                    sql.as_ref().map(|sql| sql.as_str()),
                     params,
                 )
             },
@@ -227,15 +230,17 @@ impl Engine {
             .prepared
             .read()
             .get(name)
-            .map(|entry| entry.parameter_types.clone())
+            .map(|entry| entry.parameter_types.to_vec())
     }
 
-    pub fn lookup_prepared(&self, name: &str) -> Option<uqa_planner::UnifiedPlan> {
-        self.session
-            .prepared
-            .read()
-            .get(name)
-            .map(|entry| entry.plan.as_ref().unwrap_or(&entry.logical_plan).clone())
+    /// Retain the current generic executable, or its analyzed input before planning, without copying the plan tree.
+    pub fn lookup_prepared(&self, name: &str) -> Option<uqa_sql::plan::SharedExecutablePlan> {
+        self.session.prepared.read().get(name).map(|entry| {
+            entry
+                .plan
+                .clone()
+                .unwrap_or_else(|| entry.logical_plan.clone())
+        })
     }
 
     /// Invalidate executable plans without removing connection-owned definitions.

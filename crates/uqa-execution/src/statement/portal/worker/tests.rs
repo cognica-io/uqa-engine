@@ -185,13 +185,19 @@ fn dropping_the_worker_closes_and_joins_its_thread() {
     assert!(closed.load(std::sync::atomic::Ordering::Acquire));
 }
 
-struct UnopenedQuery;
+struct ScopeCapture(Option<&'static str>);
 
-impl StatementQueryContexts<()> for UnopenedQuery {
+impl StatementQueryContexts<()> for ScopeCapture {
     fn statement_scope(
         &self,
         _: Option<&uqa_sql::catalog::roles::RoleReference>,
-    ) -> crate::query::CteScope<()> {
+    ) -> Result<crate::query::CteScope<()>, SQLError> {
+        if let Some(sqlstate) = self.0 {
+            return Err(SQLError::Routine {
+                sqlstate: sqlstate.into(),
+                message: "scope admission failed".into(),
+            });
+        }
         panic!("a portal must wait for a step before capturing its catalog scope")
     }
     fn query_context(&self) -> crate::query::statement::context::QueryContext<'_, ()> {
@@ -210,6 +216,20 @@ impl StatementQueryContexts<()> for UnopenedQuery {
     }
 }
 
+fn scope_thread_context() -> crate::statement::thread_context::StatementThreadContext {
+    crate::statement::thread_context::StatementThreadContext {
+        retained_rows: crate::query::sources::retained_source::RetainedRowContext::default(),
+        io: uqa_core::io_usage::IOContext::default(),
+        regex_cache: None,
+        temporal_input: uqa_sql::expr::TemporalInputContext {
+            transaction_clock_micros: Some(313),
+            date_order: uqa_core::TemporalDateOrder::DayMonthYear,
+            interval_style: uqa_core::TemporalIntervalStyle::SqlStandard,
+        },
+        cancellation: Some(uqa_core::CancellationToken::new()),
+    }
+}
+
 fn unopened_worker(directional: bool) -> Vec<SessionPortalWorkerResponse> {
     let (requests, request_rx) = mpsc::channel();
     let (response_tx, responses) = mpsc::channel();
@@ -223,18 +243,8 @@ fn unopened_worker(directional: bool) -> Vec<SessionPortalWorkerResponse> {
         panic!("expected a query");
     };
     run(
-        &UnopenedQuery,
-        &crate::statement::thread_context::StatementThreadContext {
-            retained_rows: crate::query::sources::retained_source::RetainedRowContext::default(),
-            io: uqa_core::io_usage::IOContext::default(),
-            regex_cache: None,
-            temporal_input: uqa_sql::expr::TemporalInputContext {
-                transaction_clock_micros: Some(313),
-                date_order: uqa_core::TemporalDateOrder::DayMonthYear,
-                interval_style: uqa_core::TemporalIntervalStyle::SqlStandard,
-            },
-            cancellation: Some(uqa_core::CancellationToken::new()),
-        },
+        &ScopeCapture(None),
+        &scope_thread_context(),
         &query,
         &[],
         directional,
@@ -255,4 +265,36 @@ fn prestart_rewind_acknowledges_without_capturing_a_query_scope() {
 #[test]
 fn prestart_forward_only_rewind_exits_without_capturing_a_query_scope() {
     assert!(unopened_worker(false).is_empty());
+}
+
+#[test]
+fn scope_capture_failure_is_the_portals_only_response_after_its_first_step() {
+    for sqlstate in ["53200", "57014"] {
+        let (requests, request_rx) = mpsc::channel();
+        let (response_tx, responses) = mpsc::channel();
+        requests
+            .send(SessionPortalWorkerRequest::Step(
+                crate::PhysicalScanDirection::Forward,
+                None,
+            ))
+            .unwrap();
+        let UnifiedPlan::Query(query) =
+            UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        run(
+            &ScopeCapture(Some(sqlstate)),
+            &scope_thread_context(),
+            &query,
+            &[],
+            false,
+            request_rx,
+            response_tx,
+        );
+        let responses = responses.into_iter().collect::<Vec<_>>();
+        assert!(
+            matches!(responses.as_slice(), [SessionPortalWorkerResponse::Error(error)] if error.sqlstate()==Some(sqlstate) && error.to_string()=="scope admission failed")
+        );
+    }
 }

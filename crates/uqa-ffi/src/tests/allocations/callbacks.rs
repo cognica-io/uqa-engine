@@ -293,6 +293,7 @@ unsafe fn failed_domain_input(flags: UQAOpenFlags, skip: usize, transaction: boo
     let mut host = Host::default();
     assert_eq!(uqa_value_create_bool(1, &raw mut host.value), UQA_OK);
     let db = Database::new(flags);
+    let memory = (&*db.engine).session.memory.clone();
     let mut function = ptr::null_mut();
     assert_eq!(
         Kind::Scalar.register(&db, &mut host, &raw mut function),
@@ -303,33 +304,47 @@ unsafe fn failed_domain_input(flags: UQAOpenFlags, skip: usize, transaction: boo
         db.sql(c"BEGIN; SAVEPOINT domain_input");
     }
     let mut value = ptr::null_mut();
-    let bytes = db.bytes();
-    let status = target::reject_named(std::any::type_name::<UQAValue>(), skip, || {
-        uqa_value_create_from_text(
-            db.engine,
-            c"callback_input".as_ptr(),
-            c"17".as_ptr(),
-            &raw mut value,
-        )
-    });
-    verify_callback_allocation_failure(status);
-    assert!(value.is_null());
-    assert_eq!(
-        db.state(),
-        if transaction {
-            UQA_TRANSACTION_FAILED
-        } else {
-            UQA_TRANSACTION_IDLE
-        }
-    );
-    assert_eq!(db.bytes(), bytes);
-    if transaction {
+    for invocation in 0..2 {
+        let bytes = db.bytes();
+        let status = target::reject_named(std::any::type_name::<UQAValue>(), skip, || {
+            uqa_value_create_from_text(
+                db.engine,
+                c"callback_input".as_ptr(),
+                c"17".as_ptr(),
+                &raw mut value,
+            )
+        });
+        verify_callback_allocation_failure(status);
+        assert!(value.is_null());
         assert_eq!(
-            uqa_savepoint_rollback(db.engine, c"domain_input".as_ptr()),
-            UQA_OK
+            db.state(),
+            if transaction {
+                UQA_TRANSACTION_FAILED
+            } else {
+                UQA_TRANSACTION_IDLE
+            }
         );
+        if invocation == 0 {
+            // Successful procedural preparation belongs to the session even when invocation fails.
+            assert!(
+                db.bytes() > bytes,
+                "cold invocation must retain its admitted preparation"
+            );
+        } else {
+            assert_eq!(
+                db.bytes(),
+                bytes,
+                "repeated failure must release every transient owner"
+            );
+        }
+        if transaction {
+            assert_eq!(
+                uqa_savepoint_rollback(db.engine, c"domain_input".as_ptr()),
+                UQA_OK
+            );
+        }
+        assert_eq!(db.integer(c"SELECT count(*) FROM domain_effects"), 0);
     }
-    assert_eq!(db.integer(c"SELECT count(*) FROM domain_effects"), 0);
     assert_eq!(
         uqa_value_create_from_text(
             db.engine,
@@ -339,13 +354,27 @@ unsafe fn failed_domain_input(flags: UQAOpenFlags, skip: usize, transaction: boo
         ),
         UQA_OK
     );
-    assert_eq!(db.integer(c"SELECT n FROM domain_effects"), 17);
+    let bytes = db.bytes();
     assert_eq!(uqa_value_destroy(&raw mut value), UQA_OK);
+    let released = bytes
+        .checked_sub(db.bytes())
+        .expect("value destruction cannot retain storage");
+    assert!(
+        released >= size_of::<UQAValue>(),
+        "the public value allocation must retire immediately"
+    );
+    assert_eq!(db.integer(c"SELECT n FROM domain_effects"), 17);
     if transaction {
         assert_eq!(uqa_transaction_rollback(db.engine), UQA_OK);
     }
     assert_eq!(uqa_udf_unregister(&raw mut function), UQA_OK);
     assert_eq!(host.retired.load(Ordering::SeqCst), 1);
+    drop(db);
+    assert_eq!(
+        memory.used(),
+        0,
+        "session closure must retire every retained cache and handle"
+    );
 }
 
 #[test]

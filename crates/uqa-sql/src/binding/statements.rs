@@ -17,13 +17,38 @@ use uqa_core::Value;
 /// Borrow binding inputs only when the statement's semantic branch requires them.
 pub trait StatementBindingScope {
     fn binding_context(&self) -> Result<BindingContext<'_>, SQLError>;
+
+    fn binding_context_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<super::production::ControlledBindingContext<'_>, SQLError> {
+        self.binding_context()?.copy_with_control(control)
+    }
 }
 pub type StatementAnalysisOperation<'a> =
     &'a mut dyn FnMut(&dyn StatementBindingScope) -> Result<(), SQLError>;
 
+pub type ControlledStatementAnalysisOperation<'a> =
+    &'a mut dyn FnMut(super::production::ControlledBindingContext<'_>) -> Result<(), SQLError>;
+
 /// Retain a fresh catalog, namespace and transition scope for each statement analysis.
 pub trait StatementAnalysisScopes {
+    /// Request ownership precedes analysis; optimizer catalog callbacks remain after successful analysis.
+    fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
+    }
+
     fn with_scope(&self, analyze: StatementAnalysisOperation<'_>) -> Result<(), SQLError>;
+
+    /// Native scopes construct their retained inputs under the caller's control; external factories preserve their scope callback.
+    fn with_controlled_scope(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        analyze: ControlledStatementAnalysisOperation<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.with_scope(&mut |scope| analyze(scope.binding_context_with_control(control)?))
+    }
 }
 
 /// A nested command retains its enclosing CTE bindings while the session supplies fresh statement metadata and admission.
@@ -33,6 +58,25 @@ pub struct InheritedStatementAnalysisScopes<'a> {
 }
 
 impl StatementAnalysisScopes for InheritedStatementAnalysisScopes<'_> {
+    fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        self.current.planning_control()
+    }
+
+    fn with_controlled_scope(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        analyze: ControlledStatementAnalysisOperation<'_>,
+    ) -> Result<(), SQLError> {
+        self.current
+            .with_controlled_scope(control, &mut |mut binding| {
+                let parent = self.parent.binding_context_with_control(control)?;
+                binding.ctes = parent.ctes;
+                binding.deferred_ctes = parent.deferred_ctes;
+                binding.non_returning_ctes = parent.non_returning_ctes;
+                analyze(binding)
+            })
+    }
+
     fn with_scope(&self, analyze: StatementAnalysisOperation<'_>) -> Result<(), SQLError> {
         self.current.with_scope(&mut |scope| {
             let mut binding = super::snapshot::BindingSnapshot::from(scope.binding_context()?);
@@ -89,7 +133,12 @@ pub fn analyze_executable_plan(
 }
 
 mod procedural;
-pub use procedural::{analyze_procedural_plan, ProceduralPlanAnalysis};
+mod production;
+pub use procedural::{
+    analyze_procedural_plan, analyze_procedural_plan_owned, OwnedProceduralPlanAnalysis,
+    ProceduralPlanAnalysis,
+};
+pub use production::analyze_reusable_inputs_owned;
 mod cache;
 pub use cache::{analyze_for_statement_reuse, AnalyzedStatement};
 
@@ -104,7 +153,8 @@ pub fn analyze_executable_plan_for_cache(
         .map(|(result, reusable)| (result, reusable && params.is_empty()))
 }
 
-fn analyze_reusable_inputs(
+/// Analyze in the selected scope and report whether immutable input conversions can survive ordinary messages. Callers capture optimizer resources only after successful analysis, then retain reusable syntax through `AnalyzedStatement`.
+pub fn analyze_reusable_inputs(
     context: &StatementAnalysisContext<'_>,
     plan: &mut UnifiedPlan,
     params: &[SQLParam],

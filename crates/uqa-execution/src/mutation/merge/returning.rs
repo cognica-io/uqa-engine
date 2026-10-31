@@ -76,7 +76,13 @@ pub fn build_merge_returning_row<S: Clone + 'static>(
         input.source_relation,
         returning,
     )?;
-    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    let snapshot_scope = ctes.returning_statement_snapshot_scope_with_control(
+        &context
+            .relational
+            .expressions
+            .production_resources()?
+            .control(),
+    )?;
     build_projection_physical_row_with_ctes(
         context.relational,
         &row,
@@ -182,7 +188,13 @@ pub fn build_view_merge_returning_row<S: Clone + 'static>(
         input.source_relation,
         returning,
     )?;
-    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    let snapshot_scope = ctes.returning_statement_snapshot_scope_with_control(
+        &context
+            .relational
+            .expressions
+            .production_resources()?
+            .control(),
+    )?;
     build_projection_physical_row_with_ctes(
         context.relational,
         &row,

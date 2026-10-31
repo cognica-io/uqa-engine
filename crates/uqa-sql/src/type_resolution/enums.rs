@@ -11,6 +11,7 @@ use crate::ast::{
     ColumnType, EnumFunctionOperation, EnumTypeReference, FunctionBinding, FunctionDispatch,
 };
 use crate::SQLError;
+use uqa_core::memory::{Produced, ProductionControl};
 
 /// The enum type selected by the `anyenum` arguments of one call.
 pub(crate) enum EnumArgumentType<'a> {
@@ -54,19 +55,30 @@ pub(crate) fn enum_argument_type<'a>(
     selected.map_or(EnumArgumentType::Unknown, EnumArgumentType::Enum)
 }
 
-/// The result type of an enum support function for its concrete enum type.
-#[must_use]
-pub(crate) fn result_type(
+/// Admit the selected enum metadata and array wrapper before allocating their result storage.
+pub(crate) fn result_type_with_control(
     operation: EnumFunctionOperation,
     reference: &EnumTypeReference,
-) -> ColumnType {
-    match operation {
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    control.check()?;
+    let ty = match operation {
         EnumFunctionOperation::First
         | EnumFunctionOperation::Last
         | EnumFunctionOperation::Smaller
-        | EnumFunctionOperation::Larger => ColumnType::Enum(reference.clone()),
-        EnumFunctionOperation::Range | EnumFunctionOperation::BoundedRange => {
-            ColumnType::Array(Box::new(ColumnType::Enum(reference.clone())))
+        | EnumFunctionOperation::Larger
+        | EnumFunctionOperation::Range
+        | EnumFunctionOperation::BoundedRange => {
+            let (reference, memory) = reference.clone_with_control(control)?.into_parts();
+            let ty = control.finish(ColumnType::Enum(reference), memory)?;
+            return if matches!(
+                operation,
+                EnumFunctionOperation::Range | EnumFunctionOperation::BoundedRange
+            ) {
+                ColumnType::array_with_control(ty, control).map_err(Into::into)
+            } else {
+                Ok(ty)
+            };
         }
         EnumFunctionOperation::Compare | EnumFunctionOperation::Hash => ColumnType::Integer,
         EnumFunctionOperation::ExtendedHash => ColumnType::BigInteger,
@@ -76,7 +88,8 @@ pub(crate) fn result_type(
         | EnumFunctionOperation::Greater
         | EnumFunctionOperation::LessEqual
         | EnumFunctionOperation::GreaterEqual => ColumnType::Boolean,
-    }
+    };
+    Ok(control.finish(ty, control.empty_reservation())?)
 }
 
 fn polymorphic_unknown() -> SQLError {
@@ -86,12 +99,14 @@ fn polymorphic_unknown() -> SQLError {
     }
 }
 
-/// Type a bound or unbound enum support-function call. `None` leaves an unmatched call to ordinary function resolution, which reports `42883`.
-pub(super) fn function_type(
+/// Retain only the result's concrete enum metadata; borrowed argument types keep their original owners.
+pub(super) fn function_type_with_control(
     name: &str,
     binding: Option<&FunctionBinding>,
     arguments: &[Option<&ColumnType>],
-) -> Result<Option<ColumnType>, SQLError> {
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
     let operation = match binding {
         Some(FunctionBinding {
             dispatch: Some(FunctionDispatch::Enum { operation, .. }),
@@ -104,8 +119,96 @@ pub(super) fn function_type(
         },
     };
     match enum_argument_type(operation, arguments) {
-        EnumArgumentType::Enum(reference) => Ok(Some(result_type(operation, reference))),
+        EnumArgumentType::Enum(reference) => {
+            result_type_with_control(operation, reference, control).map(Some)
+        }
         EnumArgumentType::Unknown => Err(polymorphic_unknown()),
         EnumArgumentType::Mismatch => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+
+    fn enum_type() -> ColumnType {
+        ColumnType::Enum(EnumTypeReference {
+            schema: "schema".repeat(256),
+            name: "label_type".repeat(256),
+            oid: 16_400,
+            array_oid: 16_401,
+        })
+    }
+
+    #[test]
+    fn enum_result_inference_owns_only_selected_result_storage() {
+        let input = enum_type();
+        for name in ["enum_first", "enum_range", "hashenum"] {
+            let budget = MemoryBudget::new(1 << 20);
+            let token = CancellationToken::new();
+            let control = ProductionControl::new(&budget, &token, &token);
+            let mut output = None;
+            let allocated = allocation_counter::measure(|| {
+                output = function_type_with_control(name, None, &[Some(&input)], &control).unwrap();
+            });
+            let output = output.unwrap();
+            assert_eq!(
+                allocated.bytes_current,
+                i64::try_from(budget.used()).unwrap()
+            );
+            assert_eq!(output.reserved_bytes(), budget.used());
+            let expected = match name {
+                "enum_first" => input.clone(),
+                "enum_range" => ColumnType::Array(Box::new(input.clone())),
+                "hashenum" => ColumnType::Integer,
+                _ => unreachable!(),
+            };
+            assert_eq!(*output, expected);
+            if name == "hashenum" {
+                assert_eq!(budget.used(), 0);
+            }
+            drop(output);
+            assert_eq!(budget.used(), 0);
+        }
+    }
+
+    #[test]
+    fn enum_result_rejection_retires_partial_metadata_and_preserves_arguments() {
+        let input = enum_type();
+        let ColumnType::Enum(reference) = &input else {
+            unreachable!()
+        };
+        let retained_names = reference.schema.len() + reference.name.len();
+        for allowance in [
+            reference.schema.len() - 1,
+            retained_names - 1,
+            retained_names,
+        ] {
+            let budget = MemoryBudget::new(allowance + 17);
+            let token = CancellationToken::new();
+            let control = ProductionControl::new(&budget, &token, &token);
+            let sibling = budget.reserve(17).unwrap();
+            let error = function_type_with_control("enum_range", None, &[Some(&input)], &control)
+                .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("53200"));
+            assert_eq!(budget.used(), sibling.bytes());
+            assert_eq!(reference.name.len(), "label_type".len() * 256);
+        }
+        for cancel_original in [false, true] {
+            let budget = MemoryBudget::new(1 << 20);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            if cancel_original {
+                original.cancel();
+            } else {
+                invoking.cancel();
+            }
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            let error = function_type_with_control("enum_range", None, &[Some(&input)], &control)
+                .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("57014"));
+            assert_eq!(budget.used(), 0);
+        }
     }
 }

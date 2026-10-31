@@ -16,15 +16,17 @@ mod windows;
 
 pub(super) use calls::validate_call;
 pub(super) use functions::validate_window_function;
-pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
+pub(super) use query_sources::with_query_source_columns;
+pub(super) use query_sources::{
+    with_projected_open_columns_with_control, with_query_source_columns_with_control,
+};
 pub(super) use windows::references_local_column;
 
 use super::type_resolution::ValidatedSubqueries;
 use super::{QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
 use crate::ast::{ColumnType, FunctionBinding};
 use crate::routines::RoutineResolution;
-use crate::semantics::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
-use crate::{ColumnIdentity, FunctionTypeResolver, RowSchema};
+use crate::{FunctionTypeResolver, RowSchema};
 
 pub(super) struct TableFunctionSourceValidation<'a> {
     pub(super) name: &'a str,
@@ -220,7 +222,7 @@ impl SchemaScope {
         schema: &RowSchema,
         fallback: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
-        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = self.with_stored_outer_internal_aliases(schema)?;
         let resolver = queries.resolver(self, std::slice::from_ref(expression), &schema)?;
         Self::validate_expression_references_with_resolver(
             self.rule_condition_event,
@@ -243,7 +245,7 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
-        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = self.with_stored_outer_internal_aliases(schema)?;
         super::preparation::condition_metadata(
             self,
             engine,
@@ -266,7 +268,7 @@ impl SchemaScope {
         construct: &str,
         schema: &RowSchema,
     ) -> Result<(), SQLError> {
-        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = self.with_stored_outer_internal_aliases(schema)?;
         let resolver = queries.resolver(self, std::slice::from_ref(condition), &schema)?;
         Self::validate_expression_references_with_resolver(
             self.rule_condition_event,
@@ -309,7 +311,7 @@ impl SchemaScope {
         &mut self,
         engine: &dyn RoutineResolution,
         request: TableFunctionSourceValidation<'_>,
-    ) -> Result<Option<crate::semantics::ResolvedUserTableFunction>, SQLError> {
+    ) -> Result<Option<crate::semantics::ControlledUserTableFunction>, SQLError> {
         let TableFunctionSourceValidation {
             name,
             binding,
@@ -331,69 +333,38 @@ impl SchemaScope {
                 &resolver,
             )?;
         }
-        functions::validate_table_function(engine, name, binding, args, input, params, &resolver)
+        functions::validate_table_function(
+            crate::semantics::TableFunctionAnalysis {
+                routines: engine,
+                types: &resolver,
+            },
+            name,
+            binding,
+            args,
+            input,
+            params,
+            &self.control(),
+        )
     }
 }
 
-pub(super) fn with_table_pseudo_columns(schema: &RowSchema, qualifier: &str) -> RowSchema {
-    let columns = [
-        (
-            ColumnIdentity::qualified(qualifier, "_doc_id"),
-            Some(ColumnType::BigInteger),
-        ),
-        (
-            ColumnIdentity::qualified(qualifier, "_score"),
-            Some(ColumnType::DoublePrecision),
-        ),
-        (
-            ColumnIdentity::qualified(qualifier, "tableoid"),
-            Some(ColumnType::Oid),
-        ),
-        (
-            ColumnIdentity::qualified(qualifier, "xmin"),
-            Some(ColumnType::Xid),
-        ),
-    ];
-    RowSchema::with_typed_virtual_identities(schema, &columns)
-}
-
-pub(super) fn with_unqualified_table_pseudo_columns(schema: &RowSchema) -> RowSchema {
-    let Some(qualifier) = functions::single_pseudo_column_qualifier(schema) else {
-        return schema.clone();
-    };
-    let columns = [
-        (
-            ColumnIdentity::unqualified("_doc_id"),
-            schema.qualified_type(&qualifier, "_doc_id").cloned(),
-        ),
-        (
-            ColumnIdentity::unqualified("_score"),
-            schema.qualified_type(&qualifier, "_score").cloned(),
-        ),
-        (
-            ColumnIdentity::unqualified("tableoid"),
-            schema.qualified_type(&qualifier, "tableoid").cloned(),
-        ),
-        (
-            ColumnIdentity::unqualified("xmin"),
-            schema.qualified_type(&qualifier, "xmin").cloned(),
-        ),
-    ];
-    let schema = RowSchema::with_typed_virtual_identities(schema, &columns);
-    if schema.has_qualifier(META_QUALIFIER) {
-        return schema;
-    }
-    RowSchema::with_typed_virtual_identities(
-        &schema,
-        &[
+pub(super) fn with_table_pseudo_columns_with_control(
+    schema: &RowSchema,
+    qualifier: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    RowSchema::with_virtual_columns_with_control(
+        schema,
+        [
+            (Some(qualifier), "_doc_id", Some(&ColumnType::BigInteger)),
             (
-                ColumnIdentity::qualified(META_QUALIFIER, META_DOC_ID_COLUMN),
-                Some(ColumnType::BigInteger),
+                Some(qualifier),
+                "_score",
+                Some(&ColumnType::DoublePrecision),
             ),
-            (
-                ColumnIdentity::qualified(META_QUALIFIER, META_SCORE_COLUMN),
-                Some(ColumnType::DoublePrecision),
-            ),
+            (Some(qualifier), "tableoid", Some(&ColumnType::Oid)),
+            (Some(qualifier), "xmin", Some(&ColumnType::Xid)),
         ],
+        control,
     )
 }

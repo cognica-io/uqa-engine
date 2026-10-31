@@ -30,12 +30,55 @@ pub trait RoutineTypeCatalog {
     }
     fn try_describe_table(&self, reference: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType>;
+    fn resolve_catalog_column_type_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        control.check()?;
+        self.resolve_catalog_column_type(name)
+            .map(|ty| {
+                if control.budget().is_none() {
+                    Ok(control.finish(ty, None)?)
+                } else {
+                    ty.clone_with_control(control).map_err(Into::into)
+                }
+            })
+            .transpose()
+    }
     fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError>;
+    /// An external catalog may return owned metadata; native catalogs override this to admit the selected projection before allocation.
+    fn resolve_catalog_column_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<ColumnType>, SQLError> {
+        control.check()?;
+        let ty = self.resolve_catalog_column_type_name(name)?;
+        if control.budget().is_none() {
+            Ok(control.finish(ty, None)?)
+        } else {
+            ty.clone_with_control(control).map_err(Into::into)
+        }
+    }
     fn resolve_catalog_user_type_by_oid(&self, oid: u32) -> Option<ColumnType>;
     /// `USAGE` on a type a routine declares, as [`crate::FunctionTypeResolver::require_type_usage`] requires it.
     fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError>;
     /// The name `PostgreSQL`'s `format_type_be` gives a type in messages.
     fn format_type(&self, ty: &ColumnType) -> Result<String, SQLError>;
+    fn format_type_with_control(
+        &self,
+        ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        control.check()?;
+        let name = self.format_type(ty)?;
+        if control.budget().is_none() {
+            Ok(control.finish(name, None)?)
+        } else {
+            control.copy_text(&name).map_err(Into::into)
+        }
+    }
     /// Render a carried record field's type identity in a runtime diagnostic.
     fn format_type_oid(&self, oid: u32) -> Result<String, SQLError> {
         match self.resolve_catalog_user_type_by_oid(oid) {

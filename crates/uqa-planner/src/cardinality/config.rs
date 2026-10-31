@@ -6,7 +6,7 @@
 
 //! Estimator construction and statistics attachment.
 
-use super::{Arc, BTreeMap, CardinalityEstimator, ColumnStats, GraphStats, GraphStoreSampler};
+use super::{Arc, CardinalityEstimator, ColumnStatistics, GraphStats, GraphStoreSampler};
 
 impl CardinalityEstimator {
     pub fn new() -> Self {
@@ -14,14 +14,14 @@ impl CardinalityEstimator {
             default_selectivity: 0.1,
             like_selectivity: 0.05,
             range_selectivity: 0.3,
-            column_stats: BTreeMap::new(),
+            column_stats: ColumnStatistics::default(),
             graph_stats: None,
             graph_store: None,
         }
     }
 
-    pub fn with_column_stats(mut self, stats: BTreeMap<String, ColumnStats>) -> Self {
-        self.column_stats = stats;
+    pub fn with_column_stats(mut self, stats: impl Into<ColumnStatistics>) -> Self {
+        self.column_stats = stats.into();
         self
     }
 

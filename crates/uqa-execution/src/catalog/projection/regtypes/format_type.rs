@@ -12,6 +12,9 @@ use super::{
 };
 use uqa_sql::ColumnType;
 
+mod production;
+pub use production::format_type_name_with_control;
+
 /// The name `PostgreSQL`'s `format_type_be` gives a type in messages: a built-in type by its SQL name without type modifiers, and a domain by its name, qualified only when the search path does not find it.
 pub fn format_type_name(context: &CatalogContext<'_>, ty: &ColumnType) -> Result<String, SQLError> {
     let oid = uqa_sql::catalog::type_metadata::pg_type_oid(ty);

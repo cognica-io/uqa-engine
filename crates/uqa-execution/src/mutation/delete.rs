@@ -38,13 +38,16 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
+    let resources = context.query.source.ctes.production_resources()?;
+    let control = resources.control();
     let privilege_expressions =
-        uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges(
+        uqa_sql::semantics::mutation_privileges::ensure_delete_target_privileges_with_control(
             context.mutation.privileges,
             stmt,
+            &control,
         )?;
     let (statement_commands, _running_statement) =
-        statement_end::statement_commands(inherited_ctes);
+        statement_end::statement_commands(context.query.source.ctes, inherited_ctes)?;
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     context.query.source.locking.session.lock_relation(
         &stmt.table,
@@ -107,7 +110,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 stmt.relations_bound,
             )?);
             if let Some(parent) = inherited_ctes {
-                ctes.inherit_cte_bindings(parent);
+                ctes.inherit_cte_bindings_with_control(parent, &control)?;
             }
             ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
@@ -125,7 +128,11 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
+            let arena_resources = context.query.source.ctes.production_resources()?;
+            ctes.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &stmt.subqueries,
+                &arena_resources.control(),
+            )?;
             if let Some(source) = stmt.source.as_deref() {
                 crate::query::privileges::ensure_select_privileges_for_source_expressions(
                     source,
@@ -203,7 +210,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
                 }
             }
             let candidates = candidates.finish()?;
-            let snapshot_ctes = ctes.returning_statement_snapshot_scope();
+            let snapshot_ctes = ctes.returning_statement_snapshot_scope_with_control(&control)?;
             let mut qualification = crate::mutation::expressions::MutationPredicate::new(
                 read_context
                     .mutation

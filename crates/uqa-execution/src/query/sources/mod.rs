@@ -9,19 +9,20 @@
 pub mod context;
 use crate::physical::physical_exec_error;
 use crate::query::{
-    binding::{bind_source_plan_schema, bind_source_plan_schema_for_execution},
+    binding::{bind_source_plan_for_execution, bind_source_plan_schema},
     consumer::QueryOutputMode,
-    locking::apply_propagated_view_lock,
     output::{query_output_shared, QueryOutput},
     projection::physical_work_mem_bytes,
-    source_projection::{alias_join_operator, qualify_source_operator_with_columns},
+    source_projection::{
+        alias_join_operator_with_control as alias_join_operator,
+        qualify_source_operator_with_columns,
+    },
     table_functions::{rows_from::RowsFromOperator, TableFunctionCall},
     CteScope,
 };
 use crate::scalar::plan::PlanSubqueryArena;
 use crate::{eval_scalar, PhysicalOperator, RowSchema, RowSchemaExecution, ScalarEvalContext};
 pub use context::SourceContext;
-use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{
     ast::JoinKind,
@@ -30,10 +31,9 @@ use uqa_sql::{
         AccessPathPlan, ComputePlan, JoinExecutionStrategy, QueryPlan, RelationalPlan, SourcePlan,
     },
     semantics::{
-        cte_names::query_cte_names,
-        join_predicates::{bind_join_sides, join_conjuncts},
+        cte_names::query_cte_names_with_control,
         resolve_user_table_function,
-        source_filters::{combine_filters, qualifier_filter, qualifier_for},
+        source_filters::{combine_filters, qualifier_filter},
         table_function_column_types, validate_table_function_alias_count,
         validate_table_function_column_definition, TableFunctionTypeRequest,
     },
@@ -64,13 +64,11 @@ use source_operator::build_join_operator_with_ctes_at_path;
 use source_qualification::shape_join_using_output;
 use source_qualification::{
     attach_closed_qualifier_filter, attach_qualifier_filter,
-    execute_view_plan_output_with_parent_cache, filter_closed_source, null_row_for_schema,
-    unproduced_column,
+    execute_view_plan_output_with_parent_cache, filter_closed_source, unproduced_column,
 };
 pub(crate) use streaming_subquery::try_build_streaming_subquery_operator;
 use subquery_source::build_subquery_source_operator;
 use table_source::build_table_source_operator;
-use uqa_sql::semantics::{join_using_predicate, resolve_join_using};
 use values_source::build_values_source_operator;
 
 pub(crate) use source_operator::{build_join_operator_with_bound_sources, empty_source_operator};
@@ -82,8 +80,11 @@ pub fn build_join_spill_with_ctes<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<crate::SharedSpill, SQLError> {
-    let mut bound = source.clone();
-    bind_source_plan_schema_for_execution(context.ctes.routines, &mut bound, params, ctes, None)?;
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
+    let bound = source.copy_for_rewrite(&control)?;
+    let (bound, _) =
+        bind_source_plan_for_execution(context.ctes.routines, bound, params, ctes, None, &control)?;
     let operator = build_join_operator_with_ctes(context, &bound, params, ctes, None, None)?;
     let columns = operator.schema().to_vec();
     let output = crate::query::collection::collect_query_operator(

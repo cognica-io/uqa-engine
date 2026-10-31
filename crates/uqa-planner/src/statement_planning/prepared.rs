@@ -57,6 +57,42 @@ pub fn specialize_parameters(plan: &mut crate::UnifiedPlan, parameters: &[uqa_sq
     });
 }
 
+/// Specialize a private executable without separating parameter payloads from their producing allowance.
+pub fn specialize_parameters_owned(
+    plan: uqa_sql::plan::MutableExecutablePlan,
+    parameters: &[uqa_sql::SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::plan::MutableExecutablePlan, uqa_sql::SQLError> {
+    use uqa_sql::{plan::OwnedScalarExpr, SQLParam, ScalarExpr};
+    plan.transform_scalar_nodes(control, &mut |_, expression| {
+        let ScalarExpr::Param(index) = &*expression else {
+            return Ok(expression);
+        };
+        let Some(parameter) = index.checked_sub(1).and_then(|index| parameters.get(index)) else {
+            return Ok(expression);
+        };
+        match parameter {
+            SQLParam::TypedScalar { value, ty } => Ok(OwnedScalarExpr::typed_literal(
+                control.copy_value(value)?,
+                ty.catalog_name_with_control(control)?,
+                Some(ty.clone_with_control(control)?),
+                None,
+                Some(*index),
+                control,
+            )?),
+            SQLParam::Scalar(value) => crate::optimizer::retain_computed_integer_owned(
+                OwnedScalarExpr::literal(control.copy_value(value)?, control)?,
+                Some(*index),
+                control,
+            ),
+            SQLParam::Vector(_)
+            | SQLParam::Tensor(_)
+            | SQLParam::TypedTensor(_)
+            | SQLParam::DeferredError { .. } => Ok(expression),
+        }
+    })
+}
+
 pub mod selection;
 
 #[cfg(test)]

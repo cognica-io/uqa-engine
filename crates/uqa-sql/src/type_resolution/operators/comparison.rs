@@ -6,7 +6,7 @@
 
 //! Declared comparison capabilities shared by query analysis and value operators.
 
-use crate::expr::composites::{descriptor, CompositeTypeCatalog};
+use crate::expr::composites::{descriptor_with_control, CompositeTypeCatalog};
 use crate::{ColumnType, FunctionTypeResolver, SQLError};
 use uqa_core::memory::ProductionControl;
 
@@ -52,6 +52,7 @@ pub fn comparison_key_is_constant(expression: &crate::ScalarExpr) -> bool {
     use crate::ScalarExpr;
     match expression {
         ScalarExpr::Literal(_)
+        | ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::TypedLiteral {
             parameter_index: None,
             ..
@@ -80,8 +81,23 @@ impl ComparisonKeySupport {
         right: &ColumnType,
         resolver: &dyn FunctionTypeResolver,
     ) -> Result<(), SQLError> {
-        self.include(left, resolver)?;
-        self.include(right, resolver)?;
+        self.include_equality_operands_with_control(
+            left,
+            right,
+            resolver,
+            &ProductionControl::uncontrolled(),
+        )
+    }
+
+    pub fn include_equality_operands_with_control(
+        &mut self,
+        left: &ColumnType,
+        right: &ColumnType,
+        resolver: &dyn FunctionTypeResolver,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.include_with_control(left, resolver, control)?;
+        self.include_with_control(right, resolver, control)?;
         self.hashing &= equality_types_share_hash_key(left, right);
         Ok(())
     }
@@ -91,8 +107,25 @@ impl ComparisonKeySupport {
         ty: &ColumnType,
         resolver: &dyn FunctionTypeResolver,
     ) -> Result<(), SQLError> {
-        self.hashing &= type_supports_hashing(ty, resolver)?;
-        self.ordering &= type_supports_ordering(ty, resolver)?;
+        self.include_with_control(ty, resolver, &ProductionControl::uncontrolled())
+    }
+
+    pub fn include_with_control(
+        &mut self,
+        ty: &ColumnType,
+        resolver: &dyn FunctionTypeResolver,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.hashing &= ComparisonSupport::Hashing.available_for_type(
+            ty,
+            resolver.composite_types(),
+            control,
+        )?;
+        self.ordering &= ComparisonSupport::Ordering.available_for_type(
+            ty,
+            resolver.composite_types(),
+            control,
+        )?;
         Ok(())
     }
 
@@ -138,7 +171,7 @@ impl ComparisonSupport {
                 self.available_for_type(base, catalog, control)
             }
             ColumnType::Composite(reference) => {
-                let fields = descriptor(catalog, reference.oid)?;
+                let fields = descriptor_with_control(catalog, reference.oid, control)?;
                 for attribute in &fields.attributes {
                     if !self.available_for_type(&attribute.ty, catalog, control)? {
                         return Ok(false);
@@ -228,6 +261,34 @@ impl ComparisonSupport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_comparison_keys_keep_one_class_without_reading_the_value() {
+        use crate::ir::{ConstantValueSource, RetainedConstantValue, RetainedScalarLiteral};
+        use crate::ScalarExpr;
+        use std::sync::Arc;
+        #[derive(Debug)]
+        struct Unreadable;
+        impl ConstantValueSource for Unreadable {
+            fn read(&self, _: u64) -> Result<uqa_core::Value, SQLError> {
+                panic!("comparison classification cannot read a constant")
+            }
+        }
+        let literal = ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
+            RetainedConstantValue::new(Arc::new(Unreadable), 0),
+            Some(ColumnType::Record),
+            None,
+            None,
+        ));
+        for expression in [
+            literal.clone(),
+            ScalarExpr::Row(vec![literal.clone()]),
+            ScalarExpr::Array(vec![literal]),
+        ] {
+            assert!(comparison_key_is_constant(&expression));
+        }
+        assert!(!comparison_key_is_constant(&ScalarExpr::Param(1)));
+    }
 
     struct Types;
 

@@ -310,6 +310,7 @@ fn original_and_invoking_cancellation_abort_before_and_during_container_producti
         };
         let mut lowering = Lowering {
             control: Some(Control::new(&budget, &original, &invoking)),
+            owned_children: None,
         };
         let mut count = 0;
         let result = lowering.map([1, 2, 3].into_iter(), |_, value| {

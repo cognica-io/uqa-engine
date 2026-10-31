@@ -51,12 +51,18 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         .columns
         .iter()
         .any(|column| column.name == super::SCORE_COLUMN);
-    let predicate = stmt.r#where.as_ref().map(|predicate| {
-        context
-            .relational
-            .evaluator(params, ctes)
-            .bind_type_introspection(predicate.clone(), schema)
-    });
+    let predicate = stmt
+        .r#where
+        .as_ref()
+        .map(|predicate| {
+            Ok::<_, SQLError>(
+                context
+                    .relational
+                    .evaluator(params, ctes)?
+                    .bind_type_introspection(predicate.clone(), schema),
+            )
+        })
+        .transpose()?;
     let score_top_k = if !has_stored_score_column
         && matches!(
             block.access,
@@ -341,8 +347,8 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             .table_name_resolved(&resolution, table)?
             .unwrap_or_else(|| table.to_string());
         Some((
-            std::sync::Arc::<str>::from(qualifier),
-            std::sync::Arc::<str>::from(storage_name),
+            crate::RowLockName::from(qualifier),
+            crate::RowLockName::from(storage_name),
         ))
     } else {
         None
@@ -407,7 +413,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     execute_query_block_operator_output(
         context.relational,
         source,
-        physical_filter,
+        physical_filter.as_ref(),
         stmt,
         block,
         params,

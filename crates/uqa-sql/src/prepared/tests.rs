@@ -8,7 +8,11 @@ use super::arguments::{
     immutable_argument, reject_set_argument, validate_argument, validate_assignment_type,
     ArgumentValidationContext,
 };
-use super::{declared_parameter_types, is_unknown_type, prepared_result_schema_matches};
+use super::{declared_parameter_types, prepared_result_schema_matches};
+fn is_unknown_type(name: &str) -> bool {
+    super::production::is_unknown_type(name, &uqa_core::memory::ProductionControl::uncontrolled())
+        .unwrap()
+}
 use crate::semantics::volatility::VolatilityCatalog;
 use crate::{
     ast::FunctionVolatility,
@@ -100,8 +104,8 @@ fn unknown_declarations_keep_parameter_holes_and_resolve_qualified_types() {
         [None, None, Some(ColumnType::Text), None]
     );
     assert_eq!(*types.0.lock().unwrap(), ["app.unknown"]);
-    assert!(!is_unknown_type("unknown[]").unwrap());
-    assert!(!is_unknown_type("unknown(3)").unwrap());
+    assert!(!is_unknown_type("unknown[]"));
+    assert!(!is_unknown_type("unknown(3)"));
 }
 
 #[test]

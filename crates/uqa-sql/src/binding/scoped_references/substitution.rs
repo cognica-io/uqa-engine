@@ -13,6 +13,9 @@ use std::{
 
 use crate::{plan::QueryPlan, ColumnIdentity, RowSchema, ScalarExpr};
 
+mod owned;
+pub use owned::substitute_outer_columns_owned;
+
 /// Substitute enclosing scalar columns without capturing locally shadowed names. Replacements must already use opaque identities and contain no query-local subquery slots. Missing source layouts and whole-row substitutions leave the query unchanged and return false.
 pub fn substitute_outer_columns(
     query: &mut QueryPlan,

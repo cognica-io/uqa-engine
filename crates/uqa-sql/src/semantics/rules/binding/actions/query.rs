@@ -17,20 +17,31 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod resolver;
+pub use resolver::{OwnedRuleQueryResolver, RuleInputColumns};
 mod schedule;
-pub use schedule::InsertRuleQueries;
+#[cfg(test)]
+pub(super) use schedule::reference::InsertRuleQueries;
+pub use schedule::OwnedInsertRuleQueries;
 mod assignments;
 mod conditions;
 mod mutation;
-pub use mutation::{MutationRuleInput, RuleMutation};
+pub use mutation::{MutationRuleInput, OwnedMutationRuleInput, RuleMutation};
+mod owned;
 #[cfg(test)]
 mod tests;
 mod values;
+pub use owned::OwnedRuleQueryInput;
 
 /// An action can borrow a native query tree without converting its rows into constants.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "native action owners move without an additional unadmitted root box"
+)]
 pub enum RuleAction {
     Stored(Box<Statement>),
     Rewritten(UnifiedPlan),
+    Owned(crate::plan::MutableExecutablePlan),
 }
 
 impl From<Statement> for RuleAction {
@@ -54,6 +65,21 @@ impl RuleAction {
         Ok(Self::Rewritten(plan))
     }
 
+    pub fn lower_with_control(
+        self,
+        aggregates: &dyn AggregateClassifier,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableExecutablePlan, SQLError> {
+        match self {
+            Self::Stored(statement) => {
+                UnifiedPlan::lower_borrowed_for_rewrite(&statement, aggregates, control)?
+                    .mark_catalog_relations_bound(control)
+            }
+            Self::Rewritten(plan) => plan.copy_for_rewrite(control),
+            Self::Owned(plan) => plan.transfer(control),
+        }
+    }
+
     pub fn lower(self, aggregates: &dyn AggregateClassifier) -> Result<UnifiedPlan, SQLError> {
         match self {
             Self::Stored(statement) => {
@@ -62,6 +88,12 @@ impl RuleAction {
                 Ok(plan)
             }
             Self::Rewritten(plan) => Ok(plan),
+            Self::Owned(plan) => Ok(plan
+                .as_plan_ref()
+                .copy_for_rewrite(&uqa_core::memory::ProductionControl::uncontrolled())?
+                .finish(&uqa_core::memory::ProductionControl::uncontrolled())?
+                .into_parts()
+                .0),
         }
     }
 }
@@ -225,6 +257,7 @@ fn attach_query(
     }
 }
 
+#[cfg(test)]
 fn add_condition(
     predicate: &mut Option<ScalarExpr>,
     subqueries: &mut Vec<QueryPlan>,
@@ -326,6 +359,57 @@ pub struct RuleQueryResolver {
 }
 
 impl VariableResolver for RuleQueryResolver {
+    fn rewrite_with_control(
+        &mut self,
+        reference: crate::plpgsql::RewriteReference<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Expr>>, SQLError> {
+        use crate::{plan::copy::SyntaxProduction, plpgsql::RewriteReference};
+        control.check()?;
+        let production = SyntaxProduction::new(*control);
+        let expression = match reference {
+            RewriteReference::Name(name) | RewriteReference::WholeRow(name) => {
+                let new = name.eq_ignore_ascii_case("new");
+                if !new && !name.eq_ignore_ascii_case("old") {
+                    return Ok(None);
+                }
+                let mut items = production.vector(self.columns.len())?;
+                for (name, expression) in &self.columns {
+                    let expression = if new {
+                        expression.as_ref().map_err(Clone::clone)?
+                    } else {
+                        &self.old[name]
+                    };
+                    items.push(production.copy(expression)?)?;
+                }
+                Expr::Cast {
+                    implicit: true,
+                    expr: production.boxed(Expr::Row(items.finish()?))?,
+                    ty: production.copy(&self.table)?,
+                }
+            }
+            RewriteReference::Qualified { qualifier, column } => {
+                let expression = if qualifier.eq_ignore_ascii_case("new") {
+                    self.columns
+                        .iter()
+                        .find(|(name, _)| name == column)
+                        .map(|(_, value)| value.as_ref().map_err(Clone::clone))
+                        .transpose()?
+                } else if qualifier.eq_ignore_ascii_case("old") {
+                    self.old.get(column)
+                } else {
+                    return Ok(None);
+                };
+                production
+                    .copy(expression.ok_or_else(|| {
+                        SQLError::UnknownColumn(format!("{qualifier}.{column}"))
+                    })?)?
+            }
+            RewriteReference::Parameter(_) | RewriteReference::Internal(_) => return Ok(None),
+        };
+        Ok(Some(production.finish(expression)?))
+    }
+
     fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(None)
     }
@@ -466,7 +550,7 @@ impl RuleQueryResolver {
         let mut columns = Vec::with_capacity(definitions.len());
         let mut old = BTreeMap::new();
         let mut expressions = BTreeMap::new();
-        for (position, column) in definitions.iter().enumerate() {
+        for column in &definitions {
             let ty = column.ty.catalog_name();
             let null = Expr::Cast {
                 implicit: true,
@@ -477,8 +561,6 @@ impl RuleQueryResolver {
             let metadata = crate::semantics::rules::binding::RuleColumnMetadata {
                 ty: column.ty.clone(),
                 collation_oid: column.collation_oid,
-                uses_document_id: false,
-                position,
             };
             if insert
                 .columns

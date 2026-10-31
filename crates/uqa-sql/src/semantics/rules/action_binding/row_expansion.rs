@@ -53,6 +53,30 @@ impl RuleRowStarExpander<'_> {
 }
 
 impl VariableResolver for RuleRowStarExpander<'_> {
+    fn expand_with_control(
+        &mut self,
+        qualifier: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<Expr>>>, SQLError> {
+        control.check()?;
+        if !qualifier.eq_ignore_ascii_case("old") && !qualifier.eq_ignore_ascii_case("new") {
+            return Ok(None);
+        }
+        if let Some(error) = self.invalid_reference(qualifier) {
+            return Err(error);
+        }
+        let production = crate::plan::copy::SyntaxProduction::new(*control);
+        let mut values = production.vector(self.columns.len())?;
+        for (column, _) in self.columns {
+            values.push(Expr::QualifiedColumn {
+                qualifier: production.text(qualifier)?,
+                column: production.text(column)?.into(),
+            })?;
+        }
+        let values = values.finish()?;
+        Ok(Some(production.finish(values)?))
+    }
+
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         if let Some(error) = self.invalid_reference(name) {
             return Err(error);

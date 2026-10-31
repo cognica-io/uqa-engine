@@ -11,6 +11,17 @@ use uqa_core::RelationIdentity;
 
 pub trait StoredSequenceNames {
     fn stored_sequence_name(&self, reference: &str) -> Result<String, String>;
+    fn stored_sequence_name_with_control(
+        &self,
+        reference: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, crate::SQLError> {
+        control.check()?;
+        let name = self
+            .stored_sequence_name(reference)
+            .map_err(crate::SQLError::Internal)?;
+        Ok(control.copy_text(&name)?)
+    }
 }
 pub struct BoundImplicitSequenceOwner {
     pub sequence: String,

@@ -10,14 +10,19 @@ use super::SystemRelation;
 
 impl SystemRelation {
     pub fn column_names(self) -> Vec<String> {
+        self.column_names_with_control(&uqa_core::memory::ProductionControl::uncontrolled())
+            .expect("ordinary system column production")
+            .into_uncontrolled()
+            .expect("ordinary columns")
+    }
+
+    pub fn column_names_with_control(
+        self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<String>>, crate::SQLError> {
+        control.check()?;
         let names: &[&str] = match self {
-            Self::Projected(relation) => {
-                return relation
-                    .schema()
-                    .into_iter()
-                    .map(|(name, _)| name)
-                    .collect()
-            }
+            Self::Projected(relation) => return relation.column_names_with_control(control),
             Self::PgDbRoleSetting => &["setdatabase", "setrole", "setconfig"],
             Self::PgShadow => &[
                 "usename",
@@ -57,6 +62,10 @@ impl SystemRelation {
             ],
             Self::InformationEnabledRoles => &["role_name"],
         };
-        names.iter().map(|name| (*name).into()).collect()
+        let mut output = uqa_core::memory::ProductionVec::new(*control);
+        for name in names {
+            output.push_produced(control.copy_text(name)?)?;
+        }
+        Ok(output.finish()?)
     }
 }

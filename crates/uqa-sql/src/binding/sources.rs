@@ -12,27 +12,36 @@ use crate::RowSchema;
 use crate::{SQLError, SQLParam};
 
 use super::{
-    analysis, operator_join_relation_schemas, projection::rename_schema, BindingContext,
+    operator_join_relation_schemas, projection::rename_schema_with_control, BindingContext,
     ScalarExpr, SchemaScope, SourceScope,
 };
 use crate::routines::RoutineResolution;
+
+mod execution;
+mod functions;
+mod relations;
+pub use execution::bind_source_plan_for_execution_owned;
 
 pub(super) fn alias_table_schema(
     schema: &RowSchema,
     qualifier: &str,
     column_aliases: &[String],
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
     if column_aliases.len() > schema.len() {
         return Err(SQLError::Routine {
             sqlstate: "42P10".into(),
-            message: format!(
-                "table \"{qualifier}\" has {} columns available but {} columns specified",
-                schema.len(),
-                column_aliases.len()
-            ),
+            message: control
+                .format(format_args!(
+                    "table \"{qualifier}\" has {} columns available but {} columns specified",
+                    schema.len(),
+                    column_aliases.len()
+                ))?
+                .into_parts()
+                .0,
         });
     }
-    Ok(rename_schema(schema, column_aliases, Some(qualifier)))
+    rename_schema_with_control(schema, column_aliases, Some(qualifier), control)
 }
 
 impl SchemaScope {
@@ -43,10 +52,16 @@ impl SchemaScope {
         qualifier: &str,
         column_aliases: &[String],
     ) -> Result<RowSchema, SQLError> {
-        let schema = alias_table_schema(schema, qualifier, column_aliases)?;
-        match self.catalog.relation_row_type(&self.resolution, name)? {
+        let control = self.control();
+        let schema = alias_table_schema(schema, qualifier, column_aliases, &control)?;
+        match self
+            .catalog
+            .relation_row_type_with_control(&self.resolution, name, &control)?
+        {
             Some(row_type) => {
-                schema.with_relation_row_type(qualifier, crate::ColumnType::Composite(row_type))
+                let (row_type, memory) = row_type.into_parts();
+                let ty = control.finish(crate::ColumnType::Composite(row_type), memory)?;
+                schema.with_relation_row_type_with_control(qualifier, &ty, &control)
             }
             None => Ok(schema),
         }
@@ -152,9 +167,16 @@ pub fn bind_source_input_schema(
     )
 }
 
+mod pseudo_columns;
+pub use pseudo_columns::with_query_table_pseudo_columns_with_control;
+
 /// Add query-block pseudo columns after the complete source scope is known, so `_meta` is exposed only for one unambiguous local-table source and never shadows a real relation alias.
 pub fn with_query_table_pseudo_columns(schema: &RowSchema) -> RowSchema {
-    analysis::with_unqualified_table_pseudo_columns(schema)
+    with_query_table_pseudo_columns_with_control(
+        schema,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary pseudo-column schema")
 }
 
 /// Derive and validate one FROM source's exact row type without executing it.
@@ -220,7 +242,7 @@ impl SchemaScope {
         else {
             unreachable!("join inputs belong to a join source")
         };
-        let condition = scope.condition();
+        let condition = scope.condition_with_control(&self.control())?;
         let schema = self.bind_join_output_schema(JoinSchemaBinding {
             routines,
             kind: *kind,
@@ -236,7 +258,7 @@ impl SchemaScope {
             outer: condition.as_ref(),
         })?;
         Ok(if scope.retain_names {
-            SourceScope::describe_output(source, schema)
+            SourceScope::describe_output_with_control(source, schema, &self.control())?
         } else {
             schema
         })
@@ -282,11 +304,11 @@ impl SchemaScope {
         if let Some(previous) = previous {
             self.resolution.set_lookup_mode(previous);
         }
-        result.map(|schema| {
+        result.and_then(|schema| {
             if scope.retain_names {
-                SourceScope::describe_output(source, schema)
+                SourceScope::describe_output_with_control(source, schema, &self.control())
             } else {
-                schema
+                Ok(schema)
             }
         })
     }
@@ -322,7 +344,7 @@ impl SchemaScope {
             routines, source, subqueries, params, scope,
         )?;
         Ok(if scope.retain_names {
-            SourceScope::describe_output(source, schema)
+            SourceScope::describe_output_with_control(source, schema, &self.control())?
         } else {
             schema
         })
@@ -337,7 +359,8 @@ impl SchemaScope {
         scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
         let input = (!matches!(source, SourcePlan::Join { .. }))
-            .then(|| scope.input(source))
+            .then(|| scope.input_with_control(source, &self.control()))
+            .transpose()?
             .flatten();
         let outer = input.as_ref();
         match source {
@@ -361,7 +384,12 @@ impl SchemaScope {
                     params,
                     scope.with_names(),
                 )?;
-                let preceding = scope.right_namespace(left, &left_schema, *kind);
+                let preceding = scope.right_namespace_with_control(
+                    left,
+                    &left_schema,
+                    *kind,
+                    &self.control(),
+                )?;
                 let right_schema = self.bind_source_for_execution_in_scope(
                     routines,
                     right,
@@ -374,7 +402,7 @@ impl SchemaScope {
                         retain_names: true,
                     },
                 )?;
-                let condition = scope.condition();
+                let condition = scope.condition_with_control(&self.control())?;
                 return self.bind_join_output_schema(JoinSchemaBinding {
                     routines,
                     kind: *kind,
@@ -436,6 +464,31 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
+        let selected =
+            self.select_execution_table_function(routines, source, subqueries, params, outer)?;
+        if let Some(selected) = selected {
+            let SourcePlan::Function { binding, .. } = source else {
+                unreachable!("table-function source")
+            };
+            *binding = Some(
+                selected
+                    .into_uncontrolled()
+                    .expect("ordinary execution binding"),
+            );
+        }
+        Ok(())
+    }
+
+    fn select_execution_table_function(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ast::FunctionBinding>>, SQLError> {
+        let resources = self.production.clone();
+        let control = resources.control();
         let SourcePlan::Function {
             name,
             binding,
@@ -443,35 +496,38 @@ impl SchemaScope {
             ..
         } = source
         else {
-            unreachable!("table-function source");
+            unreachable!("table-function source")
         };
         let input = outer.cloned().unwrap_or_default();
         let resolver = self.query_function_type_resolver_for_subqueries(
             routines, args, &input, subqueries, params,
         )?;
-        let Some(mut selected) = crate::semantics::resolve_table_function_binding(
-            routines,
+        let Some(selected) = crate::semantics::resolve_table_function_binding_with_control(
+            crate::semantics::TableFunctionAnalysis {
+                routines,
+                types: &resolver,
+            },
             name,
             binding.as_ref(),
             args,
             &input,
             params,
-            &resolver,
+            &control,
         )?
         else {
-            return Ok(());
+            return Ok(None);
         };
+        let (mut selected, memory) = selected.into_parts();
         if binding.is_none()
             && selected.builtin
             && crate::expr::binds_input_collation_by_name(
-                &crate::semantics::builtin_function_dispatch_name(name),
+                &crate::semantics::builtin_function_dispatch_name_with_control(name, &control)?,
             )
         {
             selected.input_collation = super::preparation::call_input_collation(
                 self, routines, name, args, &input, subqueries, params,
             )?;
         }
-        *binding = Some(selected);
-        Ok(())
+        Ok(Some(control.finish(selected, memory)?))
     }
 }

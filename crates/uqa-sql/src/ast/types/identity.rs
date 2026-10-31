@@ -7,6 +7,7 @@
 //! OID identities of user-defined types. Stored syntax, routine signatures and bound casts name a user-defined type by identity, so a rename, a schema move or a different search path cannot change which type they mean; output spells the type's current name. `#` cannot occur in an unquoted type name, and quoted names keep their quotes, so an identity never collides with a name as written.
 
 use super::ColumnType;
+mod production;
 
 const ENUM_PREFIX: &str = "enum#";
 const DOMAIN_PREFIX: &str = "domain#";
@@ -100,23 +101,13 @@ impl ColumnType {
     /// The identity of a user-defined type or an array of one; built-in types have none.
     #[must_use]
     pub fn user_type_identity(&self) -> Option<String> {
-        match self {
-            ColumnType::Enum(reference) => Some(format!("{ENUM_PREFIX}{}", reference.oid)),
-            ColumnType::Composite(reference) => {
-                Some(format!("{COMPOSITE_PREFIX}{}", reference.oid))
-            }
-            ColumnType::Domain { oid, .. } => Some(format!("{DOMAIN_PREFIX}{oid}")),
-            ColumnType::DeclaredRange(reference) => {
-                Some(format!("{RANGE_PREFIX}{}", reference.oid))
-            }
-            ColumnType::DeclaredMultirange(reference) => {
-                Some(format!("{MULTIRANGE_PREFIX}{}", reference.oid))
-            }
-            ColumnType::Array(element) => element
-                .user_type_identity()
-                .map(|element| format!("{element}[]")),
-            _ => None,
-        }
+        self.user_type_identity_with_control(&uqa_core::memory::ProductionControl::uncontrolled())
+            .expect("ordinary catalog identity cannot be cancelled or limited")
+            .map(|value| {
+                value
+                    .into_uncontrolled()
+                    .expect("ordinary catalog identity")
+            })
     }
 }
 

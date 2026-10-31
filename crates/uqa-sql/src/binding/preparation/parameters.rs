@@ -6,21 +6,29 @@
 
 //! Ordered parameter occurrences and their independently resolved SQL types.
 
+use super::ownership::{AnalysisMap, AnalysisType, AnalysisVec};
 use crate::catalog::collations::derivation::Derivation;
-use crate::{plan::UnifiedPlan, ColumnType, SQLError, SQLParam, ScalarExpr};
-use std::{borrow::Cow, collections::BTreeMap, ptr::NonNull};
+use crate::{
+    plan::{OwnedScalarExpr, UnifiedPlan},
+    ColumnType, SQLError, SQLParam, ScalarExpr,
+};
+use std::ptr::NonNull;
+use uqa_core::memory::{OwnedProductionControl, Produced, ProductionControl, ProductionVec};
 use uqa_core::Value;
 
+mod application;
 mod call_collations;
 mod collations;
 mod completion;
+mod constants;
+mod expression_type;
 mod grouping;
+mod inputs;
 mod results;
 pub(super) use call_collations::CallCollations;
 
-#[derive(Clone)]
 pub(super) struct ExpressionType {
-    pub(super) ty: Option<ColumnType>,
+    pub(super) ty: Option<AnalysisType>,
     /// Selected output and deferred collation diagnostics from the same typed children.
     pub(super) derivation: Derivation,
     /// Field selection observes a ROW input before the enclosing expression's collation assignment.
@@ -30,13 +38,13 @@ pub(super) struct ExpressionType {
     /// A record variable without a registered descriptor has a different field diagnostic from a computed record.
     pub(super) record_variable: bool,
     /// An anonymous ROW retains each analyzed input until a named cast selects its field coercions.
-    pub(super) row_constructor: Option<Vec<Self>>,
+    pub(super) row_constructor: Option<AnalysisVec<Self>>,
     occurrence: Option<usize>,
     // SQL unknown literals and parameters accept context coercion. Native
     // callbacks with no declared result type stay unresolved until execution.
     unknown: UnknownOrigin,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
-    literal: Option<(NonNull<ScalarExpr>, String)>,
+    literal: Option<(NonNull<ScalarExpr>, Produced<String>)>,
     collation: Option<NonNull<ScalarExpr>>,
 }
 
@@ -48,109 +56,11 @@ enum UnknownOrigin {
     Field,
 }
 
-impl ExpressionType {
-    pub(super) fn default_collation(ty: Option<&ColumnType>) -> Derivation {
-        Derivation::implicit(ty.map_or(0, crate::catalog::type_metadata::pg_type_collation_oid))
-    }
-
-    pub(super) fn combined(ty: Option<ColumnType>, values: &[Self]) -> Self {
-        let selected = values.iter().fold(Derivation::None, |state, value| {
-            state.combine(value.derivation)
-        });
-        let mut result = Self::resolved(ty);
-        result.derivation = selected.result(result.derivation.oid());
-        result
-    }
-
-    pub(super) fn comparison(left: &Self, right: &Self) -> Derivation {
-        if let (Some(left), Some(right)) = (&left.row_constructor, &right.row_constructor) {
-            left.iter()
-                .zip(right)
-                .fold(Derivation::None, |state, (left, right)| {
-                    state.combine(left.derivation.combine(right.derivation).error_only())
-                })
-        } else {
-            left.derivation.combine(right.derivation).error_only()
-        }
-    }
-
-    pub(super) fn independent(ty: Option<ColumnType>, values: &[Self]) -> Self {
-        let mut result = Self::resolved(ty);
-        result.derivation = values.iter().fold(result.derivation, |state, value| {
-            state.combine(value.derivation.error_only())
-        });
-        result
-    }
-
-    pub(super) fn resolved(ty: Option<ColumnType>) -> Self {
-        Self {
-            derivation: Self::default_collation(ty.as_ref()),
-            initial_collation: 0,
-            ty,
-            record_fields: None,
-            record_descriptor: None,
-            record_variable: false,
-            row_constructor: None,
-            occurrence: None,
-            unknown: UnknownOrigin::Deferred,
-            literal: None,
-            collation: None,
-        }
-    }
-
-    pub(super) fn unknown() -> Self {
-        Self {
-            unknown: UnknownOrigin::Literal,
-            ..Self::resolved(None)
-        }
-    }
-
-    /// A bare string literal, `unknown` until its context selects a type that reads it.
-    pub(super) fn unknown_literal(expression: &ScalarExpr, text: String) -> Self {
-        Self {
-            literal: Some((NonNull::from(expression), text)),
-            ..Self::unknown()
-        }
-    }
-
-    pub(super) fn is_deferred(&self) -> bool {
-        self.ty.is_none() && self.unknown == UnknownOrigin::Deferred
-    }
-
-    pub(super) fn is_sql_unknown(&self) -> bool {
-        self.ty.is_none() && self.unknown != UnknownOrigin::Deferred
-    }
-
-    pub(super) fn is_unknown_parameter(&self) -> bool {
-        self.ty.is_none() && self.unknown == UnknownOrigin::Parameter
-    }
-
-    pub(super) fn mark_unknown_field(&mut self) {
-        self.unknown = UnknownOrigin::Field;
-    }
-
-    pub(super) fn leaf(ty: Option<ColumnType>) -> Self {
-        let mut value = Self::resolved(ty);
-        value.initial_collation =
-            u32::try_from(value.derivation.oid()).expect("type collation OID");
-        value
-    }
-
-    pub(super) fn record_metadata(&self) -> Option<crate::schema::RecordMetadata> {
-        (self.record_fields.is_some() || self.record_descriptor.is_some()).then(|| {
-            crate::schema::RecordMetadata {
-                types: self.record_fields.clone(),
-                descriptor: self.record_descriptor.clone(),
-            }
-        })
-    }
-}
-
 pub(super) struct ParameterTypes<'a> {
     pub(super) collations: super::collations::PendingCollations,
-    types: Vec<Option<ColumnType>>,
+    types: AnalysisVec<Option<Produced<ColumnType>>>,
     fixed_values: Option<&'a [SQLParam]>,
-    occurrences: Vec<(usize, Option<ColumnType>)>,
+    occurrences: AnalysisVec<(usize, Option<Produced<ColumnType>>)>,
     input_constants: Option<InputConstants>,
     aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
     enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
@@ -160,45 +70,86 @@ pub(super) struct ParameterTypes<'a> {
     /// Generated field references remain at stable addresses throughout analysis, including inference that does not retain an executable plan.
     row_expansions: RowExpansions,
     rewritten_blocks: RewrittenBlocks,
+    canonicalize_parameters: bool,
+    composite_inputs: Option<AnalysisMap<NonNull<ScalarExpr>, OwnedScalarExpr>>,
+    reference_sites: Option<AnalysisMap<NonNull<ScalarExpr>, usize>>,
+    reference_inputs: Option<AnalysisMap<NonNull<ScalarExpr>, ConvertedInput>>,
+    control: OwnedProductionControl,
 }
 
 /// Original expression identities for input constants and selected fixed calls, used only while one prepared plan remains in place. No pointer is dereferenced. Analysis borrows the original expressions (including grouping aliases and table-function arguments), so neither repeated text nor CTE analysis order can conflate two inputs.
 /// A constant read during analysis and retained in the executable plan.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub(super) struct ConvertedInput {
-    pub(super) expression: ScalarExpr,
+    pub(super) expression: OwnedScalarExpr,
     /// The conversion read a session setting, the transaction clock or the catalog, so an ordinary message must read the text again instead of reusing the plan.
     pub(super) session_dependent: bool,
 }
 
-#[derive(Default)]
 pub(super) struct InputConstants(
-    BTreeMap<NonNull<ScalarExpr>, ConvertedInput>,
-    BTreeMap<NonNull<ScalarExpr>, crate::ast::FunctionBinding>,
-    BTreeMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
+    AnalysisMap<NonNull<ScalarExpr>, ConvertedInput>,
+    AnalysisMap<NonNull<ScalarExpr>, Produced<crate::ast::FunctionBinding>>,
+    AnalysisMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
     collations::CollationInputs,
     results::SelectedResults,
-    BTreeMap<NonNull<ScalarExpr>, ColumnType>,
+    AnalysisMap<NonNull<ScalarExpr>, AnalysisType>,
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
-    BTreeMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
-    BTreeMap<NonNull<Option<crate::ast::FunctionBinding>>, crate::ast::FunctionBinding>,
+    AnalysisMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
+    AnalysisMap<
+        NonNull<Option<crate::ast::FunctionBinding>>,
+        Produced<crate::ast::FunctionBinding>,
+    >,
     QuerySchemas,
     RowExpansions,
     RewrittenBlocks,
+    AnalysisMap<NonNull<ScalarExpr>, usize>,
 );
 
-type RowExpansions = BTreeMap<NonNull<ScalarExpr>, Vec<(usize, Vec<ScalarExpr>)>>;
+impl Default for InputConstants {
+    fn default() -> Self {
+        Self::new(&ProductionControl::uncontrolled())
+    }
+}
+
+impl InputConstants {
+    fn new(control: &ProductionControl<'_>) -> Self {
+        Self(
+            AnalysisMap::new(control),
+            AnalysisMap::new(control),
+            AnalysisMap::new(control),
+            collations::CollationInputs::new(control),
+            results::SelectedResults::new(control),
+            AnalysisMap::new(control),
+            AnalysisMap::new(control),
+            AnalysisMap::new(control),
+            QuerySchemas::new(control),
+            RowExpansions::new(control),
+            RewrittenBlocks::new(control),
+            AnalysisMap::new(control),
+        )
+    }
+}
+
+type RowExpansion = AnalysisVec<(usize, Produced<Vec<OwnedScalarExpr>>)>;
+type RowExpansions = AnalysisMap<NonNull<ScalarExpr>, RowExpansion>;
 mod rewritten_blocks;
 use rewritten_blocks::{install_rewritten_block, RewrittenBlocks};
 
 #[derive(Default)]
 struct QuerySchemas {
     groupings: grouping::GroupingInputs,
-    outputs: BTreeMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
-    sources: BTreeMap<NonNull<crate::plan::SourcePlan>, crate::RowSchema>,
+    outputs: AnalysisMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
+    sources: AnalysisMap<NonNull<crate::plan::SourcePlan>, crate::RowSchema>,
 }
 
 impl QuerySchemas {
+    fn new(control: &ProductionControl<'_>) -> Self {
+        Self {
+            groupings: grouping::GroupingInputs::new(control),
+            outputs: AnalysisMap::new(control),
+            sources: AnalysisMap::new(control),
+        }
+    }
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
         query.analyzed_output = self.outputs.remove(&NonNull::from(&*query));
         query.analyzed_source = match &query.root {
@@ -206,7 +157,7 @@ impl QuerySchemas {
                 .from
                 .as_ref()
                 .and_then(|source| self.take_source(source))
-                .map(std::sync::Arc::new),
+                .map(|source| std::sync::Arc::new(source).into()),
             _ => None,
         };
     }
@@ -227,236 +178,26 @@ impl QuerySchemas {
     }
 }
 
-impl InputConstants {
-    /// Ordinary messages must repeat session/catalog-dependent input functions.
-    /// Prepared definitions intentionally retain these same converted constants.
-    pub(super) fn reusable_across_messages(&self) -> bool {
-        self.0
-            .values()
-            .chain(
-                self.2
-                    .values()
-                    .flat_map(|membership| membership.left_constants.iter().flatten()),
-            )
-            .all(|input| !input.session_dependent)
-    }
-
-    fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
-        let identity = NonNull::from(&*expression);
-        if let Some(mut expanded) = self.9.remove(&identity) {
-            for (_, fields) in &mut expanded {
-                for field in fields {
-                    let mut result = Ok(());
-                    crate::plan::rewrite_scalar_expression(field, &mut |node| {
-                        if result.is_ok() {
-                            result = self.apply_node(node);
-                        }
-                    });
-                    result?;
-                }
-            }
-            let ScalarExpr::Row(items) = expression else {
-                return Err(SQLError::Internal(
-                    "analyzed ROW expansion lost its constructor".into(),
-                ));
-            };
-            let mut expanded = expanded.into_iter().peekable();
-            for (position, item) in std::mem::take(items).into_iter().enumerate() {
-                if expanded.peek().is_some_and(|(index, _)| *index == position) {
-                    items.extend(expanded.next().expect("selected expansion").1);
-                } else {
-                    items.push(item);
-                }
-            }
-        }
-        if let Some(selected) = self.1.remove(&identity) {
-            if let ScalarExpr::Func { binding, .. } = expression {
-                *binding = Some(selected);
-                crate::type_resolution::json_path::normalize_retained(expression)?;
-            }
-        }
-        if let Some(collation) = self.6.remove(&identity) {
-            if let ScalarExpr::Func {
-                binding: Some(binding),
-                ..
-            } = expression
-            {
-                binding.input_collation = collation;
-            }
-        }
-        if let Some(constant) = self.0.remove(&identity) {
-            *expression = constant.expression;
-        }
-        self.3.apply(identity, expression)?;
-        self.4.apply(identity, expression)?;
-        if let Some(target) = self.5.remove(&identity) {
-            let inner = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
-            *expression = ScalarExpr::Cast {
-                expr: Box::new(inner),
-                ty: target.catalog_name(),
-                implicit: true,
-            };
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(super) fn apply_expression(self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
-        self.apply_expression_with_subqueries(
-            expression,
-            &mut Vec::new(),
-            &super::tests::NoRoutines,
-            &[],
-        )
-    }
-
-    pub(super) fn apply_expression_with_subqueries(
-        mut self,
-        expression: &mut ScalarExpr,
-        subqueries: &mut Vec<crate::plan::QueryPlan>,
-        routines: &dyn super::RoutineResolution,
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        for query in subqueries.iter_mut() {
-            query.visit_queries_mut(&mut |query| self.apply_query(query));
-            query.visit_sources_mut(&mut |source| self.apply_source(source));
-        }
-        let mut result = Ok(());
-        let mut apply = |node: &mut ScalarExpr| {
-            if result.is_ok() {
-                result = self.apply_node(node);
-            }
-        };
-        crate::plan::rewrite_scalar_expression(expression, &mut apply);
-        for query in subqueries.iter_mut() {
-            query.rewrite_scalar_expressions(&mut apply);
-        }
-        result?;
-        for query in subqueries.iter_mut() {
-            self.8.groupings.apply_query(query, routines, params)?;
-        }
-        if !self.2.is_empty() {
-            crate::plan::subqueries::rewrite_expression_with_arena(
-                expression,
-                subqueries,
-                &mut |node, arena| self.apply_membership(node, arena),
-            )?;
-        }
-        if self.is_consumed() {
-            Ok(())
-        } else {
-            Err(SQLError::Internal(
-                "default input constant did not belong to the analyzed expression".into(),
-            ))
-        }
-    }
-
-    pub(super) fn apply(
-        mut self,
-        plan: &mut UnifiedPlan,
-        routines: &dyn super::RoutineResolution,
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        plan.visit_queries_mut(&mut |query| self.apply_query(query));
-        // Source selections are consumed before expression rewrites can move their enclosing nodes.
-        plan.visit_sources_mut(&mut |source| self.apply_source(source));
-        // Children are rewritten before their enclosing clauses move them; every retained identity is consumed at its original address.
-        let mut result = Ok(());
-        plan.rewrite_scalar_expressions(&mut |expression| {
-            if result.is_ok() {
-                result = self.apply_node(expression);
-            }
-        });
-        result?;
-        self.8.groupings.apply_plan(plan, routines, params)?;
-        if !self.2.is_empty() {
-            crate::plan::subqueries::rewrite_with_arenas(plan, &mut |node, arena| {
-                self.apply_membership(node, arena)
-            })?;
-        }
-        if self.is_consumed() {
-            Ok(())
-        } else {
-            Err(SQLError::Internal(
-                "prepared input constant did not belong to the analyzed plan".into(),
-            ))
-        }
-    }
-
-    fn is_consumed(&self) -> bool {
-        self.0.is_empty()
-            && self.1.is_empty()
-            && self.2.is_empty()
-            && self.3.is_empty()
-            && self.4.is_empty()
-            && self.5.is_empty()
-            && self.6.is_empty()
-            && self.7.is_empty()
-            && self.8.outputs.is_empty()
-            && self.8.sources.is_empty()
-            && self.8.groupings.is_empty()
-            && self.9.is_empty()
-            && self.10.is_empty()
-    }
-
-    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
-        install_rewritten_block(&mut self.10, query);
-        self.8.apply_query(query);
-    }
-
-    fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
-        // Command inputs have no enclosing QueryPlan; their validated descriptors are not needed by query-output pruning.
-        self.8.sources.remove(&NonNull::from(&*source));
-        let mut apply = |binding: &mut Option<crate::ast::FunctionBinding>| {
-            if let Some(selected) = self.7.remove(&NonNull::from(&*binding)) {
-                *binding = Some(selected);
-            }
-        };
-        match source {
-            crate::plan::SourcePlan::Function { binding, .. } => apply(binding),
-            crate::plan::SourcePlan::FunctionGroup { functions, .. } => {
-                for function in functions {
-                    apply(&mut function.binding);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn apply_membership(
-        &mut self,
-        node: &mut ScalarExpr,
-        arena: &mut Vec<crate::plan::QueryPlan>,
-    ) -> Result<(), SQLError> {
-        if let Some(analysis) = self.2.remove(&NonNull::from(&*node)) {
-            analysis.apply(node, arena)?;
-        }
-        Ok(())
-    }
-}
-
 impl<'a> ParameterTypes<'a> {
-    pub(super) fn take_row_expansion(
-        &mut self,
-        expression: &ScalarExpr,
-    ) -> Vec<(usize, Vec<ScalarExpr>)> {
+    pub(super) fn take_row_expansion(&mut self, expression: &ScalarExpr) -> RowExpansion {
         self.row_expansions
             .remove(&NonNull::from(expression))
-            .unwrap_or_default()
+            .unwrap_or_else(|| AnalysisVec::new(&self.control()))
     }
 
     pub(super) fn retain_row_expansion(
         &mut self,
         expression: &ScalarExpr,
-        fields: Vec<(usize, Vec<ScalarExpr>)>,
-    ) {
+        fields: RowExpansion,
+    ) -> Result<(), SQLError> {
         if !fields.is_empty() {
             self.row_expansions
-                .insert(NonNull::from(expression), fields);
+                .insert(NonNull::from(expression), fields)?;
         }
+        Ok(())
     }
     pub(super) fn with_query_schemas(mut self) -> Self {
-        self.query_schemas = Some(QuerySchemas::default());
+        self.query_schemas = Some(QuerySchemas::new(&self.control()));
         self
     }
 
@@ -492,12 +233,13 @@ impl<'a> ParameterTypes<'a> {
         &mut self,
         source: &crate::plan::SourcePlan,
         schema: &crate::RowSchema,
-    ) {
+    ) -> Result<(), SQLError> {
         if let Some(schemas) = self.query_schemas_mut() {
             schemas
                 .sources
-                .insert(NonNull::from(source), schema.clone());
+                .insert(NonNull::from(source), schema.clone())?;
         }
+        Ok(())
     }
 
     pub(super) fn query_output_schema(
@@ -512,27 +254,45 @@ impl<'a> ParameterTypes<'a> {
         query: &crate::plan::QueryPlan,
         positions: &[usize],
         output: &super::QueryOutput,
-    ) {
+    ) -> Result<(), SQLError> {
         if positions.is_empty() {
-            return;
+            return Ok(());
         }
+        let owner = self.control.clone();
+        let control = owner.control();
         let Some(schema) = self
             .query_schemas_mut()
             .and_then(|schemas| schemas.outputs.get_mut(&NonNull::from(query)))
         else {
-            return;
+            return Ok(());
         };
         let original = schema.clone();
-        *schema = crate::RowSchema::with_column_metadata(
+        let mut types = AnalysisVec::new(&control);
+        types.reserve(original.len(), &control)?;
+        for index in 0..original.len() {
+            types.push(
+                if positions.contains(&index) {
+                    output.types[index]
+                        .ty
+                        .as_deref()
+                        .map(|ty| ty.without_type_modifiers_with_control(&control))
+                        .transpose()?
+                } else {
+                    None
+                },
+                &control,
+            )?;
+        }
+        *schema = crate::RowSchema::with_output_metadata_with_control(
             None,
             original.columns().iter().enumerate().map(|(index, name)| {
                 let (ty, collation) = if positions.contains(&index) {
                     let value = &output.types[index];
                     (
-                        value.ty.as_ref().map(ColumnType::without_type_modifiers),
+                        types[index].as_deref(),
                         value
                             .ty
-                            .as_ref()
+                            .as_deref()
                             .filter(|ty| crate::schema::composites::type_is_collatable(ty))
                             .map(|ty| {
                                 u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
@@ -543,37 +303,46 @@ impl<'a> ParameterTypes<'a> {
                     )
                 } else {
                     (
-                        original.column_type(index).cloned(),
+                        original.column_type(index),
                         original.column_collation(index),
                     )
                 };
-                (name.clone(), ty, collation)
+                (
+                    name.as_str(),
+                    ty,
+                    collation,
+                    original.record_metadata(index).cloned(),
+                )
             }),
-        )
-        .with_record_metadata((0..original.columns().len()).filter_map(|index| {
-            original
-                .record_metadata(index)
-                .cloned()
-                .map(|metadata| (index, metadata))
-        }));
+            false,
+            &control,
+        )?;
+        Ok(())
     }
 
     pub(super) fn retain_query_output(
         &mut self,
         query: &crate::plan::QueryPlan,
         output: &super::QueryOutput,
-    ) {
+    ) -> Result<(), SQLError> {
+        let owner = self.control.clone();
         if let Some(schemas) = self.query_schemas_mut() {
             schemas
                 .outputs
-                .insert(NonNull::from(query), output.schema());
+                .insert(NonNull::from(query), output.schema(&owner.control())?)?;
         }
+        Ok(())
     }
 
-    pub(super) fn retain_input_coercion(&mut self, expression: &ScalarExpr, target: ColumnType) {
+    pub(super) fn retain_input_coercion(
+        &mut self,
+        expression: &ScalarExpr,
+        target: AnalysisType,
+    ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.5.insert(NonNull::from(expression), target);
+            constants.5.insert(NonNull::from(expression), target)?;
         }
+        Ok(())
     }
 
     pub(super) fn retain_result_metadata(mut self) -> Self {
@@ -594,9 +363,17 @@ impl<'a> ParameterTypes<'a> {
         Ok(())
     }
 
-    pub(super) fn take_literal(&mut self, expression: &ScalarExpr) -> Option<ConvertedInput> {
-        let constants = self.input_constants.as_mut()?;
-        constants.3.take_literal(expression, &mut constants.0)
+    pub(super) fn take_literal(
+        &mut self,
+        expression: &ScalarExpr,
+    ) -> Result<Option<ConvertedInput>, SQLError> {
+        let control = self.control.clone();
+        let Some(constants) = self.input_constants.as_mut() else {
+            return Ok(None);
+        };
+        constants
+            .3
+            .take_literal(expression, &mut constants.0, &control.control())
     }
 
     pub(super) fn retain_collation(
@@ -604,49 +381,207 @@ impl<'a> ParameterTypes<'a> {
         expression: &ScalarExpr,
         value: &mut ExpressionType,
         oid: u32,
-    ) {
+    ) -> Result<(), SQLError> {
         let origin = NonNull::from(expression);
         if let Some(constants) = &mut self.input_constants {
-            constants.3.select(origin, value.collation, oid);
+            constants.3.select(origin, value.collation, oid)?;
         }
         value.collation = Some(origin);
         value.derivation = value.derivation.explicit(i64::from(oid));
         value.initial_collation = oid;
+        Ok(())
     }
 
     pub(super) fn retain_membership(
         &mut self,
         expression: &ScalarExpr,
         analysis: super::membership::MembershipAnalysis,
-    ) {
+    ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.2.insert(NonNull::from(expression), analysis);
+            constants.2.insert(NonNull::from(expression), analysis)?;
         }
+        Ok(())
     }
 
     pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
-        Self {
-            types: types.to_vec(),
+        Self::new_with_control(types, &ProductionControl::uncontrolled())
+            .expect("ordinary analysis parameter types")
+    }
+
+    pub(super) fn new_with_control(
+        types: &[Option<ColumnType>],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let mut admitted = AnalysisVec::new(control);
+        admitted.reserve(types.len(), control)?;
+        for ty in types {
+            admitted.push(
+                ty.as_ref()
+                    .map(|ty| ty.clone_with_control(control))
+                    .transpose()?,
+                control,
+            )?;
+        }
+        Ok(Self {
+            types: admitted,
             fixed_values: None,
-            occurrences: Vec::new(),
+            occurrences: AnalysisVec::new(control),
             input_constants: None,
-            collations: super::collations::PendingCollations::default(),
+            collations: super::collations::PendingCollations::new(control),
             aliases: None,
             enum_labels: None,
             catalog_inputs: None,
             call_collations: None,
             query_schemas: None,
-            row_expansions: RowExpansions::default(),
-            rewritten_blocks: RewrittenBlocks::default(),
+            row_expansions: RowExpansions::new(control),
+            rewritten_blocks: RewrittenBlocks::new(control),
+            canonicalize_parameters: false,
+            composite_inputs: None,
+            reference_sites: None,
+            reference_inputs: None,
+            control: control.capture(),
+        })
+    }
+
+    pub(super) fn control(&self) -> ProductionControl<'_> {
+        self.control.control()
+    }
+
+    pub(super) fn with_reference_retention(mut self) -> Self {
+        self.reference_sites = Some(AnalysisMap::new(&self.control()));
+        self.reference_inputs = Some(AnalysisMap::new(&self.control()));
+        self
+    }
+
+    pub(super) fn take_reference_constants(&mut self) -> InputConstants {
+        let mut references = InputConstants::new(&self.control());
+        references.0 = self
+            .reference_inputs
+            .take()
+            .expect("reference input observation mode");
+        references.9 = std::mem::take(&mut self.row_expansions);
+        references.10 = std::mem::take(&mut self.rewritten_blocks);
+        references.11 = self
+            .reference_sites
+            .take()
+            .expect("named reference observation mode");
+        references
+    }
+
+    pub(super) fn with_composite_retention(mut self) -> Self {
+        self.composite_inputs = Some(AnalysisMap::new(&self.control()));
+        self
+    }
+
+    pub(super) fn retains_composite_inputs(&self) -> bool {
+        self.composite_inputs.is_some()
+    }
+
+    pub(super) fn retain_composite_input(
+        &mut self,
+        expression: &ScalarExpr,
+        replacement: OwnedScalarExpr,
+    ) -> Result<(), SQLError> {
+        self.composite_inputs
+            .as_mut()
+            .expect("composite observation mode")
+            .insert(NonNull::from(expression), replacement)?;
+        Ok(())
+    }
+
+    pub(super) fn take_composite_inputs(
+        &mut self,
+    ) -> AnalysisMap<NonNull<ScalarExpr>, OwnedScalarExpr> {
+        self.composite_inputs
+            .take()
+            .expect("composite observation mode")
+    }
+
+    pub(super) fn with_routine_parameter_binding(mut self) -> Self {
+        self.canonicalize_parameters = true;
+        self
+    }
+
+    pub(super) fn named_reference(
+        &mut self,
+        expression: &ScalarExpr,
+        number: usize,
+    ) -> Result<ExpressionType, SQLError> {
+        if let Some(sites) = &mut self.reference_sites {
+            sites.insert(NonNull::from(expression), number)?;
         }
+        if self.canonicalize_parameters {
+            if let Some(constants) = &mut self.input_constants {
+                constants.11.insert(NonNull::from(expression), number)?;
+            }
+        }
+        self.reference(number)
     }
 
     /// Output binding borrows caller parameters and preserves their explicit declarations.
     pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
-        Self {
+        Self::fixed_with_control(values, &ProductionControl::uncontrolled())
+            .expect("ordinary fixed parameter analysis")
+    }
+
+    pub(super) fn fixed_with_control(
+        values: &'a [SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
             fixed_values: Some(values),
-            ..Self::new(&[])
+            ..Self::new_with_control(&[], control)?
+        })
+    }
+
+    pub(super) fn with_stored_inputs(mut self) -> Self {
+        self.input_constants = Some(InputConstants::new(&self.control()));
+        self
+    }
+
+    pub(super) fn retain_stored_reference(
+        &mut self,
+        expression: &ScalarExpr,
+        column: crate::ast::InternalColumnRef,
+    ) -> Result<(), SQLError> {
+        let owner = self.control.clone();
+        let control = owner.control();
+        if let Some(constants) = &mut self.input_constants {
+            constants.0.insert(
+                NonNull::from(expression),
+                ConvertedInput {
+                    expression: ScalarExpr::InternalColumn(column).copy_for_rewrite(&control)?,
+                    session_dependent: false,
+                },
+            )?;
+        } else if let Some(references) = &mut self.reference_inputs {
+            references.insert(
+                NonNull::from(expression),
+                ConvertedInput {
+                    expression: ScalarExpr::InternalColumn(column).copy_for_rewrite(&control)?,
+                    session_dependent: false,
+                },
+            )?;
         }
+        Ok(())
+    }
+
+    pub(super) fn retain_stored_expansion(
+        &mut self,
+        expression: &ScalarExpr,
+        replacement: OwnedScalarExpr,
+    ) -> Result<(), SQLError> {
+        self.reference_inputs
+            .as_mut()
+            .expect("stored reference observation mode")
+            .insert(
+                NonNull::from(expression),
+                ConvertedInput {
+                    expression: replacement,
+                    session_dependent: false,
+                },
+            )?;
+        Ok(())
     }
 
     /// Fixed output binding can describe a subtree after ordered statement analysis, without its enclosing SQL clause.
@@ -660,13 +595,30 @@ impl<'a> ParameterTypes<'a> {
         enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
         catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
     ) -> Self {
-        Self {
-            input_constants: Some(InputConstants::default()),
+        Self::with_input_constants_with_control(
+            types,
             aliases,
             enum_labels,
             catalog_inputs,
-            ..Self::new(types)
-        }
+            &ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary input analysis")
+    }
+
+    pub(super) fn with_input_constants_with_control(
+        types: &[Option<ColumnType>],
+        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
+        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            input_constants: Some(InputConstants::new(control)),
+            aliases,
+            enum_labels,
+            catalog_inputs,
+            ..Self::new_with_control(types, control)?
+        })
     }
 
     /// Keep the declaration selected by analysis on the original call, without
@@ -675,12 +627,14 @@ impl<'a> ParameterTypes<'a> {
         &mut self,
         expression: &ScalarExpr,
         selected: &crate::ast::FunctionBinding,
-    ) {
+    ) -> Result<(), SQLError> {
+        let owner = self.control.clone();
+        let control = owner.control();
         if let Some(calls) = &mut self.call_collations {
-            calls.record_observer(expression, selected);
+            calls.record_observer(expression, selected)?;
         }
         if !selected.builtin
-            || crate::fixed_builtin_return_type(selected).is_some()
+            || crate::fixed_builtin_return_type_with_control(selected, &control)?.is_some()
             || crate::catalog::json_path::JsonPathFunction::lookup(&selected.name).is_some()
             || matches!(
                 selected.dispatch,
@@ -691,22 +645,25 @@ impl<'a> ParameterTypes<'a> {
                 .is_some_and(crate::ast::FunctionDispatch::is_concatenation)
         {
             if let Some(constants) = &mut self.input_constants {
-                constants
-                    .1
-                    .insert(NonNull::from(expression), selected.clone());
+                constants.1.insert(
+                    NonNull::from(expression),
+                    selected.clone_with_control(&control)?,
+                )?;
             }
         }
+        Ok(())
     }
 
     /// Keep the FROM call's selected identity and invocation for planning without resolving it again outside its row scope.
     pub(super) fn retain_source_binding(
         &mut self,
         original: NonNull<Option<crate::ast::FunctionBinding>>,
-        selected: crate::ast::FunctionBinding,
-    ) {
+        selected: Produced<crate::ast::FunctionBinding>,
+    ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.7.insert(original, selected);
+            constants.7.insert(original, selected)?;
         }
+        Ok(())
     }
 
     /// Record a call's input collation on whichever binding the call keeps after analysis.
@@ -714,30 +671,32 @@ impl<'a> ParameterTypes<'a> {
         &mut self,
         expression: &ScalarExpr,
         collation: Option<crate::catalog::collations::CollationSelection>,
-    ) {
+    ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.6.insert(NonNull::from(expression), collation);
+            constants.6.insert(NonNull::from(expression), collation)?;
         } else if let Some(calls) = &mut self.call_collations {
-            calls.record(expression, collation);
+            calls.record(expression, collation)?;
         }
+        Ok(())
     }
 
     /// Keep a built-in selected by name on a call that had no binding, so its input collation reaches execution.
     pub(super) fn retain_builtin_selection(
         &mut self,
         expression: &ScalarExpr,
-        selected: crate::ast::FunctionBinding,
-    ) {
+        selected: Produced<crate::ast::FunctionBinding>,
+    ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.1.insert(NonNull::from(expression), selected);
+            constants.1.insert(NonNull::from(expression), selected)?;
         } else if let Some(calls) = &mut self.call_collations {
-            calls.record_builtin(expression, selected);
+            calls.record_builtin(expression, selected)?;
         }
+        Ok(())
     }
 
     /// Record only the input collations of calls in an expression whose routines are already bound.
     pub(super) fn with_call_collations(mut self) -> Self {
-        self.call_collations = Some(CallCollations::default());
+        self.call_collations = Some(CallCollations::new(&self.control()));
         self
     }
 
@@ -755,12 +714,27 @@ impl<'a> ParameterTypes<'a> {
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {
         if let Some(values) = self.fixed_values {
             let parameter = ScalarExpr::Param(number);
-            let ty = crate::effective_overload_argument_type_with_params(
+            let control = self.control();
+            let ty = crate::scalar_type_with_control(
                 &parameter,
-                crate::scalar_type(&parameter, &crate::RowSchema::default(), values)?,
+                &crate::RowSchema::empty_with_control(&control)?,
                 values,
-            );
-            let mut value = ExpressionType::leaf(ty);
+                &control,
+            )?;
+            let ty = if crate::type_resolution::effective_overload_argument_type_ref_with_params(
+                &parameter,
+                ty.as_deref(),
+                values,
+            )
+            .is_some()
+            {
+                ty
+            } else {
+                None
+            };
+            let mut value = ExpressionType::resolved_produced(ty, &control)?;
+            value.initial_collation =
+                u32::try_from(value.derivation.oid()).expect("parameter collation OID");
             if number
                 .checked_sub(1)
                 .is_some_and(|index| index < values.len())
@@ -773,14 +747,30 @@ impl<'a> ParameterTypes<'a> {
             .checked_sub(1)
             .filter(|index| *index < self.types.len())
             .ok_or_else(|| error("42P02", format!("there is no parameter ${number}")))?;
-        let ty = self.types[index].clone();
+        let control = self.control.control();
+        let ty = self.types[index]
+            .as_deref()
+            .map(|ty| ty.clone_with_control(&control))
+            .transpose()?;
         let occurrence = self.occurrences.len();
-        self.occurrences.push((index, ty.clone()));
-        Ok(ExpressionType {
+        self.occurrences.push(
+            (
+                index,
+                self.types[index]
+                    .as_deref()
+                    .map(|ty| ty.clone_with_control(&control))
+                    .transpose()?,
+            ),
+            &control,
+        )?;
+        let mut value = ExpressionType {
             occurrence: Some(occurrence),
             unknown: UnknownOrigin::Parameter,
-            ..ExpressionType::leaf(ty)
-        })
+            ..ExpressionType::resolved_produced(ty, &control)?
+        };
+        value.initial_collation =
+            u32::try_from(value.derivation.oid()).expect("type collation OID");
+        Ok(value)
     }
 
     pub(super) fn coerce_unknown(
@@ -797,20 +787,25 @@ impl<'a> ParameterTypes<'a> {
         if let Some((origin, text)) = &expression.literal {
             self.read_literal(*origin, text, target)?;
         }
-        let target = target.without_type_modifiers();
+        let control_owner = self.control.clone();
+        let control = control_owner.control();
+        let target = target.without_type_modifiers_with_control(&control)?;
         if let Some(constants) = &mut self.input_constants {
             constants.3.coerce(expression.collation, &target)?;
         }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];
-            if self.types[*index].as_ref().is_some_and(|ty| *ty != target) {
+            if self.types[*index]
+                .as_deref()
+                .is_some_and(|ty| *ty != *target)
+            {
                 return Err(error(
                     "42P08",
                     format!("inconsistent types deduced for parameter ${}", *index + 1),
                 ));
             }
-            self.types[*index] = Some(target.clone());
-            *observed = Some(target.clone());
+            self.types[*index] = Some(target.clone_with_control(&control)?);
+            *observed = Some(target.clone_with_control(&control)?);
         }
         expression.derivation =
             expression
@@ -818,117 +813,45 @@ impl<'a> ParameterTypes<'a> {
                 .result(crate::catalog::type_metadata::pg_type_collation_oid(
                     &target,
                 ));
-        expression.ty = Some(target);
+        expression.replace_type(Some(target), &control)?;
         expression.initial_collation =
             u32::try_from(expression.derivation.oid()).expect("coerced collation OID");
         Ok(())
     }
 
-    fn read_literal(
-        &mut self,
-        origin: NonNull<ScalarExpr>,
-        text: &str,
-        target: &ColumnType,
-    ) -> Result<(), SQLError> {
-        let input_type = crate::type_resolution::literal_input_type_with_control(
-            target,
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )?
-        .into_uncontrolled()
-        .expect("ordinary literal input has no reservation");
-        if self.input_constants.as_ref().is_some_and(|constants| {
-            matches!(
-                constants.0.get(&origin),
-                Some(ConvertedInput {
-                    expression: ScalarExpr::TypedLiteral { bound_type: Some(ty), .. },
-                    ..
-                }) if *ty == input_type
-            )
-        }) {
-            return Ok(());
-        }
-        if let Some(input) = self.input_value(text, &input_type)? {
-            if let Some(constants) = &mut self.input_constants {
-                constants.0.insert(
-                    origin,
-                    ConvertedInput {
-                        expression: ScalarExpr::TypedLiteral {
-                            collation_oid: None,
-                            composite_source: None,
-                            value: input.value,
-                            ty: input_type.catalog_name(),
-                            bound_type: Some(input_type),
-                            parameter_index: None,
-                        },
-                        session_dependent: input.session_dependent,
-                    },
-                );
-            }
-        }
-        Ok(())
-    }
-
-    fn input_value(
-        &self,
-        text: &str,
-        input_type: &ColumnType,
-    ) -> Result<Option<ReadInput>, SQLError> {
-        if crate::expr::requires_catalog_constant_input(input_type) {
-            if self.input_constants.is_none() {
-                return Ok(None);
-            }
-            let catalog = self.catalog_inputs.ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "catalog input functions are unavailable for {}",
-                    input_type.sql_name()
-                ))
-            })?;
-            return catalog
-                .read_unknown_input(text, input_type)
-                .map(|value| Some(ReadInput::session_dependent(value)));
-        }
-        if self.input_constants.is_some() && crate::expr::enums::is_enum_bearing(input_type) {
-            if let Some(value) = crate::expr::enums::fold_unknown_literal(
-                self.enum_labels,
-                &Value::Str(text.into()),
-                input_type,
-            )? {
-                return Ok(Some(ReadInput::session_dependent(value)));
-            }
-        }
-        if crate::type_resolution::catalog_input_type(input_type) {
-            return self.aliases.map_or(Ok(None), |catalog| {
-                crate::schema::dependencies::oid_alias::read_unknown_constant(
-                    catalog, input_type, text,
-                )
-                .map(|value| value.map(ReadInput::session_dependent))
-            });
-        }
-        let value = crate::expr::cast_value_from(
-            &Value::Str(text.into()),
-            &input_type.catalog_name(),
-            None,
-        )?;
-        let session_dependent = input_reads_session(text, input_type, &value);
-        Ok(Some(ReadInput {
-            value,
-            session_dependent,
-        }))
-    }
-
-    pub(super) fn values(&self) -> Cow<'_, [SQLParam]> {
+    pub(super) fn values(&self) -> Result<AnalysisParameters<'_>, SQLError> {
         if let Some(values) = self.fixed_values {
-            return Cow::Borrowed(values);
+            return Ok(AnalysisParameters::Borrowed(values));
         }
-        Cow::Owned(
-            self.types
-                .iter()
-                .map(|ty| match ty {
-                    Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
-                    None => SQLParam::Scalar(Value::Null),
-                })
-                .collect(),
-        )
+        let control = self.control();
+        let mut output = ProductionVec::new(control);
+        output.reserve(self.types.len())?;
+        for ty in &self.types {
+            let (parameter, memory) = match ty {
+                Some(ty) => {
+                    let (ty, memory) = ty.clone_with_control(&control)?.into_parts();
+                    (SQLParam::typed_scalar(Value::Null, ty), memory)
+                }
+                None => (SQLParam::Scalar(Value::Null), control.empty_reservation()),
+            };
+            output.push_produced(control.finish(parameter, memory)?)?;
+        }
+        Ok(AnalysisParameters::Owned(output.finish()?))
+    }
+}
+
+pub(super) enum AnalysisParameters<'a> {
+    Borrowed(&'a [SQLParam]),
+    Owned(Produced<Vec<SQLParam>>),
+}
+
+impl std::ops::Deref for AnalysisParameters<'_> {
+    type Target = [SQLParam];
+    fn deref(&self) -> &[SQLParam] {
+        match self {
+            Self::Borrowed(values) => values,
+            Self::Owned(values) => values,
+        }
     }
 }
 
@@ -939,36 +862,25 @@ pub(super) fn error(sqlstate: &str, message: String) -> SQLError {
     }
 }
 
-/// A text input read by its input function, with whether an ordinary message must read it again.
-struct ReadInput {
-    value: Value,
-    session_dependent: bool,
-}
-
-impl ReadInput {
-    /// A value read through the catalog, whose descriptors a later message may see changed.
-    fn session_dependent(value: Value) -> Self {
-        Self {
-            value,
-            session_dependent: true,
-        }
-    }
-}
-
 /// Whether an ordinary message must read `text` again. Domain arrays and composites read the catalog; a type whose input function is stable reads a session setting or the transaction clock, unless the text reproduces `value` under every setting.
-fn input_reads_session(text: &str, input_type: &ColumnType, value: &Value) -> bool {
+fn input_reads_session(
+    text: &str,
+    input_type: &ColumnType,
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
     if crate::expr::requires_domain_array_input(input_type)
         || matches!(input_type, ColumnType::Composite(_))
     {
-        return true;
+        return Ok(true);
     }
-    if crate::type_resolution::cast_volatility(&ColumnType::Text, input_type)
+    if crate::type_resolution::cast_volatility_with_control(&ColumnType::Text, input_type, control)?
         == crate::ast::FunctionVolatility::Immutable
     {
-        return false;
+        return Ok(false);
     }
-    !(temporal_input_type(input_type)
-        && crate::expr::text_input_is_session_independent(text, input_type, value))
+    Ok(!(temporal_input_type(input_type)
+        && crate::expr::text_input_is_session_independent(text, input_type, value)))
 }
 
 /// Types whose text input reads only the thread's date order, interval style and transaction clock, and arrays of them.

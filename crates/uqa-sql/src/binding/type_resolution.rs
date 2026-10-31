@@ -14,12 +14,15 @@ use crate::routines::RoutineResolution;
 
 use super::{QueryPlan, ScalarExpr, SchemaScope};
 
+mod production;
+#[cfg(test)]
+mod production_tests;
 mod query_results;
 pub(super) use query_results::ValidatedSubqueries;
 
 pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,
-    pub(super) scalar_subquery_schemas: Option<Vec<Option<RowSchema>>>,
+    pub(super) scalar_subquery_schemas: Option<crate::production::Buffer<Option<RowSchema>>>,
     pub(super) defer_routine_namespace_errors: bool,
 }
 
@@ -92,12 +95,144 @@ impl QueryFunctionTypeResolver<'_> {
 }
 
 impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
+    fn resolve_collation_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<u32>, SQLError> {
+        self.routines
+            .resolve_collation_name_with_control(name, control)
+    }
+
+    fn is_scalar_function_binding_with_control(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.routines
+            .is_scalar_function_binding_with_control(binding, control)
+    }
+
+    fn resolve_scalar_subquery_type_with_control(
+        &self,
+        subquery: crate::SubqueryId,
+        outer_schema: &RowSchema,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        control.check()?;
+        let Some(schemas) = self.scalar_subquery_schemas.as_ref() else {
+            return self.routines.resolve_scalar_subquery_type_with_control(
+                subquery,
+                outer_schema,
+                params,
+                control,
+            );
+        };
+        schemas
+            .get(subquery)
+            .ok_or_else(|| {
+                SQLError::Internal(format!("scalar subquery slot {subquery} is out of bounds"))
+            })?
+            .as_ref()
+            .and_then(|schema| schema.column_type(0))
+            .map(|ty| ty.clone_with_control(control))
+            .transpose()
+            .map_err(Into::into)
+    }
+    fn format_type_name_with_control(
+        &self,
+        ty: &crate::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.routines.format_type_name_with_control(ty, control)
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ColumnType>>, SQLError> {
+        self.routines.resolve_type_name_with_control(name, control)
+    }
+
+    fn resolve_function_type_with_control(
+        &self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<crate::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ColumnType>>, SQLError> {
+        self.routine_resolution(self.routines.resolve_function_type_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        ))
+    }
+
+    fn resolve_function_overload_with_control(
+        &self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<crate::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        self.routine_resolution(self.routines.resolve_function_overload_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        ))
+    }
+
+    fn resolve_function_overload_with_builtins_and_control(
+        &self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<crate::ColumnType>],
+        explicit_variadic: bool,
+        builtins: &[crate::BuiltinFunctionOverload],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        self.routine_resolution(
+            self.routines
+                .resolve_function_overload_with_builtins_and_control(
+                    name,
+                    binding,
+                    argument_names,
+                    argument_types,
+                    explicit_variadic,
+                    builtins,
+                    control,
+                ),
+        )
+    }
+
     fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
         self.routines.format_type_name(ty)
     }
 
     fn has_untyped_function(&self, name: &str) -> bool {
         self.routines.has_untyped_function(name)
+    }
+
+    fn has_untyped_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.routines
+            .has_untyped_function_with_control(name, control)
     }
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {

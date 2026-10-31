@@ -7,7 +7,7 @@
 use super::*;
 use crate::{
     ast::{FunctionBinding, IndexKey, TableKeyConstraint, TableKeyConstraintKind},
-    ColumnType, FunctionTypeResolver,
+    ColumnType, FunctionTypeResolver, RowSchema,
 };
 
 struct Catalog(Vec<ColumnDef>);

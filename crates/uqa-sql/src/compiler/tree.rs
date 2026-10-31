@@ -8,7 +8,7 @@
 
 use pg_query::protobuf::Node;
 use pg_query::NodeEnum;
-use uqa_core::{DecimalValue, Value};
+use uqa_core::Value;
 
 use crate::ast::{
     BinaryOp, ColumnDef, CreateIndex, CreateTable, Expr, FromClause, InsertStmt, JoinKind, OrderBy,

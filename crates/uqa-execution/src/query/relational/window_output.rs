@@ -125,13 +125,13 @@ fn attach_unordered_output<'a, S: Clone + 'static>(
             &mut projections,
         )?);
         window.read_keys(&mut projections);
-        operator.wrap(|input| {
+        operator.attach(|input| {
             window_operator(
                 input,
                 window,
                 (execution.context, execution.params, execution.ctes),
             )
-        });
+        })?;
         operator.attach(|input| {
             attach_final_projection_order(
                 input,
@@ -179,7 +179,7 @@ fn attach_ordered_output<'a, S: Clone + 'static>(
         resjunk.order_by.extend(order_columns);
         window.read_keys(&mut physical);
         let order_statement = order_statement.as_ref().unwrap_or(statement);
-        operator.wrap(|input| window_operator(input, window, (context, params, ctes)));
+        operator.attach(|input| window_operator(input, window, (context, params, ctes)))?;
         if ctes.streams_command_progress() {
             operator.attach(|input| {
                 attach_streaming_order_projection(
@@ -256,17 +256,22 @@ fn window_operator<'a, S: Clone + 'static>(
     operator: Box<dyn PhysicalOperator + 'a>,
     window: WindowOutput,
     (context, params, ctes): (RelationalContext<'a, S>, &'a [SQLParam], &CteScope<S>),
-) -> Box<dyn PhysicalOperator + 'a> {
-    let source = operator.row_schema().clone();
-    Box::new(Window::with_row_schema_executor(
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    let (operator, (source, scope)) = OperatorBuild::run(operator, |operator| {
+        Ok((
+            operator.row_schema().clone(),
+            context.expression_scope(ctes)?,
+        ))
+    })?;
+    Ok(Box::new(Window::with_row_schema_executor(
         operator,
         window.schema,
         Box::new(PhysicalWindowExecutor::new(
-            context.expression_scope(ctes.clone()),
+            scope,
             window.plan,
             params,
             source,
             window.work_mem_bytes,
         )),
-    ))
+    )))
 }

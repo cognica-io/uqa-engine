@@ -60,15 +60,27 @@ impl CatalogReadView {
                 .observe_definition(GraphDefinitionKind::NamedGraph, Some(name))
                 .map_err(graph_error)?;
         }
-        Ok(self.snapshot.definitions.graphs.get(name).map(|store| {
-            match (&self.graph_reads, store.as_ref()) {
+        let store = if let Some(overlay) = &self.snapshot.graph_overlay {
+            overlay
+                .names
+                .contains(name)
+                .then(|| Cow::Owned(GraphStoreHandle::Persistent(overlay.store.as_ref().clone())))
+        } else {
+            self.snapshot
+                .definitions
+                .graphs
+                .get(name)
+                .map(|store| Cow::Borrowed(store.as_ref()))
+        };
+        Ok(
+            store.map(|store| match (&self.graph_reads, store.as_ref()) {
                 (Some(read), GraphStoreHandle::Persistent(store)) => Cow::Owned(
                     GraphStoreHandle::Persistent(store.clone())
                         .with_serializable_read(read.context.clone(), &read.cancellation),
                 ),
-                _ => Cow::Borrowed(store.as_ref()),
-            }
-        }))
+                _ => store,
+            }),
+        )
     }
 
     /// Catalog row consumption observes the complete name set, including an empty result.
@@ -96,9 +108,45 @@ impl CatalogReadView {
             .map_err(graph_error)
     }
 
+    pub fn graph_label_kind(
+        &self,
+        graph: &str,
+        label: &str,
+    ) -> Result<Option<uqa_graph::LabelKind>, SQLError> {
+        self.graph_read(graph)?
+            .map(|store| store.graph_label_kind(graph, label))
+            .transpose()
+            .map(Option::flatten)
+            .map_err(graph_error)
+    }
+
     /// Unobserved names for binding and restoration; row consumers use `read_graph_names`.
     pub fn graph_names(&self) -> Vec<String> {
-        self.snapshot.definitions.graphs.keys().cloned().collect()
+        self.graph_names_iter().map(str::to_owned).collect()
+    }
+
+    pub fn contains_graph(&self, name: &str) -> bool {
+        self.snapshot.graph_overlay.as_ref().map_or_else(
+            || self.snapshot.definitions.graphs.contains_key(name),
+            |overlay| overlay.names.contains(name),
+        )
+    }
+
+    /// Borrow the selected namespace without producing graph handles or names.
+    pub fn graph_names_iter(&self) -> impl Iterator<Item = &str> {
+        self.snapshot
+            .graph_overlay
+            .as_ref()
+            .into_iter()
+            .flat_map(|overlay| overlay.names.iter().map(String::as_str))
+            .chain(
+                self.snapshot
+                    .graph_overlay
+                    .is_none()
+                    .then_some(&self.snapshot.definitions.graphs)
+                    .into_iter()
+                    .flat_map(|graphs| graphs.keys().map(String::as_str)),
+            )
     }
 
     pub fn graph_next_label_id(&self, graph: &str) -> Result<Option<u32>, SQLError> {

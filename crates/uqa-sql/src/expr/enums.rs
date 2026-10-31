@@ -313,12 +313,27 @@ pub(crate) fn retain_enum_oids(
     catalog: Option<&dyn EnumLabelCatalog>,
     value: &Value,
 ) -> Result<Value> {
-    map_enum_values(value, &mut |label| {
+    retain_enum_oids_with_control(catalog, value, &ProductionControl::uncontrolled()).map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary retained enum value")
+    })
+}
+
+pub(crate) fn retain_enum_oids_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    output::map_with_control(value, control, &mut |label| {
+        control.check()?;
         let oid = match label.label_oid() {
             Some(oid) => oid,
             None => enum_label_oid(catalog, label)?,
         };
-        Ok(Value::Enum(label.clone().with_label_oid(Some(oid))))
+        let memory =
+            control.reserve(EnumValue::retained_header_bytes() + label.key().as_bytes().len())?;
+        Ok(control.finish(Value::Enum(label.clone().with_label_oid(Some(oid))), memory)?)
     })
 }
 
@@ -469,37 +484,89 @@ pub fn fold_unknown_literal(
     value: &Value,
     target: &ColumnType,
 ) -> Result<Option<Value>> {
+    Ok(fold_unknown_literal_with_control(
+        catalog,
+        value,
+        target,
+        &ProductionControl::uncontrolled(),
+    )?
+    .map(|value| value.into_uncontrolled().expect("ordinary enum literal")))
+}
+
+/// Convert an unknown enum literal while retaining the parsed array and every converted element under the invoking allowance. Complete array syntax validation still precedes enum input.
+pub fn fold_unknown_literal_with_control(
+    catalog: Option<&dyn EnumLabelCatalog>,
+    value: &Value,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>> {
+    control.check()?;
     match (target, value) {
-        (ColumnType::Enum(_) | ColumnType::Array(_), Value::Null) if is_enum_bearing(target) => {
-            Ok(Some(Value::Null))
-        }
+        (ColumnType::Enum(_) | ColumnType::Array(_), Value::Null) if is_enum_bearing(target) => Ok(
+            Some(control.finish(Value::Null, control.empty_reservation())?),
+        ),
         (ColumnType::Enum(reference), Value::Str(text)) => {
-            enum_value_from_text(catalog, reference.oid, text).map(Some)
+            enum_value_from_text_with_control(catalog, reference.oid, text, control).map(Some)
         }
         (ColumnType::Array(element), Value::Str(text)) if is_enum_bearing(element) => {
             let mut leaf = element.as_ref();
             while let ColumnType::Array(inner) = leaf {
+                control.check()?;
                 leaf = inner;
             }
             let ColumnType::Enum(reference) = leaf else {
                 return Ok(None);
             };
-            let parsed = super::casting::parse_pg_array_literal(text)?;
-            map_array(&parsed, |element| match element {
-                Value::Null => Ok(Value::Null),
-                Value::Str(text) => enum_value_from_text(catalog, reference.oid, text),
-                other => Err(SQLError::Internal(format!(
-                    "array literal parsing produced a non-text element {other:?}"
-                ))),
-            })
-            .map(|array| {
-                Some(Value::Array(
-                    array.with_element_type_oid(Some(reference.oid)),
-                ))
-            })
+            let parsed = super::casting::parse_pg_array_literal_with_control(text, control)?;
+            let elements =
+                enum_literal_elements(parsed.elements(), catalog, reference.oid, control)?;
+            let mut bounds = ProductionVec::new(*control);
+            bounds.extend_from_slice(parsed.lower_bounds())?;
+            let array =
+                ArrayValue::with_lower_bounds_with_control(elements, bounds.finish()?, control)?
+                    .filter(|array| array.dimensions() == parsed.dimensions())
+                    .ok_or_else(|| {
+                        SQLError::Internal("enum array conversion changed array dimensions".into())
+                    })?;
+            let (array, memory) = array.into_parts();
+            Ok(Some(control.finish(
+                Value::Array(array.with_element_type_oid(Some(reference.oid))),
+                memory,
+            )?))
         }
         _ => Ok(None),
     }
+}
+
+fn enum_literal_elements(
+    values: &[Value],
+    catalog: Option<&dyn EnumLabelCatalog>,
+    type_oid: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Value>>> {
+    let mut output = ProductionVec::new(*control);
+    output.reserve(values.len())?;
+    for value in values {
+        control.check()?;
+        let value = match value {
+            Value::List(values) => {
+                let (values, memory) =
+                    enum_literal_elements(values, catalog, type_oid, control)?.into_parts();
+                control.finish(Value::List(values), memory)?
+            }
+            Value::Null => control.finish(Value::Null, control.empty_reservation())?,
+            Value::Str(text) => {
+                enum_value_from_text_with_control(catalog, type_oid, text, control)?
+            }
+            other => {
+                return Err(SQLError::Internal(format!(
+                    "array literal parsing produced a non-text element {other:?}"
+                )))
+            }
+        };
+        output.push_produced(value)?;
+    }
+    Ok(output.finish()?)
 }
 
 /// The string category accepted by automatic I/O conversion casts.

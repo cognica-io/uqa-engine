@@ -24,7 +24,7 @@ pub trait QueryExpressionContext:
     fn expression_evaluator<'a>(
         &'a self,
         params: &'a [SQLParam],
-    ) -> crate::SharedExpressionEvaluator<'a>;
+    ) -> Result<crate::SharedExpressionEvaluator<'a>, SQLError>;
 
     fn subquery_plans(&self) -> &[QueryPlan];
 }

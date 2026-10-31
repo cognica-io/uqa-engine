@@ -53,6 +53,21 @@ impl TablePrivilegeState for TableState {
     fn security(&self) -> BoundTableSecurity {
         self.security()
     }
+    fn security_snapshot_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Arc<BoundTableSecurity>>, uqa_sql::SQLError> {
+        Ok(control.finish(self.security.snapshot(), control.empty_reservation())?)
+    }
+    fn with_columns_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[uqa_sql::ast::ColumnDef]) -> Result<(), uqa_sql::SQLError>,
+    ) -> Result<(), uqa_sql::SQLError> {
+        control.check()?;
+        read(&self.columns.read())?;
+        Ok(control.check()?)
+    }
     fn column_names(&self) -> Vec<String> {
         self.columns
             .read()
@@ -67,6 +82,20 @@ impl TablePrivilegeRegistry for Engine {
     }
     fn refresh_catalog(&self) -> StorageBackendResult<()> {
         self.synchronize_catalog_registries()
+    }
+    fn retained_table_with_control(
+        &self,
+        relation: &RelationIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Arc<dyn TablePrivilegeState>>, uqa_sql::SQLError> {
+        control.check()?;
+        Ok(self
+            .storage
+            .tables
+            .read()
+            .get(relation)
+            .cloned()
+            .map(|table| table as Arc<dyn TablePrivilegeState>))
     }
     fn tables(&self) -> Box<dyn TablePrivilegeRead + '_> {
         Box::new(TablePrivilegeGuard(self.storage.tables.read()))

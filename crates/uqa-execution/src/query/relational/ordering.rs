@@ -39,7 +39,7 @@ pub fn attach_final_projection_order<'a, S: Clone + 'static>(
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     OperatorBuild::build(operator, |operator| {
         let (statement, output) = ordering;
-        let type_resolver = execution.context.expression_scope(execution.ctes.clone());
+        let type_resolver = execution.context.expression_scope(execution.ctes)?;
         let returns_set = projections_may_return_set(
             execution.context.catalog,
             type_resolver.as_ref(),

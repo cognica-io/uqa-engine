@@ -48,7 +48,7 @@ impl SelectedRowMaterializer {
         let [fragment] = row.fragments.as_slice() else {
             return false;
         };
-        if Arc::strong_count(&fragment.values) == 1 {
+        if !fragment.can_copy_directly() {
             return false;
         }
         for (output, &slot) in self.outputs.iter().enumerate() {
@@ -67,12 +67,7 @@ impl SelectedRowMaterializer {
     }
 
     pub(crate) fn materialize(&self, row: PhysicalRow, mut emit: impl FnMut(usize, Value)) {
-        if row.fragments.len() > 1
-            && row
-                .fragments
-                .iter()
-                .any(|fragment| Arc::strong_count(&fragment.values) > 1)
-        {
+        if row.fragments.len() > 1 && row.fragments.iter().any(RowFragment::has_shared_values) {
             self.materialize_shared_fragments(row, &mut emit);
             return;
         }
@@ -96,22 +91,28 @@ impl SelectedRowMaterializer {
             let end = offset + fragment.len();
             let count = pending.partition_point(|(slot, _)| *slot < end);
             let (selected, rest) = pending.split_at(count);
-            let selected = selected
-                .iter()
-                .filter_map(|(slot, output)| {
-                    let local = slot - offset;
-                    let stored = match &fragment.projection {
-                        Some(projection) => *projection.get(local)?,
-                        None => local,
-                    };
-                    (stored != NULL_SLOT).then_some((stored, *output))
-                })
-                .collect::<SmallVec<[(usize, usize); 16]>>();
-            if !selected.is_empty() {
-                groups.push(SelectedFragment {
-                    values: fragment.values,
-                    selected,
-                });
+            match fragment {
+                RowFragment::Constant { value, .. } => {
+                    for (_, output) in selected {
+                        emit(*output, value.clone());
+                    }
+                }
+                RowFragment::Stored { values, projection } => {
+                    let selected = selected
+                        .iter()
+                        .filter_map(|(slot, output)| {
+                            let local = slot - offset;
+                            let stored = match &projection {
+                                Some(projection) => *projection.get(local)?,
+                                None => local,
+                            };
+                            (stored != NULL_SLOT).then_some((stored, *output))
+                        })
+                        .collect::<SmallVec<[(usize, usize); 16]>>();
+                    if !selected.is_empty() {
+                        groups.push(SelectedFragment { values, selected });
+                    }
+                }
             }
             pending = rest;
             offset = end;
@@ -148,7 +149,15 @@ impl RowFragment {
         if selected.is_empty() {
             return;
         }
-        let Self { values, projection } = self;
+        let (values, projection) = match self {
+            Self::Constant { value, .. } => {
+                for (_, output) in selected {
+                    emit(*output, value.clone());
+                }
+                return;
+            }
+            Self::Stored { values, projection } => (values, projection),
+        };
         let Some(projection) = projection else {
             emit_selected_values(
                 values,

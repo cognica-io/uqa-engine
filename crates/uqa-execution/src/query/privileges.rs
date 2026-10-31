@@ -31,6 +31,34 @@ impl<S: Clone> PrivilegeCteCatalog for CteScope<S> {
         self.materialized_for_scan(name)
             .map(|rows| rows.row_schema().columns().to_vec())
     }
+    fn materialized_columns_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+        let Some(rows) = self.materialized_for_scan_with_control(name, control)? else {
+            return Ok(None);
+        };
+        let mut columns = uqa_core::memory::ProductionVec::new(*control);
+        for name in rows.row_schema().columns() {
+            columns.push_produced(control.copy_text(name)?)?;
+        }
+        Ok(Some(columns.finish()?))
+    }
+    fn is_visible_cte_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.is_visible_cte_with_control(name, control)
+    }
+    fn deferred_reference_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<&CtePlan>, SQLError> {
+        self.deferred_reference_with_control(name, control)
+    }
     fn deferred_reference(&self, name: &str) -> Option<&CtePlan> {
         self.deferred_reference(name)
     }
@@ -42,15 +70,39 @@ pub(crate) fn with_scope<S: Clone, T>(
     ctes: &CteScope<S>,
     apply: impl FnOnce(&PrivilegeScope<'_, &[QueryPlan]>) -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
+    with_scope_with_control(
+        ctes,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        apply,
+    )
+}
+
+fn with_scope_with_control<S: Clone, T>(
+    ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    apply: impl FnOnce(&PrivilegeScope<'_, &[QueryPlan]>) -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
     let catalog = ctes.catalog_read_view()?;
-    let scope = PrivilegeScope::borrowed(
+    let scope = PrivilegeScope::borrowed_with_control(
         &catalog,
-        ctes.relation_name_resolution()?,
+        ctes.relation_name_resolution_with_control(control)?,
         ctes,
         &ctes.scalar_subqueries,
+        control,
     );
     apply(&scope)
 }
+
+pub fn ensure_select_privileges_for_query_with_control<S: Clone>(
+    query: &QueryPlan,
+    ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    with_scope_with_control(ctes, control, |scope| {
+        logical::ensure_select_privileges_for_query(query, scope)
+    })
+}
+
 pub fn ensure_select_privileges_for_query<S: Clone>(
     query: &QueryPlan,
     ctes: &CteScope<S>,
@@ -85,7 +137,21 @@ pub fn ensure_select_privileges_for_source_expressions<S: Clone>(
     expressions: &[&ScalarExpr],
     ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {
-    with_scope(ctes, |scope| {
+    ensure_select_privileges_for_source_expressions_with_control(
+        source,
+        expressions,
+        ctes,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn ensure_select_privileges_for_source_expressions_with_control<S: Clone>(
+    source: &SourcePlan,
+    expressions: &[&ScalarExpr],
+    ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    with_scope_with_control(ctes, control, |scope| {
         logical::ensure_select_privileges_for_source_expressions(source, expressions, scope)
     })
 }
@@ -113,45 +179,21 @@ pub fn ensure_select_privileges_for_table_expressions<S: Clone>(
 use uqa_sql::semantics::privileges::TargetSelectPrivilegeRequest;
 pub fn ensure_target_table_select_for_expressions<S: Clone>(
     request: TargetSelectPrivilegeRequest<'_, '_>,
-    ctes: &mut CteScope<S>,
+    ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {
-    let TargetSelectPrivilegeRequest {
-        table,
-        privilege_subject,
-        target_qualifier,
-        returning_aliases,
-        expressions,
-        subqueries,
-        required_columns,
-    } = request;
-    let relation =
-        uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-    let target_qualifiers = BTreeSet::from([
-        target_qualifier.to_string(),
-        table.to_string(),
-        relation.name,
-        returning_aliases.old.clone(),
-        returning_aliases.new.clone(),
-    ]);
-    ctes.scalar_subqueries = subqueries.into();
-    if let Some(subject) = privilege_subject {
-        let scope = ctes.enter_privilege_subject(subject.clone());
-        ensure_select_privileges_for_table_expressions(
-            table,
-            &target_qualifiers,
-            expressions,
-            subqueries,
-            required_columns,
-            &scope,
-        )
-    } else {
-        ensure_select_privileges_for_table_expressions(
-            table,
-            &target_qualifiers,
-            expressions,
-            subqueries,
-            required_columns,
-            ctes,
-        )
-    }
+    ensure_target_table_select_for_expressions_with_control(
+        request,
+        ctes,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn ensure_target_table_select_for_expressions_with_control<S: Clone>(
+    request: TargetSelectPrivilegeRequest<'_, '_>,
+    ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    with_scope_with_control(ctes, control, |scope| {
+        logical::ensure_target_select(request, scope)
+    })
 }

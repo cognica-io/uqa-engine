@@ -147,7 +147,7 @@ pub(crate) fn select_common_input_type_in_with_control<'a>(
 }
 
 /// SQL `unknown` inputs participate in the exact-type check. Incompatible known types return `None`; resource errors remain errors.
-pub(in crate::type_resolution) fn select_common_input_type_with_control(
+pub(crate) fn select_common_input_type_with_control(
     types: &[Option<&ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {

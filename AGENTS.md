@@ -20,7 +20,11 @@ Always check the automatic performance regression CI for the product changes bei
 
 Group related open issues by their owning behavior and dependencies, use one PR per coherent group, and commit individual fixes in logical units. Create implementation PRs as drafts and push those commits without starting CI for each update. Finish the scoped implementation, focused local verification, review fixes and current task records before marking a PR ready for review; that transition runs the affected PR checks once for the completed batch, including automatic Linux/macOS performance regression checks. If qualification requires a product fix, return the PR to draft, finish the correction batch and mark it ready again. Before merging, verify the actual final-source results; reuse completed evidence only for identical qualification inputs. A cancelled or skipped run is not evidence. Main pushes retain their configured workspace and performance checks; the FDW matrix runs only for affected ready-for-review candidates, with all six Linux/macOS configurations verified against the final source fingerprint.
 
+Keep each PR at 10,000 changed lines or fewer, counting additions plus deletions against its actual base. If a PR exceeds that limit, stop expanding it and split the work and PRs by owning behavior and dependency order before review or merge. Each resulting PR must contain a coherent, independently verifiable change within the limit; use the prerequisite branch as the base for dependent work. Record transferred scope, dependency links and verification requirements in the affected issues and PRs. Filing follow-up issues alone does not resolve an oversized existing diff.
+
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
+
+Describe decisions, scope, behavior and verification evidence directly in issues, PRs and documentation. Do not narrate instructions, approvals or conversation history, or attribute a decision or requirement to a person.
 
 Preserve the established `CPU`, `MLX`, and `UQA` initialisms in Rust identifiers and design pseudocode; do not apply mixed-case acronym normalization to them.
 
@@ -38,4 +42,4 @@ Do not prefix commit messages or pull request titles with labels such as `feat:`
 
 Keep exactly one test executable per crate. Put additional integration-test files in submodules of that crate's single test target; never add another top-level `tests/*.rs` file or `[[test]]` target.
 
-Treat every behavior difference from PostgreSQL 18 as a bug. Fix the implementation; do not waive or merely document the difference as a compatibility gap. The maintainer-approved exception in [#656](https://github.com/cognica-io/uqa-engine/issues/656) rejects retained composite reads beyond their owned tuple with `XX001` instead of reproducing PostgreSQL allocator contents; preserve all defined in-bounds, lazy-read, transaction and persistence behavior.
+Treat every behavior difference from PostgreSQL 18 as a bug. Fix the implementation; do not waive or merely document the difference as a compatibility gap. The exception in [#656](https://github.com/cognica-io/uqa-engine/issues/656) rejects retained composite reads beyond their owned tuple with `XX001` instead of reproducing PostgreSQL allocator contents; preserve all defined in-bounds, lazy-read, transaction and persistence behavior.

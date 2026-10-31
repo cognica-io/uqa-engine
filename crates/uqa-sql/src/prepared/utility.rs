@@ -7,7 +7,7 @@
 //! Session-owned utility descriptors and the distinction between analyzed and unplanned statements.
 
 use crate::{
-    plan::{CommandPlan, UnifiedPlan},
+    plan::{CommandPlan, PlanRef, UnifiedPlan},
     RowSchema, SQLError, Statement,
 };
 
@@ -16,14 +16,43 @@ pub trait PreparedSessionMetadata {
     fn show_result_schema(&self, name: &str) -> Result<RowSchema, SQLError>;
     fn portal_result_schema(&self, name: &str) -> Option<RowSchema>;
     fn prepared_result_schema(&self, name: &str) -> Option<RowSchema>;
+
+    fn show_result_schema_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        control.check()?;
+        self.show_result_schema(name)
+    }
+    fn portal_result_schema_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<RowSchema>, SQLError> {
+        control.check()?;
+        Ok(self.portal_result_schema(name))
+    }
+    fn prepared_result_schema_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<RowSchema>, SQLError> {
+        control.check()?;
+        Ok(self.prepared_result_schema(name))
+    }
 }
 
 /// Utilities whose bodies undergo parse analysis also require a planning snapshot and cache revalidation. Other utilities retain their original result descriptor even when the session object used at execution changes.
 pub fn requires_analysis(plan: &UnifiedPlan) -> bool {
+    requires_analysis_ref(plan.into())
+}
+
+pub fn requires_analysis_ref(plan: PlanRef<'_>) -> bool {
     match plan {
-        UnifiedPlan::Query(_) => true,
-        UnifiedPlan::Command(command) => matches!(
-            command.as_ref(),
+        PlanRef::Query(_) => true,
+        PlanRef::Command(command) => matches!(
+            command,
             CommandPlan::Insert(_)
                 | CommandPlan::Update(_)
                 | CommandPlan::Delete(_)
@@ -66,6 +95,30 @@ pub fn result_schema(
             Ok(session.portal_result_schema(&fetch.name))
         }
         CommandPlan::Execute { name, .. } => Ok(session.prepared_result_schema(name)),
+        _ => Ok(None),
+    }
+}
+
+/// Observe utility metadata under the same allowance as its preparation; shared portal and prepared schemas retain their original owners.
+pub fn result_schema_with_control(
+    session: &dyn PreparedSessionMetadata,
+    plan: PlanRef<'_>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<RowSchema>, SQLError> {
+    control.check()?;
+    let PlanRef::Command(command) = plan else {
+        return Ok(None);
+    };
+    match command {
+        CommandPlan::ShowVariable { name } => session
+            .show_result_schema_with_control(name, control)
+            .map(Some),
+        CommandPlan::FetchCursor(fetch) if !fetch.move_only => {
+            session.portal_result_schema_with_control(&fetch.name, control)
+        }
+        CommandPlan::Execute { name, .. } => {
+            session.prepared_result_schema_with_control(name, control)
+        }
         _ => Ok(None),
     }
 }

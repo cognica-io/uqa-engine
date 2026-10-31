@@ -6,6 +6,9 @@
 
 //! Propagate constant equality predicates across equivalent join keys.
 
+mod production;
+pub use production::propagated_join_filters_with_control;
+
 use std::collections::BTreeSet;
 use uqa_sql::{
     plan::{source_projection::QualifierFilters, SourcePlan},
@@ -18,30 +21,14 @@ pub fn propagated_join_filters(
     target_from: &SourcePlan,
     on: Option<&ScalarExpr>,
 ) -> Option<QualifierFilters> {
-    let on = on?;
-    let mut out = filters.clone();
-    let mut changed = false;
-    let source_quals = from_qualifiers(source_from);
-    let target_quals = from_qualifiers(target_from);
-    for (left, right) in join_column_equalities(on) {
-        changed |= propagate_join_filter_pair(
-            filters,
-            &mut out,
-            &source_quals,
-            &target_quals,
-            &left,
-            &right,
-        );
-        changed |= propagate_join_filter_pair(
-            filters,
-            &mut out,
-            &source_quals,
-            &target_quals,
-            &right,
-            &left,
-        );
-    }
-    changed.then_some(out)
+    propagated_join_filters_with_control(
+        filters,
+        source_from,
+        target_from,
+        on,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary JOIN propagation")
 }
 
 pub fn propagate_join_filter_pair(
@@ -64,7 +51,7 @@ pub fn propagate_join_filter_pair(
                     lhs: Box::new(ScalarExpr::qualified_column(&target.0, &target.1)),
                     rhs: Box::new(value),
                 };
-                out.entry(target.0.clone()).or_default().push(propagated);
+                out.push(&target.0, propagated);
                 changed = true;
             }
         }

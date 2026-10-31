@@ -1,0 +1,14 @@
+PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+items:(1,alpha)
+items:(2,beta)
+items_view:(1,alpha)
+items_view:(2,beta)
+items_mv:(1,alpha)
+items_mv:(2,beta)
+1:alpha:"C"
+2:beta:"C"
+(1,x):bigint
+1:false:bigint
+name:aclitem[]
+information_schema.sql_identifier:id
+information_schema.sql_identifier:v

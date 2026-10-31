@@ -53,11 +53,11 @@ fn query(sql: &str) -> QueryPlan {
         panic!("block")
     };
     block.deferred_outer_rewrites.push(DeferredOuterRewrite {
-        outer_columns: Arc::new(BTreeMap::from([(
+        outer_columns: ordinary_outer_columns(BTreeMap::from([(
             ColumnIdentity::qualified("target", "n"),
             crate::ast::InternalRelationId::allocate().column(0),
         )])),
-        replacements: Arc::new(BTreeMap::from([
+        replacements: replacements::Replacements::ordinary(BTreeMap::from([
             (
                 ColumnIdentity::unqualified("alias_n"),
                 OuterReplacement {
@@ -66,6 +66,7 @@ fn query(sql: &str) -> QueryPlan {
                         subqueries: Vec::new(),
                     },
                     qualifier: "target".into(),
+                    memory: None,
                 },
             ),
             (
@@ -76,6 +77,7 @@ fn query(sql: &str) -> QueryPlan {
                         subqueries: Vec::new(),
                     },
                     qualifier: "target".into(),
+                    memory: None,
                 },
             ),
         ])),
@@ -324,7 +326,7 @@ fn each_replacement_captures_only_its_own_retargeted_qualifier() {
     ) else {
         unreachable!()
     };
-    Arc::make_mut(&mut rewrite.replacements).insert(
+    rewrite.replacements.ordinary_mut().insert(
         ColumnIdentity::unqualified("calc"),
         OuterReplacement {
             expression: ExpressionPlan {
@@ -332,9 +334,10 @@ fn each_replacement_captures_only_its_own_retargeted_qualifier() {
                 subqueries: vec![*inner],
             },
             qualifier: "target".into(),
+            memory: None,
         },
     );
-    Arc::make_mut(&mut rewrite.replacements).insert(
+    rewrite.replacements.ordinary_mut().insert(
         ColumnIdentity::unqualified("previous"),
         OuterReplacement {
             expression: ExpressionPlan {
@@ -342,6 +345,7 @@ fn each_replacement_captures_only_its_own_retargeted_qualifier() {
                 subqueries: Vec::new(),
             },
             qualifier: "incoming".into(),
+            memory: None,
         },
     );
     rewrite.capture_outer_columns();

@@ -332,7 +332,7 @@ fn constant_similar_translation_reports_postgresql_planning_errors() {
             .clone()
     };
     let control = ProductionControl::uncontrolled();
-    let error = check_constant_similar_translation(&[text("%"), text("##")], &control).unwrap_err();
+    let error = check_constant_similar_translation(&text("%"), &text("##"), &control).unwrap_err();
     let expected = case("similar_planning_error");
     assert_eq!(error.sqlstate(), expected["error"]["sqlstate"].as_str());
     assert_eq!(
@@ -341,6 +341,45 @@ fn constant_similar_translation_reports_postgresql_planning_errors() {
     );
     assert_eq!(error.hint(), expected["error"]["hint"].as_str());
     // A NULL operand leaves the strict translation unevaluated, as PostgreSQL folds it to NULL.
-    check_constant_similar_translation(&[Value::Null, text("##")], &control).unwrap();
-    check_constant_similar_translation(&[text("%"), text("#")], &control).unwrap();
+    check_constant_similar_translation(&Value::Null, &text("##"), &control).unwrap();
+    check_constant_similar_translation(&text("%"), &text("#"), &control).unwrap();
+}
+
+#[test]
+fn constant_similar_translation_respects_exact_and_shared_workspace_allowances() {
+    let pattern_text = "a%_b".repeat(256);
+    let pattern = text(&pattern_text);
+    let escape = text("#");
+    let token = CancellationToken::new();
+    let memory = MemoryBudget::new(usize::MAX);
+    check_constant_similar_translation(
+        &pattern,
+        &escape,
+        &ProductionControl::new(&memory, &token, &token),
+    )
+    .unwrap();
+    let required = memory.peak();
+    assert!(required > 0);
+    assert_eq!(memory.used(), 0);
+    // Producers may use smaller growth steps under a tight allowance. Admitting only the input bytes must still reject the nonempty translation; the observed full reservation must suffice exactly.
+    for available in [0, 1, pattern_text.len() + 1, required, required + 1] {
+        let parent = MemoryBudget::new(required + 1);
+        let sibling = parent.reserve(required + 1 - available).unwrap();
+        let memory = parent.child(required + 1);
+        let result = check_constant_similar_translation(
+            &pattern,
+            &escape,
+            &ProductionControl::new(&memory, &token, &token),
+        );
+        if available < required {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+        } else {
+            result.unwrap();
+        }
+        assert_eq!(memory.used(), 0);
+        assert!(parent.peak() <= parent.limit());
+        assert_eq!(parent.used(), required + 1 - available);
+        drop(sibling);
+        assert_eq!(parent.used(), 0);
+    }
 }

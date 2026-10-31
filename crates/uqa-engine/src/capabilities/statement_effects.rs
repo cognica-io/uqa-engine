@@ -7,12 +7,7 @@
 //! Definition adapters for SQL plan-effect classification.
 
 use crate::Engine;
-use uqa_sql::{
-    ast::RelationPersistence,
-    catalog::domain::StoredDomain,
-    plan::{QueryPlan, UnifiedPlan},
-    SQLError,
-};
+use uqa_sql::{ast::RelationPersistence, catalog::domain::StoredDomain, plan::QueryPlan, SQLError};
 
 impl uqa_sql::semantics::effects::QueryEffectCatalog for Engine {
     fn registered_runtime_function_may_mutate_engine(&self, name: &str) -> bool {
@@ -30,7 +25,7 @@ impl uqa_sql::semantics::effects::QueryEffectCatalog for Engine {
     fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
         Engine::view_plan(self, name)
     }
-    fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan> {
+    fn lookup_prepared(&self, name: &str) -> Option<uqa_sql::plan::SharedExecutablePlan> {
         Engine::lookup_prepared(self, name)
     }
 }

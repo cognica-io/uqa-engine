@@ -11,15 +11,41 @@ use crate::ast::{ColumnType, Expr};
 use crate::expr::EngineHook;
 use crate::plan::{QueryPlan, UnifiedPlan};
 use crate::{SQLError, ScalarExpr};
-use uqa_core::{ArrayValue, Value};
+use uqa_core::Value;
+
+mod production;
+pub use production::read_prepared_oid_alias_constants_owned;
+pub(crate) use production::read_unknown_constant_with_control;
 
 /// A catalog that reads OID alias input: the object a name denotes for one alias type, resolved as the type's input function resolves it through the search path, with the input function's errors. `None` says the catalog has no such object; the reader then reports the input function's missing-object error.
 pub trait OidAliasInput {
     fn resolve_oid_alias_input(&self, ty: &ColumnType, name: &str)
         -> Result<Option<i64>, SQLError>;
+
+    /// Native catalogs admit parsed names and lookup workspace before allocation. External catalogs retain their existing callback.
+    fn resolve_oid_alias_input_with_control(
+        &self,
+        ty: &ColumnType,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<i64>, SQLError> {
+        control.check()?;
+        let result = self.resolve_oid_alias_input(ty, name)?;
+        control.check()?;
+        Ok(result)
+    }
 }
 
 impl<T: EngineHook + ?Sized> OidAliasInput for T {
+    fn resolve_oid_alias_input_with_control(
+        &self,
+        ty: &ColumnType,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<i64>, SQLError> {
+        EngineHook::resolve_oid_alias_input_with_control(self, ty, name, control)
+    }
+
     fn resolve_oid_alias_input(
         &self,
         ty: &ColumnType,
@@ -71,37 +97,6 @@ fn alias_type(ty: &str) -> Option<(ColumnType, bool)> {
 }
 
 /// The error the alias type's input function reports for a name no object has.
-fn missing_object(ty: &ColumnType, name: &str) -> SQLError {
-    if matches!(ty, ColumnType::Regcollation) {
-        return SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("collation \"{name}\" for encoding \"UTF8\" does not exist"),
-        };
-    }
-    let (sqlstate, object) = match ty {
-        ColumnType::Regclass => ("42P01", "relation"),
-        ColumnType::Regtype => ("42704", "type"),
-        ColumnType::Regrole => ("42704", "role"),
-        ColumnType::Regproc | ColumnType::Regprocedure => ("42883", "function"),
-        _ => ("3F000", "schema"),
-    };
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: format!("{object} \"{name}\" does not exist"),
-    }
-}
-
-/// The OID the alias type's input function gives `name`.
-fn read_name<C: OidAliasInput + ?Sized>(
-    catalog: &C,
-    ty: &ColumnType,
-    name: &str,
-) -> Result<i64, SQLError> {
-    catalog
-        .resolve_oid_alias_input(ty, name)?
-        .ok_or_else(|| missing_object(ty, name))
-}
-
 /// The constant parse analysis stores for a cast of the literal `text` to the alias type `ty`, or to an array of it: the object's OID, or the OIDs of the array's elements.
 fn read_constant<C: OidAliasInput + ?Sized>(
     catalog: &C,
@@ -109,58 +104,15 @@ fn read_constant<C: OidAliasInput + ?Sized>(
     text: &str,
     array: bool,
 ) -> Result<Value, SQLError> {
-    if !array {
-        return read_name(catalog, ty, text).map(Value::Int);
-    }
-    let array = crate::expr::parse_pg_array_literal(text)?;
-    let lower_bounds = array.lower_bounds().to_vec();
-    let mut elements = array.into_elements();
-    read_array_elements(catalog, ty, &mut elements)?;
-    ArrayValue::with_lower_bounds(elements, lower_bounds)
-        .map(Value::Array)
-        .ok_or_else(|| {
-            SQLError::Internal(format!("{} array literal lost its shape", ty.sql_name()))
-        })
-}
-
-fn read_array_elements<C: OidAliasInput + ?Sized>(
-    catalog: &C,
-    ty: &ColumnType,
-    elements: &mut [Value],
-) -> Result<(), SQLError> {
-    for element in elements {
-        match element {
-            Value::Null => {}
-            Value::Str(name) => *element = Value::Int(read_name(catalog, ty, name)?),
-            Value::List(nested) => read_array_elements(catalog, ty, nested)?,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "cannot read {other:?} as {}",
-                    ty.sql_name(),
-                )))
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Read an unknown input after ordered analysis selects an OID alias type. Other catalog-dependent input types remain the responsibility of their own binders.
-pub(crate) fn read_unknown_constant(
-    catalog: &dyn OidAliasInput,
-    ty: &ColumnType,
-    text: &str,
-) -> Result<Option<Value>, SQLError> {
-    match ty {
-        ColumnType::Array(element)
-            if is_alias(element) || matches!(element.as_ref(), ColumnType::Regrole) =>
-        {
-            read_constant(catalog, element, text, true).map(Some)
-        }
-        scalar if is_alias(scalar) || matches!(scalar, ColumnType::Regrole) => {
-            read_constant(catalog, scalar, text, false).map(Some)
-        }
-        _ => Ok(None),
-    }
+    production::read_constant_with_control(
+        catalog,
+        ty,
+        text,
+        array,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary OID input owner".into()))
 }
 
 /// The type of the stored constant: the alias type, or an array of it.
@@ -224,10 +176,13 @@ fn sequence_argument_mut(expression: &mut ScalarExpr) -> Option<&mut ScalarExpr>
 }
 
 fn is_sequence_function(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    matches!(local, "nextval" | "currval" | "setval")
-        && (!lower.contains('.') || lower.starts_with("pg_catalog."))
+    let local = name
+        .get(..11)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("pg_catalog."))
+        .map_or(name, |_| &name[11..]);
+    ["nextval", "currval", "setval"]
+        .iter()
+        .any(|candidate| local.eq_ignore_ascii_case(candidate))
 }
 
 /// [`read_oid_alias_constants`] for one scalar node. The first failure is kept and stops further reads. With `keep_relations`, a `regclass` cast is checked and left as written.

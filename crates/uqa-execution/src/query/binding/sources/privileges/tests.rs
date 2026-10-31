@@ -9,6 +9,8 @@ use crate::{
     catalog::test_support::{empty_scope, NoRoutines},
     query::{binding::sources::bind_query_block_with_sources, privileges::SELECT_CHECKS},
 };
+use uqa_core::memory::ProductionControl;
+use uqa_sql::binding::ExecutionBindingOptions;
 use uqa_sql::plan::{QueryPlan, RelationalPlan, UnifiedPlan};
 
 static ROUTINES: NoRoutines = NoRoutines;
@@ -33,10 +35,18 @@ fn child(block: &QueryBlockPlan) -> &QueryBlockPlan {
     self::block(body)
 }
 fn bindings<'a>(block: &'a QueryBlockPlan, scope: &CteScope) -> SourceBindings<'a> {
-    bind_query_block_with_sources(&ROUTINES, block, &[], scope, None, false, None)
-        .unwrap()
-        .sources
-        .unwrap()
+    bind_query_block_with_sources(
+        &ROUTINES,
+        block,
+        &[],
+        scope,
+        ExecutionBindingOptions::default(),
+        None,
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap()
+    .sources
+    .unwrap()
 }
 fn enter_blocks<'a>(
     block: &'a QueryBlockPlan,
@@ -44,9 +54,16 @@ fn enter_blocks<'a>(
     scope: &CteScope,
     reuse: bool,
 ) {
-    let mut bound =
-        bind_query_block_with_sources(&ROUTINES, block, &[], scope, None, false, inherited)
-            .unwrap();
+    let mut bound = bind_query_block_with_sources(
+        &ROUTINES,
+        block,
+        &[],
+        scope,
+        ExecutionBindingOptions::default(),
+        inherited,
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
     if !reuse {
         if let Some(bindings) = bound.sources.as_mut() {
             bindings.authorization = None;
@@ -88,13 +105,7 @@ fn nested_select_coverage_checks_complete_lineage_once() {
 fn select_coverage_requires_the_same_role_incarnation_and_lookup_mode() {
     use std::sync::Arc;
     use uqa_sql::catalog::roles::identity::RoleBinding;
-    let role = |id| {
-        RoleReference::Bound(Arc::new(RoleBinding {
-            name: "reader".into(),
-            oid: 42,
-            object_id: [id; 16],
-        }))
-    };
+    let role = |id| RoleReference::Bound(Arc::new(RoleBinding::new("reader".into(), 42, [id; 16])));
     let mut original = empty_scope();
     let original = original.enter_privilege_subject(role(1));
     let plan = query("SELECT * FROM (SELECT * FROM (VALUES (7)) AS input(value)) AS derived");

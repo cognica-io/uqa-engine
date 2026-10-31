@@ -30,6 +30,57 @@ mod metadata;
 mod tests;
 
 impl SQLiteInvertedIndex {
+    pub(super) fn field_names_budgeted(
+        &self,
+        control: &StorageReadControl,
+    ) -> SQLiteResult<uqa_core::memory::BudgetedVec<uqa_core::memory::BudgetedString>> {
+        control.check()?;
+        self.conn.with(|connection| {
+            read_snapshot(connection, |connection| {
+                self.require_graph_format_budgeted_on(connection, control)?;
+                let _bindings = reserve_bindings(control, &[self.table.as_bytes()])?;
+                let mut statement = connection.prepare(
+                    "SELECT DISTINCT field FROM _occurrence_lengths WHERE table_name = ?1",
+                )?;
+                let mut rows = statement.query([&self.table])?;
+                let mut fields = uqa_core::memory::BudgetedVec::new(control.memory());
+                while let Some(row) = rows.next()? {
+                    control.check()?;
+                    let field = match row.get_ref(0)? {
+                        rusqlite::types::ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+                            .map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    0,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(error),
+                                )
+                            })?,
+                        value => {
+                            return Err(rusqlite::Error::InvalidColumnType(
+                                0,
+                                "field".into(),
+                                value.data_type(),
+                            )
+                            .into())
+                        }
+                    };
+                    fields.reserve(1)?;
+                    let mut name = uqa_core::memory::BudgetedString::new(control.memory());
+                    name.reserve(field.len())?;
+                    for (offset, character) in field.chars().enumerate() {
+                        if offset % 1024 == 0 {
+                            control.check()?;
+                        }
+                        name.push(character)?;
+                    }
+                    fields.push(name)?;
+                }
+                control.check()?;
+                Ok(fields)
+            })
+        })
+    }
+
     pub(super) fn visit_clusters_budgeted(
         &self,
         field: &str,

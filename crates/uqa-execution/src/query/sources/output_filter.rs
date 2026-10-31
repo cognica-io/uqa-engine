@@ -6,13 +6,14 @@
 
 //! Pass source aliases and placed predicates to the query rewrite owner.
 
-use super::{qualifier_filter, QualifierFilters, QueryPlan, SQLError, SourceContext};
+use super::{QualifierFilters, QueryPlan, SQLError, SourceContext};
+use uqa_core::memory::Produced;
 
 pub(super) fn specialize_lateral_source<S: Clone>(
     context: &SourceContext<'_, S>,
     source: &super::SourcePlan,
     filters: Option<&QualifierFilters>,
-) -> Result<Option<super::SourcePlan>, SQLError> {
+) -> Result<Option<Produced<super::SourcePlan>>, SQLError> {
     let super::SourcePlan::Subquery {
         body,
         alias,
@@ -32,12 +33,10 @@ pub(super) fn specialize_lateral_source<S: Clone>(
     else {
         return Ok(None);
     };
-    let mut source = source.clone();
-    let super::SourcePlan::Subquery { body, .. } = &mut source else {
-        unreachable!()
-    };
-    **body = specialized;
-    Ok(Some(source))
+    let resources = context.ctes.production_resources()?;
+    source
+        .copy_with_query(specialized, &resources.control())
+        .map(Some)
 }
 
 pub(super) fn specialize_source_filter<S: Clone>(
@@ -46,8 +45,13 @@ pub(super) fn specialize_source_filter<S: Clone>(
     qualifier: &str,
     aliases: &[String],
     filters: Option<&QualifierFilters>,
-) -> Result<Option<QueryPlan>, SQLError> {
-    let Some(filter) = qualifier_filter(filters, qualifier) else {
+) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
+    let Some(filter) = uqa_sql::semantics::source_filters::qualifier_filter_with_control(
+        filters, qualifier, &control,
+    )?
+    else {
         return Ok(None);
     };
     context

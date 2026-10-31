@@ -10,7 +10,6 @@ use super::{context::StatementExecutionInputs, plan_executor::UnifiedPlanExecuto
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     binding::statements::AnalyzedResult,
-    binding::stored_routines::mark_catalog_statement_relations_bound,
     plan::{AggregateClassifier, CommandPlan, ExecutablePlanOptimizer, UnifiedPlan},
     SQLError, SQLParam, SQLResult, Statement,
 };
@@ -28,8 +27,16 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
     statement: Statement,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let plan = UnifiedPlan::lower_with(statement, context.aggregates);
-    execute_plan(context, plan, params)
+    let _statement_thread =
+        super::context::statement_thread_scope(context.statements, context.cancellation);
+    let resources = context.planning.planning_control()?;
+    let control = resources.control();
+    let plan = UnifiedPlan::lower_borrowed_for_rewrite(&statement, context.aggregates, &control)?;
+    let plan = context
+        .planning
+        .plan_owned_for_execution(plan, params, &control)?;
+    UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
+        .execute(&plan)
 }
 
 pub fn execute_plan<S: Clone + Send + Sync + 'static>(
@@ -39,7 +46,13 @@ pub fn execute_plan<S: Clone + Send + Sync + 'static>(
 ) -> Result<SQLResult, SQLError> {
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.cancellation);
-    let plan = context.planning.plan_for_execution(plan, params)?;
+    let resources = context.planning.planning_control()?;
+    let control = resources.control();
+    let plan = context.planning.plan_owned_for_execution(
+        plan.copy_for_rewrite(&control)?,
+        params,
+        &control,
+    )?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .execute(&plan)
 }
@@ -66,7 +79,13 @@ pub fn execute_checked_plan<S: Clone + Send + Sync + 'static>(
 ) -> Result<SQLResult, SQLError> {
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.cancellation);
-    let (plan, result) = context.planning.plan_with_result(plan, params)?;
+    let resources = context.planning.planning_control()?;
+    let control = resources.control();
+    let (plan, result) = context.planning.plan_owned_with_result(
+        plan.copy_for_rewrite(&control)?,
+        params,
+        &control,
+    )?;
     check(&result)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .execute(&plan)
@@ -97,8 +116,12 @@ pub fn execute_output_with_privilege_subject<S: Clone + Send + Sync + 'static>(
 ) -> Result<super::plan_executor::StatementOutput, SQLError> {
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.cancellation);
-    let plan = action.lower(context.aggregates)?;
-    let plan = context.planning.plan_for_execution(plan, params)?;
+    let resources = context.planning.planning_control()?;
+    let control = resources.control();
+    let plan = action.lower_with_control(context.aggregates, &control)?;
+    let plan = context
+        .planning
+        .plan_owned_for_execution(plan, params, &control)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
         .with_privilege_subject(privilege_subject)
         .with_inherited_ctes(inherited_ctes)
@@ -115,10 +138,14 @@ fn stored_plan<S: Clone + 'static>(
     context: &CompiledStatementContext<'_, S>,
     statement: Statement,
     params: &[SQLParam],
-) -> Result<UnifiedPlan, SQLError> {
-    let mut plan = UnifiedPlan::lower_with(statement, context.aggregates);
-    mark_catalog_statement_relations_bound(&mut plan)?;
-    context.planning.plan_for_execution(plan, params)
+) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
+    let resources = context.planning.planning_control()?;
+    let control = resources.control();
+    let plan = UnifiedPlan::lower_borrowed_for_rewrite(&statement, context.aggregates, &control)?
+        .mark_catalog_relations_bound(&control)?;
+    context
+        .planning
+        .plan_owned_for_execution(plan, params, &control)
 }
 
 pub fn execute_optimized_command<S: Clone + Send + Sync + 'static>(
@@ -128,8 +155,12 @@ pub fn execute_optimized_command<S: Clone + Send + Sync + 'static>(
 ) -> Result<SQLResult, SQLError> {
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.cancellation);
+    let resources = context.planning.planning_control()?;
+    let control = resources.control();
+    let plan = uqa_sql::plan::MutableExecutablePlan::Command(command.copy_for_rewrite(&control)?)
+        .finish(&control)?;
     UnifiedPlanExecutor::new_nested(context.statements.statement_execution_context(), params)
-        .execute(&UnifiedPlan::Command(Box::new(command.clone())))
+        .execute(&plan)
 }
 
 #[cfg(test)]

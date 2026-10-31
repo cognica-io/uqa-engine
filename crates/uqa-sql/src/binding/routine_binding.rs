@@ -18,17 +18,23 @@ use crate::routines::RoutineResolution;
 use crate::{ColumnIdentity, FunctionTypeResolver};
 
 impl SchemaScope {
-    pub(super) fn with_stored_outer_internal_aliases(&self, schema: &RowSchema) -> RowSchema {
-        self.stored_expression_outer.as_ref().map_or_else(
-            || schema.clone(),
-            |outer| {
-                if schema.physical_width() < outer.physical_width() {
-                    schema.clone()
-                } else {
-                    RowSchema::with_trailing_internal_aliases(schema, outer)
-                }
-            },
-        )
+    pub(super) fn with_stored_outer_internal_aliases(
+        &self,
+        schema: &RowSchema,
+    ) -> Result<RowSchema, SQLError> {
+        match self.stored_expression_outer.as_ref() {
+            Some(outer) if schema.physical_width() >= outer.physical_width() => {
+                RowSchema::with_trailing_internal_aliases_with_control(
+                    schema,
+                    outer,
+                    &self.control(),
+                )
+            }
+            _ => {
+                self.control().check()?;
+                Ok(schema.clone())
+            }
+        }
     }
 
     fn canonicalize_stored_outer_columns(&self, expression: &mut ScalarExpr, schema: &RowSchema) {
@@ -85,12 +91,12 @@ impl SchemaScope {
         ctes: &mut [crate::plan::CtePlan],
         params: &[SQLParam],
         outer: Option<&RowSchema>,
-    ) -> Result<Vec<(String, bool, Option<RowSchema>)>, SQLError> {
+    ) -> Result<super::ctes::CteScopeStack, SQLError> {
         let ordered_names = crate::semantics::ordered_cte_plans(ctes)?
             .into_iter()
             .map(|cte| cte.name.clone())
             .collect::<Vec<_>>();
-        let mut previous = Vec::with_capacity(ordered_names.len());
+        let mut previous = super::ctes::CteScopeStack::new(ordered_names.len(), &self.control())?;
         for name in ordered_names {
             let position = ctes
                 .iter()
@@ -145,11 +151,7 @@ impl SchemaScope {
             } else {
                 extend_cte_generated_schema(routines, &ctes[position], provisional, params)?
             };
-            previous.push((
-                name.clone(),
-                self.set_cte_returning(&ctes[position]),
-                self.ctes.insert(name.clone(), provisional),
-            ));
+            previous.push(self.install_cte_schema(&ctes[position], Some(provisional))?);
             if self_recursive {
                 let complete = self.bind_cte_routines_for_storage(
                     routines,
@@ -160,7 +162,7 @@ impl SchemaScope {
                 let complete = rename_schema(&complete, &columns, None);
                 let complete =
                     extend_cte_generated_schema(routines, &ctes[position], complete, params)?;
-                self.ctes.insert(name, complete);
+                self.set_cte_schema(&name, complete)?;
             }
         }
 
@@ -630,7 +632,7 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
-        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = self.with_stored_outer_internal_aliases(schema)?;
         let schema = &schema;
         self.canonicalize_stored_outer_columns(expression, schema);
         self.expand_stored_whole_rows(expression, schema);

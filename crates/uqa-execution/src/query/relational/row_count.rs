@@ -56,7 +56,7 @@ fn evaluate_limit_offset_with_ctes<S: Clone + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Value, SQLError> {
-    let hook = context.expression_scope(ctes.clone());
+    let hook = context.expression_scope(ctes)?;
     // A count can name the columns of the enclosing queries, which the outer row of a correlated block carries, but none of its own query.
     let ctx = match ctes.row_lock_outer_row() {
         Some(outer) => PhysicalEvalContext::from_row_lookup(outer, params)

@@ -10,6 +10,9 @@ use super::AssignmentContext;
 use crate::{ColumnType, SQLError};
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 
+mod catalog_production;
+pub use catalog_production::coerce_assignment_value_with_control;
+
 mod carrier;
 pub(super) use carrier::normalize_existing;
 pub use carrier::{contains_legacy_vectors, normalize_legacy_vector_carrier_with_control};
@@ -20,30 +23,16 @@ pub fn coerce_assignment_value(
     target: &ColumnType,
     source: Option<&ColumnType>,
 ) -> Result<Value, SQLError> {
-    if physical_identity(&value, source, target)
-        || source.is_some_and(|source| same_catalog_value_type(source, target))
-    {
-        return normalize_existing(value, target);
-    }
-    if matches!(target, ColumnType::Domain { .. }) {
-        let source = source.map(ColumnType::catalog_name);
-        if let Some(value) =
-            super::domain::assign_domain_value_from(context, &value, source.as_deref(), target)?
-        {
-            return Ok(value);
-        }
-    }
-    let value = if target.is_character_string() {
-        source
-            .map(|source| crate::expr::format_regtype_value(&value, source, Some(context)))
-            .transpose()?
-            .flatten()
-            .map(Value::Str)
-            .unwrap_or(value)
-    } else {
-        value
-    };
-    convert_value_to_column_type_with_context_from(context, value, target, source)
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    coerce_assignment_value_with_control(
+        context,
+        control.finish(value, None)?,
+        target,
+        source,
+        &control,
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary catalog assignment owner".into()))
 }
 
 /// An admitted physical value needs no payload read for a binary identity assignment. A domain source can be relabeled to its base without repeating its checks; target modifiers must still match exactly.
@@ -225,39 +214,16 @@ fn convert_value_to_column_type_with_context_from(
     ty: &ColumnType,
     source: Option<&ColumnType>,
 ) -> Result<Value, SQLError> {
-    // Assignment to a string type calls the enum output function, which reads the current label.
-    let value = if textual_target(ty) && crate::expr::enums::contains_enum_carrier(&value) {
-        crate::expr::enums::render_enum_labels(
-            crate::expr::EngineHook::enum_labels(context),
-            &value,
-        )?
-    } else {
-        value
-    };
-    if let Some(value) = super::domain::assign_domain_value(context, &value, ty)? {
-        return Ok(value);
-    }
-    if matches!(value, Value::Null) {
-        return Ok(Value::Null);
-    }
-    let value = match value {
-        Value::Datum(datum) => crate::expr::datums::read_with_catalog(&datum, Some(context))?,
-        value => value,
-    };
-    if let ColumnType::Array(element) = ty {
-        if type_requires_catalog_resolution(element) {
-            return convert_catalog_array(context, value, element);
-        }
-    }
-    if type_requires_catalog_resolution(ty) {
-        return crate::expr::cast_value_with_type_resolution(
-            &value,
-            None,
-            &ty.catalog_name(),
-            Some(context),
-        );
-    }
-    convert_value_to_column_type_from(value, ty, source)
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    catalog_production::convert_with_catalog(
+        context,
+        control.finish(value, None)?,
+        ty,
+        source,
+        &control,
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary catalog conversion owner".into()))
 }
 
 fn textual_target(ty: &ColumnType) -> bool {
@@ -265,53 +231,6 @@ fn textual_target(ty: &ColumnType) -> bool {
         ColumnType::Array(element) => textual_target(element),
         other => other.is_character_string(),
     }
-}
-
-fn convert_catalog_array(
-    context: &dyn AssignmentContext,
-    value: Value,
-    element: &ColumnType,
-) -> Result<Value, SQLError> {
-    let array = match value {
-        Value::Array(array) => array,
-        Value::Str(text) => crate::expr::parse_pg_array_literal(&text)?,
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "expected an array, got {other:?}"
-            )))
-        }
-    };
-    let values = convert_catalog_array_elements(context, array.elements(), element)?;
-    ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
-        .map(|array| {
-            array.with_element_type_oid(Some(crate::catalog::type_metadata::pg_type_oid(
-                array_scalar_type(element),
-            ) as u32))
-        })
-        .map(Value::Array)
-        .ok_or_else(|| {
-            SQLError::TypeMismatch("multidimensional arrays must have matching dimensions".into())
-        })
-}
-
-fn convert_catalog_array_elements(
-    context: &dyn AssignmentContext,
-    values: &[Value],
-    element: &ColumnType,
-) -> Result<Vec<Value>, SQLError> {
-    let mut element = element;
-    while let ColumnType::Array(nested) = element {
-        element = nested;
-    }
-    values
-        .iter()
-        .map(|value| match value {
-            Value::List(values) => {
-                convert_catalog_array_elements(context, values, element).map(Value::List)
-            }
-            value => convert_value_to_column_type_with_context(context, value.clone(), element),
-        })
-        .collect()
 }
 
 mod production;

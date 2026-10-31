@@ -6,7 +6,10 @@
 
 //! `PostgreSQL` foreign catalog row descriptors, shared by relation and type projection.
 
-use super::VirtualRelation;
+use super::{
+    schema_production::CatalogColumnType::{self, Array, Inline},
+    VirtualRelation,
+};
 use crate::ColumnType;
 
 pub struct ForeignCatalogDescriptor {
@@ -37,40 +40,30 @@ pub const FOREIGN_CATALOGS: &[ForeignCatalogDescriptor] = &[
     },
 ];
 
-pub(super) fn schema(relation: VirtualRelation) -> Vec<(String, ColumnType)> {
+pub(super) fn visit_columns(
+    relation: VirtualRelation,
+    visit: &mut dyn FnMut(&'static str, CatalogColumnType),
+) {
     use ColumnType::{AclItem, Name, Oid, Text};
-    let array = |ty| ColumnType::Array(Box::new(ty));
-    let columns = match relation {
-        VirtualRelation::PgForeignDataWrapper => vec![
-            ("oid", Oid),
-            ("fdwname", Name),
-            ("fdwowner", Oid),
-            ("fdwhandler", Oid),
-            ("fdwvalidator", Oid),
-            ("fdwacl", array(AclItem)),
-            ("fdwoptions", array(Text)),
+    macro_rules! columns {
+        ($($name:literal => $ty:expr),* $(,)?) => {{ $(visit($name, $ty);)* }};
+    }
+    match relation {
+        VirtualRelation::PgForeignDataWrapper => columns![
+            "oid" => Inline(Oid), "fdwname" => Inline(Name), "fdwowner" => Inline(Oid),
+            "fdwhandler" => Inline(Oid), "fdwvalidator" => Inline(Oid),
+            "fdwacl" => Array(AclItem), "fdwoptions" => Array(Text),
         ],
-        VirtualRelation::PgForeignServer => vec![
-            ("oid", Oid),
-            ("srvname", Name),
-            ("srvowner", Oid),
-            ("srvfdw", Oid),
-            ("srvtype", Text),
-            ("srvversion", Text),
-            ("srvacl", array(AclItem)),
-            ("srvoptions", array(Text)),
+        VirtualRelation::PgForeignServer => columns![
+            "oid" => Inline(Oid), "srvname" => Inline(Name), "srvowner" => Inline(Oid),
+            "srvfdw" => Inline(Oid), "srvtype" => Inline(Text), "srvversion" => Inline(Text),
+            "srvacl" => Array(AclItem), "srvoptions" => Array(Text),
         ],
-        VirtualRelation::PgForeignTable => vec![
-            ("ftrelid", Oid),
-            ("ftserver", Oid),
-            ("ftoptions", array(Text)),
+        VirtualRelation::PgForeignTable => columns![
+            "ftrelid" => Inline(Oid), "ftserver" => Inline(Oid), "ftoptions" => Array(Text),
         ],
         _ => unreachable!("foreign catalog descriptor"),
-    };
-    columns
-        .into_iter()
-        .map(|(name, ty)| (name.into(), ty))
-        .collect()
+    }
 }
 
 #[cfg(test)]

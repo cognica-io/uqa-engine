@@ -25,6 +25,7 @@ pub(crate) struct ScopedEngineHook<'a> {
     catalog: catalog::ScopedCatalog,
     cast_scope: std::sync::OnceLock<uqa_sql::expr::CatalogCastScope>,
     routine_scope: std::sync::OnceLock<routine_descriptions::NativeRoutineScope>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl<'a> ScopedEngineHook<'a> {
@@ -36,6 +37,7 @@ impl<'a> ScopedEngineHook<'a> {
             catalog: catalog::ScopedCatalog::new(engine, ctes),
             cast_scope: std::sync::OnceLock::new(),
             routine_scope: std::sync::OnceLock::new(),
+            _memory: None,
         }
     }
 }
@@ -54,21 +56,37 @@ impl<'a> ScopedEngineHook<'a> {
         }
     }
 
-    pub(crate) fn owned(engine: &'a Engine, ctes: CteScope) -> Self {
-        Self {
+    pub(crate) fn owned(
+        engine: &'a Engine,
+        ctes: &CteScope,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Arc<Self>, SQLError> {
+        let ctes = ctes.copy_with_control(control)?;
+        let memory = control.reserve(size_of::<Self>())?;
+        Ok(Arc::new(Self {
             engine,
             runtime: engine.query_runtime_view(),
             catalog: catalog::ScopedCatalog::new(engine, &ctes),
             cast_scope: std::sync::OnceLock::new(),
             routine_scope: std::sync::OnceLock::new(),
             ctes: std::borrow::Cow::Owned(ctes),
-        }
+            _memory: memory,
+        }))
     }
 }
 
 impl uqa_sql::plan::AggregateClassifier for ScopedEngineHook<'_> {
     fn is_registered_aggregate(&self, name: &str) -> bool {
         self.engine.has_registered_aggregate_function(name)
+    }
+
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.runtime
+            .has_aggregate_function_with_control(name, control)
     }
 }
 
@@ -82,29 +100,24 @@ impl uqa_execution::functions::AggregateFunctionRegistry for ScopedEngineHook<'_
 }
 
 impl uqa_execution::scalar::plan::QueryExpressionContext for ScopedEngineHook<'_> {
-    fn expression_evaluator<'a>(&'a self, params: &'a [SQLParam]) -> SharedExpressionEvaluator<'a> {
-        EngineExpressionEvaluator::shared(self.engine, params, &self.ctes)
+    fn expression_evaluator<'a>(
+        &'a self,
+        params: &'a [SQLParam],
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        let resources =
+            uqa_execution::query::relational::QueryExpressionFactory::production_resources(
+                self.engine,
+            )?;
+        uqa_execution::query::expression::ScopedExpressionEvaluator::borrowed_with_control(
+            self,
+            params,
+            self.engine.cancellation_token(),
+            &resources.control(),
+        )
     }
 
     fn subquery_plans(&self) -> &[uqa_sql::plan::QueryPlan] {
         &self.ctes.scalar_subqueries
-    }
-}
-
-/// Capture the engine's current execution scope for a shared physical evaluator.
-struct EngineExpressionEvaluator;
-
-impl EngineExpressionEvaluator {
-    fn shared<'a>(
-        engine: &'a Engine,
-        params: &'a [SQLParam],
-        ctes: &CteScope,
-    ) -> SharedExpressionEvaluator<'a> {
-        uqa_execution::query::expression::ScopedExpressionEvaluator::shared(
-            Arc::new(ScopedEngineHook::owned(engine, ctes.clone())),
-            params,
-            engine.cancellation_token(),
-        )
     }
 }
 
@@ -176,12 +189,38 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ).require_execute(binding)
     }
 
+    fn require_builtin_execute_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        use uqa_sql::catalog::security::builtin_routines::BuiltinRoutineExecution;
+        control.check()?;
+        uqa_execution::catalog::security::builtin_routines::execution::BuiltinRoutinePermissions::capture(
+            &self.catalog_context(),
+        ).require_execute_with_control(binding, control)
+    }
+
     fn transaction_timestamp_micros(&self) -> Option<i64> {
         Some(self.engine.transaction_timestamp_micros())
     }
 
     fn statement_timestamp_micros(&self) -> Option<i64> {
         Some(self.engine.statement_timestamp_micros())
+    }
+
+    fn resolve_oid_alias_input_with_control(
+        &self,
+        ty: &uqa_sql::ColumnType,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_oid_alias_input_with_control(
+            &self.catalog_context(),
+            ty,
+            name,
+            control,
+        )
     }
 
     fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
@@ -240,6 +279,30 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
                 &self.catalog_context(),
                 oid,
             ),
+        )
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        uqa_execution::catalog::projection::resolve_catalog_column_type_with_control(
+            &self.catalog_context(),
+            name,
+            control,
+        )
+    }
+
+    fn resolve_type_oid_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        uqa_execution::catalog::projection::resolve_catalog_user_type_by_oid_with_control(
+            &self.catalog_context(),
+            oid,
+            control,
         )
     }
 
@@ -357,6 +420,20 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         self.runtime.has_scalar_functions()
     }
 
+    fn call_bound_builtin_function_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Option<Result<uqa_core::memory::Produced<Value>, SQLError>> {
+        uqa_execution::query::scalar_functions::call_bound_builtin_with_control(
+            &self.scalar_function_context(),
+            binding,
+            args,
+            control,
+        )
+    }
+
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
         self.catalog_context()
             .current_schema_name()
@@ -459,6 +536,20 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ScopedEngineHook::routine_description_scope(self)
     }
 
+    fn call_bound_user_function_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        args: &[(Option<String>, Value)],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Option<Result<uqa_core::memory::Produced<Value>, SQLError>> {
+        uqa_execution::routines::invocation::evaluate_bound_scalar_for_planning(
+            &self.engine.routine_invocation_context(),
+            binding,
+            args,
+            control,
+        )
+    }
+
     fn call_bound_user_function_with_descriptions(
         &self,
         binding: &uqa_sql::ast::FunctionBinding,
@@ -502,7 +593,7 @@ pub(crate) fn eval_lowered_expression(
     row: Option<&ResultRow>,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine)?;
     uqa_execution::query::catalog_expression::eval_lowered_expression(
         engine, scope, expression, row, params,
     )
@@ -513,8 +604,8 @@ pub(crate) fn eval_lowered_expression_with_type(
     expression: &uqa_sql::ast::Expr,
     row: Option<&ResultRow>,
     params: &[SQLParam],
-) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
+) -> Result<uqa_execution::query::catalog_expression::TypedCatalogValue, SQLError> {
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine)?;
     uqa_execution::query::catalog_expression::eval_lowered_expression_with_type(
         engine, scope, expression, row, params,
     )
@@ -527,7 +618,7 @@ pub(crate) fn eval_lowered_expression_with_schema(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine)?;
     uqa_execution::query::catalog_expression::eval_lowered_expression_with_schema(
         engine, scope, expression, row, schema, params,
     )

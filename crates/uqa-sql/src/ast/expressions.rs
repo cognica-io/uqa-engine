@@ -110,7 +110,7 @@ pub struct WindowDefinition<S = WindowSpec> {
 
 /// Compiler-only equality key for a raw window declaration; not part of stored SQL.
 #[derive(Debug, Clone, PartialEq)]
-pub struct WindowDefinitionSyntax(pub(crate) serde_json::Value);
+pub struct WindowDefinitionSyntax(pub(crate) std::sync::Arc<serde_json::Value>);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowSpec {

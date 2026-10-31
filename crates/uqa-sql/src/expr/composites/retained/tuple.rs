@@ -6,13 +6,15 @@
 
 //! Form the original tuple once and deform it under the current descriptor. Variable-width fields retain byte views until an operation reads them; NULL tests inspect only the tuple's null bitmap.
 
-use super::super::{datum, CompositeTypeDescriptor};
+use super::super::CompositeTypeDescriptor;
 use crate::catalog::type_metadata::{pg_type_align, pg_type_len, pg_type_oid, pg_type_storage};
 use crate::ColumnType;
-use uqa_core::{DatumValue, Value};
+use uqa_core::Value;
 
 mod encoding;
+mod production;
 pub(crate) use encoding::{array_payload, array_payload_with_control};
+pub(super) use production::project_with_control;
 
 pub(crate) fn record_bytes_with_control(
     fields: &uqa_core::RecordValue,
@@ -31,107 +33,26 @@ pub(crate) fn record_bytes(
     encoding::encode(fields, descriptors.get(&type_oid)?, descriptors).map(|(bytes, _, _)| bytes)
 }
 
+#[cfg(test)]
 pub(super) fn project(
     fields: &uqa_core::RecordValue,
     before: &CompositeTypeDescriptor,
     after: &CompositeTypeDescriptor,
     descriptors: &super::Descriptors,
 ) -> Option<Value> {
-    let (bytes, positions, start) = encoding::encode(fields, before, descriptors)?;
-    let backing = DatumValue::new(0, 0, bytes);
-    let bytes = backing.bytes();
-    let mut output = after
-        .attributes
-        .iter()
-        .map(|attribute| (attribute.name.clone(), Value::Null))
-        .collect::<Vec<_>>();
-    let mut offset = start;
-    for (original, position) in before.attributes.iter().zip(positions) {
-        let Some(position) = position else {
-            continue;
-        };
-        let (_, value) = fields
-            .iter()
-            .find(|(name, _)| name.as_str() == original.name.as_str())?;
-        let current = after
-            .attributes
-            .iter()
-            .enumerate()
-            .find(|(_, attribute)| attribute.number == original.number);
-        let (length, alignment) = if let Some((_, attribute)) = current {
-            (
-                pg_type_len(&attribute.ty),
-                pg_type_align(&attribute.ty).as_bytes()[0],
-            )
-        } else {
-            let dropped = after
-                .dropped
-                .iter()
-                .find(|attribute| attribute.number == original.number)?;
-            (dropped.length, dropped.alignment)
-        };
-        // att_align_pointer leaves packed varlena values unaligned. Zero is the pad byte preceding a four-byte header.
-        if length != -1 || bytes.get(offset) == Some(&0) {
-            offset = align(offset, alignment)?;
-        }
-        if let Some((index, attribute)) = current {
-            // Array operations dispatch on the admitted header's element OID. An unchanged byte position can retain its validated elements even when the declared array type changes.
-            let retained_array = (position == offset && original.ty != attribute.ty)
-                .then(|| retain_array_identity(value, &original.ty, &attribute.ty))
-                .flatten();
-            output[index].1 = if position == offset && original.ty == attribute.ty {
-                value.clone()
-            } else if let Some(array) = retained_array {
-                array
-            } else if length == -1 || !matches!(length, 1 | 2 | 4 | 8) {
-                Value::Datum(backing.field(base_oid(&attribute.ty)?, u32::try_from(offset).ok()?))
-            } else {
-                let length = width(length)?;
-                let end = offset.checked_add(length)?;
-                if let Some(bytes) = bytes.get(offset..end) {
-                    let mut bits = [0; 8];
-                    bits[..length].copy_from_slice(bytes);
-                    datum::decode_bits(u64::from_le_bytes(bits), &attribute.ty)?
-                } else {
-                    // A later field outside the original tuple must not discard earlier physical reads. Retain its position without reading or extending the owned bytes.
-                    Value::Datum(
-                        backing.field(base_oid(&attribute.ty)?, u32::try_from(offset).ok()?),
-                    )
-                }
-            };
-        }
-        offset = offset.checked_add(if length == -1 {
-            bytes.get(offset..).and_then(variable_length).unwrap_or(0)
-        } else {
-            usize::try_from(length).ok()?
-        })?;
-    }
-    Some(Value::Record(uqa_core::RecordValue::from_parts(
-        output,
-        Some(before.type_oid),
-    )))
-}
-
-fn retain_array_identity(value: &Value, before: &ColumnType, after: &ColumnType) -> Option<Value> {
-    fn element_oid(ty: &ColumnType) -> Option<u32> {
-        match ty {
-            ColumnType::Domain { base, .. } => element_oid(base),
-            ColumnType::Array(element) => {
-                let mut leaf = element.as_ref();
-                while let ColumnType::Array(element) = leaf {
-                    leaf = element;
-                }
-                Some(pg_type_oid(leaf) as u32)
-            }
-            _ => None,
-        }
-    }
-    element_oid(after)?;
-    let Value::Array(array) = value else {
-        return None;
-    };
-    let oid = array.element_type_oid().or(element_oid(before));
-    Some(Value::Array(array.clone().with_element_type_oid(oid)))
+    project_with_control(
+        fields,
+        before,
+        after,
+        descriptors,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .ok()?
+    .map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary tuple projection")
+    })
 }
 
 fn base_oid(ty: &ColumnType) -> Option<u32> {

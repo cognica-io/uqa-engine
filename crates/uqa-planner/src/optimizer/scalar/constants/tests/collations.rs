@@ -151,7 +151,8 @@ fn folding_constant_expressions_preserves_selected_output_collation() {
         token.cancel();
         assert!(projection.expr.clone_with_control(&control).is_err());
         assert_eq!(budget.used(), 0);
-        let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut config =
+            crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         config.coerced_conditionals = true;
         crate::optimizer::optimize_scalar_expression(&mut projection.expr, &config).unwrap();
         let value = uqa_execution::scalar::eval_constant_scalar(&projection.expr)
@@ -202,7 +203,8 @@ fn simplified_case_retains_selected_branch_modifiers_and_collation() {
         let RelationalPlan::QueryBlock(block) = &mut query.root else {
             panic!("block")
         };
-        let mut config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut config =
+            crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         config.coerced_conditionals = true;
         crate::optimizer::optimize_scalar_expression(&mut block.projections[0].expr, &config)
             .unwrap();
@@ -251,7 +253,9 @@ fn nested_collated_calls_fold_on_an_ordinary_thread_stack() {
             let projection = &mut block.projections[0];
             let label = uqa_sql::semantics::projection_label_at(projection);
             let expression = &mut projection.expr;
-            let config = crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+            let config = crate::OptimizerConfig::new(
+                uqa_execution::scalar::eval_constant_scalar_with_control,
+            );
             crate::optimizer::optimize_scalar_expression(expression, &config).unwrap();
             assert_eq!(
                 uqa_execution::scalar::eval_constant_scalar(expression).unwrap(),
@@ -266,4 +270,51 @@ fn nested_collated_calls_fold_on_an_ordinary_thread_stack() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+#[test]
+fn constant_folding_retains_selected_collation_metadata() {
+    for coerced_conditionals in [false, true] {
+        let mut config = crate::optimizer::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
+        config.coerced_conditionals = coerced_conditionals;
+        for source in [
+            "'x' COLLATE \"C\"",
+            "('x' COLLATE \"C\") COLLATE \"POSIX\"",
+            "upper('x' COLLATE \"C\")",
+            "ARRAY['x' COLLATE \"C\"]",
+        ] {
+            let uqa_sql::Statement::Select(mut query) =
+                uqa_sql::compile(&format!("SELECT {source}"))
+                    .unwrap()
+                    .remove(0)
+            else {
+                panic!("SELECT")
+            };
+            let expression =
+                uqa_sql::plan::ExpressionPlan::lower(query.projections.remove(0).expr).scalar;
+            let mut expression =
+                uqa_sql::bind_type_introspection(expression, &RowSchema::default(), &[]);
+            let identities = |expression: &ScalarExpr| {
+                let mut identities = Vec::new();
+                expression.visit(&mut |node| {
+                    if let Some(clause) =
+                        uqa_sql::catalog::collations::expression::scalar_clause(node).unwrap()
+                    {
+                        identities.push(clause.oid.expect("selected collation"));
+                    }
+                });
+                identities
+            };
+            let expected = identities(&expression);
+            assert!(!expected.is_empty());
+            crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config).unwrap();
+            assert_eq!(
+                identities(&expression),
+                expected,
+                "{source}, coerced={coerced_conditionals}"
+            );
+        }
+    }
 }

@@ -433,8 +433,8 @@ fn explicit_expr_type(expr: &Expr) -> Option<&str> {
             ..
         } => Some(ty),
         Expr::RetainedLiteral(literal) => literal.0.declaration.as_deref().or(match literal.0.ty {
-            crate::ast::ColumnType::Bytea => Some("bytea"),
-            crate::ast::ColumnType::Bit(_) => Some("bit"),
+            Some(crate::ast::ColumnType::Bytea) => Some("bytea"),
+            Some(crate::ast::ColumnType::Bit(_)) => Some("bit"),
             _ => None,
         }),
         Expr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),

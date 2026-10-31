@@ -311,6 +311,7 @@ impl RowSchema {
             extra_ambiguous_qualified,
             local_width,
             lateral_restrictions,
+            memory,
         } = metadata;
         collations.retain(&types, &alias_types, &internal_types, &binding_only);
         debug_assert_eq!(columns.len(), slots.len());
@@ -390,6 +391,7 @@ impl RowSchema {
                     local_width,
                     lateral_restrictions,
                 }),
+                _memory: memory,
             }),
         }
     }

@@ -51,3 +51,27 @@ fn common_type_contexts_match_postgresql_sqlite() {
         &Engine::open(&directory.path().join("common-type-contexts.db")).unwrap(),
     );
 }
+
+#[rstest::rstest]
+#[case::sqlite_key_value(false)]
+#[case::redb(true)]
+fn common_type_selection_and_contexts_match_postgresql_key_value(#[case] redb: bool) {
+    for verify in [
+        verify_common_type_selection as fn(&Engine),
+        verify_common_type_contexts,
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("common-types.db");
+        let engine = if redb {
+            Engine::from_persistent_provider(std::sync::Arc::new(
+                uqa_storage_redb::RedbStorage::open(&path).unwrap(),
+            ))
+        } else {
+            Engine::from_persistent_provider(std::sync::Arc::new(
+                uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
+            ))
+        }
+        .unwrap();
+        verify(&engine);
+    }
+}

@@ -11,14 +11,29 @@ use crate::SQLError;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 pub use uqa_core::catalog_role::RoleIdentity;
+use uqa_core::memory::ProductionControl;
 
 /// A selected role keeps its incarnation even if another role later reuses its name or OID.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RoleBinding {
     pub name: String,
     pub oid: u32,
     pub object_id: [u8; 16],
+    #[serde(skip)]
+    memory: Option<uqa_core::memory::MemoryReservation>,
 }
+
+impl Clone for RoleBinding {
+    fn clone(&self) -> Self {
+        Self::new(self.name.clone(), self.oid, self.object_id)
+    }
+}
+impl PartialEq for RoleBinding {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.oid == other.oid && self.object_id == other.object_id
+    }
+}
+impl Eq for RoleBinding {}
 
 /// Explicit SQL names are resolved against the current catalog; captured authority retains its incarnation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +56,53 @@ impl From<&str> for RoleReference {
 }
 
 impl RoleReference {
+    pub fn from_identity_with_control(
+        identity: RoleIdentity,
+        roles: &BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let role = identity
+            .role_definition_with_control(roles, control)?
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "role identity references a missing or replaced incarnation".into(),
+                )
+            })?;
+        Self::from_definition_with_control(role, control)
+    }
+
+    pub(crate) fn from_definition_with_control(
+        role: &RoleDefinition,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        let oid = RoleBinding::validated_oid(role)?;
+        let header = control.reserve(std::mem::size_of::<RoleBinding>())?;
+        let (name, memory) = control.copy_text(&role.name)?.into_parts();
+        control.check()?;
+        Ok(Self::Bound(Arc::new(RoleBinding {
+            name,
+            oid,
+            object_id: role.object_id,
+            memory: control.combine(header, memory),
+        })))
+    }
+
+    pub fn clone_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, SQLError> {
+        control.check()?;
+        let (reference, memory) = match self {
+            Self::Named(name) => {
+                let (name, memory) = control.copy_text(name)?.into_parts();
+                (Self::Named(name), memory)
+            }
+            Self::Bound(role) => (Self::Bound(role.clone()), control.empty_reservation()),
+        };
+        Ok(control.finish(reference, memory)?)
+    }
+
     pub fn from_identity(
         identity: RoleIdentity,
         roles: &BTreeMap<String, RoleDefinition>,
@@ -99,9 +161,35 @@ impl RoleSubject for RoleReference {
             Self::Bound(role) => role.role_definition(roles),
         }
     }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        match self {
+            Self::Named(name) => name.role_definition_with_control(roles, control),
+            Self::Bound(role) => role.role_definition_with_control(roles, control),
+        }
+    }
 }
 
 impl RoleBinding {
+    pub fn new(name: String, oid: u32, object_id: [u8; 16]) -> Self {
+        Self {
+            name,
+            oid,
+            object_id,
+            memory: None,
+        }
+    }
+
+    pub fn reserved_bytes(&self) -> usize {
+        self.memory
+            .as_ref()
+            .map_or(0, uqa_core::memory::MemoryReservation::bytes)
+    }
+
     pub fn identity(&self) -> RoleIdentity {
         RoleIdentity {
             oid: i64::from(self.oid),
@@ -110,18 +198,18 @@ impl RoleBinding {
     }
 
     pub fn from_definition(role: &RoleDefinition) -> Result<Self, SQLError> {
+        let oid = Self::validated_oid(role)?;
+        Ok(Self::new(role.name.clone(), oid, role.object_id))
+    }
+
+    fn validated_oid(role: &RoleDefinition) -> Result<u32, SQLError> {
         if role.oid <= 0 {
             return Err(SQLError::Internal("invalid role OID".into()));
         }
         if role.object_id == [0; 16] {
             return Err(SQLError::Internal("role has no object identity".into()));
         }
-        Ok(Self {
-            name: role.name.clone(),
-            oid: u32::try_from(role.oid)
-                .map_err(|_| SQLError::Internal("invalid role OID".into()))?,
-            object_id: role.object_id,
-        })
+        u32::try_from(role.oid).map_err(|_| SQLError::Internal("invalid role OID".into()))
     }
 
     /// Retain the original incarnation through name changes before publishing a stored role reference.
@@ -161,6 +249,18 @@ pub trait RoleSubject {
         &self,
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition>;
+
+    /// Native captured identities poll while searching a renamed incarnation. External subjects retain their existing lookup semantics.
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        control.check()?;
+        let role = self.role_definition(roles);
+        control.check()?;
+        Ok(role)
+    }
 }
 
 impl<T: RoleSubject + ?Sized> RoleSubject for Arc<T> {
@@ -172,6 +272,14 @@ impl<T: RoleSubject + ?Sized> RoleSubject for Arc<T> {
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition> {
         self.as_ref().role_definition(roles)
+    }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        self.as_ref().role_definition_with_control(roles, control)
     }
 }
 
@@ -185,6 +293,14 @@ impl<T: RoleSubject + ?Sized> RoleSubject for &T {
         roles: &'a BTreeMap<String, RoleDefinition>,
     ) -> Option<&'a RoleDefinition> {
         (*self).role_definition(roles)
+    }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        (*self).role_definition_with_control(roles, control)
     }
 }
 
@@ -241,6 +357,27 @@ impl RoleSubject for RoleBinding {
             .filter(|role| self.matches_definition(role))
             .or_else(|| roles.values().find(|role| self.matches_definition(role)))
     }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        control.check()?;
+        if let Some(role) = roles
+            .get(&self.name)
+            .filter(|role| self.matches_definition(role))
+        {
+            return Ok(Some(role));
+        }
+        for role in roles.values() {
+            control.check()?;
+            if self.matches_definition(role) {
+                return Ok(Some(role));
+            }
+        }
+        Ok(None)
+    }
 }
 
 impl RoleSubject for RoleIdentity {
@@ -256,6 +393,24 @@ impl RoleSubject for RoleIdentity {
             return None;
         }
         roles.values().find(|role| role.identity() == *self)
+    }
+
+    fn role_definition_with_control<'a>(
+        &self,
+        roles: &'a BTreeMap<String, RoleDefinition>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<&'a RoleDefinition>, SQLError> {
+        control.check()?;
+        if !self.is_valid() {
+            return Ok(None);
+        }
+        for role in roles.values() {
+            control.check()?;
+            if role.identity() == *self {
+                return Ok(Some(role));
+            }
+        }
+        Ok(None)
     }
 }
 

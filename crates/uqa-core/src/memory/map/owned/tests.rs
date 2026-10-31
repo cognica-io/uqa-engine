@@ -15,6 +15,40 @@ use std::{
     },
 };
 
+mod admission;
+mod serialization;
+
+#[test]
+fn extracting_and_restoring_preserves_node_identity_and_admission_without_allocation() {
+    let budget = MemoryBudget::new(1 << 20);
+    let mut map = OwnedMap::new();
+    for key in 0..31 {
+        map.insert_budgeted(key, key * 2, &budget).unwrap();
+    }
+    let used = budget.used();
+    for key in [15, 0, 30, 7, 22] {
+        let pointer = std::ptr::from_ref(map.get(&key).unwrap());
+        let measured = allocation_counter::measure(|| {
+            let entry = map.extract(&key);
+            assert_eq!(budget.used(), used);
+            assert_eq!(entry.len(), 1);
+            assert_eq!(std::ptr::from_ref(entry.get(&key).unwrap()), pointer);
+            assert_eq!(super::super::tests::verify(&map.root).0, map.len());
+            map.append(entry);
+            assert_eq!(budget.used(), used);
+            assert_eq!(std::ptr::from_ref(map.get(&key).unwrap()), pointer);
+        });
+        assert_eq!(measured.count_total, 0);
+        assert_eq!(super::super::tests::verify(&map.root).0, 31);
+    }
+    assert!(map.extract(&99).is_empty());
+    let entry = map.extract(&15);
+    drop(map);
+    assert_eq!(budget.used(), OwnedMap::<i32, i32>::entry_bytes());
+    drop(entry);
+    assert_eq!(budget.used(), 0);
+}
+
 proptest! {
     #[test]
     fn appending_preserves_nodes_and_matches_ordered_map_collision_semantics(
@@ -178,4 +212,82 @@ fn owned_sets_preserve_ordered_sequence_storage_and_exact_node_ownership() {
     assert_eq!(set.allocated_bytes(), 0);
     assert_eq!(copied.len(), 3);
     assert!(serde_json::from_str::<OwnedSet<String>>(r#"["a",1]"#).is_err());
+}
+
+#[test]
+fn mutable_values_keep_disjoint_borrows_without_allocating_or_releasing_nodes() {
+    let budget = crate::memory::MemoryBudget::new(1 << 20);
+    let mut map = OwnedMap::new();
+    for key in (0..1024).rev() {
+        map.insert_budgeted(key, key, &budget).unwrap();
+    }
+    let retained = budget.used();
+    let measured = allocation_counter::measure(|| {
+        let mut values = map.values_mut();
+        assert_eq!(values.len(), 1024);
+        let first = values.next().unwrap();
+        for (index, value) in values.enumerate() {
+            assert_eq!(*value, index + 1);
+            *value += 100;
+        }
+        *first = 9000;
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(budget.used(), retained);
+    assert_eq!(map.get(&0), Some(&9000));
+    assert_eq!(map.get(&1023), Some(&1123));
+    drop(map);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn produced_text_keys_keep_payload_leases_through_replacement_and_removal() {
+    use crate::memory::{Produced, ProductionControl};
+    let budget = crate::memory::MemoryBudget::new(1 << 20);
+    let token = crate::CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut map: OwnedMap<Produced<String>, usize> = OwnedMap::new();
+    map.insert_budgeted(control.copy_text("saved").unwrap(), 1, &budget)
+        .unwrap();
+    let retained = budget.used();
+    map.insert_budgeted(control.copy_text("saved").unwrap(), 2, &budget)
+        .unwrap();
+    assert_eq!(budget.used(), retained);
+    assert_eq!(map.get("saved"), Some(&2));
+    assert_eq!(map.remove("saved"), Some(2));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn set_transfer_preserves_nodes_and_releases_duplicate_owners() {
+    use crate::memory::{OwnedSet, Produced, ProductionControl};
+    let budget = crate::memory::MemoryBudget::new(1 << 20);
+    let token = crate::CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let sibling = budget.reserve(37).unwrap();
+    let mut left = OwnedSet::new();
+    let mut right = OwnedSet::new();
+    for (set, name) in [(&mut left, "first"), (&mut right, "first")] {
+        set.insert_budgeted(control.copy_text(name).unwrap(), &budget)
+            .unwrap();
+    }
+    right
+        .insert_budgeted(control.copy_text("second").unwrap(), &budget)
+        .unwrap();
+    let measured = allocation_counter::measure(|| {
+        left.append(right);
+        assert!(left.contains_by(|name| "first".cmp(name.as_str())));
+        assert!(!left.contains_by(|name| "missing".cmp(name.as_str())));
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(left.len(), 2);
+    assert_eq!(
+        budget.used(),
+        37 + 2 * OwnedSet::<Produced<String>>::entry_bytes()
+            + left.iter().map(|name| name.capacity()).sum::<usize>()
+    );
+    drop(left);
+    assert_eq!(budget.used(), 37);
+    drop(sibling);
+    assert_eq!(budget.used(), 0);
 }

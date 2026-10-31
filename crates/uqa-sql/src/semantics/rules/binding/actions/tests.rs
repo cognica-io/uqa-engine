@@ -5,137 +5,286 @@
 //
 
 use super::*;
+use crate::{
+    ast::{ColumnDef, ColumnType, Expr, InternalRelationId, RuleEvent, Statement},
+    catalog::{events::StoredRule, roles::RoleReference},
+    plan::{CommandPlan, QueryPlan, UnifiedPlan},
+    plpgsql::VariableResolver,
+    semantics::rules::{
+        action_binding::{bind_rule_action, expand_rule_action_row_stars, RuleSourceCatalog},
+        analysis::RuleAnalysisContext,
+        RuleCatalog,
+    },
+    RowSchema, SQLError, ScalarExpr,
+};
+use std::collections::BTreeMap;
 
 mod collations;
+mod mutation_owned;
+mod owned;
+mod resolver;
+mod schedule_owned;
 
-struct Row(crate::ResultRow);
+struct Catalog(Vec<ColumnDef>);
+impl RuleSourceCatalog for Catalog {
+    fn query_source_columns(&self, _: &str, _: bool) -> Result<Option<Vec<String>>, SQLError> {
+        Ok(Some(
+            self.0.iter().map(|column| column.name.clone()).collect(),
+        ))
+    }
+    fn rule_relation_definitions(&self, _: &str) -> Result<Vec<ColumnDef>, SQLError> {
+        Ok(self.0.clone())
+    }
+}
+impl crate::semantics::returning::ReturningCatalog for Catalog {
+    fn with_table_row_type_with_control(
+        &self,
+        _: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        read(&self.0)?;
+        Ok(true)
+    }
 
-impl RuleRowValues for Row {
-    fn old_row(&self) -> Option<&crate::ResultRow> {
-        Some(&self.0)
+    fn try_describe_table_row_type(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
+        Ok(Some(self.0.clone()))
     }
-    fn new_row(&self) -> Option<&crate::ResultRow> {
-        Some(&self.0)
+    fn try_table_columns(&self, _: &str) -> Result<Vec<String>, String> {
+        Ok(self.0.iter().map(|column| column.name.clone()).collect())
     }
-    fn old_doc_id(&self) -> Option<uqa_core::DocId> {
-        None
+    fn view_schema(&self, _: &str) -> Result<Option<RowSchema>, SQLError> {
+        Ok(None)
     }
-    fn new_doc_id(&self) -> Option<uqa_core::DocId> {
+}
+impl RuleCatalog for Catalog {
+    fn relation_has_rules(&self, _: &str) -> Result<bool, SQLError> {
+        Ok(false)
+    }
+    fn resolve_rule_relation(&self, name: &str) -> Result<uqa_core::RelationIdentity, SQLError> {
+        uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)
+    }
+    fn rules_for(&self, _: &str, _: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
+        Ok(Vec::new())
+    }
+    fn resolve_mutation_target(&self, name: &str, _: bool) -> Result<String, SQLError> {
+        Ok(name.into())
+    }
+}
+impl crate::FunctionTypeResolver for Catalog {
+    fn resolve_function_type(
+        &self,
+        _: &str,
+        _: Option<&crate::ast::FunctionBinding>,
+        _: &[Option<String>],
+        _: &[Option<ColumnType>],
+        _: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+impl crate::routines::RoutineResolution for Catalog {}
+impl crate::catalog::domain::DomainCatalog for Catalog {
+    fn domain_by_oid(&self, _: u32) -> Option<crate::catalog::domain::StoredDomain> {
         None
     }
 }
-
-#[test]
-fn rule_row_sources_preserve_every_admitted_byte() {
-    let columns = BTreeMap::from([(
-        "c".into(),
-        RuleColumnMetadata {
-            collation_oid: None,
-            ty: ColumnType::InternalChar,
-            uses_document_id: false,
-            position: 0,
-        },
-    )]);
-    for byte in 0..=u8::MAX {
-        let signed = i64::from(i8::from_ne_bytes([byte]));
-        let value =
-            crate::expr::cast_value_from(&Value::Int(signed), "\"char\"", Some("integer")).unwrap();
-        let row = Row(BTreeMap::from([("c".into(), value.clone())]));
-        let source = rule_row_source(&[0], &[row], &columns).unwrap();
-        let FromClause::Values { rows, .. } = source.clause else {
-            unreachable!()
-        };
-        for field in &rows[0][..2] {
-            let actual =
-                crate::expr::eval(field, &crate::expr::EvalContext::new(None, &[])).unwrap();
-            assert_eq!(actual, value);
-            assert_eq!(
-                crate::expr::cast_value_from(&actual, "integer", Some("\"char\"")).unwrap(),
-                Value::Int(signed)
-            );
+impl Catalog {
+    fn analysis(&self) -> RuleAnalysisContext<'_> {
+        RuleAnalysisContext {
+            rules: self,
+            sources: self,
+            returning: self,
+            domains: self,
+            composites: None,
         }
     }
+    fn binding(&self) -> crate::binding::BindingContext<'static> {
+        let mut binding = crate::binding::fixture::empty_binding_context();
+        binding.catalog = crate::binding::fixture::catalog(BTreeMap::from([
+            (
+                crate::RelationIdentity::new("public", "items"),
+                crate::binding::fixture::table_definition(self.0.clone()),
+            ),
+            (
+                crate::RelationIdentity::new("public", "log"),
+                crate::binding::fixture::table_definition(self.0.clone()),
+            ),
+        ]));
+        binding
+    }
+}
+fn command(sql: &str) -> Box<CommandPlan> {
+    let UnifiedPlan::Command(command) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+    else {
+        panic!("command")
+    };
+    command
+}
+fn native_action(catalog: &Catalog, sql: &str, action: &Statement, restore: bool) -> UnifiedPlan {
+    let command = command(sql);
+    let command = if restore {
+        serde_json::from_slice(&serde_json::to_vec(&command).unwrap()).unwrap()
+    } else {
+        command
+    };
+    let (mut resolver, input) = match command.as_ref() {
+        CommandPlan::Insert(insert) => {
+            let queries = OwnedInsertRuleQueries::bind(
+                catalog.analysis(),
+                insert,
+                &|_| Ok("owner".into()),
+                &"caller".into(),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .unwrap();
+            let insert = queries.relations().next().unwrap();
+            let relation = InternalRelationId::allocate();
+            let resolver =
+                RuleQueryResolver::from_insert(catalog.analysis(), insert, relation).unwrap();
+            let input = RuleQueryInput {
+                query: *insert.source.clone().unwrap(),
+                inline: insert
+                    .rule_values_input
+                    .as_ref()
+                    .is_some_and(crate::plan::RuleValuesInput::is_inline),
+                relation,
+                condition: None,
+                expressions: BTreeMap::new(),
+            };
+            (resolver, input)
+        }
+        CommandPlan::Update(update) => mutation_input(catalog, RuleMutation::Update(update)),
+        CommandPlan::Delete(delete) => mutation_input(catalog, RuleMutation::Delete(delete)),
+        _ => panic!("event mutation"),
+    };
+    let columns = catalog.0.iter().map(|column| column.name.clone()).collect();
+    let bound = bind_rule_action(catalog, action, &columns, &mut resolver).unwrap();
+    let bound = if restore {
+        serde_json::from_slice(&serde_json::to_vec(&bound).unwrap()).unwrap()
+    } else {
+        bound
+    };
+    let input = RuleQueryInput {
+        expressions: resolver.expressions,
+        ..input
+    };
+    RuleAction::bind(catalog.analysis(), &|_: &str| false, bound, Some(input))
+        .unwrap()
+        .lower(&|_: &str| false)
+        .unwrap()
+}
+fn mutation_input(
+    catalog: &Catalog,
+    mutation: RuleMutation<'_>,
+) -> (RuleQueryResolver, RuleQueryInput) {
+    let binding = catalog.binding();
+    let schema = crate::binding::analyze_source_plan_schema(
+        catalog,
+        &mutation.target_source(),
+        &[],
+        &binding,
+        None,
+    )
+    .unwrap();
+    let input = MutationRuleInput::bind(
+        catalog.analysis(),
+        crate::binding::correlation::CorrelationContext {
+            routines: catalog,
+            catalog: binding.catalog.as_ref(),
+            resolution: &binding.resolution,
+            scoped_relations: None,
+        },
+        mutation,
+        (&schema, None),
+        true,
+        &RoleReference::from("caller"),
+        &RoleReference::from("owner"),
+    )
+    .unwrap();
+    (input.resolver, input.input)
 }
 
 #[test]
-fn retained_rule_layout_keeps_declared_width_collation_and_whole_row_order() {
-    let columns = BTreeMap::from([
-        (
-            "z".into(),
-            RuleColumnMetadata {
-                ty: ColumnType::SmallInteger,
-                collation_oid: None,
-                uses_document_id: false,
-                position: 0,
-            },
-        ),
-        (
-            "a".into(),
-            RuleColumnMetadata {
-                ty: ColumnType::Text,
-                collation_oid: Some(950),
-                uses_document_id: false,
-                position: 1,
-            },
-        ),
+fn native_rule_layout_keeps_declared_width_collation_and_whole_row_order() {
+    let mut text = ColumnDef::nullable("a", ColumnType::Text);
+    text.collation_oid = Some(950);
+    let catalog = Catalog(vec![
+        ColumnDef::nullable("z", ColumnType::SmallInteger),
+        text,
     ]);
-    let row = Row(BTreeMap::from([
-        ("z".into(), Value::Int(7)),
-        ("a".into(), Value::Null),
-    ]));
-    let input = RetainedRuleInput::new(&columns);
-    assert_eq!(input.schema().physical_width(), 7);
-    assert!(input.schema().columns().is_empty());
-    assert_eq!(
-        input.schema().internal_type(input.relation().column(2)),
-        Some(&ColumnType::SmallInteger)
-    );
-    assert_eq!(
-        input
-            .schema()
-            .internal_collation(input.relation().column(0)),
-        Some(950)
-    );
-    let fields = input.schema().physical_record_fields(4).unwrap();
-    assert_eq!(
-        fields.as_ref(),
-        &[Some(ColumnType::SmallInteger), Some(ColumnType::Text)]
-    );
-    let values = input.row_values(&row, 9).unwrap();
-    assert_eq!(
-        &values[..4],
-        &[Value::Null, Value::Null, Value::Int(7), Value::Int(7)]
-    );
-    let Value::Record(fields) = &values[4] else {
-        panic!("whole OLD record")
+    let insert = command("INSERT INTO items SELECT 7, NULL::text");
+    let CommandPlan::Insert(insert) = insert.as_ref() else {
+        panic!("INSERT")
     };
+    let relation = InternalRelationId::allocate();
+    let mut resolver =
+        RuleQueryResolver::from_insert(catalog.analysis(), insert, relation).unwrap();
     assert_eq!(
-        fields.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        resolver
+            .columns
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
         ["z", "a"]
     );
-    assert_eq!(values[6], Value::Int(9));
-    assert_eq!(
-        input.admitted_types().as_ref(),
-        &[
-            Some("pg_catalog.\"text\"".into()),
-            Some("pg_catalog.\"text\"".into()),
-            Some("pg_catalog.\"int2\"".into()),
-            Some("pg_catalog.\"int2\"".into()),
-            None,
-            None,
-            None
-        ]
-    );
+    let Expr::Cast { expr, ty, .. } = resolver.rewrite_name("NEW").unwrap().unwrap() else {
+        panic!("row cast")
+    };
+    assert_eq!(ty, "items");
+    let Expr::Row(fields) = *expr else {
+        panic!("whole row")
+    };
+    for (field, (_, expected)) in fields.iter().zip(&resolver.columns) {
+        assert_eq!(field, expected.as_ref().unwrap());
+    }
+    for (position, (_, expression)) in resolver.columns.iter().enumerate() {
+        let Expr::InternalColumn(reference) = expression.as_ref().unwrap() else {
+            panic!("internal input")
+        };
+        let expression = &resolver.expressions[reference].scalar;
+        let empty = RowSchema::default();
+        assert_eq!(
+            crate::scalar_type(expression, &empty, &[]).unwrap(),
+            Some(catalog.0[position].ty.clone())
+        );
+        assert_eq!(
+            crate::schema::ScalarTypeSchema::input_collation(&empty, expression),
+            if position == 0 { None } else { Some(950) }
+        );
+    }
 }
 
 #[test]
-fn retained_rule_input_rejects_an_unrelated_source_before_action_binding() {
-    let columns = BTreeMap::new();
-    let input = RetainedRuleInput::new(&columns);
-    let other = RetainedRuleInput::new(&columns);
-    let descriptor =
-        crate::ast::RetainedRowSource::new(other.relation(), other.schema().clone(), 1).unwrap();
-    assert!(input
-        .bind_action(descriptor, &|_| panic!("unrelated row owner"))
-        .is_err());
+fn native_rule_inputs_keep_distinct_internal_relations() {
+    let catalog = Catalog(vec![ColumnDef::nullable("n", ColumnType::Integer)]);
+    let action = crate::compile("SELECT NEW.n").unwrap().remove(0);
+    let mut observed = Vec::new();
+    for _ in 0..2 {
+        let UnifiedPlan::Query(query) =
+            native_action(&catalog, "INSERT INTO items SELECT 7", &action, false)
+        else {
+            panic!("query")
+        };
+        let crate::plan::RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("block")
+        };
+        let crate::plan::SourcePlan::Subquery {
+            captured_output: Some(relation),
+            ..
+        } = block.from.unwrap()
+        else {
+            panic!("captured input")
+        };
+        let mut references = Vec::new();
+        block.projections[0].expr.visit(&mut |node| {
+            if let ScalarExpr::InternalColumn(column) = node {
+                references.push(*column);
+            }
+        });
+        assert_eq!(references, [relation.column(0)]);
+        observed.push(relation);
+    }
+    assert_ne!(observed[0], observed[1]);
 }

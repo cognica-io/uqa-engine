@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod owned;
+
 #[test]
 fn stored_outer_identities_preserve_nested_alias_shadowing() {
     let relation = crate::ast::InternalRelationId::allocate();

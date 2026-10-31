@@ -62,7 +62,7 @@ impl Preparation<'_> {
         }
         let target =
             self.scope
-                .bind_command_target(self.routines, command, &self.parameters.values())?;
+                .bind_command_target(self.routines, command, &self.parameters.values()?)?;
         let preceding = crate::binding::SourceScope::command_target(command, &target);
         let source = command
             .source_input()
@@ -79,10 +79,8 @@ impl Preparation<'_> {
                 )
             })
             .transpose()?;
-        let input = super::SchemaScope::command_input_schema(command, &target, source.as_ref())?;
-        let input = outer.map_or(input.clone(), |outer| {
-            RowSchema::with_outer_schema(&input, outer)
-        });
+        let (returning, input) =
+            self.command_clause_schemas(command, &target, source.as_ref(), outer)?;
         let subqueries = command.scalar_subqueries();
         match command {
             CommandPlan::Insert(insert) => {
@@ -98,7 +96,7 @@ impl Preparation<'_> {
                         "WHERE",
                     )?;
                 }
-                let result = self.command_result(command, &target, &input, source.as_ref())?;
+                let result = self.command_result(command, &target, &returning, source.as_ref())?;
                 self.in_placement(SetPlacement::Update, |analysis| {
                     analysis.assignments(
                         &update.table,
@@ -129,13 +127,63 @@ impl Preparation<'_> {
                     subqueries,
                     "JOIN/ON",
                 )?;
-                let result = self.command_result(command, &target, &input, source.as_ref())?;
+                let result = self.command_result(command, &target, &returning, source.as_ref())?;
                 self.merge(merge, &target, &input, subqueries)?;
                 return Ok(result);
             }
             _ => {}
         }
-        self.command_result(command, &target, &input, source.as_ref())
+        self.command_result(command, &target, &returning, source.as_ref())
+    }
+
+    fn command_clause_schemas(
+        &self,
+        command: &CommandPlan,
+        target: &RowSchema,
+        source: Option<&RowSchema>,
+        outer: Option<&RowSchema>,
+    ) -> Result<(RowSchema, RowSchema), SQLError> {
+        let returning = crate::semantics::returning_expression_schema_with_control(
+            target,
+            command.target_qualifier().unwrap_or_default(),
+            command.returning_aliases().ok_or_else(|| {
+                SQLError::Internal("command CTE has no RETURNING namespace".into())
+            })?,
+            source,
+            &self.scope.control(),
+        )?;
+        let returning = if target.columns_are_open(None) {
+            RowSchema::with_open_columns_with_control(
+                &returning,
+                command.target_qualifier(),
+                &self.scope.control(),
+            )?
+        } else {
+            returning
+        };
+        let returning = super::super::overlay_outer_schema_with_control(
+            &returning,
+            outer,
+            &self.scope.control(),
+        )?;
+        let input = crate::semantics::mutation_clause_schema_with_control(
+            target,
+            command.target_qualifier().unwrap_or_default(),
+            source,
+            &self.scope.control(),
+        )?;
+        let input = if target.columns_are_open(None) {
+            RowSchema::with_open_columns_with_control(
+                &input,
+                command.target_qualifier(),
+                &self.scope.control(),
+            )?
+        } else {
+            input
+        };
+        let input =
+            super::super::overlay_outer_schema_with_control(&input, outer, &self.scope.control())?;
+        Ok((returning, input))
     }
 
     /// Analyze an INSERT's VALUES rows or source query and its ON CONFLICT clause.
@@ -275,7 +323,7 @@ impl Preparation<'_> {
             output.columns.len(),
         )?;
         self.resolve_targets(&mut output)?;
-        Ok(Some(output.schema()))
+        Ok(Some(output.schema(&self.scope.control())?))
     }
 
     fn merge(
@@ -296,10 +344,22 @@ impl Preparation<'_> {
             .target_alias
             .as_deref()
             .unwrap_or(&merge.target_qualifier);
-        let target_input = RowSchema::with_relation_qualifier(target, target_qualifier);
-        let target_input = crate::binding::overlay_outer_schema(&target_input, outer);
+        let target_input = RowSchema::with_relation_qualifier_with_control(
+            target,
+            target_qualifier,
+            &self.scope.control(),
+        )?;
+        let target_input = crate::binding::overlay_outer_schema_with_control(
+            &target_input,
+            outer,
+            &self.scope.control(),
+        )?;
         let source_input = self.source(&merge.source, subqueries, outer)?;
-        let source_input = crate::binding::overlay_outer_schema(&source_input, outer);
+        let source_input = crate::binding::overlay_outer_schema_with_control(
+            &source_input,
+            outer,
+            &self.scope.control(),
+        )?;
         for clause in &merge.when_clauses {
             let input = match clause {
                 MergeWhenPlan::UpdateNotMatchedBySource { .. }
@@ -520,7 +580,7 @@ impl Preparation<'_> {
             let mut ty = self.expression(bound, input, subqueries)?;
             self.parameters
                 .coerce_unknown(&mut ty, &crate::ColumnType::Integer)?;
-            if ty.ty.as_ref().is_some_and(|ty| {
+            if ty.ty.as_deref().is_some_and(|ty| {
                 !crate::assignment_type_compatible(ty, &crate::ColumnType::Integer)
             }) {
                 return Err(error(
@@ -533,7 +593,7 @@ impl Preparation<'_> {
             }
         }
         self.parameters.coerce_unknown(value, &required)?;
-        targets::validate_assignment_source(assignment, &required, value.ty.as_ref())?;
+        targets::validate_assignment_source(assignment, &required, value.ty.as_deref())?;
         targets::validate_assignment_result(assignment, declared)
     }
 }

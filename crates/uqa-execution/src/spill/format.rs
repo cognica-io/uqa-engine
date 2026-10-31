@@ -22,7 +22,8 @@ pub(super) use binary::{
     encoded_borrowed_row_record_size, encoded_physical_row_record_size,
 };
 pub(crate) use binary::{
-    decode_document, decode_physical_row_record, encode_document, encode_physical_row_record,
+    decode_constant_record, decode_document, decode_physical_row_record,
+    encode_constant_record_with_control, encode_document, encode_physical_row_record,
     encoded_document_size,
 };
 

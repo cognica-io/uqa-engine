@@ -7,7 +7,6 @@
 //! Execute independent rewrite-rule queries with ordered actions and scoped recursion.
 use std::cell::RefCell;
 use uqa_core::RelationIdentity;
-use uqa_sql::semantics::rules::analysis::rule_returning_columns;
 use uqa_sql::{ast::RuleEvent, SQLError};
 mod context;
 mod mutation_inputs;

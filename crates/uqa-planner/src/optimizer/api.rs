@@ -23,8 +23,22 @@ pub enum OptimizerError {
 
 pub type OptimizerResult<T> = Result<T, OptimizerError>;
 
-/// Evaluate a planner-proven constant using the runtime selected by the caller.
-pub type ConstantEvaluator = fn(&ScalarExpr) -> Result<uqa_core::Value, uqa_sql::SQLError>;
+impl From<crate::JoinOrderError> for OptimizerError {
+    fn from(error: crate::JoinOrderError) -> Self {
+        match error {
+            crate::JoinOrderError::Graph(error) => Self::JoinGraph(error),
+            crate::JoinOrderError::Production(error) => Self::Expression(error.into()),
+        }
+    }
+}
+
+/// Evaluate a planner-proven constant under the optimizer's production allowance, retaining the result's constructor lease.
+pub type ConstantEvaluator =
+    fn(
+        &ScalarExpr,
+        &[uqa_sql::SQLParam],
+        &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_core::Value>, uqa_sql::SQLError>;
 
 /// Plan an already analyzed scalar at its owning command's preparation boundary. This uses the same lazy conditional simplification and constant-error propagation as query planning.
 pub fn optimize_scalar_expression(
@@ -34,12 +48,22 @@ pub fn optimize_scalar_expression(
     super::optimize_scalar_slot(expression, config)
 }
 
+/// Simplify an independently owned scalar under its existing statement allowance.
+pub fn optimize_owned_scalar_expression(
+    expression: uqa_sql::plan::OwnedScalarExpr,
+    config: &OptimizerConfig<'_>,
+) -> Result<uqa_sql::plan::OwnedScalarExpr, uqa_sql::SQLError> {
+    super::scalar::owned::optimize(expression, config)
+}
+
 type ConstantStorageResult =
     Result<Option<std::sync::Arc<dyn uqa_sql::ir::ConstantValueStorage>>, uqa_sql::SQLError>;
 
 /// Borrowed initialization is used only while optimizing a VALUES command; produced literals own their storage independently.
 #[derive(Clone, Copy)]
-pub(crate) struct ConstantStorageFactory<'a>(pub &'a dyn Fn() -> ConstantStorageResult);
+pub(crate) struct ConstantStorageFactory<'a>(
+    pub &'a dyn Fn(&uqa_core::memory::ProductionControl<'_>) -> ConstantStorageResult,
+);
 
 impl std::fmt::Debug for ConstantStorageFactory<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,6 +74,8 @@ impl std::fmt::Debug for ConstantStorageFactory<'_> {
 
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig<'a> {
+    /// Allocation owner and cancellation scopes for optimizer producers.
+    pub production: uqa_core::memory::ProductionControl<'a>,
     /// CASE/COALESCE result types and arm coercions have already been retained by the caller. Unreachable arms can be discarded without changing subsequent type inference.
     pub coerced_conditionals: bool,
     pub enable_filter_pushdown: bool,
@@ -73,11 +99,32 @@ pub struct OptimizerConfig<'a> {
 
 impl OptimizerConfig<'_> {
     pub(super) fn for_values(&self) -> Result<Self, uqa_sql::SQLError> {
-        let mut config = self.clone();
-        config.retain_values_constants = true;
+        let mut config = self.for_values_without_active()?;
+        config
+            .active_inline_routines
+            .clone_from(&self.active_inline_routines);
+        Ok(config)
+    }
+
+    pub(super) fn for_values_without_active(&self) -> Result<Self, uqa_sql::SQLError> {
+        let mut config = Self {
+            production: self.production,
+            coerced_conditionals: self.coerced_conditionals,
+            enable_filter_pushdown: self.enable_filter_pushdown,
+            enable_boolean_simplify: self.enable_boolean_simplify,
+            enable_vector_threshold_merge: self.enable_vector_threshold_merge,
+            enable_join_reordering: self.enable_join_reordering,
+            constant_evaluator: self.constant_evaluator,
+            constant_storage: self.constant_storage.clone(),
+            retain_values_constants: true,
+            constant_storage_factory: self.constant_storage_factory,
+            builtin_permissions: self.builtin_permissions.clone(),
+            routine_inlining: self.routine_inlining,
+            active_inline_routines: Vec::new(),
+        };
         if config.constant_storage.is_none() {
             if let Some(factory) = config.constant_storage_factory {
-                config.constant_storage = factory.0()?;
+                config.constant_storage = factory.0(&config.production)?;
             }
         }
         Ok(config)
@@ -86,6 +133,7 @@ impl OptimizerConfig<'_> {
     #[must_use]
     pub const fn new(constant_evaluator: ConstantEvaluator) -> Self {
         Self {
+            production: uqa_core::memory::ProductionControl::uncontrolled(),
             coerced_conditionals: false,
             enable_filter_pushdown: true,
             enable_boolean_simplify: true,
@@ -152,7 +200,10 @@ impl AggregateClassifier for NoRegisteredAggregates {
 }
 
 /// Optimize a fully lowered plan using the built-in aggregate catalogue.
-pub fn optimize(plan: UnifiedPlan, config: &OptimizerConfig) -> OptimizerResult<UnifiedPlan> {
+pub fn optimize(
+    plan: UnifiedPlan,
+    config: &OptimizerConfig,
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_with_aggregates_and_statistics(
         plan,
         config,
@@ -166,7 +217,7 @@ pub fn optimize_with_aggregates(
     plan: UnifiedPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) -> OptimizerResult<UnifiedPlan> {
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_with_aggregates_and_statistics(plan, config, aggregates, &NoSourceStatistics)
 }
 
@@ -175,7 +226,7 @@ pub fn optimize_with_statistics(
     plan: UnifiedPlan,
     config: &OptimizerConfig,
     statistics: &dyn SourceStatistics,
-) -> OptimizerResult<UnifiedPlan> {
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_with_aggregates_and_statistics(plan, config, &NoRegisteredAggregates, statistics)
 }
 
@@ -186,10 +237,26 @@ pub fn optimize_with_aggregates_and_statistics(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
     statistics: &dyn SourceStatistics,
-) -> OptimizerResult<UnifiedPlan> {
+) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
     optimize_unified_plan(&mut plan, config, aggregates)?;
     if config.enable_join_reordering {
-        reorder_unified_plan_joins(&mut plan, statistics)?;
+        reorder_unified_plan_joins(plan, statistics, &config.production)
+    } else {
+        Ok(plan.into())
     }
-    Ok(plan)
+}
+
+/// Optimize a mutable admitted plan without converting its constructor owners to ordinary storage.
+pub fn optimize_owned_with_aggregates_and_statistics(
+    plan: uqa_sql::plan::MutableExecutablePlan,
+    config: &OptimizerConfig<'_>,
+    aggregates: &dyn AggregateClassifier,
+    statistics: &dyn SourceStatistics,
+) -> OptimizerResult<uqa_sql::plan::MutableExecutablePlan> {
+    let plan = super::owned::optimize(plan, config, aggregates)?;
+    if config.enable_join_reordering {
+        super::join_reorder::reorder_owned_plan(plan, statistics, &config.production)
+    } else {
+        Ok(plan)
+    }
 }

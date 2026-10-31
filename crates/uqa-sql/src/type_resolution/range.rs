@@ -6,6 +6,9 @@
 
 //! Bind range-polymorphic functions while declared range identity is available.
 
+mod owned;
+pub(super) use owned::bind_owned_call;
+
 use super::call::{BindingCall, InferType};
 use crate::ast::{
     ColumnType, FunctionBinding, FunctionDispatch, RangeFunctionOperation, RangeSubtype,

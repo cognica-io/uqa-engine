@@ -65,7 +65,7 @@ pub(super) fn visible_type_name(schema: &str, name: &str) -> String {
         .expect("ordinary type name has no reservation")
 }
 
-fn visible_type_name_with_control(
+pub(super) fn visible_type_name_with_control(
     schema: &str,
     name: &str,
     control: &ProductionControl<'_>,

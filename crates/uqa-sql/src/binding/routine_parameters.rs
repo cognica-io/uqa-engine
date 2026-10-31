@@ -13,6 +13,8 @@ use crate::plan::{CommandPlan, ExpressionPlan, ProjectionPlan, UnifiedPlan};
 use crate::routines::RoutineResolution;
 use std::sync::LazyLock;
 
+mod production;
+
 /// The opaque relation whose attributes mark the parameter slots of every row scope the parameter layer reaches, so that a name resolves to a parameter only through the layer itself.
 static ROUTINE_PARAMETERS: LazyLock<InternalRelationId> =
     LazyLock::new(InternalRelationId::allocate);
@@ -20,6 +22,10 @@ static ROUTINE_PARAMETERS: LazyLock<InternalRelationId> =
 /// The parameters a SQL routine's body can name, in positional order.
 #[derive(Clone)]
 pub struct RoutineParameterScope {
+    data: std::sync::Arc<uqa_core::memory::Produced<RoutineParameterData>>,
+}
+
+struct RoutineParameterData {
     /// The routine's unqualified name, which qualifies its parameter names.
     function: String,
     /// The parameter names; an unnamed parameter has an empty name and is reachable only by position.
@@ -33,17 +39,27 @@ impl RoutineParameterScope {
     pub fn new(function: &str, names: Vec<String>, types: Vec<Option<ColumnType>>) -> Self {
         let visible = RowSchema::with_qualified_types(function, names.clone(), types.clone());
         let marked = RowSchema::with_internal_relation_types(*ROUTINE_PARAMETERS, types);
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
         Self {
-            function: function.to_string(),
-            names,
-            schema: RowSchema::with_trailing_internal_aliases(&visible, &marked),
+            data: control
+                .finish(
+                    RoutineParameterData {
+                        function: function.to_owned(),
+                        names,
+                        schema: RowSchema::with_trailing_internal_aliases(&visible, &marked),
+                    },
+                    None,
+                )
+                .expect("ordinary routine parameter scope")
+                .into_shared(&control)
+                .expect("ordinary shared parameter scope"),
         }
     }
 
     /// The parameters as a row scope, the outermost scope of every name in the body.
     #[must_use]
-    pub const fn schema(&self) -> &RowSchema {
-        &self.schema
+    pub fn schema(&self) -> &RowSchema {
+        &self.data.schema
     }
 
     /// The position of the parameter that occupies `slot` of `schema`.
@@ -71,7 +87,8 @@ impl RoutineParameterScope {
                 match schema.qualified_slot(qualifier, column) {
                     Some(slot) => Self::position_at(schema, slot),
                     // A relation that takes the routine's name but lacks the column leaves the name to the parameter, since the parser finds no column for it.
-                    None if *qualifier == self.function && Self::reaches(schema) => self
+                    None if *qualifier == self.data.function && Self::reaches(schema) => self
+                        .data
                         .names
                         .iter()
                         .position(|name| !name.is_empty() && name == column),
@@ -85,8 +102,8 @@ impl RoutineParameterScope {
     /// Whether `name` is a relation visible in `schema`. The layer's own qualifier, the routine's name, is visible only where no relation takes that name.
     fn names_relation(&self, schema: &RowSchema, name: &str) -> bool {
         schema.has_qualifier(name)
-            && (name != self.function
-                || !self.names.iter().any(|parameter| {
+            && (name != self.data.function
+                || !self.data.names.iter().any(|parameter| {
                     schema
                         .qualified_slot(name, parameter)
                         .and_then(|slot| Self::position_at(schema, slot))

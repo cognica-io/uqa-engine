@@ -18,7 +18,7 @@ use uqa_sql::{
                 self as model, EventRelationPersistence, StoredRuleCatalog, StoredTriggerCatalog,
             },
             reads::EventCatalogReads,
-            StoredRule, StoredTrigger,
+            StoredTrigger,
         },
         resolution::RelationLookupMode,
     },
@@ -114,9 +114,7 @@ impl EventRestoreContext<'_> {
                 recorded_oids = true;
             }
             let name = rule.definition.name.clone();
-            if rules
-                .entry(relation)
-                .or_default()
+            if std::sync::Arc::make_mut(rules.entry(relation).or_default())
                 .insert(name.clone(), rule)
                 .is_some()
             {
@@ -294,7 +292,7 @@ fn legacy_trigger_object_id(definition: &uqa_sql::ast::CreateTrigger) -> [u8; 16
 pub fn persist_rule_catalog_snapshot(
     catalog: Option<&dyn CatalogFacade>,
     relations: &dyn EventRelationPersistence,
-    rules: &BTreeMap<RelationIdentity, BTreeMap<String, StoredRule>>,
+    rules: &uqa_sql::catalog::events::RuleCatalog,
 ) -> Result<(), SQLError> {
     let Some(catalog) = catalog else {
         return Ok(());

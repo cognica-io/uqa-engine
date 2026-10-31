@@ -4,12 +4,27 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::{
-    ast::ColumnType, expr::cast_value, type_resolution::canonical_routine_type_name, SQLError,
+use crate::{ast::ColumnType, SQLError};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
 };
-use uqa_core::Value;
+
+mod production;
+pub use production::coerce_routine_value_from_with_control;
 pub trait RoutineValueContext: super::AssignmentContext {
     fn catalog_column_type(&self, name: &str) -> Option<ColumnType>;
+
+    fn catalog_column_type_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+        control.check()?;
+        self.catalog_column_type(name)
+            .map(|ty| ty.retain_external_with_control(control).map_err(Into::into))
+            .transpose()
+    }
 }
 pub fn coerce_routine_value(
     context: &dyn RoutineValueContext,
@@ -25,10 +40,16 @@ pub fn coerce_routine_value_from(
     type_name: &str,
     source: Option<&ColumnType>,
 ) -> Result<Value, SQLError> {
-    match RoutineValueDescription::resolve(context, type_name) {
-        Some(description) => description.coerce(context, value, source),
-        None => cast_value(value, type_name),
-    }
+    let control = ProductionControl::uncontrolled();
+    coerce_routine_value_from_with_control(
+        context,
+        control.copy_value(value)?,
+        type_name,
+        source,
+        &control,
+    )?
+    .into_uncontrolled()
+    .map_err(|_| SQLError::Internal("ordinary routine coercion owner".into()))
 }
 
 /// The assignment semantics selected by a routine's declared type. This describes a conversion, never a converted value; callers may retain it only while the catalog and name-resolution scope that selected it remain unchanged.
@@ -48,14 +69,13 @@ enum RoutineValueKind {
 impl RoutineValueDescription {
     /// Resolve at the original conversion boundary. An unresolved name keeps the ordinary value-dependent cast path and is not a reusable description.
     pub fn resolve(context: &dyn RoutineValueContext, name: &str) -> Option<Self> {
-        Some(Self(match canonical_routine_type_name(name).as_str() {
-            "record" => RoutineValueKind::Record,
-            "trigger" => RoutineValueKind::Trigger,
-            "anyarray" => RoutineValueKind::AnyArray,
-            "refcursor" => RoutineValueKind::RefCursor,
-            "void" => RoutineValueKind::Void,
-            _ => RoutineValueKind::Catalog(context.catalog_column_type(name)?),
-        }))
+        Self::resolve_with_control(context, name, &ProductionControl::uncontrolled())
+            .expect("ordinary routine descriptor lookup")
+            .map(|description| {
+                description
+                    .into_uncontrolled()
+                    .expect("ordinary routine descriptor owner")
+            })
     }
 
     /// Admit a retained copy of the descriptor's owned type payload before copying it.
@@ -84,71 +104,10 @@ impl RoutineValueDescription {
         value: &Value,
         source: Option<&ColumnType>,
     ) -> Result<Value, SQLError> {
-        match &self.0 {
-            RoutineValueKind::Record => match value {
-                Value::Record(_) | Value::Null => Ok(value.clone()),
-                Value::Datum(datum)
-                    if crate::expr::composites::datum_is_composite(datum, context)? =>
-                {
-                    Ok(value.clone())
-                }
-                Value::Row(row) if row.field_types().is_some() => Ok(value.clone()),
-                Value::Row(values) => Ok(Value::Record(
-                    values
-                        .iter()
-                        .cloned()
-                        .enumerate()
-                        .map(|(index, value)| (format!("f{}", index + 1), value))
-                        .collect::<Vec<_>>()
-                        .into(),
-                )),
-                _ => Err(SQLError::Routine {
-                    sqlstate: "42804".into(),
-                    message: "cannot cast non-composite value to type record".into(),
-                }),
-            },
-            RoutineValueKind::Trigger => match value {
-                Value::Record(_) | Value::Row(_) | Value::Null => Ok(value.clone()),
-                Value::Datum(datum)
-                    if crate::expr::composites::datum_is_composite(datum, context)? =>
-                {
-                    Ok(value.clone())
-                }
-                _ => Err(SQLError::Routine {
-                    sqlstate: "42804".into(),
-                    message: "trigger function must return a row or NULL".into(),
-                }),
-            },
-            RoutineValueKind::AnyArray => match value {
-                Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Null => {
-                    Ok(value.clone())
-                }
-                _ => Err(SQLError::Routine {
-                    sqlstate: "42804".into(),
-                    message: "cannot cast non-array value to type anyarray".into(),
-                }),
-            },
-            RoutineValueKind::RefCursor => match value {
-                Value::Str(_) | Value::Null => Ok(value.clone()),
-                _ => Err(SQLError::Routine {
-                    sqlstate: "42804".into(),
-                    message: "cannot cast value to type refcursor".into(),
-                }),
-            },
-            RoutineValueKind::Void if matches!(value, Value::Null) => Ok(Value::Null),
-            RoutineValueKind::Void => Err(SQLError::Routine {
-                sqlstate: "42804".into(),
-                message: "cannot cast non-null value to type void".into(),
-            }),
-            RoutineValueKind::Catalog(target) => {
-                crate::assignment::conversion::coerce_assignment_value(
-                    context,
-                    value.clone(),
-                    target,
-                    source,
-                )
-            }
-        }
+        let control = ProductionControl::uncontrolled();
+        self.coerce_with_control(context, control.copy_value(value)?, source, &control)?
+            .into_uncontrolled()
+            .map_err(|_| SQLError::Internal("ordinary described coercion owner".into()))
     }
 }
 

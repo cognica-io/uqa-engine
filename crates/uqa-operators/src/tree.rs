@@ -659,16 +659,27 @@ pub enum DeepFusionLayer {
 
 impl OperatorTree {
     /// Visit this node and every descendant in pre-order.
-    ///
-    /// The match is intentionally exhaustive so adding a child-bearing IR
-    /// variant cannot silently create a traversal boundary in planners or
-    /// engine catalog analysis.
+    pub fn visit(&self, visitor: &mut impl FnMut(&OperatorTree)) {
+        let result = self.try_visit(&mut |node| {
+            visitor(node);
+            Ok::<(), std::convert::Infallible>(())
+        });
+        match result {
+            Ok(()) => {}
+            Err(never) => match never {},
+        }
+    }
+
+    /// Visit borrowed nodes in pre-order, stopping at the first error without collecting descendants. The exhaustive child match also defines the ordinary visitor's order.
     #[expect(
         clippy::too_many_lines,
         reason = "preserves exhaustive IR variant order"
     )]
-    pub fn visit(&self, visitor: &mut impl FnMut(&OperatorTree)) {
-        visitor(self);
+    pub fn try_visit<E>(
+        &self,
+        visitor: &mut impl FnMut(&OperatorTree) -> Result<(), E>,
+    ) -> Result<(), E> {
+        visitor(self)?;
         match self {
             OperatorTree::Filter {
                 source: Some(source),
@@ -692,7 +703,7 @@ impl OperatorTree {
             | OperatorTree::Aggregate {
                 source: Some(source),
                 ..
-            } => source.visit(visitor),
+            } => source.try_visit(visitor)?,
             OperatorTree::Intersect(children)
             | OperatorTree::Union(children)
             | OperatorTree::Composed(children)
@@ -711,7 +722,7 @@ impl OperatorTree {
             }
             | OperatorTree::LearnedFusion {
                 signals: children, ..
-            } => visit_operator_slice(children, visitor),
+            } => try_visit_operator_slice(children, visitor)?,
             OperatorTree::GraphJoin { left, right, .. }
             | OperatorTree::TextSimilarityJoin { left, right, .. }
             | OperatorTree::VectorSimilarityJoin { left, right, .. }
@@ -730,25 +741,25 @@ impl OperatorTree {
                 positive: left,
                 negative: right,
             } => {
-                left.visit(visitor);
-                right.visit(visitor);
+                left.try_visit(visitor)?;
+                right.try_visit(visitor)?;
             }
-            OperatorTree::FacetVector { vector_op, .. } => vector_op.visit(visitor),
+            OperatorTree::FacetVector { vector_op, .. } => vector_op.try_visit(visitor)?,
             OperatorTree::MultiStage { stages } => {
                 for stage in stages {
-                    stage.child.visit(visitor);
+                    stage.child.try_visit(visitor)?;
                 }
             }
             OperatorTree::ProgressiveFusion { stages, .. } => {
                 for stage in stages {
-                    stage.signal.visit(visitor);
+                    stage.signal.try_visit(visitor)?;
                 }
             }
             OperatorTree::DeepFusion { layers, .. } => {
                 for layer in layers {
                     if let DeepFusionLayer::Signal { signals } = layer {
                         for signal in signals {
-                            signal.visit(visitor);
+                            signal.try_visit(visitor)?;
                         }
                     }
                 }
@@ -778,6 +789,7 @@ impl OperatorTree {
             | OperatorTree::TemporalPatternMatch { .. }
             | OperatorTree::DeepPredict { .. } => {}
         }
+        Ok(())
     }
 
     /// `True` when the operator is structurally empty. The explicit empty
@@ -866,11 +878,18 @@ impl OperatorTree {
     }
 }
 
-fn visit_operator_slice(children: &[OperatorTree], visitor: &mut impl FnMut(&OperatorTree)) {
+fn try_visit_operator_slice<E>(
+    children: &[OperatorTree],
+    visitor: &mut impl FnMut(&OperatorTree) -> Result<(), E>,
+) -> Result<(), E> {
     for child in children {
-        child.visit(visitor);
+        child.try_visit(visitor)?;
     }
+    Ok(())
 }
 
 mod introspection;
 pub use introspection::collect_graph_names;
+
+#[cfg(test)]
+mod tests;

@@ -6,6 +6,8 @@
 
 use super::*;
 use crate::catalog::test_support::{empty_scope, NoRoutines};
+use uqa_core::memory::ProductionControl;
+use uqa_sql::binding::ExecutionBindingOptions;
 use uqa_sql::{
     plan::{RelationalPlan, UnifiedPlan},
     ColumnType,
@@ -48,9 +50,16 @@ fn source_transfer_rebinds_changed_parameters_and_cte_definitions() {
         uqa_core::Value::Str("seven".into()),
         ColumnType::Text,
     )];
-    let bound =
-        bind_query_block_with_sources(&routines, root, &integers, &scope, None, false, None)
-            .unwrap();
+    let bound = bind_query_block_with_sources(
+        &routines,
+        root,
+        &integers,
+        &scope,
+        ExecutionBindingOptions::default(),
+        None,
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
     let bindings = bound.sources.as_ref().unwrap();
     assert!(bindings
         .query_source(&routines, child(root), &integers, &scope, None, false)
@@ -63,9 +72,9 @@ fn source_transfer_rebinds_changed_parameters_and_cte_definitions() {
         child(root),
         &strings,
         &scope,
-        None,
-        false,
+        ExecutionBindingOptions::default(),
         Some(bindings),
+        &ProductionControl::uncontrolled(),
     )
     .unwrap();
     assert_eq!(rebound.schema.column_type(0), Some(&ColumnType::Text));
@@ -79,8 +88,16 @@ fn source_transfer_rebinds_changed_parameters_and_cte_definitions() {
     );
     let query_plan = query("SELECT * FROM (SELECT * FROM input) AS derived");
     let root = block(&query_plan);
-    let bound =
-        bind_query_block_with_sources(&routines, root, &[], &scope, None, false, None).unwrap();
+    let bound = bind_query_block_with_sources(
+        &routines,
+        root,
+        &[],
+        &scope,
+        ExecutionBindingOptions::default(),
+        None,
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
     let bindings = bound.sources.as_ref().unwrap();
     assert!(bindings
         .query_source(&routines, child(root), &[], &scope, None, false)
@@ -99,9 +116,9 @@ fn source_transfer_rebinds_changed_parameters_and_cte_definitions() {
         child(root),
         &[],
         &scope,
-        None,
-        false,
+        ExecutionBindingOptions::default(),
         Some(bindings),
+        &ProductionControl::uncontrolled(),
     )
     .unwrap();
     assert_eq!(rebound.schema.column_type(0), Some(&ColumnType::Text));

@@ -12,12 +12,20 @@
 //! one place so the view, CTE, predicate-pushdown, column-pruning, and `DPccp`
 //! paths cannot drift apart.
 
-use std::collections::BTreeSet;
-
 use crate::ast::{FunctionBinding, FunctionVolatility};
-use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan};
+use crate::plan::{QueryBlockPlan, QueryPlan, UnifiedPlan};
 use crate::SQLError;
 use crate::ScalarExpr;
+
+mod production;
+pub use production::{
+    builtin_function_volatility_with_control, expr_contains_volatile_function_with_control,
+    function_volatility_with_binding_and_control, query_contains_volatile_function_with_control,
+    scalar_calls_are_volatile_with_control,
+    scalar_in_scope_contains_volatile_function_with_control,
+    select_contains_volatile_function_with_control,
+    unified_plan_contains_volatile_function_with_control,
+};
 
 /// Metadata needed to classify SQL expressions without invoking a routine or reading a row.
 pub trait VolatilityCatalog {
@@ -27,6 +35,21 @@ pub trait VolatilityCatalog {
         name: &str,
         binding: Option<&FunctionBinding>,
     ) -> Option<Vec<FunctionVolatility>>;
+    /// Aggregate an external catalog's completed metadata; native registries override this with a borrowed fold.
+    fn routine_volatility_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<FunctionVolatility>, SQLError> {
+        control.check()?;
+        let result = self
+            .routine_volatilities(name, binding)
+            .as_deref()
+            .map(production::strongest);
+        control.check()?;
+        Ok(result)
+    }
     fn view_query(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
 
     /// Lend the selected view plan for one read. Catalogs retaining immutable definitions can override this adapter without constructing an owned plan.
@@ -36,6 +59,22 @@ pub trait VolatilityCatalog {
         read: &mut dyn FnMut(&QueryPlan) -> Result<bool, SQLError>,
     ) -> Result<Option<bool>, SQLError> {
         self.view_query(name)?.as_ref().map(read).transpose()
+    }
+
+    /// Read a retained native view under the current production scope. The external default keeps its existing callback boundary; native borrowed overrides do not construct a query copy.
+    fn with_view_query_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<bool, SQLError>,
+    ) -> Result<Option<bool>, SQLError> {
+        control.check()?;
+        let result = self.with_view_query(name, &mut |query| {
+            control.check()?;
+            read(query)
+        })?;
+        control.check()?;
+        Ok(result)
     }
 }
 
@@ -91,23 +130,14 @@ pub fn function_volatility_with_binding(
     binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> FunctionVolatility {
-    let builtin = builtin_function_volatility(name, binding, argument_count);
-    if is_intrinsic_scalar_syntax(binding) || builtin == FunctionVolatility::Volatile {
-        return builtin;
-    }
-    let identity = super::functions::lowercase_function_name(name);
-
-    // Registrations made through the original APIs retain the conservative
-    // VOLATILE default. Explicit options let pure callbacks participate in
-    // the same optimizer rules as declared SQL routines.
-    if let Some(volatility) = catalog.host_function_volatility(&identity) {
-        return volatility;
-    }
-
-    if let Some(volatility) = sql_routine_volatility(catalog, &identity, binding) {
-        return volatility;
-    }
-    builtin
+    function_volatility_with_binding_and_control(
+        catalog,
+        name,
+        binding,
+        argument_count,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine volatility has no resource failure")
 }
 
 /// Classify an already selected built-in without consulting host or SQL routine registrations. Callers that have not resolved the routine must use the catalog-aware entry point instead.
@@ -289,21 +319,6 @@ fn builtin_is_volatile(name: &str) -> bool {
     )
 }
 
-fn sql_routine_volatility(
-    catalog: &dyn VolatilityCatalog,
-    identity: &str,
-    binding: Option<&FunctionBinding>,
-) -> Option<FunctionVolatility> {
-    let overloads = catalog.routine_volatilities(identity, binding)?;
-    if overloads.contains(&FunctionVolatility::Volatile) {
-        return Some(FunctionVolatility::Volatile);
-    }
-    if overloads.contains(&FunctionVolatility::Stable) {
-        return Some(FunctionVolatility::Stable);
-    }
-    Some(FunctionVolatility::Immutable)
-}
-
 pub fn expr_contains_volatile_function(catalog: &dyn VolatilityCatalog, expr: &ScalarExpr) -> bool {
     expr_contains_volatile_function_with(catalog, expr, true)
 }
@@ -319,34 +334,13 @@ fn expr_contains_volatile_function_with(
     expr: &ScalarExpr,
     conservative_subqueries: bool,
 ) -> bool {
-    let mut volatile = false;
-    expr.visit(&mut |part| {
-        if volatile {
-            return;
-        }
-        match part {
-            ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                ..
-            } => {
-                volatile =
-                    function_volatility_with_binding(catalog, name, binding.as_ref(), args.len())
-                        == FunctionVolatility::Volatile;
-            }
-            ScalarExpr::WindowCall { name, args, .. } => {
-                volatile =
-                    function_volatility(catalog, name, args.len()) == FunctionVolatility::Volatile;
-            }
-            // Query-valued children are inspected by the enclosing QueryPlan. At expression-only rewrite sites, retaining the conservative rule prevents an opaque child query from being duplicated or reordered.
-            ScalarExpr::ScalarSubquery(_)
-            | ScalarExpr::Exists { .. }
-            | ScalarExpr::InSubquery { .. } => volatile = conservative_subqueries,
-            _ => {}
-        }
-    });
-    volatile
+    production::expression_contains_volatile_with_control(
+        catalog,
+        expr,
+        conservative_subqueries,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary scalar volatility has no resource failure")
 }
 
 /// Inspect a scalar plan with its query arena instead of treating every subquery as an opaque volatile call.
@@ -373,35 +367,13 @@ pub fn scalar_in_scope_contains_volatile_function(
     subqueries: &[QueryPlan],
     visible_ctes: &dyn Fn(&str) -> bool,
 ) -> Result<bool, SQLError> {
-    if scalar_calls_are_volatile(catalog, scalar) {
-        return Ok(true);
-    }
-    let mut result = Ok(false);
-    scalar.visit(&mut |node| {
-        if !matches!(result, Ok(false)) {
-            return;
-        }
-        let index = match node {
-            ScalarExpr::ScalarSubquery(index)
-            | ScalarExpr::Exists {
-                subquery: index, ..
-            }
-            | ScalarExpr::InSubquery {
-                subquery: index, ..
-            } => *index,
-            _ => return,
-        };
-        // An unresolved arena reference cannot authorize eliminating its expression; the ordinary validation path retains its diagnostic.
-        result = subqueries.get(index).map_or(Ok(true), |query| {
-            query_contains_volatile_function_inner(
-                catalog,
-                query,
-                &mut BTreeSet::new(),
-                visible_ctes,
-            )
-        });
-    });
-    result
+    scalar_in_scope_contains_volatile_function_with_control(
+        catalog,
+        scalar,
+        subqueries,
+        visible_ctes,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// The block's own subquery plans are inspected separately by the query-level walk, so subquery references here are not conservatively volatile.
@@ -409,46 +381,12 @@ pub fn select_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     block: &QueryBlockPlan,
 ) -> bool {
-    block
-        .deferred_outer_rewrites
-        .iter()
-        .flat_map(super::view_rewrite::DeferredOuterRewrite::expressions)
-        .any(|expression| expr_contains_volatile_function_with(catalog, &expression.scalar, true))
-        || block.projections.iter().any(|projection| {
-            expr_contains_volatile_function_with(catalog, &projection.expr, false)
-        })
-        || block
-            .r#where
-            .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function_with(catalog, expr, false))
-        || block
-            .group_by
-            .iter()
-            .any(|expr| expr_contains_volatile_function_with(catalog, expr, false))
-        || block.grouping_sets.iter().any(|set| {
-            set.iter()
-                .any(|expr| expr_contains_volatile_function_with(catalog, expr, false))
-        })
-        || block
-            .having
-            .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function_with(catalog, expr, false))
-        || block
-            .order_by
-            .iter()
-            .any(|order| expr_contains_volatile_function_with(catalog, &order.expr, false))
-        || block
-            .limit
-            .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function_with(catalog, expr, false))
-        || block
-            .offset
-            .as_ref()
-            .is_some_and(|expr| expr_contains_volatile_function_with(catalog, expr, false))
-        || block
-            .distinct_on
-            .iter()
-            .any(|expr| expr_contains_volatile_function_with(catalog, expr, false))
+    select_contains_volatile_function_with_control(
+        catalog,
+        block,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary block volatility")
 }
 
 /// Inspect a complete query, including transitive view dependencies.
@@ -456,189 +394,11 @@ pub fn query_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     plan: &QueryPlan,
 ) -> Result<bool, SQLError> {
-    query_contains_volatile_function_inner(catalog, plan, &mut BTreeSet::new(), &|_| false)
-}
-
-fn query_contains_volatile_function_inner(
-    catalog: &dyn VolatilityCatalog,
-    plan: &QueryPlan,
-    visiting_views: &mut BTreeSet<String>,
-    outer: &dyn Fn(&str) -> bool,
-) -> Result<bool, SQLError> {
-    let scope = |name: &str| plan.ctes.iter().any(|cte| cte.name == name) || outer(name);
-    let recursive = plan.ctes.iter().any(|cte| cte.recursive);
-    for (index, cte) in plan.ctes.iter().enumerate() {
-        let visible = if recursive {
-            &plan.ctes[..]
-        } else {
-            &plan.ctes[..index]
-        };
-        let definition_scope =
-            |name: &str| visible.iter().any(|cte| cte.name == name) || outer(name);
-        if match &cte.body {
-            crate::plan::CtePlanBody::Query(query) => query_contains_volatile_function_inner(
-                catalog,
-                query,
-                visiting_views,
-                &definition_scope,
-            )?,
-            crate::plan::CtePlanBody::Command(_) => true,
-        } {
-            return Ok(true);
-        }
-    }
-    match &plan.root {
-        RelationalPlan::QueryBlock(block) => {
-            if select_contains_volatile_function(catalog, block) {
-                return Ok(true);
-            }
-            for subquery in &block.subqueries {
-                if query_contains_volatile_function_inner(
-                    catalog,
-                    subquery,
-                    visiting_views,
-                    &scope,
-                )? {
-                    return Ok(true);
-                }
-            }
-            if let Some(source) = &block.from {
-                source_contains_volatile_function(catalog, source, visiting_views, &scope)
-            } else {
-                Ok(false)
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            order_by,
-            limit,
-            offset,
-            subqueries,
-            ..
-        } => {
-            if query_contains_volatile_function_inner(catalog, left, visiting_views, &scope)?
-                || query_contains_volatile_function_inner(catalog, right, visiting_views, &scope)?
-                || order_by
-                    .iter()
-                    .any(|order| scalar_calls_are_volatile(catalog, &order.expr))
-                || limit
-                    .as_ref()
-                    .is_some_and(|expr| scalar_calls_are_volatile(catalog, expr))
-                || offset
-                    .as_ref()
-                    .is_some_and(|expr| scalar_calls_are_volatile(catalog, expr))
-            {
-                return Ok(true);
-            }
-            for subquery in subqueries {
-                if query_contains_volatile_function_inner(
-                    catalog,
-                    subquery,
-                    visiting_views,
-                    &scope,
-                )? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        RelationalPlan::Values { rows, subqueries } => {
-            if rows
-                .iter()
-                .flatten()
-                .any(|expr| scalar_calls_are_volatile(catalog, expr))
-            {
-                return Ok(true);
-            }
-            for subquery in subqueries {
-                if query_contains_volatile_function_inner(
-                    catalog,
-                    subquery,
-                    visiting_views,
-                    &scope,
-                )? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-    }
-}
-
-fn source_contains_volatile_function(
-    catalog: &dyn VolatilityCatalog,
-    source: &SourcePlan,
-    visiting_views: &mut BTreeSet<String>,
-    scope: &dyn Fn(&str) -> bool,
-) -> Result<bool, SQLError> {
-    match source {
-        crate::plan::SourcePlan::RetainedRows(_) => Ok(false),
-        SourcePlan::Table { name, .. } => {
-            if super::cte_reference_name(name).is_some_and(|name| scope(&name)) {
-                // Each visible CTE definition was already inspected in its defining query. A same-named catalog view is a different relation.
-                return Ok(false);
-            }
-            let key = name.to_ascii_lowercase();
-            if !visiting_views.insert(key.clone()) {
-                return Ok(false);
-            }
-            let result = catalog
-                .with_view_query(name, &mut |view| {
-                    query_contains_volatile_function_inner(catalog, view, visiting_views, &|_| {
-                        false
-                    })
-                })
-                .map(|result| result.unwrap_or(false));
-            visiting_views.remove(&key);
-            result
-        }
-        SourcePlan::Join {
-            left, right, on, ..
-        } => {
-            if on
-                .as_ref()
-                .is_some_and(|expr| scalar_calls_are_volatile(catalog, expr))
-            {
-                return Ok(true);
-            }
-            Ok(
-                source_contains_volatile_function(catalog, left, visiting_views, scope)?
-                    || source_contains_volatile_function(catalog, right, visiting_views, scope)?,
-            )
-        }
-        SourcePlan::Values { rows, .. } => Ok(rows
-            .iter()
-            .flatten()
-            .any(|expr| scalar_calls_are_volatile(catalog, expr))),
-        SourcePlan::Function {
-            name,
-            binding,
-            args,
-            ..
-        } => Ok(
-            function_volatility_with_binding(catalog, name, binding.as_ref(), args.len())
-                == FunctionVolatility::Volatile
-                || args
-                    .iter()
-                    .any(|expr| scalar_calls_are_volatile(catalog, expr)),
-        ),
-        SourcePlan::FunctionGroup { functions, .. } => Ok(functions.iter().any(|function| {
-            function_volatility_with_binding(
-                catalog,
-                &function.name,
-                function.binding.as_ref(),
-                function.args.len(),
-            ) == FunctionVolatility::Volatile
-                || function
-                    .args
-                    .iter()
-                    .any(|expr| scalar_calls_are_volatile(catalog, expr))
-        })),
-        SourcePlan::Subquery { body, .. } => {
-            query_contains_volatile_function_inner(catalog, body, visiting_views, scope)
-        }
-    }
+    query_contains_volatile_function_with_control(
+        catalog,
+        plan,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// Whether scalar optimizer rewrites or `DPccp` join enumeration must preserve volatile call scheduling. Borrow the plan and its expression roots; inspecting constants must not copy their retained payloads or allocate command child lists.
@@ -646,13 +406,12 @@ pub fn unified_plan_contains_volatile_function(
     catalog: &dyn VolatilityCatalog,
     plan: &UnifiedPlan,
 ) -> bool {
-    let mut volatile = false;
-    plan.visit_scalar_expressions(&mut |expression| {
-        if !volatile {
-            volatile = scalar_calls_are_volatile(catalog, expression);
-        }
-    });
-    volatile
+    unified_plan_contains_volatile_function_with_control(
+        catalog,
+        plan,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary statement volatility")
 }
 
 #[cfg(test)]

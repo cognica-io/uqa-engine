@@ -201,3 +201,46 @@ fn indexed_spill_rejects_metadata_overflow_before_writing() {
     assert_eq!(byte_overflow.data.as_file().metadata().unwrap().len(), 0);
     assert_eq!(byte_overflow.offsets.as_file().metadata().unwrap().len(), 0);
 }
+
+#[test]
+fn cancelled_append_rolls_back_both_files_before_publishing_the_row() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    for cancel_at in [1, 4, 6, 7] {
+        let mut spill = IndexedSpill::new(indexed_id_schema()).unwrap();
+        spill.push(&indexed_id_row(7)).unwrap();
+        let bytes = spill.encoded_bytes();
+        let data_length = spill.data.as_file().metadata().unwrap().len();
+        let offset_length = spill.offsets.as_file().metadata().unwrap().len();
+        let row = PhysicalRow::from_values(vec![Value::Str("x".repeat(130 * 1024))]);
+        let record = encode_physical_row_record(&row, 1).unwrap();
+        let memory = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let mut checks = 0;
+        let error = spill
+            .append_encoded(&record, || {
+                checks += 1;
+                if checks == cancel_at {
+                    invoking.cancel();
+                }
+                check_publication(&control)
+            })
+            .unwrap_err();
+        assert_eq!(
+            crate::physical::physical_exec_error(error).sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(spill.len(), 1);
+        assert_eq!(spill.encoded_bytes(), bytes);
+        assert_eq!(spill.data.as_file().metadata().unwrap().len(), data_length);
+        assert_eq!(
+            spill.offsets.as_file().metadata().unwrap().len(),
+            offset_length
+        );
+        assert_eq!(spill.get(0).unwrap().value(0), Some(&Value::Int(7)));
+        spill.push(&indexed_id_row(9)).unwrap();
+        assert_eq!(spill.len(), 2);
+        assert_eq!(spill.get(1).unwrap().value(0), Some(&Value::Int(9)));
+    }
+}

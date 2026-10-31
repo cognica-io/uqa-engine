@@ -13,6 +13,8 @@ use crate::{scalar_call_argument, schema::ScalarTypeSchema, ScalarExpr};
 use super::{fixed_builtin, scalar_type_inner, FunctionTypeResolver};
 mod concat;
 mod production;
+pub(super) mod targets;
+pub(crate) use targets::builtin_function_argument_targets_with_control;
 mod signatures;
 pub(super) use concat::{array_concat_argument, array_concat_types};
 pub(super) use production::builtin_function_type_with_control;
@@ -46,61 +48,51 @@ pub fn builtin_function_type_with_resolver(
     builtin_function_type_inner(name, None, args, order_by, schema, params, Some(resolver))
 }
 
+pub(crate) fn builtin_function_type_with_resolver_and_control(
+    name: &str,
+    args: &[ScalarExpr],
+    order_by: &[crate::ScalarOrder],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    builtin_function_type_with_control(
+        FunctionTypeCall {
+            name,
+            binding: None,
+            args,
+        },
+        order_by,
+        params,
+        Some(resolver),
+        &mut |expression| {
+            super::scalar_type_with_resolver_and_control(
+                expression,
+                schema,
+                params,
+                Some(resolver),
+                control,
+            )
+        },
+        control,
+    )
+}
+
 /// Return the declared argument targets selected by PostgreSQL-compatible built-in resolution. Known argument types are retained for polymorphic calls, while fixed signatures and overloaded operators supply the context needed to resolve `unknown` arguments.
 #[must_use]
 pub fn builtin_function_argument_targets(
     name: &str,
     argument_types: &[Option<ColumnType>],
 ) -> Vec<Option<ColumnType>> {
-    let lower = name.to_ascii_lowercase();
-    let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    if let Some(targets) = fixed_builtin::selected_argument_targets(name, argument_types) {
-        return targets;
-    }
-    let mut targets = argument_types.to_vec();
-    match name {
-        "array_cat" | "array_append" | "array_prepend" | "array_remove" | "array_replace" => {
-            if let Ok(Some(array)) = compatible_array_result_type(
-                name,
-                argument_types,
-                &ProductionControl::uncontrolled(),
-            ) {
-                let ColumnType::Array(element) = &*array else {
-                    unreachable!("compatible array result");
-                };
-                for (position, target) in targets.iter_mut().enumerate() {
-                    *target = Some(if compatible_array_argument(name, position) {
-                        (*array).clone()
-                    } else {
-                        (**element).clone()
-                    });
-                }
-            }
-        }
-        "upper" | "lower" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" | "analyze_text"
-        | "create_analyzer" | "drop_analyzer" | "set_table_analyzer" | "fts_index_stats"
-        | "text_match" => {
-            targets.fill(Some(ColumnType::Text));
-        }
-        "array_sort" if matches!(targets.len(), 2 | 3) => {
-            targets.iter_mut().skip(1).for_each(|target| {
-                *target = Some(ColumnType::Boolean);
-            });
-        }
-        "concat_op" if targets.len() == 2 => {
-            if let Ok(selected) = super::concatenation::select(
-                targets[0].as_ref(),
-                targets[1].as_ref(),
-                &ProductionControl::uncontrolled(),
-            ) {
-                return (0..2)
-                    .map(|index| Some(selected.argument(index).clone()))
-                    .collect();
-            }
-        }
-        _ => {}
-    }
-    targets
+    builtin_function_argument_targets_with_control(
+        name,
+        argument_types,
+        &ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary target production has no resource failure")
+    .into_uncontrolled()
+    .expect("ordinary target vector")
 }
 
 pub(super) fn compatible_array_argument(name: &str, position: usize) -> bool {

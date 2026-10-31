@@ -133,11 +133,30 @@ impl EventLookupContext<'_> {
         Ok(())
     }
     pub fn rule_privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError> {
-        let relation = self.analysis.resolve_rule_relation(table)?;
+        Ok(self
+            .rule_privilege_subject_with_control(
+                table,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?
+            .into_uncontrolled()
+            .expect("ordinary rule privilege subject"))
+    }
+    pub fn rule_privilege_subject_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RoleReference>, SQLError> {
+        let relation = self
+            .analysis
+            .resolve_rule_relation_with_control(table, control)?;
         self.analysis
             .catalog
             .event_relation_owner(&relation)
-            .and_then(|(owner, _)| self.analysis.privileges.bound_role(owner))
+            .and_then(|(owner, _)| {
+                self.analysis
+                    .privileges
+                    .bound_role_with_control(owner, control)
+            })
     }
     pub fn constraint_trigger_by_constraint_name(
         &self,

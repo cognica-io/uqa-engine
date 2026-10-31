@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
 use uqa_sql::{
     ast::Statement,
     routines::{RoutineBody, SQLUserFunction},
@@ -32,8 +32,8 @@ fn snapshots_follow_selected_routine_tuple_identity_and_global_namespaces() {
     Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
         .insert("public.f".into(), vec![function(1, 10)]);
     let dependencies = PreparedAnalysisDependencies {
-        relations: BTreeSet::new(),
-        routines: BTreeSet::from([[1; 16]]),
+        relations: uqa_core::memory::OwnedSet::new(),
+        routines: uqa_core::memory::OwnedSet::from([[1; 16]]),
     };
     let original = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
@@ -103,8 +103,8 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
         Some(oids.relation)
     );
     let dependencies = PreparedAnalysisDependencies {
-        relations: BTreeSet::from([oids.relation, 0]),
-        routines: BTreeSet::new(),
+        relations: uqa_core::memory::OwnedSet::from([oids.relation, 0]),
+        routines: uqa_core::memory::OwnedSet::new(),
     };
     let revision = capture(&catalog, &dependencies).unwrap();
     assert!(revision.relations[&oids.relation].is_some());

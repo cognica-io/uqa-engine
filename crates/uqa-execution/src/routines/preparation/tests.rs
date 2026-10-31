@@ -4,7 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 use super::*;
+
+mod registry;
 use crate::statement::prepared::invalidation::{PreparedCatalogChange, PreparedInvalidationLog};
+use uqa_sql::{binding::statements::ProceduralPlanAnalysis, plan::UnifiedPlan};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 fn fragment() -> PreparedFragment {
@@ -20,19 +23,22 @@ fn fragment() -> PreparedFragment {
     };
     let definition = analysis
         .prepared_definition(&UnifiedPlan::lower(syntax.clone()), &[])
-        .unwrap();
+        .unwrap()
+        .into_shared();
     PreparedFragment {
         source: Arc::new(PLpgSQLSource {
             query: Arc::from("SELECT 1"),
             mode: uqa_sql::plpgsql::PLpgSQLParseMode::Statement,
         }),
         simple_expression: true,
-        syntax,
-        analysis,
+        syntax: Arc::new(syntax),
+        analysis: FragmentAnalysis::from_definition(&definition),
         parameter_types: definition.parameter_types.clone(),
         variants: super::super::plans::RoutinePlanVariants::new(&definition),
         valid: AtomicBool::new(true),
-        variables: Vec::new(),
+        variables: ProductionControl::uncontrolled()
+            .finish(Vec::new(), None)
+            .unwrap(),
     }
 }
 #[test]
@@ -141,14 +147,19 @@ fn failed_reanalysis_keeps_raw_syntax_without_resurrecting_stale_inputs() {
 #[test]
 fn catalog_publication_reaches_live_anonymous_owners_without_retaining_dead_activations() {
     let bodies = crate::routines::invocation::bodies::SessionRoutineBodies::default();
-    let cache = bodies.procedural.register();
+    let cache = bodies
+        .procedural
+        .register(&ProductionControl::uncontrolled())
+        .unwrap();
     let original = cache
         .get_or_prepare(
             1,
             |_| Ok(true),
             |_| {
                 let mut value = fragment();
-                value.analysis.dependencies.relations.insert(42);
+                let mut dependencies = (*value.analysis.dependencies).clone();
+                dependencies.relations.insert(42);
+                value.analysis.dependencies = dependencies.into();
                 Ok(value)
             },
         )
@@ -166,7 +177,9 @@ fn catalog_publication_reaches_live_anonymous_owners_without_retaining_dead_acti
             |raw| {
                 assert!(std::ptr::eq(raw.unwrap(), &raw const original.syntax));
                 let mut value = fragment();
-                value.analysis.dependencies.relations.insert(42);
+                let mut dependencies = (*value.analysis.dependencies).clone();
+                dependencies.relations.insert(42);
+                value.analysis.dependencies = dependencies.into();
                 Ok(value)
             },
         )
@@ -179,7 +192,10 @@ fn catalog_publication_reaches_live_anonymous_owners_without_retaining_dead_acti
     let weak = Arc::downgrade(&cache);
     drop(cache);
     assert!(weak.upgrade().is_none());
-    let next = bodies.procedural.register();
+    let next = bodies
+        .procedural
+        .register(&ProductionControl::uncontrolled())
+        .unwrap();
     assert_eq!(bodies.procedural.owners.lock().len(), 1);
     drop(next);
     log.invalidate_with_routines(std::iter::empty(), &bodies);
@@ -213,21 +229,34 @@ fn invalidated_recursive_preparation_keeps_the_newer_published_analysis() {
 fn executable_invalidation_reaches_procedural_owners_and_fences_recursive_publication() {
     use crate::statement::prepared::invalidation::CatalogRegistryChange;
     let bodies = crate::routines::invocation::bodies::SessionRoutineBodies::default();
-    let owner = bodies.procedural.register();
+    let owner = bodies
+        .procedural
+        .register(&ProductionControl::uncontrolled())
+        .unwrap();
     let prepared = owner
         .get_or_prepare(
             1,
             |_| Ok(true),
             |_| {
                 let mut value = fragment();
-                value.syntax = uqa_sql::compile("SELECT catalog_value()")
-                    .unwrap()
-                    .remove(0);
-                value.analysis.dependencies.routines.insert([7; 16]);
+                value.syntax = Arc::new(
+                    uqa_sql::compile("SELECT catalog_value()")
+                        .unwrap()
+                        .remove(0),
+                );
+                let mut dependencies = (*value.analysis.dependencies).clone();
+                dependencies.routines.insert([7; 16]);
+                value.analysis.dependencies = dependencies.into();
                 value.variants = super::super::plans::RoutinePlanVariants::new(
-                    &value
-                        .analysis
-                        .prepared_definition(&UnifiedPlan::lower(value.syntax.clone()), &[])?,
+                    &uqa_sql::prepared::definition::PreparedDefinition {
+                        composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
+                        logical_plan: UnifiedPlan::lower((*value.syntax).clone()).into(),
+                        parameter_types: value.parameter_types.clone(),
+                        result_schema: None,
+                        dependencies: value.analysis.dependencies.clone(),
+                        effective_search_path: value.analysis.effective_search_path.clone(),
+                        dependency_snapshot: value.analysis.dependency_snapshot.clone(),
+                    },
                 );
                 Ok(value)
             },
@@ -237,7 +266,7 @@ fn executable_invalidation_reaches_procedural_owners_and_fences_recursive_public
         let plan = entry
             .plan
             .clone()
-            .unwrap_or_else(|| (*entry.logical_plan).clone());
+            .unwrap_or_else(|| entry.logical_plan.clone());
         uqa_sql::prepared::planning::PreparedPlanSelection {
             plan: plan.clone(),
             update: uqa_sql::prepared::planning::PreparedPlanUpdate {

@@ -32,6 +32,15 @@ pub fn array_type_name(type_name: &str, pass: u32) -> String {
     name
 }
 
+/// Compare the legacy first generated name without constructing a temporary catalog identifier.
+pub fn default_array_type_name_matches(type_name: &str, candidate: &str) -> bool {
+    let mut length = type_name.len().min(MAX_TYPE_NAME_BYTES - 1);
+    while !type_name.is_char_boundary(length) {
+        length -= 1;
+    }
+    candidate.strip_prefix('_') == Some(&type_name[..length])
+}
+
 /// Select the first generated array name that no existing type in the namespace uses.
 pub fn choose_array_type_name(type_name: &str, mut in_use: impl FnMut(&str) -> bool) -> String {
     let mut pass = 0;
@@ -46,7 +55,27 @@ pub fn choose_array_type_name(type_name: &str, mut in_use: impl FnMut(&str) -> b
 
 #[cfg(test)]
 mod tests {
-    use super::{array_type_name, choose_array_type_name, valid_type_name};
+    use super::{
+        array_type_name, choose_array_type_name, default_array_type_name_matches, valid_type_name,
+    };
+
+    #[test]
+    fn legacy_array_name_comparison_borrows_the_clipped_utf8_prefix() {
+        for name in [
+            "".to_owned(),
+            "x".into(),
+            "_x".into(),
+            "x".repeat(63),
+            "é".repeat(32),
+        ] {
+            let expected = array_type_name(&name, 0);
+            let allocation = allocation_counter::measure(|| {
+                assert!(default_array_type_name_matches(&name, &expected));
+                assert!(!default_array_type_name_matches(&name, "unrelated"));
+            });
+            assert_eq!(allocation.count_total, 0);
+        }
+    }
 
     #[test]
     fn stored_type_names_use_the_name_types_byte_limit() {

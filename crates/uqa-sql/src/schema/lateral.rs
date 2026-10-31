@@ -11,6 +11,7 @@ use crate::SQLError;
 use std::sync::Arc;
 
 mod columns;
+mod production;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Denial {
@@ -22,6 +23,7 @@ enum Denial {
 struct DiagnosticNamespace {
     name: Box<str>,
     columns: Vec<Box<str>>,
+    _memory: super::production::lease::SchemaMemory,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,6 +36,7 @@ pub(super) struct LateralRestrictions {
     unavailable_ambiguous_columns: SchemaSet<Box<str>>,
     unavailable_qualifiers: SchemaMap<Box<str>, bool>,
     unavailable_columns: SchemaMap<Box<str>, Vec<(Box<str>, bool)>>,
+    _memory: super::production::lease::SchemaMemory,
 }
 
 impl RowSchema {
@@ -78,12 +81,6 @@ impl RowSchema {
                 ..LateralRestrictions::default()
             })
         })
-    }
-
-    pub(crate) fn with_column_diagnostic_names_from(mut self, input: &Self) -> Self {
-        Arc::make_mut(&mut self.index).cold.lateral_restrictions =
-            Self::requalified_column_names(input);
-        self
     }
 
     /// Retain the left namespace while rejecting its use by the right input of a RIGHT or FULL join. The namespace must remain present so even an unknown qualified column reports the forbidden relation first.
@@ -141,6 +138,7 @@ impl RowSchema {
                 .iter()
                 .map(|identity| identity.column().into())
                 .collect(),
+            _memory: crate::schema::production::lease::SchemaMemory::default(),
         })];
         // Missing-column hints search range entries, excluding the synthetic join entry. A derived relation starts its own range entry instead of exposing its body's namespaces.
         if !joined {
@@ -254,11 +252,17 @@ impl RowSchema {
             .get(column)?;
         let (detail, hint) = match names.as_slice() {
             [(qualifier, lateral)] => (
-                format!("There is a column named \"{column}\" in table \"{qualifier}\", but it cannot be referenced from this part of the query."),
-                lateral.then(|| "To reference that column, you must mark this subquery with LATERAL.".into()),
+                format!(
+                    "There is a column named \"{column}\" in table \"{qualifier}\", but it cannot be referenced from this part of the query."
+                ),
+                lateral.then(|| {
+                    "To reference that column, you must mark this subquery with LATERAL.".into()
+                }),
             ),
             [_, _, ..] => (
-                format!("There are columns named \"{column}\", but they are in tables that cannot be referenced from this part of the query."),
+                format!(
+                    "There are columns named \"{column}\", but they are in tables that cannot be referenced from this part of the query."
+                ),
                 Some("Try using a table-qualified name.".into()),
             ),
             [] => return None,
@@ -369,7 +373,9 @@ impl RowSchema {
 }
 
 fn unavailable_entry(qualifier: &str) -> String {
-    format!("There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query.")
+    format!(
+        "There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query."
+    )
 }
 
 fn forbidden_reference(qualifier: &str, reason: Denial) -> SQLError {

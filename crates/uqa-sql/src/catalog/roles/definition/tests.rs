@@ -151,7 +151,7 @@ fn role_creation_grants_creator_administration_without_inherit_or_set() {
     let mut inputs = Inputs::new();
     let statement = CreateRoleStmt {
         name: "created".into(),
-        attributes: BTreeSet::from([RoleAttribute::Inherit]),
+        attributes: uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]),
         connection_limit: -1,
         in_roles: Vec::new(),
         role_members: Vec::new(),

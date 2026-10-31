@@ -29,10 +29,10 @@ pub(super) fn index_candidates(
         .map_err(|error| operator_execution_error("resolve index candidate table", error))?
         .unwrap_or_else(|| table.to_string());
     let mut indexes_by_field = BTreeMap::new();
-    for index in catalog
+    let indexes = catalog
         .list_catalog_indexes()
-        .map_err(|error| operator_execution_error("list index candidates", error))?
-    {
+        .map_err(|error| operator_execution_error("list index candidates", error))?;
+    for index in indexes.iter() {
         if index.table_name != resolved_table || !index.index_type.eq_ignore_ascii_case("btree") {
             continue;
         }
@@ -49,27 +49,23 @@ pub(super) fn index_candidates(
                 .or_insert_with(|| index.relation.qualified_name());
         }
     }
+    drop(indexes);
 
-    let mut predicates = Vec::new();
-    tree.visit(&mut |node| {
+    let mut candidates = Vec::new();
+    tree.try_visit(&mut |node| {
         let OperatorTree::Filter {
             field,
             predicate,
             source: None,
         } = node
         else {
-            return;
+            return Ok(());
         };
-        predicates.push((field.clone(), predicate.clone()));
-    });
-
-    let mut candidates = Vec::new();
-    for (field, predicate) in predicates {
-        let Some(index_name) = indexes_by_field.get(&field) else {
-            continue;
+        let Some(index_name) = indexes_by_field.get(field) else {
+            return Ok(());
         };
-        let Some(cardinality) = catalog.value_index_cardinality(table, &field, &predicate)? else {
-            continue;
+        let Some(cardinality) = catalog.value_index_cardinality(table, field, predicate)? else {
+            return Ok(());
         };
         let cardinality = cardinality as f64;
         let scan_cost = CostEstimator::default()
@@ -78,10 +74,11 @@ pub(super) fn index_candidates(
         candidates.push(IndexScanCandidate {
             index_name: index_name.clone(),
             table_name: table.to_string(),
-            field,
-            predicate,
+            field: field.clone(),
+            predicate: predicate.clone(),
             scan_cost,
         });
-    }
+        Ok::<(), SQLError>(())
+    })?;
     Ok(candidates)
 }

@@ -6,7 +6,9 @@
 
 //! Built-in result inference retains type buffers and selected payloads under its caller's control.
 
+mod aggregates;
 mod nullif;
+use aggregates::min_max_result_type;
 
 use super::super::common::{base_type, common_numeric_type, numeric_type};
 use super::super::{
@@ -14,8 +16,8 @@ use super::super::{
     call::{infer_with_control, InferType},
     containment, fixed_builtin, range, FunctionTypeResolver,
 };
+use super::named_argument_value;
 use super::FunctionTypeCall;
-use super::{named_argument, named_argument_value};
 use crate::{
     ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch},
     SQLError, SQLParam, ScalarExpr,
@@ -156,13 +158,6 @@ fn fixed_type(
         binding,
         args,
     } = call;
-    if resolver.is_some() {
-        // External catalog callbacks keep their established ordinary protocol; retained inference has no resolver, enforced at the shared entry.
-        return optional_inline(
-            fixed_builtin::resolve_type(name, binding, args, types, explicit, params, resolver)?,
-            control,
-        );
-    }
     let mut names = ProductionVec::new(*control);
     names.reserve(args.len())?;
     let mut effective = ProductionVec::new(*control);
@@ -186,10 +181,21 @@ fn fixed_type(
     }
     let names = names.finish()?;
     let effective = effective.finish()?;
-    fixed_builtin::resolve_return_type_with_control(
-        name, binding, &names, &effective, explicit, control,
-    )
-    .map(Some)
+    if resolver.is_none() {
+        fixed_builtin::resolve_return_type_with_control(
+            name, binding, &names, &effective, explicit, control,
+        )
+        .map(Some)
+    } else {
+        let selected = fixed_builtin::resolve_overload_with_control(
+            name, binding, &names, &effective, explicit, resolver, control,
+        )?;
+        selected
+            .return_type
+            .clone_with_control(control)
+            .map(Some)
+            .map_err(Into::into)
+    }
 }
 
 fn array_type(
@@ -207,13 +213,9 @@ fn array_type(
     } = call;
     let types =
         array_transform::argument_types_with_parameters(name, args, types, params, control)?;
-    if resolver.is_some() {
-        return optional_inline(
-            array_transform::resolve_type(name, binding, args, &types, explicit, resolver)?,
-            control,
-        );
-    }
-    array_transform::resolve_type_with_control(name, binding, args, &types, explicit, control)
+    array_transform::resolve_type_with_resolver_and_control(
+        name, binding, args, &types, explicit, resolver, control,
+    )
 }
 
 fn extension_type(
@@ -232,23 +234,36 @@ fn extension_type(
     let Some(resolver) = resolver else {
         return Ok(None);
     };
-    assert!(
-        control.budget().is_none(),
-        "catalog callback is ordinary-only"
-    );
-    let mut names = Vec::with_capacity(args.len());
-    let mut types = Vec::with_capacity(args.len());
+    let mut names = ProductionVec::new(*control);
+    let mut types = ProductionVec::new(*control);
+    names.reserve(args.len())?;
+    types.reserve(args.len())?;
     for (argument, ty) in args.iter().zip(resolved_types) {
-        let (name, value) = named_argument(argument);
-        names.push(name);
-        types.push(super::super::effective_overload_argument_type_with_params(
-            value,
-            ty.clone(),
+        let argument = crate::scalar_call_argument(argument)?;
+        let name = argument
+            .name
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        let (name, memory) = name.map_or((None, control.empty_reservation()), |name| {
+            let (name, memory) = name.into_parts();
+            (Some(name), memory)
+        });
+        names.push_produced(control.finish(name, memory)?)?;
+        let ty = super::super::common::effective_overload_argument_type_ref_with_params(
+            argument.value,
+            ty.as_ref(),
             params,
-        ));
+        );
+        push_type(&mut types, copy(ty, control)?, control)?;
     }
-    optional_inline(
-        resolver.resolve_function_type(name, binding, &names, &types, explicit_variadic)?,
+    let names = names.finish()?;
+    let types = types.finish()?;
+    resolver.resolve_function_type_with_control(
+        name,
+        binding,
+        &names,
+        &types,
+        explicit_variadic,
         control,
     )
 }
@@ -271,7 +286,11 @@ fn common_argument_type(
     });
     let result =
         super::super::common::select_common_input_type_in_with_control(context, inputs, control)?;
-    super::super::common::read_unknown_literals(args.iter().map(named_argument_value), &result)?;
+    super::super::common::read_unknown_literals_with_control(
+        args.iter().map(named_argument_value),
+        &result,
+        control,
+    )?;
     Ok(Some(result))
 }
 
@@ -404,10 +423,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         args,
     } = call;
     control.check()?;
-    assert!(
-        resolver.is_none() || control.budget().is_none(),
-        "catalog callbacks are resolved outside retained generated inference"
-    );
     if let Some(binding) =
         binding.filter(|binding| matches!(binding.dispatch, Some(FunctionDispatch::TypeOf { .. })))
     {
@@ -436,7 +451,10 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
     let lower = lowercase(name, control)?;
     let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
     if binding.is_none()
-        && resolver.is_some_and(|resolver| resolver.has_untyped_function(original_name))
+        && resolver
+            .map(|resolver| resolver.has_untyped_function_with_control(original_name, control))
+            .transpose()?
+            .unwrap_or(false)
     {
         return Ok(None);
     }
@@ -490,17 +508,18 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         infer_types(order_by.iter().map(|order| &order.expr), infer, control)?;
     let argument = |position: usize| argument_types.get(position).and_then(Option::as_ref);
     // `unknown` literals and untyped parameters keep their parser identity for polymorphic selection.
-    let effective_types = call_arguments
-        .iter()
-        .zip(argument_types.iter())
-        .map(|(argument, ty)| {
+    let mut effective_types = ProductionVec::new(*control);
+    effective_types.reserve(call_arguments.len())?;
+    for (argument, ty) in call_arguments.iter().zip(argument_types.iter()) {
+        effective_types.push_copy(
             super::super::common::effective_overload_argument_type_ref_with_params(
                 argument.value,
                 ty.as_ref(),
                 params,
-            )
-        })
-        .collect::<Vec<_>>();
+            ),
+        )?;
+    }
+    let effective_types = effective_types.finish()?;
     let effective = |position: usize| effective_types.get(position).copied().flatten();
     super::signatures::validate_variadic_prefix(original_name, args, &effective_types)?;
     // An explicit VARIADIC argument of a `VARIADIC "any"` built-in must be an array.
@@ -568,24 +587,34 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                         ))
                     }
                 };
-                let literal = match args.first() {
-                    Some(ScalarExpr::Literal(value)) => {
-                        super::super::field_selection::literal_field_type(value, field)
+                if let Some(ScalarExpr::Row(items)) = args.first() {
+                    let position =
+                        super::super::field_selection::anonymous_field_position(field, items.len())
+                            .ok_or_else(|| {
+                                super::super::field_selection::undefined_record_field(field)
+                            })?;
+                    let mut selected = None;
+                    for (index, item) in items.iter().enumerate() {
+                        let ty = infer_with_control(item, infer, control)?;
+                        if index == position {
+                            selected = ty;
+                        }
                     }
-                    _ => None,
-                };
-                let field_type = if let Some(ScalarExpr::Row(items)) = args.first() {
-                    let items = items
-                        .iter()
-                        .map(|item| infer(item).map(|ty| ty.map(|ty| (*ty).clone())))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    super::super::field_selection::row_field_type(&items, field)?
-                } else if let Some(field_type) = literal {
-                    field_type?
-                } else {
-                    super::super::field_selection::value_field_type(first(), field, resolver)?
-                };
-                return copy(field_type.as_ref(), control);
+                    return Ok(selected);
+                }
+                if let Some(literal) = args.first().and_then(|base| {
+                    super::super::field_selection::constant_field_type_with_control(
+                        base, field, control,
+                    )
+                }) {
+                    return literal;
+                }
+                return super::super::field_selection::value_field_type_with_control(
+                    first(),
+                    field,
+                    resolver,
+                    control,
+                );
             }
             FunctionDispatch::ArraySlices | FunctionDispatch::ArraySlicesWithBounds(_) => {
                 return match first().map(base_type) {
@@ -689,8 +718,10 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
     if let Some(ty) = range::function_type(name, binding, &argument_types) {
         return inline(ty, control);
     }
-    if let Some(ty) = super::super::enums::function_type(name, binding, &effective_types)? {
-        return inline(ty, control);
+    if let Some(ty) =
+        super::super::enums::function_type_with_control(name, binding, &effective_types, control)?
+    {
+        return Ok(Some(ty));
     }
     if fixed_builtin::is_function(name) {
         return fixed_type(
@@ -787,8 +818,8 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                     "does not exist",
                 ))
             }
-            argument => match min_max_result_type(argument.map(base_type)) {
-                Some(result) => inline(result, control),
+            argument => match min_max_result_type(argument.map(base_type), control)? {
+                Some(result) => Ok(Some(result)),
                 None => Err(super::super::function_resolution_error(
                     "42883",
                     name,
@@ -803,10 +834,12 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "array_sample" | "generate_series" => copy(first(), control),
         // `anycompatible` arguments: an `unknown` literal takes the type selected by the known arguments.
         "array_cat" | "array_remove" | "array_replace" | "array_append" | "array_prepend" => {
-            let known = effective_types
-                .iter()
-                .map(|ty| ty.cloned())
-                .collect::<Vec<_>>();
+            let mut known = ProductionVec::new(*control);
+            known.reserve(effective_types.len())?;
+            for ty in effective_types.iter() {
+                push_type(&mut known, copy(*ty, control)?, control)?;
+            }
+            let known = known.finish()?;
             super::compatible_array_result_type(name, &known, control)
         }
         "mode" | "percentile_disc" => copy(ordered_argument(), control),
@@ -930,53 +963,3 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
 
 #[cfg(test)]
 mod tests;
-
-/// The result type of the `min` or `max` overload that `PostgreSQL` 18 selects for an argument type, or `None` when no overload accepts it. An aggregate's result carries no type modifier; `varchar`, `name`, `"char"` and `pg_node_tree` reach `min(text)` by implicit coercion to the preferred string type, and so does an unknown argument. The OID alias types reach `min(oid)` by their implicit casts, and `int2vector` and `oidvector` match `anyarray` as array types.
-fn min_max_result_type(argument: Option<&ColumnType>) -> Option<ColumnType> {
-    Some(match argument {
-        None
-        | Some(
-            ColumnType::Text
-            | ColumnType::Varchar(_)
-            | ColumnType::Name
-            | ColumnType::InternalChar
-            | ColumnType::PgNodeTree,
-        ) => ColumnType::Text,
-        Some(
-            ColumnType::Regproc
-            | ColumnType::Regprocedure
-            | ColumnType::Regclass
-            | ColumnType::Regcollation
-            | ColumnType::Regnamespace
-            | ColumnType::Regrole
-            | ColumnType::Regtype,
-        ) => ColumnType::Oid,
-        Some(ty @ (ColumnType::Int2Vector | ColumnType::OidVector)) => ty.clone(),
-        Some(ColumnType::Bpchar | ColumnType::Character(_)) => ColumnType::Bpchar,
-        Some(ColumnType::Numeric { .. }) => ColumnType::Numeric {
-            precision: None,
-            scale: None,
-        },
-        Some(ColumnType::Time | ColumnType::TimePrecision(_)) => ColumnType::Time,
-        Some(ColumnType::TimeTz | ColumnType::TimeTzPrecision(_)) => ColumnType::TimeTz,
-        Some(ColumnType::Timestamp | ColumnType::TimestampPrecision(_)) => ColumnType::Timestamp,
-        Some(ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_)) => {
-            ColumnType::TimestampTz
-        }
-        Some(ColumnType::Interval | ColumnType::IntervalWithFields { .. }) => ColumnType::Interval,
-        Some(
-            ty @ (ColumnType::SmallInteger
-            | ColumnType::Integer
-            | ColumnType::BigInteger
-            | ColumnType::Oid
-            | ColumnType::Real
-            | ColumnType::DoublePrecision
-            | ColumnType::Date
-            | ColumnType::Bytea
-            | ColumnType::Record
-            | ColumnType::Enum(_)),
-        ) => ty.clone(),
-        Some(ty @ ColumnType::Array(_)) => ty.without_type_modifiers(),
-        Some(_) => return None,
-    })
-}

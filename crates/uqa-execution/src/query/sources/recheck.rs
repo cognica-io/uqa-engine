@@ -34,6 +34,7 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
         params,
         ctes,
         ctes.row_lock_outer_row().map(|row| &row.schema),
+        &context.ctes.production_resources()?.control(),
     )?;
     let column_prune =
         context
@@ -49,7 +50,10 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
         ctes,
     )?;
     let mut operator = {
-        let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+        let mut scoped_ctes = ctes.enter_source_row_locks_with_control(
+            source_row_locks,
+            &context.ctes.production_resources()?.control(),
+        )?;
         super::build_join_operator_with_recheck_pins(
             context,
             from,
@@ -62,32 +66,41 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
     if let Some(outer_row) = ctes.row_lock_outer_row() {
         operator = Box::new(crate::ScopeOverlay::new(operator, outer_row.clone()));
     }
-    let predicate =
-        context
-            .planning
-            .residual_filter(statement, from, qualifier_filters.as_ref(), ctes)?;
-    let evaluator = context.relational.evaluator(params, ctes);
-    if let Some(predicate) = predicate {
-        operator = match context
-            .relational
-            .expressions
-            .prepare_predicate(&predicate, params, ctes)?
-        {
-            Some(prepared) => Box::new(crate::Filter::with_row_predicate(operator, prepared)),
-            None => Box::new(crate::Filter::with_evaluator(
-                operator,
-                predicate,
-                Arc::clone(&evaluator),
-            )),
-        };
-    }
-    operator = if projections.is_empty() {
-        operator
-    } else {
-        Box::new(
-            Project::appending_target_evaluator(operator, projections.to_vec(), evaluator)
-                .with_memory_budget(context.relational.runtime.work_mem_bytes()?),
-        ) as Box<dyn PhysicalOperator + 'a>
-    };
-    Ok(operator)
+    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+        let predicate =
+            context
+                .planning
+                .residual_filter(statement, from, qualifier_filters.as_ref(), ctes)?;
+        let evaluator = context.relational.evaluator(params, ctes)?;
+        if let Some(predicate) = predicate {
+            let prepared = context
+                .relational
+                .expressions
+                .prepare_predicate(&predicate, params, ctes)?;
+            let resources = context.ctes.production_resources()?;
+            let control = resources.control();
+            operator.attach(|input| match prepared {
+                Some(prepared) => {
+                    crate::Filter::with_row_predicate(input, prepared).into_boxed(&control)
+                }
+                None => crate::Filter::with_owned_predicate(
+                    input,
+                    predicate,
+                    Arc::clone(&evaluator),
+                    &control,
+                )?
+                .into_boxed(&control),
+            })?;
+        }
+        if !projections.is_empty() {
+            let work_mem = context.relational.runtime.work_mem_bytes()?;
+            operator.wrap(|input| {
+                Box::new(
+                    Project::appending_target_evaluator(input, projections.to_vec(), evaluator)
+                        .with_memory_budget(work_mem),
+                )
+            });
+        }
+        Ok(())
+    })
 }

@@ -15,6 +15,7 @@ mod catalog;
 pub(crate) mod comparison;
 pub(super) mod numeric;
 mod resolution;
+mod volatility;
 pub use numeric::{
     numeric_operator_types, numeric_operator_types_with_control, NumericOperatorTypes,
 };
@@ -22,6 +23,7 @@ pub use resolution::{binary_operator_types, binary_operator_types_with_control};
 pub(crate) use resolution::{
     named_binary_operator_types, named_binary_operator_types_with_control,
 };
+pub use volatility::binary_operator_volatility_with_control;
 
 #[derive(Debug, Clone)]
 pub struct UnaryOperatorCatalogEntry {
@@ -91,18 +93,7 @@ pub fn binary_operator_volatility(
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> Result<FunctionVolatility, SQLError> {
-    let [target_left, target_right, _] = binary_operator_types(op, left, right)?;
-    if [(left, &target_left), (right, &target_right)]
-        .into_iter()
-        .any(|(source, target)| {
-            source.is_some_and(|source| {
-                super::cast_volatility(source, target) != FunctionVolatility::Immutable
-            })
-        })
-    {
-        return Ok(FunctionVolatility::Stable);
-    }
-    binary_operator_catalog_entry(op, [&target_left, &target_right]).map(|entry| entry.volatility())
+    binary_operator_volatility_with_control(op, left, right, &ProductionControl::uncontrolled())
 }
 
 pub fn binary_operator_by_oid(oid: i64) -> Option<BinaryOperatorCatalogEntry> {
@@ -132,52 +123,11 @@ pub(crate) fn named_binary_operator_catalog_entry(
     name: &str,
     operands: [&ColumnType; 2],
 ) -> Result<BinaryOperatorCatalogEntry, SQLError> {
-    for polymorphic in [false, true] {
-        for &(candidate, left, right, result_type, oid, function_oid) in catalog::SIGNATURES {
-            if candidate != name {
-                continue;
-            }
-            let range_match = resolution::range_operands(left, right, operands.map(Some)).is_some();
-            if candidate == name
-                && (range_match
-                    || [left, right]
-                        .into_iter()
-                        .zip(operands)
-                        .all(|(declared, actual)| {
-                            let actual = base_type(actual);
-                            resolution::catalog_type(declared).is_some_and(|ty| {
-                                crate::catalog::type_metadata::pg_type_oid(&ty)
-                                    == crate::catalog::type_metadata::pg_type_oid(actual)
-                            }) || polymorphic
-                                && match declared {
-                                    "anyarray" => matches!(
-                                        actual,
-                                        ColumnType::Array(_)
-                                            | ColumnType::Int2Vector
-                                            | ColumnType::OidVector
-                                    ),
-                                    "anyrange" => matches!(actual, ColumnType::Range(_)),
-                                    "anymultirange" => matches!(actual, ColumnType::Multirange(_)),
-                                    "anyenum" => matches!(actual, ColumnType::Enum(_)),
-                                    _ => false,
-                                }
-                        }))
-            {
-                return Ok(BinaryOperatorCatalogEntry {
-                    name: candidate,
-                    operand_types: [left, right],
-                    result_type,
-                    oid,
-                    function_oid,
-                });
-            }
-        }
-    }
-    Err(undefined_binary_operator(
+    volatility::named_binary_operator_catalog_entry_with_control(
         name,
-        Some(operands[0]),
-        Some(operands[1]),
-    ))
+        operands,
+        &ProductionControl::uncontrolled(),
+    )
 }
 
 /// Require the equality semantics used by grouping, duplicate elimination, and set operations. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an equality operator for it.

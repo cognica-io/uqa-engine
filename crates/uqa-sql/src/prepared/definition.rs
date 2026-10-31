@@ -7,12 +7,19 @@
 //! Analyze prepared declarations with separate retained inference and descriptor scopes.
 
 use super::dependencies::{PreparedAnalysisDependencies, PreparedDependencySnapshot};
+use super::ownership::SharedPreparedInput;
 use crate::{
     binding::statements::{StatementAnalysisScopes, StatementBindingScope},
     catalog::resolution::EffectiveSearchPath,
     plan::UnifiedPlan,
     routines::RoutineResolution,
     ColumnType, FunctionTypeResolver, RowSchema, SQLError,
+};
+
+mod production;
+pub use production::{
+    analysis_is_current_with_control, analyze_definition_owned, analyze_result_schema_with_control,
+    analyze_routine_definition_owned, effective_search_path_with_control,
 };
 
 #[derive(Clone, Copy)]
@@ -26,14 +33,29 @@ pub struct PreparedDefinitionContext<'a> {
     pub aliases: &'a dyn crate::schema::dependencies::oid_alias::OidAliasInput,
 }
 
-pub struct PreparedDefinition {
+pub struct PreparedDefinition<P = UnifiedPlan> {
     pub composite_inputs: super::composites::CompositeInputs,
-    pub logical_plan: UnifiedPlan,
-    pub parameter_types: Vec<Option<ColumnType>>,
+    pub logical_plan: P,
+    pub parameter_types: SharedPreparedInput<Vec<Option<ColumnType>>>,
     pub result_schema: Option<RowSchema>,
-    pub effective_search_path: Option<EffectiveSearchPath>,
-    pub dependencies: PreparedAnalysisDependencies,
-    pub dependency_snapshot: Option<PreparedDependencySnapshot>,
+    pub effective_search_path: SharedPreparedInput<Option<EffectiveSearchPath>>,
+    pub dependencies: SharedPreparedInput<PreparedAnalysisDependencies>,
+    pub dependency_snapshot: SharedPreparedInput<Option<PreparedDependencySnapshot>>,
+}
+
+impl PreparedDefinition {
+    /// Publish ordinary analysis storage without copying its tree. Admitted producers publish their existing shared owner directly.
+    pub fn into_shared(self) -> PreparedDefinition<crate::plan::SharedExecutablePlan> {
+        PreparedDefinition {
+            composite_inputs: self.composite_inputs,
+            logical_plan: self.logical_plan.into(),
+            parameter_types: self.parameter_types,
+            result_schema: self.result_schema,
+            effective_search_path: self.effective_search_path,
+            dependencies: self.dependencies,
+            dependency_snapshot: self.dependency_snapshot,
+        }
+    }
 }
 
 pub fn analyze_definition(
@@ -48,11 +70,11 @@ pub fn analyze_definition(
         return Ok(PreparedDefinition {
             composite_inputs: super::composites::CompositeInputs::default(),
             logical_plan,
-            parameter_types,
+            parameter_types: parameter_types.into(),
             result_schema,
-            effective_search_path: None,
-            dependencies: PreparedAnalysisDependencies::default(),
-            dependency_snapshot: None,
+            effective_search_path: None.into(),
+            dependencies: PreparedAnalysisDependencies::default().into(),
+            dependency_snapshot: None.into(),
         });
     }
     let (input, effective_search_path, dependency_snapshot) = with_scope_result(
@@ -113,11 +135,11 @@ pub fn analyze_definition(
             context.types,
         )?,
         logical_plan,
-        parameter_types: input.parameter_types,
+        parameter_types: input.parameter_types.into(),
         result_schema,
-        effective_search_path,
-        dependencies: input.dependencies,
-        dependency_snapshot,
+        effective_search_path: effective_search_path.into(),
+        dependencies: input.dependencies.into(),
+        dependency_snapshot: dependency_snapshot.into(),
     })
 }
 

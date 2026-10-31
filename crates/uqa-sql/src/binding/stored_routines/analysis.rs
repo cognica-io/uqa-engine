@@ -70,6 +70,30 @@ impl CatalogRoutineAnalysisContext<'_> {
             )
         })
     }
+    pub fn bind_rule_inputs_owned(
+        &self,
+        expression: crate::plan::MutableExpressionPlan,
+        binding: &crate::catalog::events::RuleConditionBinding,
+        table: &str,
+        columns: &[crate::ast::ColumnDef],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableExpressionPlan, SQLError> {
+        let mut expression = Some(expression);
+        self.with_scope_result(|scope| {
+            crate::binding::preparation::bind_rule_inputs_owned(
+                self.routines,
+                expression.take().ok_or_else(|| {
+                    SQLError::Internal("catalog scope repeated a consuming analysis".into())
+                })?,
+                scope.binding_context_with_control(control)?,
+                binding,
+                table,
+                columns,
+                control,
+            )
+        })
+    }
+
     pub fn bind_rule_condition(
         &self,
         expression: &mut ExpressionPlan,

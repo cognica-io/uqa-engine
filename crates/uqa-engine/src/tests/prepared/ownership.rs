@@ -22,13 +22,13 @@ fn replaced_or_deallocated_definition_never_receives_a_previous_plans_usage() {
     let update = || PreparedPlanUpdate {
         composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
         reanalyzed: None,
-        generic_plan: Some((*original).clone()),
+        generic_plan: Some(original.clone()),
         generic_cost: Some(42.0),
         custom_cost: None,
     };
     PreparedPlanSession::publish_usage(&engine, "saved", &original, update());
     let current = engine.session.prepared.read()["saved"].clone();
-    assert!(!Arc::ptr_eq(&current.logical_plan, &original));
+    assert!(!current.logical_plan.ptr_eq(&original));
     assert!(current.plan.is_none());
     assert!(current.generic_cost.is_none());
     assert_eq!(current.generic_plans, 0);
@@ -45,7 +45,7 @@ fn failed_replacement_keeps_the_original_definition_identity_and_metadata() {
     let original = engine.session.prepared.read()["saved"].clone();
     assert!(register(&engine, "SELECT missing FROM missing_table").is_err());
     let current = engine.session.prepared.read()["saved"].clone();
-    assert!(Arc::ptr_eq(&current.logical_plan, &original.logical_plan));
+    assert!(current.logical_plan.ptr_eq(&original.logical_plan));
     assert_eq!(current.prepared_at_micros, original.prepared_at_micros);
     assert_eq!(current.parameter_types, original.parameter_types);
     assert_eq!(current.generic_plans, original.generic_plans);
@@ -92,7 +92,7 @@ fn direct_registration_retains_one_fresh_peer_catalog_boundary(#[case] provider:
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0]["added"], uqa_core::Value::Int(7));
     let current = engine.session.prepared.read()["saved"].clone();
-    assert!(Arc::ptr_eq(&original.logical_plan, &current.logical_plan));
+    assert!(original.logical_plan.ptr_eq(&current.logical_plan));
     assert_eq!(original.dependency_snapshot, current.dependency_snapshot);
 }
 
@@ -130,9 +130,6 @@ fn memory_relation_publications_reread_prepared_inputs(#[case] change: &str) {
             postgres_micros: (current_clock) - uqa_core::POSTGRES_EPOCH_MICROS
         })
     );
-    assert!(!Arc::ptr_eq(
-        &original,
-        &engine.session.prepared.read()["saved"].logical_plan
-    ));
+    assert!(!original.ptr_eq(&engine.session.prepared.read()["saved"].logical_plan));
     engine.sql("COMMIT", &[]).unwrap();
 }

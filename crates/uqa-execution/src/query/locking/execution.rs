@@ -15,10 +15,10 @@ use crate::RowSchemaExecution;
 
 /// One physical tuple this candidate row must lock. A self-join names the same tuple through several visible qualifiers; the tuple is locked once at the strongest requested strength while every qualifier stays known so each marked alias is pinned to the substituted image during a recheck.
 struct LockCandidate {
-    qualifiers: Vec<std::sync::Arc<str>>,
+    qualifiers: Vec<crate::RowLockName>,
     /// Base-scan qualifiers that produced this tuple, so identity-source rechecks pin exactly the inner scans that emitted it.
-    scan_qualifiers: Vec<std::sync::Arc<str>>,
-    storage_name: std::sync::Arc<str>,
+    scan_qualifiers: Vec<crate::RowLockName>,
+    storage_name: crate::RowLockName,
     doc_id: uqa_core::DocId,
     display_name: String,
     strength: LockStrength,
@@ -50,7 +50,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
         row: PhysicalRow,
     ) -> Result<Option<PhysicalRow>, SQLError> {
         let mut candidates: Vec<LockCandidate> = Vec::new();
-        for target in &self.targets {
+        for target in self.targets.iter() {
             for origin in row.lock_origins() {
                 if !lock_origin_matches_target(origin, target) {
                     continue;
@@ -63,21 +63,19 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                     candidate.wait = merge_lock_wait(candidate.wait, target.wait);
                     candidate.identity_source |= target.identity_source;
                     if !candidate.qualifiers.contains(&origin.qualifier) {
-                        candidate
-                            .qualifiers
-                            .push(std::sync::Arc::clone(&origin.qualifier));
+                        candidate.qualifiers.push(origin.qualifier.clone());
                     }
                     if !candidate.scan_qualifiers.contains(&origin.scan_qualifier) {
                         candidate
                             .scan_qualifiers
-                            .push(std::sync::Arc::clone(&origin.scan_qualifier));
+                            .push(origin.scan_qualifier.clone());
                     }
                     continue;
                 }
                 candidates.push(LockCandidate {
-                    qualifiers: vec![std::sync::Arc::clone(&origin.qualifier)],
-                    scan_qualifiers: vec![std::sync::Arc::clone(&origin.scan_qualifier)],
-                    storage_name: std::sync::Arc::clone(&origin.storage_name),
+                    qualifiers: vec![origin.qualifier.clone()],
+                    scan_qualifiers: vec![origin.scan_qualifier.clone()],
+                    storage_name: origin.storage_name.clone(),
                     doc_id: origin.doc_id,
                     display_name: target.display_name.clone(),
                     strength: target.strength,
@@ -95,8 +93,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                     candidate.storage_name.as_ref(),
                     crate::row_locks::RelationLockMode::RowShare,
                 )?;
-                self.relation_locked
-                    .insert(std::sync::Arc::clone(&candidate.storage_name));
+                self.relation_locked.insert(candidate.storage_name.clone());
             }
         }
         let mut acquired = Vec::new();
@@ -403,13 +400,17 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 "row-lock recheck attempted without a rebuildable plan source".into(),
             ));
         };
-        let source_leaves = source
-            .statement
-            .from
-            .as_ref()
-            .map(|from| collect_source_leaves(from, false, &source.ctes))
-            .transpose()?
-            .unwrap_or_default();
+        let control = source.resources.control();
+        let catalog = source.ctes.catalog_read_view()?;
+        let resolution = source
+            .ctes
+            .relation_name_resolution_with_control(&control)?;
+        let source_leaves = match source.statement.from.as_ref() {
+            Some(from) => {
+                collect_source_leaves(from, false, &catalog, &resolution, &source.ctes, &control)?
+            }
+            None => control.finish(Vec::new(), control.empty_reservation())?,
+        };
         let mut pins = crate::row_locks::recheck::RowLockRecheckPins::new();
         if let Some(from) = source.statement.from.as_ref() {
             let mut leaf_plans = Vec::new();
@@ -421,7 +422,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                     source_leaves.len()
                 )));
             }
-            for ((path, source_plan), leaf) in leaf_plans.into_iter().zip(&source_leaves) {
+            for ((path, source_plan), leaf) in leaf_plans.into_iter().zip(source_leaves.iter()) {
                 let is_lock_target = candidates.iter().any(|candidate| {
                     candidate
                         .qualifiers
@@ -434,13 +435,13 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 let (schema, source_row) = copy_recheck_source_row(
                     self.context,
                     source_plan,
-                    &leaf.qualifier,
+                    leaf.qualifier,
                     &self.schema,
                     row,
                     self.params,
                     &source.ctes,
                 )?;
-                pins.pin_source_row(path, leaf.qualifier.clone(), schema, source_row);
+                pins.pin_source_row(path, leaf.qualifier.to_owned(), schema, source_row);
             }
         }
         for origin in row.lock_origins() {
@@ -473,7 +474,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 vec![crate::row_locks::recheck::RecheckDoc { doc_id, document }],
             );
         }
-        let mut recheck_ctes = source.ctes.clone();
+        let mut recheck_ctes = source.ctes.copy_with_control(&source.resources.control())?;
         recheck_ctes.activate_row_lock_recheck(std::sync::Arc::new(pins));
         let mut operator = self.context.recheck.build_recheck(
             &source.statement,

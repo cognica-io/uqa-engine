@@ -85,6 +85,20 @@ impl EventRelationCatalog for Engine {
     fn view(&self, relation: &RelationIdentity) -> Option<StoredView> {
         self.durable.views.read().get(relation).cloned()
     }
+    fn with_view_with_control(
+        &self,
+        relation: &RelationIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&StoredView) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let views = self.durable.views.snapshot();
+        let Some(view) = views.get(relation) else {
+            return Ok(false);
+        };
+        read(view)?;
+        Ok(true)
+    }
     fn foreign_columns(&self, relation: &RelationIdentity) -> Option<Vec<ColumnDef>> {
         self.durable
             .foreign_tables
@@ -98,6 +112,18 @@ impl EventRelationCatalog for Engine {
     }
     fn stored_view_schema(&self, view: &StoredView) -> Result<RowSchema, SQLError> {
         Engine::stored_view_schema(self, view)
+    }
+    fn stored_view_schema_with_control(
+        &self,
+        view: &StoredView,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        self.catalog_execution()
+            .stored_view_schema_with_catalog_with_control(
+                view,
+                self.restored_catalog_read_view_with_control(control)?,
+                control,
+            )
     }
     fn loaded_table_hierarchy(&self, relation: &RelationIdentity) -> Option<TableHierarchy> {
         Engine::loaded_table_hierarchy(self, relation)

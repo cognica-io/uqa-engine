@@ -6,8 +6,10 @@
 
 //! Whole-row namespaces survive empty rows independently of named type identity.
 
-use super::{Arc, ColumnIdentity, ColumnType, HashMap, RowSchema};
+use super::{Arc, ColumnIdentity, ColumnType, RowSchema, SchemaMap};
 use crate::SQLError;
+
+mod production;
 
 /// Absent namespaces allocate no map; copies of a retained scope share its identities.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -15,9 +17,10 @@ pub(super) struct RelationRowTypes(Option<Arc<RelationRows>>);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct RelationRows {
-    types: HashMap<Box<str>, Option<ColumnType>>,
+    types: SchemaMap<Box<str>, Option<ColumnType>>,
     /// The complete local row denotes this one source. A join or an outer-only namespace has no such identity.
     source: Option<Box<str>>,
+    _memory: super::production::lease::SchemaMemory,
 }
 
 impl RelationRowTypes {

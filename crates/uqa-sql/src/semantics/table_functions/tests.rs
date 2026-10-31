@@ -472,3 +472,72 @@ fn record_column_definitions_keep_postgresql_validation_order() {
         assert_eq!(error.to_string(), message);
     }
 }
+
+#[test]
+fn controlled_empty_function_columns_admit_only_final_names() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let unused = "x".repeat(4 << 20);
+    let aliases = vec!["selected".to_owned(), "position".to_owned()];
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut output = None;
+    let measured = allocation_counter::measure(|| {
+        output = Some(
+            super::table_function_empty_schema_with_control(
+                "generate_series",
+                &unused,
+                Some(&unused),
+                &aliases,
+                1,
+                true,
+                &control,
+            )
+            .unwrap(),
+        );
+    });
+    let output = output.unwrap();
+    assert_eq!(*output, aliases);
+    assert!(measured.bytes_total < 4096, "{measured:?}");
+    assert_eq!(measured.bytes_current, output.reserved_bytes() as i64);
+    assert_eq!(budget.used(), output.reserved_bytes());
+    drop(output);
+    assert_eq!(budget.used(), 0);
+    let measured = allocation_counter::measure(|| {
+        assert_eq!(
+            super::table_function_empty_schema_with_control(
+                "generate_series",
+                &unused,
+                None,
+                &[],
+                1,
+                false,
+                &control
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("53200")
+        );
+    });
+    assert!(measured.bytes_total < 4096, "{measured:?}");
+    assert_eq!(budget.used(), 0);
+    token.cancel();
+    assert_eq!(
+        super::table_function_empty_schema_with_control(
+            "generate_series",
+            "series",
+            None,
+            &[],
+            1,
+            false,
+            &control
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.used(), 0);
+}

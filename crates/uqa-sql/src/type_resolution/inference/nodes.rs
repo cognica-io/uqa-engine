@@ -11,6 +11,7 @@ use super::{
     scalar_type_inner_with_control, ColumnType, FunctionTypeResolver, Produced, ProductionControl,
     SQLError, SQLParam, ScalarExpr, ScalarTypeSchema,
 };
+use uqa_core::memory::ProductionVec;
 
 pub(super) fn collated_type_with_control(
     expression: &ScalarExpr,
@@ -101,8 +102,16 @@ pub(super) fn binary_type_with_control(
             control,
         )?;
         let [left_target, right_target, _] = &*selected;
-        common::read_unknown_literals(std::iter::once(lhs.as_ref()), left_target)?;
-        common::read_unknown_literals(std::iter::once(rhs.as_ref()), right_target)?;
+        common::read_unknown_literals_with_control(
+            std::iter::once(lhs.as_ref()),
+            left_target,
+            control,
+        )?;
+        common::read_unknown_literals_with_control(
+            std::iter::once(rhs.as_ref()),
+            right_target,
+            control,
+        )?;
     }
     operators::binary_result_type_with_control(*op, left.as_deref(), right.as_deref(), control)
 }
@@ -154,21 +163,29 @@ pub(super) fn membership_type_with_control(
     let needle = common::common_context_expression_type_with_control(
         expr, schema, params, resolver, control,
     )?;
-    let mut candidates = Vec::with_capacity(list.len());
+    let mut candidates = ProductionVec::new(*control);
+    candidates.reserve(list.len())?;
     for item in list {
-        candidates.push(common::common_context_expression_type_with_control(
+        let ty = common::common_context_expression_type_with_control(
             item, schema, params, resolver, control,
-        )?);
+        )?;
+        candidates.push_produced(control.finish(ty, control.empty_reservation())?)?;
     }
     // `transformAExprIn` compares the needle with the list coerced to the inputs' common type; without one, each item is compared separately.
-    let inputs = std::iter::once(needle.as_deref())
-        .chain(candidates.iter().map(Option::as_deref))
-        .collect::<Vec<_>>();
-    match common::select_common_input_type_with_control(&inputs, control)? {
+    let mut inputs = ProductionVec::new(*control);
+    inputs.reserve(candidates.len() + 1)?;
+    inputs.push_copy(needle.as_deref())?;
+    for candidate in candidates.iter() {
+        inputs.push_copy(candidate.as_deref())?;
+    }
+    let selected = common::select_common_input_type_with_control(&inputs, control)?;
+    drop(inputs);
+    match selected {
         Some(common) => {
-            common::read_unknown_literals(
+            common::read_unknown_literals_with_control(
                 std::iter::once(expr.as_ref()).chain(list.iter()),
                 &common,
+                control,
             )?;
             operators::binary_result_type_with_control(
                 crate::ast::BinaryOp::Equal,
@@ -178,7 +195,7 @@ pub(super) fn membership_type_with_control(
             )?;
         }
         None => {
-            for candidate in &candidates {
+            for candidate in candidates.iter() {
                 operators::binary_result_type_with_control(
                     crate::ast::BinaryOp::Equal,
                     needle.as_deref(),
@@ -188,6 +205,8 @@ pub(super) fn membership_type_with_control(
             }
         }
     }
+    drop(candidates);
+    drop(needle);
     copy_type(Some(&ColumnType::Boolean), control)
 }
 
@@ -216,7 +235,8 @@ pub(super) fn conditional_type_with_control(
         })
         .transpose()?
         .flatten();
-    let mut results = Vec::with_capacity(when.len() + 1);
+    let mut results = ProductionVec::new(*control);
+    results.reserve(when.len())?;
     for (condition, value) in when {
         let condition_type = if simple {
             common::common_context_expression_type_with_control(
@@ -233,24 +253,23 @@ pub(super) fn conditional_type_with_control(
                 control,
             )?;
         }
-        results.push(common::common_context_expression_type_with_control(
+        let ty = common::common_context_expression_type_with_control(
             value, schema, params, resolver, control,
-        )?);
+        )?;
+        results.push_produced(control.finish(ty, control.empty_reservation())?)?;
     }
     // `transformCaseExpr` selects the result type with the ELSE result first, including its implicit NULL.
-    results.insert(
-        0,
-        else_branch
-            .as_deref()
-            .map(|value| {
-                common::common_context_expression_type_with_control(
-                    value, schema, params, resolver, control,
-                )
-            })
-            .transpose()?
-            .flatten(),
-    );
-    if results.iter().all(Option::is_none)
+    let else_type = else_branch
+        .as_deref()
+        .map(|value| {
+            common::common_context_expression_type_with_control(
+                value, schema, params, resolver, control,
+            )
+        })
+        .transpose()?
+        .flatten();
+    if else_type.is_none()
+        && results.iter().all(Option::is_none)
         && !when
             .iter()
             .map(|(_, value)| value)
@@ -262,17 +281,21 @@ pub(super) fn conditional_type_with_control(
     let mut selection = common::CommonInputType::new();
     let expressions =
         std::iter::once(else_branch.as_deref()).chain(when.iter().map(|(_, value)| Some(value)));
-    for (ty, expression) in results.into_iter().zip(expressions) {
+    // Each inferred type retains its own payload lease; keep only the vector's capacity lease alongside its consuming iterator.
+    let (results, storage) = results.finish()?.into_parts();
+    for (ty, expression) in std::iter::once(else_type).chain(results).zip(expressions) {
         if ty.is_some() || expression.is_none_or(common::unknown_input) {
             selection.include_owned(common::CommonTypeContext::Case, ty, control)?;
         }
     }
+    drop(storage);
     let result = selection.finish(control)?;
-    common::read_unknown_literals(
+    common::read_unknown_literals_with_control(
         when.iter()
             .map(|(_, value)| value)
             .chain(else_branch.as_deref()),
         &result,
+        control,
     )?;
     common::case::case_output_type_with_control(
         expression,

@@ -28,9 +28,35 @@ pub fn show_schema(
     session: &dyn CatalogSession,
     name: &str,
 ) -> Result<uqa_sql::RowSchema, SQLError> {
-    let columns = show_columns(session, name)?;
-    let types = vec![Some(ColumnType::Text); columns.len()];
-    Ok(uqa_sql::RowSchema::with_types(columns, types))
+    show_schema_with_control(
+        session,
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn show_schema_with_control(
+    session: &dyn CatalogSession,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::RowSchema, SQLError> {
+    control.check()?;
+    let ty = ColumnType::Text;
+    if shows_all(name) {
+        return uqa_sql::RowSchema::with_column_metadata_with_control(
+            None,
+            SHOW_ALL_COLUMNS
+                .into_iter()
+                .map(|name| (name, Some(&ty), None)),
+            control,
+        );
+    }
+    let name = session.parameter_name_with_control(name, control)?;
+    uqa_sql::RowSchema::with_column_metadata_with_control(
+        None,
+        [(name.as_str(), Some(&ty), None)],
+        control,
+    )
 }
 
 /// The result of `SHOW name`.

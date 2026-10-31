@@ -153,3 +153,5 @@ fn rewrite_rules_reading_a_set_returning_entry_fail_as_in_postgresql() {
     assert!(expanded.columns.is_empty());
     assert_eq!(source_projections(&expanded).len(), 2);
 }
+
+mod ownership;

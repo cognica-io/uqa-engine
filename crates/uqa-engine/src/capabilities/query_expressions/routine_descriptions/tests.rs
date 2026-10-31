@@ -28,7 +28,7 @@ mod table {
         let engine = Engine::new();
         engine.sql(&format!("CREATE FUNCTION public.kept(a integer) RETURNS SETOF integer LANGUAGE {language} STRICT AS $${original}$$"), &[]).unwrap();
         let binding = binding(&engine);
-        let ctes = query_scope::new_for_current_routine(&engine);
+        let ctes = query_scope::new_for_current_routine(&engine).unwrap();
         let hook = ScopedEngineHook::new(&engine, &ctes);
         let descriptions = RoutineCallDescriptions::default();
         let project = |value| match hook
@@ -81,7 +81,7 @@ mod table {
         let engine = Engine::new();
         engine.sql(&format!("CREATE FUNCTION public.kept(a integer) RETURNS SETOF integer LANGUAGE {language} AS $${body}$$"), &[]).unwrap();
         let binding = binding(&engine);
-        let ctes = query_scope::new_for_current_routine(&engine);
+        let ctes = query_scope::new_for_current_routine(&engine).unwrap();
         let hook = ScopedEngineHook::new(&engine, &ctes);
         let descriptions = RoutineCallDescriptions::default();
         let budget = uqa_core::memory::MemoryBudget::new(64 * 1024);
@@ -160,7 +160,7 @@ fn native_routine_descriptions_follow_replacement_and_rollback(
     let engine = Engine::new();
     engine.sql(&format!("CREATE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE {language} AS $${original_body}$$"), &[]).unwrap();
     let binding = binding(&engine);
-    let ctes = query_scope::new_for_current_routine(&engine);
+    let ctes = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &ctes);
     let descriptions = RoutineCallDescriptions::default();
     let control = ProductionControl::uncontrolled();
@@ -234,7 +234,7 @@ fn native_routine_descriptions_keep_execute_checks_for_strict_null_calls(
     let engine = Engine::new();
     engine.sql(&format!("CREATE FUNCTION public.kept(a integer) RETURNS integer LANGUAGE {language} STRICT AS $${body}$$; CREATE ROLE routine_reader; REVOKE EXECUTE ON FUNCTION public.kept(integer) FROM PUBLIC"), &[]).unwrap();
     let binding = binding(&engine);
-    let ctes = query_scope::new_for_current_routine(&engine);
+    let ctes = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &ctes);
     let descriptions = RoutineCallDescriptions::default();
     let control = ProductionControl::uncontrolled();

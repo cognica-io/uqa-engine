@@ -17,12 +17,23 @@ use uqa_core::Value;
 struct PreparationCounter(AtomicUsize);
 
 impl QueryExpressionFactory<()> for PreparationCounter {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
+    }
     fn bind_scope(
         &self,
-        _: CteScope,
-    ) -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_> {
+        _: &CteScope,
+    ) -> Result<Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_>, SQLError> {
         self.0.fetch_add(1, Ordering::Relaxed);
-        Arc::new(Services)
+        Ok(Arc::new(Services))
+    }
+
+    fn optimize_owned_catalog_scalar(
+        &self,
+        _expression: uqa_sql::plan::OwnedScalarExpr,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        panic!("mutation qualification must not add constant evaluation")
     }
 
     fn optimize_catalog_scalar(&self, _: &mut ScalarExpr) -> Result<(), SQLError> {

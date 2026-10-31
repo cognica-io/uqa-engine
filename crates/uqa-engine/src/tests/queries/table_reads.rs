@@ -159,7 +159,7 @@ fn locking_physical_cursor_attaches_the_requested_origin() {
         None,
     )
     .with_qualifier("l")
-    .with_lock_origin(Some((Arc::from("l"), Arc::from("locking_source"))));
+    .with_lock_origin(Some(("l".into(), "locking_source".into())));
 
     let rows = source.next_physical_batch(16).unwrap();
 

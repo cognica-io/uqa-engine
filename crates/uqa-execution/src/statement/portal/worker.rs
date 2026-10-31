@@ -163,18 +163,19 @@ pub fn run<S: Clone + Send + Sync + 'static>(
         closed: std::cell::Cell::new(false),
         public_width: std::cell::Cell::new(0),
     });
-    let mut ctes = queries.statement_scope(None);
-    ctes.enable_command_progress_streaming();
-    if directional {
-        ctes.enable_backwards_scanning();
-    }
-    let result = crate::query::statement::execute_query_plan_output(
-        &queries.query_context(),
-        query,
-        params,
-        &mut ctes,
-        crate::query::statement::consumer::QueryOutputMode::physical_consumer(consumer.clone()),
-    );
+    let result = queries.statement_scope(None).and_then(|mut ctes| {
+        ctes.enable_command_progress_streaming();
+        if directional {
+            ctes.enable_backwards_scanning();
+        }
+        crate::query::statement::execute_query_plan_output(
+            &queries.query_context(),
+            query,
+            params,
+            &mut ctes,
+            crate::query::statement::consumer::QueryOutputMode::physical_consumer(consumer.clone()),
+        )
+    });
     match result {
         Ok(_) if !consumer.closed.get() => {
             let _ = response_tx.send(SessionPortalWorkerResponse::Eof);

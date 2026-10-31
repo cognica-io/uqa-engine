@@ -8,8 +8,7 @@
 
 use crate::query::{sources::SourceContext, CteScope};
 use crate::{PhysicalOperator, RowSchema};
-use std::collections::BTreeMap;
-use uqa_sql::{plan::QueryPlan, SQLError, SQLParam, ScalarExpr};
+use uqa_sql::{plan::QueryPlan, SQLError, SQLParam};
 
 /// Select a read generation while keeping its owner alive only for the borrowed operation.
 pub trait SnapshotSource<S: Clone + 'static> {
@@ -30,9 +29,9 @@ pub trait ScopedQueryOperation<S: Clone + 'static> {
 pub trait DirectionalQueryFactory<S: Clone + 'static> {
     fn query_operator(
         &self,
-        plan: QueryPlan,
-        params: Vec<SQLParam>,
-        scope: CteScope<S>,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        scope: &CteScope<S>,
         schema: RowSchema,
     ) -> Result<Box<dyn PhysicalOperator>, SQLError>;
 }
@@ -41,7 +40,7 @@ pub trait CteFilterPlanning<S: Clone> {
         &self,
         plan: &QueryPlan,
         scope: &CteScope<S>,
-    ) -> Result<BTreeMap<String, (String, ScalarExpr)>, SQLError>;
+    ) -> Result<uqa_sql::plan::source_projection::CteOutputFilters, SQLError>;
 }
 #[derive(Clone)]
 pub struct QueryContext<'a, S: Clone + 'static> {

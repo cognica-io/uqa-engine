@@ -54,6 +54,9 @@ pub mod join_graph;
 pub mod join_order;
 pub mod optimizer;
 pub mod plan_cost;
+mod planning_resources;
+mod scratch;
+pub use planning_resources::PlanningResources;
 pub mod query_optimizer;
 pub mod statement_planning;
 pub mod text_top_k;
@@ -61,16 +64,18 @@ pub mod unified_plan;
 
 pub use cardinality::{
     column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate, AccessParadigm,
-    CardinalityEstimator, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler,
+    CardinalityEstimator, ColumnStatistics, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler,
     LocalAccessEstimate, RelationStats, Selectivity, GRAPH_AVG_DEGREE_DEFAULT,
     JACCARD_JOIN_SELECTIVITY,
 };
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
-pub use join_enumerator::{enumerate_dpccp, enumerate_dpccp_with_cost_estimator, JoinPlan};
+pub use join_enumerator::{
+    enumerate_dpccp, enumerate_dpccp_with_control, enumerate_dpccp_with_cost_estimator, JoinPlan,
+};
 pub use join_graph::{JoinEdge, JoinGraph, JoinGraphError, JoinGraphResult};
 pub use join_order::{
-    JoinAlgorithm, JoinCondition, JoinOrderOptimizer, JoinOrderResult, JoinOrderTree,
-    JoinPredicate, JoinRelation,
+    JoinAlgorithm, JoinCondition, JoinOrderError, JoinOrderOptimizer, JoinOrderResult,
+    JoinOrderTree, JoinPredicate, JoinRelation,
 };
 pub use optimizer::{
     optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,

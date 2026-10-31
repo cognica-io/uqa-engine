@@ -54,18 +54,22 @@ pub trait CteBodyExecutor<S: Clone>: Sync {
 }
 
 pub trait QueryOutputRewriter: Sync {
-    /// Remove scalar output expressions the containing query does not need, preserving the stored row descriptor and side effects.
-    fn prune_query_outputs(
+    /// Consume the private catalog-query destination before assembling its streaming or materialized execution path. The caller has already restored layouts and applied its output demand.
+    fn optimize_retained_query(
         &self,
-        query: &mut QueryPlan,
+        query: uqa_sql::plan::MutableQueryPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError>;
+
+    fn prune_owned_query_outputs(
+        &self,
+        query: uqa_sql::plan::MutableQueryPlan,
         aliases: &[String],
         projection: &uqa_sql::plan::source_projection::SourceProjection,
         schema: &crate::RowSchema,
         visible_ctes: &dyn Fn(&str) -> bool,
-    ) -> Result<(), SQLError>;
-
-    /// Optimize a catalog-retained query before assembling either its streaming or materialized execution path.
-    fn optimize_retained_query(&self, query: &QueryPlan) -> Result<QueryPlan, SQLError>;
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::MutableQueryPlan, SQLError>;
 
     /// Return a plan that applies the complete output predicate, or `None` when the caller must retain it.
     fn push_output_filter(
@@ -74,7 +78,7 @@ pub trait QueryOutputRewriter: Sync {
         qualifier: &str,
         filter: &ScalarExpr,
         output_columns: Option<&[String]>,
-    ) -> Result<Option<QueryPlan>, SQLError>;
+    ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError>;
 
     /// Place a predicate inside an ordinary derived source. Recursive specialization keeps its separate effect boundary through `push_output_filter`.
     fn push_derived_output_filter(
@@ -83,7 +87,7 @@ pub trait QueryOutputRewriter: Sync {
         qualifier: &str,
         filter: &ScalarExpr,
         output_columns: Option<&[String]>,
-    ) -> Result<Option<QueryPlan>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
         self.push_output_filter(query, qualifier, filter, output_columns)
     }
 }
@@ -97,3 +101,18 @@ pub struct CteExecutionContext<'a, S: Clone> {
     pub runtime: QueryRuntimeView<'a>,
 }
 impl<S: Clone> Copy for CteExecutionContext<'_, S> {}
+
+impl<S: Clone> CteExecutionContext<'_, S> {
+    /// Retain the original query allowance and both cancellation owners for private execution inputs.
+    pub fn production_resources(
+        &self,
+    ) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        let retained = self.queries.read_control()?;
+        Ok(uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.runtime.cancellation,
+        )
+        .capture())
+    }
+}

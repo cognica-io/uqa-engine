@@ -45,6 +45,27 @@ pub(crate) fn resolve_grouping_expression_reference<'a>(
     outer: Option<&RowSchema>,
     params: &[SQLParam],
 ) -> Result<&'a ScalarExpr, SQLError> {
+    resolve_grouping_expression_reference_with_control(
+        routines,
+        expression,
+        projections,
+        schema,
+        outer,
+        params,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(crate) fn resolve_grouping_expression_reference_with_control<'a>(
+    routines: &dyn RoutineResolution,
+    expression: &'a ScalarExpr,
+    projections: &'a [ProjectionPlan],
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<&'a ScalarExpr, SQLError> {
+    control.check()?;
     let mut resolved = expression;
     if let Some(name) = grouping_output_name(expression, schema, outer) {
         let mut matches = projections
@@ -54,18 +75,28 @@ pub(crate) fn resolve_grouping_expression_reference<'a>(
             resolved = &first.expr;
             let mut identity = None;
             for candidate in matches {
+                control.check()?;
                 let first_identity = match &identity {
                     Some(identity) => identity,
-                    None => identity.insert(super::expression_identity(
-                        routines, resolved, schema, params,
+                    None => identity.insert(super::expression_identity_with_control(
+                        routines, resolved, schema, params, control,
                     )?),
                 };
                 if *first_identity
-                    != super::expression_identity(routines, &candidate.expr, schema, params)?
+                    != super::expression_identity_with_control(
+                        routines,
+                        &candidate.expr,
+                        schema,
+                        params,
+                        control,
+                    )?
                 {
                     return Err(SQLError::Routine {
                         sqlstate: "42702".into(),
-                        message: format!("GROUP BY \"{name}\" is ambiguous"),
+                        message: control
+                            .format(format_args!("GROUP BY \"{name}\" is ambiguous"))?
+                            .into_parts()
+                            .0,
                     });
                 }
             }
@@ -142,4 +173,82 @@ pub fn bind_grouping_names(
         }
     }
     Ok(changed)
+}
+
+/// Bind the original GROUP BY sequence while transferring each selected scalar's independent constructor owner.
+pub fn bind_grouping_names_owned(
+    routines: &dyn RoutineResolution,
+    mut query: crate::plan::MutableQueryPlan,
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<crate::plan::MutableQueryPlan, SQLError> {
+    control.check()?;
+    let crate::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+        return Err(SQLError::Internal(
+            "grouping names require a query block".into(),
+        ));
+    };
+    let groups = block.group_by.len();
+    let sets = block.grouping_sets.len();
+    for index in 0..groups {
+        query = bind_owned_grouping_slot(
+            routines,
+            query,
+            crate::plan::QueryScalarSlot::GroupBy(index),
+            schema,
+            outer,
+            params,
+            control,
+        )?;
+    }
+    for set in 0..sets {
+        let crate::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+            unreachable!("original grouping block")
+        };
+        let count = block.grouping_sets[set].len();
+        for expression in 0..count {
+            query = bind_owned_grouping_slot(
+                routines,
+                query,
+                crate::plan::QueryScalarSlot::GroupingSet { set, expression },
+                schema,
+                outer,
+                params,
+                control,
+            )?;
+        }
+    }
+    Ok(query)
+}
+
+fn bind_owned_grouping_slot(
+    routines: &dyn RoutineResolution,
+    query: crate::plan::MutableQueryPlan,
+    slot: crate::plan::QueryScalarSlot,
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<crate::plan::MutableQueryPlan, SQLError> {
+    query.map_scalar_with_parent(slot, control, |parent, expression| {
+        let crate::plan::RelationalPlan::QueryBlock(block) = &parent.root else {
+            unreachable!("original grouping block")
+        };
+        let selected = resolve_grouping_expression_reference_with_control(
+            routines,
+            &expression,
+            &block.projections,
+            schema,
+            outer,
+            params,
+            control,
+        )?;
+        if std::ptr::eq(selected, std::ptr::from_ref(&*expression)) {
+            Ok(expression)
+        } else {
+            Ok(selected.copy_for_rewrite(control)?)
+        }
+    })
 }

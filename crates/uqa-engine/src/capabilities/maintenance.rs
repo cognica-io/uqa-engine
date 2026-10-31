@@ -7,7 +7,7 @@
 //! Bind maintenance to retained table generations, session locks and provider transactions.
 use crate::{Engine, TableState};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     sync::{atomic::Ordering, Arc},
 };
 use uqa_core::DocId;
@@ -156,7 +156,7 @@ struct VacuumTableBinding<'a> {
 struct SavedVacuumStatistics<'a> {
     engine: &'a Engine,
     table: &'a TableState,
-    statistics: BTreeMap<String, uqa_planner::ColumnStats>,
+    statistics: uqa_planner::ColumnStatistics,
     loaded: bool,
     dirty: bool,
 }

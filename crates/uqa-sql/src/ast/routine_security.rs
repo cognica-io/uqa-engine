@@ -6,8 +6,6 @@
 
 //! Routine security, ownership, configuration, privileges, and role statements.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -210,7 +208,7 @@ pub enum RoleAttribute {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateRoleStmt {
     pub name: String,
-    pub attributes: BTreeSet<RoleAttribute>,
+    pub attributes: uqa_core::memory::OwnedSet<RoleAttribute>,
     pub connection_limit: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub in_roles: Vec<RoleSpecification>,
@@ -229,7 +227,7 @@ pub enum RoleMembershipAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlterRoleStmt {
     pub name: RoleSpecification,
-    pub attributes: BTreeMap<RoleAttribute, bool>,
+    pub attributes: uqa_core::memory::OwnedMap<RoleAttribute, bool>,
     pub connection_limit: Option<i32>,
     pub membership_action: Option<RoleMembershipAction>,
     pub members: Vec<RoleSpecification>,

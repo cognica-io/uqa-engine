@@ -112,6 +112,7 @@ struct PreparedCorrelatedExistsPredicate<'a, S: Clone> {
     ctes: CteScope<S>,
     lookup: Arc<CachedCorrelatedExists>,
     negated: bool,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl<S: Clone + Send + Sync + 'static> crate::RowPredicate
@@ -161,11 +162,16 @@ pub fn prepare_correlated_exists_predicate<'a, S: Clone + Send + Sync + 'static>
     let Some(lookup) = build_correlated_exists(services, ctes, plan, params)? else {
         return Ok(None);
     };
+    let resources = services.production_resources()?;
+    let control = resources.control();
+    let ctes = ctes.copy_with_control(&control)?;
+    let memory = control.reserve(size_of::<PreparedCorrelatedExistsPredicate<'_, S>>())?;
     Ok(Some(Arc::new(PreparedCorrelatedExistsPredicate {
         hooks: services.hooks,
         params,
-        ctes: ctes.clone(),
+        ctes,
         lookup,
         negated: *negated,
+        _memory: memory,
     })))
 }

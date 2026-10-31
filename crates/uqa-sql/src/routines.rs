@@ -123,9 +123,28 @@ pub fn is_routine_namespace_lookup_error(error: &SQLError) -> bool {
 }
 
 /// Function-catalog operations required by static query binding. The interface deliberately excludes storage, transaction, locking, and execution services so the binder can run against a deterministic catalog fixture.
+#[derive(Clone, Copy, Default)]
+pub struct VisibleFunctionSetness {
+    pub found: bool,
+    /// `None` means either no scalar declaration or differing set-returning declarations.
+    pub uniform: Option<bool>,
+}
+
 pub trait RoutineResolution: FunctionTypeResolver {
     fn has_registered_scalar_function(&self, _name: &str) -> bool {
         false
+    }
+
+    /// Native registries admit normalized lookup keys before allocation; external catalogs retain their existing scalar callback.
+    fn has_registered_scalar_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let registered = self.has_registered_scalar_function(name);
+        control.check()?;
+        Ok(registered)
     }
 
     /// The compiled body of a routine as this session executes it: a bound body as defined, or a source body as this session compiled it. A resolver without a session holds only bound bodies.
@@ -156,14 +175,55 @@ pub trait RoutineResolution: FunctionTypeResolver {
         false
     }
 
+    /// Native registries admit normalized lookup keys before allocation; external catalogs retain their established boolean callback.
+    fn has_registered_table_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let registered = self.has_registered_table_function(name);
+        control.check()?;
+        Ok(registered)
+    }
+
     /// A registered function's stable output names, available without calling
     /// it. `None` means its result supplies the descriptor at execution.
     fn registered_table_function_columns(&self, _name: &str) -> Option<Vec<String>> {
         None
     }
 
+    /// Native registries copy borrowed declarations under the request allowance; external catalogs retain their metadata callback.
+    fn registered_table_function_columns_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+        control.check()?;
+        self.registered_table_function_columns(name)
+            .map(|columns| {
+                let mut output = uqa_core::memory::ProductionVec::new(*control);
+                for column in columns {
+                    output.push_produced(control.copy_text(&column)?)?;
+                }
+                Ok(output.finish()?)
+            })
+            .transpose()
+    }
+
     fn has_registered_aggregate_function(&self, _name: &str) -> bool {
         false
+    }
+
+    fn has_registered_aggregate_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let registered = self.has_registered_aggregate_function(name);
+        control.check()?;
+        Ok(registered)
     }
 
     fn lookup_visible_sql_functions(
@@ -173,12 +233,73 @@ pub trait RoutineResolution: FunctionTypeResolver {
         Ok(None)
     }
 
+    /// Native catalogs inspect immutable buckets; external catalogs preserve their visible lookup.
+    fn has_visible_sql_functions_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let found = self.lookup_visible_sql_functions(name)?.is_some();
+        control.check()?;
+        Ok(found)
+    }
+
     /// Resolve candidate metadata without refreshing session-visible function state during analysis.
     fn lookup_visible_sql_functions_for_analysis(
         &self,
         name: &str,
     ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
         self.lookup_visible_sql_functions(name)
+    }
+
+    /// Observe the same visible, signature-shadowed candidates used by ordinary analysis without requiring a copied native candidate list.
+    fn visible_function_setness_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<VisibleFunctionSetness, SQLError> {
+        control.check()?;
+        let candidates = self.lookup_visible_sql_functions_for_analysis(name)?;
+        let mut result = VisibleFunctionSetness {
+            found: candidates.is_some(),
+            uniform: None,
+        };
+        let mut first = None;
+        let mut mixed = false;
+        for function in candidates
+            .iter()
+            .flatten()
+            .filter(|function| !function.def.is_procedure)
+        {
+            control.check()?;
+            let set = function.def.returns_set();
+            match first {
+                None => first = Some(set),
+                Some(first) => mixed |= first != set,
+            }
+        }
+        result.uniform = first.filter(|_| !mixed);
+        Ok(result)
+    }
+
+    /// Observe visible set-returning declarations without constructing candidate snapshots in native catalogs. External adapters retain their existing analysis lookup.
+    fn visible_function_returns_set_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let candidates = self.lookup_visible_sql_functions_for_analysis(name)?;
+        let mut returns_set = false;
+        for function in candidates.iter().flatten() {
+            control.check()?;
+            if !function.def.is_procedure && function.def.returns_set() {
+                returns_set = true;
+                break;
+            }
+        }
+        Ok(returns_set)
     }
 
     /// Resolve an exact stored routine name without repeating visible-name lookup.
@@ -193,6 +314,21 @@ pub trait RoutineResolution: FunctionTypeResolver {
         None
     }
 
+    /// Select an already bound scalar routine. Native registries borrow their immutable bucket; custom catalogs may supply their existing candidate snapshot.
+    fn select_bound_function_with_control(
+        &self,
+        binding: &FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+        control.check()?;
+        let candidates = self.lookup_bound_sql_functions_by_binding(binding);
+        lifecycle::lookup::select_bound_function_with_control(
+            candidates.iter().flatten(),
+            binding,
+            control,
+        )
+    }
+
     fn resolve_static_sql_function(
         &self,
         _name: &str,
@@ -204,6 +340,48 @@ pub trait RoutineResolution: FunctionTypeResolver {
         Ok(None)
     }
 
+    /// Observe strictness after the same static function selection; native overload workspace retains the invoking allowance.
+    fn resolve_static_sql_function_strictness_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        control.check()?;
+        let selected = self.resolve_static_sql_function(
+            name,
+            binding,
+            call.argument_names,
+            call.argument_types,
+            call.explicit_variadic,
+        )?;
+        control.check()?;
+        Ok(selected.map(|function| function.def.strict))
+    }
+
+    /// Select the same routine as static expression analysis and observe only its set-returning declaration. Native adapters retain admitted overload workspace; external adapters keep the existing selection callback.
+    fn resolve_static_sql_function_setness_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        control.check()?;
+        let result = self.resolve_static_sql_function(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )?;
+        control.check()?;
+        Ok(result.map(|function| function.def.returns_set()))
+    }
+
     fn resolve_static_sql_function_match(
         &self,
         _name: &str,
@@ -213,6 +391,77 @@ pub trait RoutineResolution: FunctionTypeResolver {
         _explicit_variadic: bool,
     ) -> Result<Option<StaticFunctionMatch>, SQLError> {
         Ok(None)
+    }
+
+    /// Keep the selected invocation owned while callers derive table-result metadata.
+    fn resolve_static_sql_function_match_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<resolution::OwnedStaticFunctionMatch>, SQLError> {
+        control.check()?;
+        self.resolve_static_sql_function_match(
+            name,
+            binding,
+            call.argument_names,
+            call.argument_types,
+            call.explicit_variadic,
+        )?
+        .map(|matched| {
+            Ok(resolution::OwnedStaticFunctionMatch {
+                function: matched.function,
+                invocation: crate::plan::copy::copy_syntax_with_control(
+                    matched.invocation.as_ref(),
+                    control,
+                )?,
+            })
+        })
+        .transpose()
+    }
+
+    /// Construct the selected table-call binding without adding scalar output-type validation.
+    fn resolve_static_sql_function_binding_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<FunctionBinding>>, SQLError> {
+        control.check()?;
+        self.resolve_static_sql_function_match(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )?
+        .map(|matched| matched.binding_with_control(control))
+        .transpose()
+    }
+
+    fn resolve_table_function_overload_with_builtins_and_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
+        builtins: &[BuiltinFunctionOverload],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        control.check()?;
+        self.resolve_table_function_overload_with_builtins(
+            name,
+            binding,
+            call.argument_names,
+            call.argument_types,
+            call.explicit_variadic,
+            builtins,
+        )?
+        .map(|selected| selected.clone_with_control(control))
+        .transpose()
     }
 
     fn resolve_table_function_overload_with_builtins(
@@ -233,18 +482,45 @@ pub fn selected_bound_function(
     routines: &dyn RoutineResolution,
     binding: &FunctionBinding,
 ) -> Option<std::sync::Arc<SQLUserFunction>> {
-    if binding.builtin || binding.resolution_error.is_some() {
-        return None;
+    selected_bound_function_with_control(
+        routines,
+        binding,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary selected routine lookup cannot be cancelled or limited")
+}
+
+pub fn selected_bound_function_with_control(
+    routines: &dyn RoutineResolution,
+    binding: &FunctionBinding,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    control.check()?;
+    if binding.builtin || binding.resolution_error.is_some() || binding.object_id.is_none() {
+        return Ok(None);
     }
-    let identity = binding.object_id?;
-    routines
-        .lookup_bound_sql_functions_by_binding(binding)?
-        .into_iter()
-        .find(|function| {
-            !function.def.is_procedure
-                && function.def.object_id == Some(identity)
-                && routine_signature_types(&function.def) == binding.argument_types
-        })
+    routines.select_bound_function_with_control(binding, control)
+}
+
+pub(crate) fn routine_signature_matches_with_control(
+    definition: &CreateFunction,
+    types: &[String],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let mut parameters = definition.identity_params();
+    for expected in types {
+        let Some(parameter) = parameters.next() else {
+            return Ok(false);
+        };
+        if *crate::type_resolution::canonical_routine_type_name_with_control(
+            &parameter.type_name,
+            control,
+        )? != *expected
+        {
+            return Ok(false);
+        }
+    }
+    Ok(parameters.next().is_none())
 }
 
 pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
@@ -254,16 +530,11 @@ pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
 }
 
 pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
-    let mut outputs = def.output_params();
-    match (outputs.next(), outputs.next(), &def.returns) {
-        (Some(output), None, _) => canonical_routine_type_name(&output.type_name) == "record",
-        (
-            None,
-            None,
-            FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name },
-        ) => canonical_routine_type_name(type_name) == "record",
-        _ => false,
-    }
+    routine_returns_anonymous_record_with_control(
+        def,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine return category")
 }
 
 pub struct StaticFunctionMatch {
@@ -278,6 +549,17 @@ pub struct StaticFunctionMatch {
 }
 
 impl StaticFunctionMatch {
+    pub fn binding_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<FunctionBinding>, SQLError> {
+        resolution::selected_binding(
+            &self.function,
+            crate::plan::copy::copy_syntax_with_control(self.invocation.as_ref(), control)?,
+            control,
+        )
+    }
+
     pub fn binding(&self) -> FunctionBinding {
         FunctionBinding {
             object_id: self.function.def.object_id,
@@ -342,10 +624,18 @@ pub fn function_binding_matches(binding: &FunctionBinding, target: &FunctionBind
 }
 
 pub fn routine_local_name(name: &str) -> Result<String, SQLError> {
-    uqa_core::RelationIdentity::from_legacy_name(name)
-        .map(|relation| relation.name)
-        .map_err(|error| SQLError::Internal(format!("invalid routine name `{name}`: {error}")))
+    routine_local_name_with_control(name, &uqa_core::memory::ProductionControl::uncontrolled()).map(
+        |name| {
+            name.into_uncontrolled()
+                .expect("ordinary routine local name")
+        },
+    )
 }
+
+mod names_production;
+pub use names_production::{
+    routine_local_name_with_control, routine_returns_anonymous_record_with_control,
+};
 
 pub fn routine_kind(def: &CreateFunction) -> &'static str {
     if def.is_procedure {

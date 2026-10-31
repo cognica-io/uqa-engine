@@ -46,7 +46,7 @@ fn dependencies_follow_bound_relations_through_views_ctes_and_write_targets() {
     ] {
         let (_, dependencies) = analyze(sql);
         assert_eq!(
-            dependencies.relations,
+            dependencies.relations.iter().copied().collect::<BTreeSet<_>>(),
             expected.into_iter().collect(),
             "{sql}"
         );
@@ -66,12 +66,20 @@ fn dependencies_record_selected_overloads_and_stored_view_calls_without_routine_
     ] {
         let (_, dependencies) = analyze(sql);
         assert_eq!(
-            dependencies.relations,
+            dependencies
+                .relations
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
             relations.into_iter().collect(),
             "{sql}"
         );
         assert_eq!(
-            dependencies.routines,
+            dependencies
+                .routines
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
             routines.into_iter().collect(),
             "{sql}"
         );
@@ -87,7 +95,14 @@ fn ordered_oid_inputs_freeze_scalar_and_array_values_but_only_scalar_relations_a
     let (plan, dependencies) = analyze(
         "SELECT 'base'::regclass, '23'::oid, '{array_only}'::regclass[], ARRAY['array_item'::regclass], nextval('sequence_input')",
     );
-    assert_eq!(dependencies.relations, BTreeSet::from([23, 101, 302, 303]));
+    assert_eq!(
+        dependencies
+            .relations
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([23, 101, 302, 303])
+    );
     let mut frozen_array = false;
     plan.visit_scalar_expressions(&mut |expression| {
         expression.visit(&mut |expression| {
@@ -198,5 +213,12 @@ fn cycle_mark_inputs_contribute_dependencies_after_their_original_leaves_are_rew
     let (_, dependencies) = analyze(
         "WITH RECURSIVE walk(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM walk WHERE n<2) CYCLE n SET seen TO regclass 'base' DEFAULT regclass 'array_item' USING path SELECT n FROM walk",
     );
-    assert_eq!(dependencies.relations, BTreeSet::from([101, 302]));
+    assert_eq!(
+        dependencies
+            .relations
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([101, 302])
+    );
 }

@@ -47,7 +47,7 @@ pub struct TableAlterContext<'a, S: Clone + 'static> {
     pub addition: ColumnAdditionContext<'a, S>,
     pub columns: ColumnAlterContext<'a, S>,
     /// Planner-owned simplification after SQL has resolved the transform and its assignment type.
-    pub plan_type_transform: fn(&mut uqa_sql::ScalarExpr) -> Result<(), SQLError>,
+    pub expressions: &'a dyn crate::query::relational::QueryExpressionFactory<S>,
     pub removal: ColumnRemovalContext<'a>,
     pub identities: super::identity::IdentityAlterContext<'a>,
     pub lifecycle: &'a dyn TableLifecycle,

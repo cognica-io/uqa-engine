@@ -29,7 +29,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let target = resolve_view_target(context.mutation.rules.views, &stmt.table)?;
+    let target = resolve_view_target(context, &stmt.table)?;
     if stmt.on_conflict.is_some() {
         return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
@@ -76,7 +76,10 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             )?
             .is_empty();
     let (statement_commands, _running_statement) =
-        crate::mutation::statement_end::statement_commands(inherited_ctes);
+        crate::mutation::statement_end::statement_commands(
+            context.query.source.ctes,
+            inherited_ctes,
+        )?;
     let view_statement = crate::mutation::triggers::queue::StatementEvent::new(
         &target.canonical_name,
         uqa_sql::ast::TriggerEvent::Insert,
@@ -105,7 +108,10 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 stmt.relations_bound,
             )?);
             if let Some(parent) = inherited_ctes {
-                ctes.inherit_cte_bindings(parent);
+                ctes.inherit_cte_bindings_with_control(
+                    parent,
+                    &context.query.source.ctes.production_resources()?.control(),
+                )?;
             }
             ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
@@ -123,7 +129,11 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
+            let arena_resources = context.query.source.ctes.production_resources()?;
+            ctes.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &stmt.subqueries,
+                &arena_resources.control(),
+            )?;
             let mut has_rules = false;
             for relation in std::iter::once(&target.canonical_name).chain(&stmt.view_rule_relations)
             {
@@ -131,10 +141,8 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     .mutation
                     .rules
                     .rules
-                    .analysis
-                    .rules
-                    .rules_for(relation, uqa_sql::ast::RuleEvent::Insert)?
-                    .is_empty()
+                    .capture_rules(relation, uqa_sql::ast::RuleEvent::Insert)?
+                    .is_empty()?
                 {
                     has_rules = true;
                     break;
@@ -142,19 +150,11 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             }
             let query_rules = (has_rules || stmt.rule_values_input.is_some())
                 .then(|| {
-                    uqa_sql::semantics::rules::binding::InsertRuleQueries::bind(
-                        context.mutation.rules.rules.analysis,
-                        stmt,
-                        &|table| {
-                            context
-                                .mutation
-                                .rules
-                                .rules
-                                .security
-                                .privilege_subject(table)
-                        },
-                        ctes.privilege_subject()?,
-                    )
+                    context
+                        .mutation
+                        .rules
+                        .rules
+                        .bind_insert_queries(stmt, ctes.privilege_subject()?)
                 })
                 .transpose()?;
             if let Some(queries) = &query_rules {
@@ -186,7 +186,9 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     .as_ref()
                     .and_then(|queries| queries.original.as_deref())
                     .unwrap_or(source);
-                let mut source_scope = ctes.returning_statement_snapshot_scope();
+                let mut source_scope = ctes.returning_statement_snapshot_scope_with_control(
+                    &context.query.source.ctes.production_resources()?.control(),
+                )?;
                 source_scope.enable_command_progress_streaming();
                 crate::query::statement::execute_query_plan_output(
                     &read_context.query,

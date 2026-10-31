@@ -9,12 +9,17 @@
 mod alias_constants;
 mod collations;
 mod format_type;
+mod input;
 pub(crate) use alias_constants::AliasConstantOutput;
 pub(crate) use collations::format_expression_collation;
-pub use collations::{resolve_expression_collation_oid, resolve_regcollation_oid};
+pub use collations::{
+    resolve_expression_collation_oid, resolve_expression_collation_oid_with_control,
+    resolve_regcollation_oid,
+};
+pub use input::{resolve_oid_alias_input_with_control, resolved_relation_dependency_with_control};
 pub mod relation_oid;
 mod row_types;
-pub use format_type::{format_type_name, format_type_value};
+pub use format_type::{format_type_name, format_type_name_with_control, format_type_value};
 use relation_oid::lookup_regclass_oid;
 pub use relation_oid::resolve_bound_regclass_oid;
 pub use row_types::{format_type_object, resolve_type_object_oid, row_type_relation};
@@ -40,8 +45,11 @@ use procedures::{format_regproc, format_regprocedure, lookup_regprocedure_oid};
 pub use procedures::{resolve_regprocedure_input_oid, routine_name_parts};
 
 pub use type_names::{
-    catalog_routine_type_oid, catalog_user_type_identity, named_type_exists,
-    resolve_catalog_column_type, resolve_catalog_user_type_by_oid, CatalogEnumLabels,
+    catalog_routine_type_oid, catalog_routine_type_oid_with_control, catalog_user_type_identity,
+    catalog_user_type_identity_with_control, catalog_user_type_name_with_control,
+    named_type_exists, resolve_catalog_column_type, resolve_catalog_column_type_name_with_control,
+    resolve_catalog_column_type_with_control, resolve_catalog_user_type_by_oid,
+    resolve_catalog_user_type_by_oid_with_control, CatalogEnumLabels,
 };
 
 fn cross_database_reference(name: &str) -> SQLError {

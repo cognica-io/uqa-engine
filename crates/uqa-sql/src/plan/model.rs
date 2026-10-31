@@ -24,6 +24,32 @@ pub enum UnifiedPlan {
     Command(Box<CommandPlan>),
 }
 
+/// A statement root borrowed from either a complete plan or a utility's relational child. Borrowing does not copy the child or assert that its analysis or optimization has run.
+#[derive(Debug, Clone, Copy)]
+pub enum PlanRef<'a> {
+    Query(&'a QueryPlan),
+    Command(&'a CommandPlan),
+}
+
+impl PlanRef<'_> {
+    /// Create an ordinary mutable destination with one copy of the borrowed tree. Resource-controlled immutable copies use `clone_executable_with_control`.
+    pub fn to_owned(self) -> UnifiedPlan {
+        match self {
+            Self::Query(query) => UnifiedPlan::Query(Box::new(query.clone())),
+            Self::Command(command) => UnifiedPlan::Command(Box::new(command.clone())),
+        }
+    }
+}
+
+impl<'a> From<&'a UnifiedPlan> for PlanRef<'a> {
+    fn from(plan: &'a UnifiedPlan) -> Self {
+        match plan {
+            UnifiedPlan::Query(query) => Self::Query(query),
+            UnifiedPlan::Command(command) => Self::Command(command),
+        }
+    }
+}
+
 /// A relational query with its CTE scope and one relational root.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryPlan {
@@ -32,7 +58,7 @@ pub struct QueryPlan {
     pub analyzed_output: Option<crate::RowSchema>,
     /// Already-analyzed input layouts, consumed before any optimizer rewrite changes source topology. Stored syntax never retains them.
     #[serde(skip)]
-    pub analyzed_source: Option<std::sync::Arc<AnalyzedSource>>,
+    pub analyzed_source: Option<super::SharedAnalyzedSource>,
     /// Grouping-set equality established before scalar optimization. Stored SQL retains its original grouping syntax.
     #[serde(skip)]
     pub analyzed_grouping: Option<crate::semantics::grouping_sets::AnalyzedGroupingSets>,
@@ -807,6 +833,18 @@ pub enum CommandPlan {
 /// making the planner depend on the engine.
 pub trait AggregateClassifier {
     fn is_registered_aggregate(&self, name: &str) -> bool;
+
+    /// Native catalogs override this observation to admit lookup scratch before allocation. External classifiers keep their existing callback boundary.
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, crate::SQLError> {
+        control.check()?;
+        let registered = self.is_registered_aggregate(name);
+        control.check()?;
+        Ok(registered)
+    }
 }
 
 impl<F> AggregateClassifier for F

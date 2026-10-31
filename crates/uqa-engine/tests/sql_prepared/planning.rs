@@ -9,18 +9,30 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
-#[test]
-fn constant_planning_matches_postgresql() {
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_kv(2)]
+#[case::redb(3)]
+fn constant_planning_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = planning_provider(provider, &directory.path().join("constant-planning.db"));
     super::parameters::verify_parameters(
-        &Engine::new(),
+        &engine,
         include_str!("../../../../tests/parity/pg18/constant_planning_oracle.expected.json"),
     );
 }
 
-#[test]
-fn prepared_plan_error_order_matches_postgresql() {
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_kv(2)]
+#[case::redb(3)]
+fn prepared_plan_error_order_matches_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = planning_provider(provider, &directory.path().join("constant-order.db"));
     super::parameters::verify_parameters(
-        &Engine::new(),
+        &engine,
         include_str!(
             "../../../../tests/parity/pg18/prepared_plan_error_order_oracle.expected.json"
         ),
@@ -35,24 +47,28 @@ fn prepared_plan_error_order_matches_postgresql() {
 fn rule_input_planning_matches_postgresql(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("rule-planning.db");
-    let engine = match provider {
-        0 => Engine::new(),
-        1 => Engine::open(&path).unwrap(),
-        2 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_sqlite::SQLiteKeyValueStorage::open(&path).unwrap(),
-        ))
-        .unwrap(),
-        3 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_redb::RedbStorage::open(&path).unwrap(),
-        ))
-        .unwrap(),
-        _ => unreachable!(),
-    };
+    let engine = planning_provider(provider, &path);
     super::parameters::verify_parameters(
         &engine,
         include_str!("../../../../tests/parity/pg18/rule_input_planning_oracle.expected.json"),
     );
     engine.close().unwrap();
+}
+
+fn planning_provider(provider: usize, path: &std::path::Path) -> Engine {
+    match provider {
+        0 => Engine::new(),
+        1 => Engine::open(path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
 }
 
 fn assert_closed_empty_schema(engine: &Engine, table: &str) {

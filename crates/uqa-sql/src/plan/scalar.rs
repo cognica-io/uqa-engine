@@ -14,17 +14,75 @@ use crate::schema::retention::CatalogRetentionError;
 use resources::{Control, Lowering, Result};
 use source::{Node, Source};
 use uqa_core::{
-    memory::{Budgeted, MemoryBudget},
+    memory::{Budgeted, MemoryBudget, Produced, ProductionControl},
     CancellationToken,
 };
 
 mod binding;
 mod copy;
+mod lowering;
+pub(in crate::plan) use lowering::lower_scalar_with_arena;
+mod owned;
+pub(in crate::plan) use owned::windows::OwnedWindowSpec;
+pub(crate) use owned::ScalarMemory;
+pub use owned::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
 mod resources;
 mod source;
 mod window;
 
+/// A scalar's query slots belong to its enclosing query owner. Scalar-only consumers keep the rejection boundary; complete plan lowering supplies an admitted arena.
+pub(in crate::plan) trait QueryLowering {
+    fn parameter(&self, _expression: &Expr) -> Option<usize> {
+        None
+    }
+
+    fn append_owned(
+        &mut self,
+        query: crate::ast::SelectStmt,
+        aggregates: &dyn AggregateClassifier,
+    ) -> Result<usize>;
+
+    fn append_borrowed(
+        &mut self,
+        _query: &crate::ast::SelectStmt,
+        _aggregates: &dyn AggregateClassifier,
+    ) -> Result<usize> {
+        Err(CatalogRetentionError::UnexpectedSubquery)
+    }
+}
+
+impl QueryLowering for Vec<QueryPlan> {
+    fn append_owned(
+        &mut self,
+        query: crate::ast::SelectStmt,
+        aggregates: &dyn AggregateClassifier,
+    ) -> Result<usize> {
+        let index = self.len();
+        self.push(QueryPlan::lower_with(query, aggregates));
+        Ok(index)
+    }
+}
+
 impl super::ExpressionPlan {
+    /// Lower a borrowed scalar-only expression with destination admission. A query child is reported before publication so callers can decline scalar-only transformations without constructing an unowned query arena.
+    pub fn lower_scalar_with_control(
+        expression: &Expr,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<ScalarExpr>> {
+        control.check()?;
+        let mut lowering = Lowering {
+            control: control.budget().map(|_| Control::from_production(*control)),
+            owned_children: None,
+        };
+        let scalar = lowering.expression(
+            Source::Borrowed(expression),
+            &super::NoRegisteredAggregates,
+            &mut Vec::new(),
+        )?;
+        let memory = lowering.control.map(|control| control.memory);
+        Ok(control.finish(scalar, memory)?)
+    }
+
     /// Lower a borrowed, validated column expression directly into admitted scalar IR. Destination strings, value payloads, bindings, vector capacities and boxes acquire the supplied allowance before allocation, and the result retains those leases. Both the retained definition's original cancellation and the invoking reader's cancellation remain active during lowering. This controls AST-to-IR production only; subsequent type binding and evaluation require their own resource contracts. Query children violate the validated column-expression invariant.
     pub fn lower_column_budgeted(
         expression: &Expr,
@@ -34,6 +92,7 @@ impl super::ExpressionPlan {
     ) -> Result<Budgeted<ScalarExpr>> {
         let mut lowering = Lowering {
             control: Some(Control::new(budget, original, invoking)),
+            owned_children: None,
         };
         let scalar = lowering.expression(
             Source::Borrowed(expression),
@@ -49,9 +108,12 @@ pub(super) fn lower_scalar_expression(
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> ScalarExpr {
-    Lowering { control: None }
-        .expression(Source::Owned(expression), aggregates, subqueries)
-        .expect("owned lowering has no admission failure")
+    Lowering {
+        control: None,
+        owned_children: None,
+    }
+    .expression(Source::Owned(expression), aggregates, subqueries)
+    .expect("owned lowering has no admission failure")
 }
 
 pub(super) fn lower_window_spec(
@@ -59,9 +121,12 @@ pub(super) fn lower_window_spec(
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> ScalarWindowSpec {
-    Lowering { control: None }
-        .window(Source::Owned(specification), aggregates, subqueries)
-        .expect("owned lowering has no admission failure")
+    Lowering {
+        control: None,
+        owned_children: None,
+    }
+    .window(Source::Owned(specification), aggregates, subqueries)
+    .expect("owned lowering has no admission failure")
 }
 
 impl Lowering<'_> {
@@ -69,13 +134,18 @@ impl Lowering<'_> {
         clippy::too_many_lines,
         reason = "plan lowering preserves exhaustive variants and structural identities"
     )]
-    fn expression(
+    fn expression_node(
         &mut self,
         expression: Source<'_, Expr>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<ScalarExpr> {
         self.check()?;
+        if let Source::Borrowed(expression) = &expression {
+            if let Some(number) = subqueries.parameter(expression) {
+                return Ok(ScalarExpr::Param(number));
+            }
+        }
         Ok(match expression.node() {
             Node::Star => ScalarExpr::Star,
             Node::QualifiedStar(name) => ScalarExpr::QualifiedStar(self.reference_name(name)?),
@@ -88,10 +158,8 @@ impl Lowering<'_> {
             Node::InternalColumn(column) => ScalarExpr::InternalColumn(column),
             Node::Literal(value) => ScalarExpr::Literal(self.value(value)?),
             Node::RetainedLiteral(value) => match value {
-                Source::Owned(value) => ScalarExpr::RetainedLiteral(Box::new(value.0)),
-                Source::Borrowed(value) => {
-                    ScalarExpr::RetainedLiteral(self.copy_retained_literal(&value.0)?)
-                }
+                Source::Owned(value) => ScalarExpr::RetainedLiteral(value.0),
+                Source::Borrowed(value) => ScalarExpr::RetainedLiteral(value.0.clone()),
             },
             Node::TypedLiteral {
                 value,
@@ -247,7 +315,7 @@ impl Lowering<'_> {
         &mut self,
         expression: Source<'_, Box<Expr>>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<Box<ScalarExpr>> {
         self.boxed(|this| this.expression(expression.unbox(), aggregates, subqueries))
     }
@@ -256,15 +324,13 @@ impl Lowering<'_> {
         &self,
         query: Source<'_, Box<crate::ast::SelectStmt>>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<usize> {
         self.check()?;
-        let Source::Owned(query) = query else {
-            return Err(CatalogRetentionError::UnexpectedSubquery);
-        };
-        let id = subqueries.len();
-        subqueries.push(QueryPlan::lower_with(*query, aggregates));
-        Ok(id)
+        match query {
+            Source::Owned(query) => subqueries.append_owned(*query, aggregates),
+            Source::Borrowed(query) => subqueries.append_borrowed(query, aggregates),
+        }
     }
 }
 

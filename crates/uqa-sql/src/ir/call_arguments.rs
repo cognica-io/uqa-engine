@@ -245,15 +245,33 @@ fn malformed_call_argument(message: &str) -> SQLError {
 pub fn analyze_expression_call_arguments(
     arguments: &[crate::plan::ExpressionPlan],
 ) -> Result<(Vec<ScalarCallArgument<'_>>, bool), SQLError> {
+    let (decoded, explicit) = analyze_expression_call_arguments_with_control(
+        arguments,
+        &ProductionControl::uncontrolled(),
+    )?;
+    Ok((
+        decoded
+            .into_uncontrolled()
+            .expect("ordinary procedure argument decoding"),
+        explicit,
+    ))
+}
+
+pub fn analyze_expression_call_arguments_with_control<'a>(
+    arguments: &'a [crate::plan::ExpressionPlan],
+    control: &ProductionControl<'_>,
+) -> Result<(Produced<Vec<ScalarCallArgument<'a>>>, bool), SQLError> {
+    let mut decoded = ProductionVec::new(*control);
     if matches!(arguments, [argument] if matches!(argument.scalar, ScalarExpr::Star)) {
-        return Ok((Vec::new(), false));
+        return Ok((decoded.finish()?, false));
     }
-    let decoded = arguments
-        .iter()
-        .map(|argument| scalar_call_argument(&argument.scalar))
-        .collect::<Result<Vec<_>, _>>()?;
-    let explicit_variadic = validate_scalar_call_arguments(&decoded)?;
-    Ok((decoded, explicit_variadic))
+    decoded.reserve(arguments.len())?;
+    for argument in arguments {
+        decoded.push_copy(scalar_call_argument(&argument.scalar)?)?;
+    }
+    let decoded = decoded.finish()?;
+    let explicit = validate_scalar_call_arguments(&decoded)?;
+    Ok((decoded, explicit))
 }
 
 #[cfg(test)]

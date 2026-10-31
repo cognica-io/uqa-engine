@@ -7,14 +7,13 @@
 //! Query-block validation and physical source selection.
 
 use super::{
-    binding_context, ensure_select_privileges_for_query_block, execute_query_block_operator_output,
-    expand_from_star_columns, overlay_outer_schema, projection_columns,
-    run_select_without_from_output, run_single_foreign_select_output,
-    run_single_table_select_output, validate_query_block_expression_types,
-    validate_query_block_references, validate_query_set_contexts,
-    validate_source_set_contexts_before_build, with_query_table_pseudo_columns, ComputePlan,
-    CteScope, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
-    SingleRelation, SourceContext, SourcePlan,
+    binding_context, ensure_select_privileges_for_query_block, expand_from_star_columns,
+    overlay_outer_schema, projection_columns, run_select_without_from_output,
+    run_single_foreign_select_output, run_single_table_select_output,
+    validate_query_block_expression_types, validate_query_block_references,
+    validate_query_set_contexts, validate_source_set_contexts_before_build,
+    with_query_table_pseudo_columns, ComputePlan, CteScope, QueryBlockPlan, QueryOutput,
+    QueryOutputMode, SQLError, SQLParam, ScalarExpr, SingleRelation, SourceContext, SourcePlan,
 };
 use crate::query::binding::sources::{
     bind_query_block_with_sources, ensure_select_with_sources, BoundQueryBlock, SourceBindings,
@@ -61,16 +60,25 @@ fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
     source_schema: &crate::RowSchema,
 ) -> Result<(crate::RowSchema, Option<crate::RowSchema>), SQLError> {
     let outer = ctes.row_lock_outer_row().map(|row| row.schema.clone());
-    let source_schema = with_query_table_pseudo_columns(source_schema);
-    let expression_schema = overlay_outer_schema(&source_schema, outer.as_ref());
+    let resources = context.ctes.production_resources()?;
+    let source_schema = uqa_sql::binding::with_query_table_pseudo_columns_with_control(
+        source_schema,
+        &resources.control(),
+    )?;
+    let expression_schema = uqa_sql::binding::overlay_outer_schema_with_control(
+        &source_schema,
+        outer.as_ref(),
+        &resources.control(),
+    )?;
     validate_query_block_expression_types(
         context.ctes.routines,
         stmt,
         &expression_schema,
         params,
         ctes,
+        &context.ctes.production_resources()?.control(),
     )?;
-    let type_resolver = context.relational.expression_scope(ctes.clone());
+    let type_resolver = context.relational.expression_scope(ctes)?;
     validate_query_set_contexts(
         context.relational.catalog,
         type_resolver.as_ref(),
@@ -98,6 +106,7 @@ fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
             params,
             ctes,
             outer.as_ref(),
+            &context.ctes.production_resources()?.control(),
         )?;
         return Ok((expression_schema, outer));
     };
@@ -166,6 +175,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                     params,
                     ctes,
                     outer,
+                    &context.ctes.production_resources()?.control(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_foreign_select_output(
@@ -224,6 +234,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                     params,
                     ctes,
                     outer,
+                    &context.ctes.production_resources()?.control(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_table_select_output(
@@ -267,6 +278,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             params,
             ctes,
             outer,
+            &context.ctes.production_resources()?.control(),
         )?;
     }
     let column_prune = context
@@ -283,7 +295,10 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
     )?;
     let sources = ensure_select_with_sources(stmt, from, ctes, sources)?;
     let operator = {
-        let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+        let mut scoped_ctes = ctes.enter_source_row_locks_with_control(
+            source_row_locks,
+            &context.ctes.production_resources()?.control(),
+        )?;
         if context.planning.block_input_is_empty(stmt) {
             crate::query::sources::empty_source_operator(
                 context,
@@ -305,24 +320,46 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
         }
     };
     let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
-    let rewritten =
-        uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(stmt, operator.row_schema());
-    let original =
-        uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(block, operator.row_schema());
+    let (operator, (rewritten, original)) =
+        crate::physical::construction::OperatorBuild::run(operator, |operator| {
+            let resources = context.ctes.production_resources()?;
+            let control = resources.control();
+            let rewritten = uqa_sql::binding::ExecutionQueryBlock::borrowed(stmt)
+                .resolve_outer_rewrites(operator.row_schema(), &control)?;
+            let original = uqa_sql::binding::ExecutionQueryBlock::borrowed(block)
+                .resolve_outer_rewrites(operator.row_schema(), &control)?;
+            Ok((rewritten, original))
+        })?;
     let stmt = rewritten.as_ref();
     let block = original.as_ref();
     let mut rewritten_scope;
-    let ctes = if rewrite_subqueries {
-        rewritten_scope = ctes.enter_scalar_subqueries(&stmt.subqueries);
-        &mut *rewritten_scope
+    let (operator, ctes) = if rewrite_subqueries {
+        let (operator, scope) =
+            crate::physical::construction::OperatorBuild::run(operator, |_| {
+                let arena_resources = context.ctes.production_resources()?;
+                ctes.enter_scalar_subqueries_with_control(
+                    &stmt.subqueries,
+                    &arena_resources.control(),
+                )
+            })?;
+        rewritten_scope = scope;
+        (operator, &mut *rewritten_scope)
     } else {
-        ctes
+        (operator, ctes)
     };
     let (operator, (columns, physical_filter)) =
         crate::physical::construction::OperatorBuild::run(operator, |operator| {
             let source_schema = operator.row_schema().clone();
-            let projection_schema = with_query_table_pseudo_columns(&source_schema);
-            let projection_schema = overlay_outer_schema(&projection_schema, outer);
+            let resources = context.ctes.production_resources()?;
+            let projection_schema = uqa_sql::binding::with_query_table_pseudo_columns_with_control(
+                &source_schema,
+                &resources.control(),
+            )?;
+            let projection_schema = uqa_sql::binding::overlay_outer_schema_with_control(
+                &projection_schema,
+                outer,
+                &resources.control(),
+            )?;
             validate_query_block_references(
                 context.ctes.routines,
                 stmt,
@@ -330,6 +367,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
                 outer,
+                &context.ctes.production_resources()?.control(),
             )?;
             let physical_filter =
                 context
@@ -343,7 +381,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             )?;
             Ok((columns, physical_filter))
         })?;
-    execute_query_block_operator_output(
+    crate::query::relational::output::execute_query_block_operator_output_owned(
         context.relational,
         operator,
         physical_filter,
@@ -433,7 +471,8 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     output_mode: QueryOutputMode<'a>,
 ) -> Result<QueryOutput, SQLError> {
     let inherited_lock_identities = ctes.lock_identities.emit;
-    let mut scoped_ctes = ctes.enter_query_block(block);
+    let arena_resources = context.ctes.production_resources()?;
+    let mut scoped_ctes = ctes.enter_query_block_with_control(block, &arena_resources.control())?;
     let row_identity_barrier = block.distinct
         || !block.distinct_on.is_empty()
         || matches!(block.compute, ComputePlan::Aggregate | ComputePlan::Window);
@@ -446,7 +485,11 @@ pub fn execute_query_block_output<'a, S: Clone + Send + Sync + 'static>(
     let scoped_ctes = if block.deferred_outer_rewrites.is_empty() {
         &mut *scoped_ctes
     } else {
-        rewritten_scope = scoped_ctes.enter_scalar_subqueries(&bound.block.subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        rewritten_scope = scoped_ctes.enter_scalar_subqueries_with_control(
+            &bound.block.subqueries,
+            &arena_resources.control(),
+        )?;
         &mut *rewritten_scope
     };
     run_bound_query_block_output(
@@ -482,8 +525,11 @@ fn prepare_query_block<'a, S: Clone + Send + Sync + 'static>(
         block,
         params,
         ctes,
-        outer,
-        defer_distinct_limit,
+        uqa_sql::binding::ExecutionBindingOptions {
+            outer,
+            defer_distinct_limit,
+        },
         None,
+        &context.ctes.production_resources()?.control(),
     )
 }

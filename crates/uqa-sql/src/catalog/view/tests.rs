@@ -35,7 +35,7 @@ fn named_view_schemas_preserve_collations_and_shared_composite_fields() {
     assert_eq!(output.column_collation(0), Some(950));
     assert_eq!(output.column_collation(1), Some(0));
     assert_eq!(output.column_collation(2), Some(0));
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(crate::schema::RecordFields::shares_storage(
         output.record_fields(2).unwrap(),
         &fields
     ));

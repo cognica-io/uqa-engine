@@ -28,6 +28,7 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
+mod columns;
 #[cfg(test)]
 mod tests;
 
@@ -132,6 +133,32 @@ impl EventAnalysisContext<'_> {
         RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
             SQLError::Internal(format!("decode bound rule relation `{canonical}`: {error}"))
         })
+    }
+
+    pub fn resolve_rule_relation_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationIdentity>, SQLError> {
+        let resolution = self
+            .relations
+            .resolve_bound_relation_kind_with_control(name, control)?;
+        let RelationResolution::Found(canonical, "table" | "view" | "materialized view") =
+            &*resolution
+        else {
+            return Err(SQLError::UnknownTable(
+                control.copy_text(name)?.into_parts().0,
+            ));
+        };
+        let reference = RelationIdentity::try_borrowed_reference(canonical).map_err(|error| {
+            match control.format(format_args!(
+                "decode bound rule relation `{canonical}`: {error}"
+            )) {
+                Ok(message) => SQLError::Internal(message.into_parts().0),
+                Err(error) => error.into(),
+            }
+        })?;
+        Ok(reference.identity_with_control(uqa_core::RelationName::decoded("public"), control)?)
     }
 
     pub fn rule_relation_columns(&self, name: &str) -> Result<Vec<(String, ColumnType)>, SQLError> {

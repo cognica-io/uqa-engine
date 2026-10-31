@@ -198,8 +198,8 @@ pub use context::{
     cast_value_with_scoped_resolution, cast_value_with_type_resolution,
     cast_value_with_type_resolution_with_control, coercion_type_name, format_regtype_value,
     format_regtype_value_with_control, read_catalog_array_input, read_catalog_input,
-    CatalogCastScope, CatalogInputFunctions, EngineHook, EvalContext, RetainedCatalogCast,
-    RowKeySpace, RowLookup, ScopedCastResult,
+    read_catalog_input_with_control, CatalogCastScope, CatalogInputFunctions, EngineHook,
+    EvalContext, RetainedCatalogCast, RowKeySpace, RowLookup, ScopedCastResult,
 };
 pub(crate) use context::{
     format_regtype_value_with_catalog_and_control, requires_catalog_constant_input,

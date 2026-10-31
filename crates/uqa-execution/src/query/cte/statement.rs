@@ -8,7 +8,6 @@
 
 use super::{install_scheduled_ctes, CteExecutionContext};
 use crate::query::CteScope;
-use std::collections::BTreeMap;
 use uqa_core::{
     memory::{Produced, ProductionControl, ProductionVec},
     RelationName,
@@ -19,7 +18,7 @@ use uqa_sql::{
         cte_strategy::{order_statement_ctes_with_control, ScheduledCte},
         order_cte_plans_with_control,
     },
-    SQLError, SQLParam, ScalarExpr,
+    SQLError, SQLParam,
 };
 
 /// Materialize the selected WITH items in their native before/after-primary order. The root-reference producer borrows definition names under the same allowance.
@@ -30,7 +29,7 @@ pub fn materialize_statement_ctes<'a, S: Clone>(
     primary_references: impl FnOnce(ProductionControl<'_>) -> Result<Produced<Vec<&'a str>>, SQLError>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
-    output_filters: &BTreeMap<String, (String, ScalarExpr)>,
+    output_filters: &uqa_sql::plan::source_projection::CteOutputFilters,
 ) -> Result<(), SQLError> {
     let retained = context.queries.read_control()?;
     let control = ProductionControl::new(
@@ -63,7 +62,7 @@ pub(crate) fn install_statement_ctes<'a, S: Clone>(
     primary_references: impl FnOnce(ProductionControl<'_>) -> Result<Produced<Vec<&'a str>>, SQLError>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
-    output_filters: &BTreeMap<String, (String, ScalarExpr)>,
+    output_filters: &uqa_sql::plan::source_projection::CteOutputFilters,
 ) -> Result<(), SQLError> {
     if !scheduled.iter().any(|cte| cte.plan.body.modifies_data()) {
         return install_scheduled_ctes(
@@ -95,11 +94,7 @@ pub(crate) fn install_statement_ctes<'a, S: Clone>(
     )?;
     let commands = match scope.statement_commands() {
         Some(commands) => std::sync::Arc::clone(commands),
-        None => {
-            let commands = std::sync::Arc::default();
-            scope.set_statement_commands(std::sync::Arc::clone(&commands));
-            commands
-        }
+        None => crate::query::scope::StatementCommands::with_control(&control)?,
     };
     let is_folded = |plan: &CtePlan| {
         folded
@@ -107,12 +102,13 @@ pub(crate) fn install_statement_ctes<'a, S: Clone>(
             .is_ok()
     };
     commands.begin_data_modifying_with(
-        order
-            .postponed
-            .iter()
-            .map(|plan| ((*plan).clone(), is_folded(plan)))
-            .collect(),
-    );
+        order.postponed.iter().map(|plan| ScheduledCte {
+            plan,
+            deferred: is_folded(plan),
+        }),
+        &control,
+    )?;
+    scope.set_statement_commands(commands);
     install_scheduled_ctes(
         context,
         order.primary.iter().map(|plan| ScheduledCte {
@@ -152,7 +148,7 @@ pub fn materialize_command_ctes<'a, S: Clone>(
         |_| Ok(primary),
         params,
         scope,
-        &BTreeMap::new(),
+        &uqa_sql::plan::source_projection::CteOutputFilters::new(),
     )
 }
 
@@ -168,12 +164,15 @@ pub fn finish_statement_ctes<S: Clone>(
     let postponed = commands.take_scheduled_postponed();
     install_scheduled_ctes(
         context,
-        postponed.iter().map(|(plan, deferred)| ScheduledCte {
-            plan,
-            deferred: *deferred,
-        }),
+        postponed
+            .iter()
+            .flat_map(|schedule| schedule.iter())
+            .map(|(plan, deferred)| ScheduledCte {
+                plan,
+                deferred: *deferred,
+            }),
         params,
         scope,
-        &BTreeMap::new(),
+        &uqa_sql::plan::source_projection::CteOutputFilters::new(),
     )
 }

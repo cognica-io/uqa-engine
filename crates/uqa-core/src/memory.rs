@@ -14,15 +14,18 @@ use std::sync::Arc;
 use triomphe::Arc as StrongArc;
 
 mod deque;
+mod hash_index;
 mod hash_set;
 mod heap;
 mod map;
+mod observation;
 mod production;
 mod small_vec;
 mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
+pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter};
 pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
 pub use map::{
@@ -30,8 +33,10 @@ pub use map::{
     BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter,
     OwnedSetIter, PreparedMapEntry,
 };
+pub use observation::{AllocationObserver, AllocationUsage, ObserveAllocations};
 pub use production::{
-    Produced, ProductionControl, ProductionSmallVec, ProductionString, ProductionVec,
+    OwnedProductionControl, Produced, ProductionControl, ProductionMap, ProductionSmallVec,
+    ProductionString, ProductionVec,
 };
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;

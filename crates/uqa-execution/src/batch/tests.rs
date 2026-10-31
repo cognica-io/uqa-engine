@@ -10,7 +10,24 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uqa_sql::ColumnType;
 
+mod constants;
 mod materialization;
+
+#[test]
+fn wide_null_extension_has_no_width_sized_allocation() {
+    let mut row = None;
+    let allocation = allocation_counter::measure(|| {
+        row = Some(PhysicalRow::nulls(100_000));
+    });
+    assert_eq!(allocation.bytes_total, 0, "{allocation:?}");
+    let row = row.unwrap();
+    assert_eq!(row.value(99_999), Some(&Value::Null));
+    assert_eq!(row.value(100_000), None);
+    assert_eq!(
+        row.clone().into_prefix(2).into_physical_values(),
+        vec![Value::Null; 2]
+    );
+}
 
 #[test]
 #[cfg(target_pointer_width = "64")]
@@ -163,14 +180,20 @@ fn join_composes_fragments_without_cloning_values() {
     let output_schema = RowSchema::join(&left_schema, &right_schema, Vec::new());
     let left = PhysicalRow::from_values(vec![Value::Str("left".repeat(128))]);
     let right = PhysicalRow::from_values(vec![Value::Str("right".repeat(128))]);
-    let left_fragment = Arc::clone(&left.fragments[0].values);
-    let right_fragment = Arc::clone(&right.fragments[0].values);
+    let left_fragment = Arc::clone(left.fragments[0].stored_values());
+    let right_fragment = Arc::clone(right.fragments[0].stored_values());
 
     let joined = PhysicalRow::concat(&left, &right);
 
     assert_eq!(joined.fragment_count(), 2);
-    assert!(Arc::ptr_eq(&joined.fragments[0].values, &left_fragment));
-    assert!(Arc::ptr_eq(&joined.fragments[1].values, &right_fragment));
+    assert!(Arc::ptr_eq(
+        joined.fragments[0].stored_values(),
+        &left_fragment
+    ));
+    assert!(Arc::ptr_eq(
+        joined.fragments[1].stored_values(),
+        &right_fragment
+    ));
     let view = output_schema.view(&joined);
     assert_eq!(view.get("l.value"), left_fragment.first());
     assert_eq!(view.get("r.value"), right_fragment.first());
@@ -182,14 +205,20 @@ fn lock_rows_clone_keeps_shared_fragments_and_concatenated_origins() {
         .with_lock_origin(RowLockOrigin::new("accounts", "public.accounts", 1));
     let right = PhysicalRow::from_values(vec![Value::Str("right".repeat(128))])
         .with_lock_origin(RowLockOrigin::new("owners", "public.owners", 2));
-    let left_fragment = Arc::clone(&left.fragments[0].values);
-    let right_fragment = Arc::clone(&right.fragments[0].values);
+    let left_fragment = Arc::clone(left.fragments[0].stored_values());
+    let right_fragment = Arc::clone(right.fragments[0].stored_values());
     let joined = PhysicalRow::concat(&left, &right);
     let locked = joined.clone();
 
     assert_eq!(locked.fragment_count(), 2);
-    assert!(Arc::ptr_eq(&locked.fragments[0].values, &left_fragment));
-    assert!(Arc::ptr_eq(&locked.fragments[1].values, &right_fragment));
+    assert!(Arc::ptr_eq(
+        locked.fragments[0].stored_values(),
+        &left_fragment
+    ));
+    assert!(Arc::ptr_eq(
+        locked.fragments[1].stored_values(),
+        &right_fragment
+    ));
     assert_eq!(locked.lock_origins().len(), 2);
     assert_eq!(locked.lock_origins()[0].doc_id, 1);
     assert_eq!(locked.lock_origins()[1].doc_id, 2);
@@ -240,7 +269,7 @@ fn shared_storage_projection_remaps_without_cloning_values() {
     let schema = RowSchema::new(vec!["number".into(), "missing".into(), "text".into()]);
     let view = schema.view(&row);
 
-    assert!(Arc::ptr_eq(&row.fragments[0].values, &stored));
+    assert!(Arc::ptr_eq(row.fragments[0].stored_values(), &stored));
     assert_eq!(view.get("number"), Some(&Value::Int(7)));
     assert_eq!(view.get("missing"), Some(&Value::Null));
     assert_eq!(view.get("text"), stored.first());
@@ -275,9 +304,9 @@ fn canonical_projection_preserves_public_columns_and_hidden_alias_slots() {
     );
     let projected = RowSchema::append(&aliased, &["value".into()]);
     let source = PhysicalRow::from_values(vec![Value::Str("source".into())]);
-    let source_values = Arc::clone(&source.fragments[0].values);
+    let source_values = Arc::clone(source.fragments[0].stored_values());
     let source = source.append_values(vec![Value::Str("projected".into())]);
-    let projected_values = Arc::clone(&source.fragments[1].values);
+    let projected_values = Arc::clone(source.fragments[1].stored_values());
 
     let (canonical, slots) = projected.canonical_projection();
     let row = source.project_slots(&slots);
@@ -290,8 +319,14 @@ fn canonical_projection_preserves_public_columns_and_hidden_alias_slots() {
         view.qualified_column("source", "value"),
         Some(&Value::Str("source".into()))
     );
-    assert!(Arc::ptr_eq(&row.fragments[0].values, &projected_values));
-    assert!(Arc::ptr_eq(&row.fragments[1].values, &source_values));
+    assert!(Arc::ptr_eq(
+        row.fragments[0].stored_values(),
+        &projected_values
+    ));
+    assert!(Arc::ptr_eq(
+        row.fragments[1].stored_values(),
+        &source_values
+    ));
 }
 
 #[test]
@@ -326,7 +361,7 @@ fn physical_relayout_shares_fragments_and_restores_hidden_alias_slots() {
         Value::Str("source".into()),
     ])
     .with_lock_origin(RowLockOrigin::new("source", "public.source", 7));
-    let stored = Arc::clone(&row.fragments[0].values);
+    let stored = Arc::clone(row.fragments[0].stored_values());
 
     let relaid = source_schema
         .relayout_physical_row(row, &target_schema)
@@ -338,7 +373,7 @@ fn physical_relayout_shares_fragments_and_restores_hidden_alias_slots() {
         view.qualified_column("source", "value"),
         Some(&Value::Str("source".into()))
     );
-    assert!(Arc::ptr_eq(&relaid.fragments[0].values, &stored));
+    assert!(Arc::ptr_eq(relaid.fragments[0].stored_values(), &stored));
     assert_eq!(relaid.lock_origins().len(), 1);
 }
 
@@ -349,7 +384,7 @@ fn mixed_projection_clones_neither_direct_values_nor_lock_origins() {
         Value::Str("second".repeat(64)),
     ])
     .with_lock_origin(RowLockOrigin::new("source", "public.source", 11));
-    let stored = Arc::clone(&source.fragments[0].values);
+    let stored = Arc::clone(source.fragments[0].stored_values());
     let origins = Arc::clone(source.lock_origins.as_ref().unwrap());
 
     let projected = source.project_with_values([
@@ -363,8 +398,8 @@ fn mixed_projection_clones_neither_direct_values_nor_lock_origins() {
     assert_eq!(view.get("second"), stored.get(1));
     assert_eq!(view.get("computed"), Some(&Value::Int(7)));
     assert_eq!(view.get("first"), stored.first());
-    assert!(Arc::ptr_eq(&projected.fragments[0].values, &stored));
-    assert!(Arc::ptr_eq(&projected.fragments[2].values, &stored));
+    assert!(Arc::ptr_eq(projected.fragments[0].stored_values(), &stored));
+    assert!(Arc::ptr_eq(projected.fragments[2].stored_values(), &stored));
     assert!(Arc::ptr_eq(
         projected.lock_origins.as_ref().unwrap(),
         &origins
@@ -410,13 +445,16 @@ fn consuming_prefix_reuses_unique_fragment_and_drops_suffix() {
         Value::Int(7),
         Value::Int(11),
     ]);
-    let storage_address = Arc::as_ptr(&source.fragments[0].values);
+    let storage_address = Arc::as_ptr(source.fragments[0].stored_values());
 
     let prefix = source.into_prefix(1);
 
-    assert_eq!(Arc::as_ptr(&prefix.fragments[0].values), storage_address);
-    assert_eq!(prefix.fragments[0].values.len(), 1);
-    assert!(prefix.fragments[0].projection.is_none());
+    assert_eq!(
+        Arc::as_ptr(prefix.fragments[0].stored_values()),
+        storage_address
+    );
+    assert_eq!(prefix.fragments[0].stored_values().len(), 1);
+    assert!(prefix.fragments[0].projection().is_none());
 }
 
 #[test]

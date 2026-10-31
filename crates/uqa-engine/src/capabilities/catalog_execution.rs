@@ -17,6 +17,31 @@ use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::catalog::session::{CursorMetadata, PreparedStatementMetadata};
 use uqa_sql::SQLError;
 
+impl SessionExecutionView<'_> {
+    fn relation_name_resolution_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationNameResolution>, SQLError> {
+        control.check()?;
+        let state = self.session.state.read();
+        let role = state.authorization.current();
+        RelationNameResolution::from_inputs_with_control(
+            state.search_path.iter().map(|name| {
+                if name == "$user" {
+                    role.name.as_str()
+                } else {
+                    name.as_str()
+                }
+            }),
+            control.format(format_args!("pg_temp_{}", self.session_id))?,
+            state.temporary_namespace.is_some(),
+            &RoleReference::Bound(role.clone()),
+            uqa_execution::catalog::RelationLookupMode::Dynamic,
+            control,
+        )
+    }
+}
+
 impl Engine {
     pub(crate) fn catalog_identity_reservation_context(
         &self,
@@ -52,8 +77,24 @@ impl CatalogSession for Engine {
         self.session_execution_view().relation_name_resolution()
     }
 
+    fn relation_name_resolution_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationNameResolution>, SQLError> {
+        self.session_execution_view()
+            .relation_name_resolution_with_control(control)
+    }
+
     fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError> {
         self.session_execution_view().show_parameter(name)
+    }
+    fn parameter_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.session_execution_view()
+            .parameter_name_with_control(name, control)
     }
     fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
         self.session_execution_view().parameter_settings()
@@ -85,8 +126,22 @@ impl CatalogSession for SessionExecutionView<'_> {
         SessionExecutionView::relation_name_resolution(self)
     }
 
+    fn relation_name_resolution_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationNameResolution>, SQLError> {
+        SessionExecutionView::relation_name_resolution_with_control(self, control)
+    }
+
     fn show_parameter(&self, name: &str) -> Result<(String, String), SQLError> {
         SessionExecutionView::show_parameter(self, name)
+    }
+    fn parameter_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        SessionExecutionView::parameter_name_with_control(self, name, control)
     }
     fn parameter_settings(&self) -> Vec<uqa_sql::semantics::parameters::setting::ParameterSetting> {
         SessionExecutionView::parameter_settings(self)
@@ -245,11 +300,18 @@ impl ViewCatalogCapabilities for Engine {
         catalog: &uqa_execution::catalog::CatalogReadView,
         resolution: &RelationNameResolution,
     ) -> Result<ViewCatalogMetadata, SQLError> {
+        let resources = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
         let retained = uqa_execution::catalog::view::metadata::RetainedViewCatalog {
             catalog,
             resolution,
             fallback: self,
             replica: self.session_replication_role_is_replica(),
+            control: control.capture(),
         };
         let metadata = uqa_sql::semantics::view_rewrite::view_updatability(
             uqa_sql::semantics::view_rewrite::context::ViewRewriteContext {
@@ -271,11 +333,18 @@ impl ViewCatalogCapabilities for Engine {
         catalog: &uqa_execution::catalog::CatalogReadView,
         resolution: &RelationNameResolution,
     ) -> Result<bool, SQLError> {
+        let resources = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
         let retained = uqa_execution::catalog::view::metadata::RetainedViewCatalog {
             catalog,
             resolution,
             fallback: self,
             replica: self.session_replication_role_is_replica(),
+            control: control.capture(),
         };
         uqa_sql::semantics::view_rewrite::has_instead_of_trigger(
             uqa_sql::semantics::view_rewrite::context::ViewRewriteContext {

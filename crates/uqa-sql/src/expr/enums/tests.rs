@@ -7,6 +7,126 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+#[test]
+fn enum_array_literal_admits_parsing_conversion_and_exact_retained_output() {
+    let catalog = Catalog(Arc::new(EnumTypeLabels {
+        type_oid: 16_400,
+        labels: vec![EnumTypeLabel {
+            oid: 16_402,
+            key: EnumLabelKey::from_bytes(vec![64]).unwrap(),
+            label: "blue".into(),
+        }],
+    }));
+    let target = ColumnType::Array(Box::new(ColumnType::Enum(crate::ast::EnumTypeReference {
+        schema: "public".into(),
+        name: "label_type".into(),
+        oid: 16_400,
+        array_oid: 16_401,
+    })));
+    let input = Value::Str("[-1:0][2:3]={{blue,NULL},{blue,blue}}".into());
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut output = None;
+    let allocation = allocation_counter::measure(|| {
+        output = Some(
+            fold_unknown_literal_with_control(Some(&catalog), &input, &target, &control)
+                .unwrap()
+                .unwrap(),
+        );
+    });
+    let output = output.unwrap();
+    assert_eq!(
+        allocation.bytes_current,
+        i64::try_from(budget.used()).unwrap()
+    );
+    assert_eq!(output.reserved_bytes(), budget.used());
+    let Value::Array(array) = &*output else {
+        panic!("enum array")
+    };
+    assert_eq!(array.dimensions(), &[2, 2]);
+    assert_eq!(array.lower_bounds(), &[-1, 2]);
+    assert_eq!(array.element_type_oid(), Some(16_400));
+    let Value::List(first) = &array.elements()[0] else {
+        panic!("first dimension")
+    };
+    assert!(
+        matches!(&first[0], Value::Enum(label) if label.type_oid() == 16_400 && label.label_oid() == Some(16_402))
+    );
+    assert_eq!(first[1], Value::Null);
+    drop(output);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn enum_array_literal_rejects_before_large_growth_and_releases_partial_conversion() {
+    let catalog = Catalog(Arc::new(EnumTypeLabels {
+        type_oid: 16_400,
+        labels: vec![EnumTypeLabel {
+            oid: 16_402,
+            key: EnumLabelKey::from_bytes(vec![64]).unwrap(),
+            label: "blue".into(),
+        }],
+    }));
+    let target = ColumnType::Array(Box::new(ColumnType::Enum(crate::ast::EnumTypeReference {
+        schema: "public".into(),
+        name: "label_type".into(),
+        oid: 16_400,
+        array_oid: 16_401,
+    })));
+    let input = Value::Str(format!("{{{}}}", "blue,".repeat(1 << 18)));
+    for mode in 0..3 {
+        let budget = MemoryBudget::new(4096);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let sibling = budget.reserve(37).unwrap();
+        if mode == 1 {
+            original.cancel();
+        }
+        if mode == 2 {
+            invoking.cancel();
+        }
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| {
+            result = Some(fold_unknown_literal_with_control(
+                Some(&catalog),
+                &input,
+                &target,
+                &control,
+            ));
+        });
+        assert_eq!(
+            result.unwrap().unwrap_err().sqlstate(),
+            Some(if mode == 0 { "53200" } else { "57014" })
+        );
+        assert!(allocation.bytes_total < 32 * 1024, "{allocation:?}");
+        assert_eq!(budget.used(), sibling.bytes());
+        drop(sibling);
+    }
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let invalid = Value::Str("{blue,missing}".into());
+    assert_eq!(
+        fold_unknown_literal_with_control(Some(&catalog), &invalid, &target, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("22P02")
+    );
+    assert_eq!(budget.used(), 0);
+    let recovered = fold_unknown_literal_with_control(
+        Some(&catalog),
+        &Value::Str("{blue}".into()),
+        &target,
+        &control,
+    )
+    .unwrap()
+    .unwrap();
+    drop(recovered);
+    assert_eq!(budget.used(), 0);
+}
+
 struct Catalog(Arc<EnumTypeLabels>);
 
 impl EnumLabelCatalog for Catalog {

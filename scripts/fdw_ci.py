@@ -40,7 +40,7 @@ INPUTS = (
     ".github/workflows/fdw-features.yml", ".github/scripts/free-linux-runner-disk.sh",
     "scripts/check-fdw-feature-isolation.py",
 )
-PLATFORMS = ["ubuntu-24.04", "macos-14"]
+PLATFORMS = ["ubuntu-24.04", "macos-15"]
 CONFIGURATIONS = ["memory", "arrow", "duckdb"]
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 

@@ -6,6 +6,12 @@
 
 //! PostgreSQL-compatible binding for `array_sort` and `array_reverse`.
 
+mod owned;
+mod preparation;
+mod production;
+pub(super) use owned::bind_owned_call;
+pub(super) use production::resolve_type_with_resolver_and_control;
+
 use super::call::{BindingCall, InferType};
 use super::common::base_type;
 use super::functions::named_argument_value;
@@ -18,38 +24,8 @@ use uqa_core::{
     Value,
 };
 
-pub(super) fn resolve_type(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-    explicit_variadic: bool,
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<ColumnType>, SQLError> {
-    select_overload(
-        name,
-        binding,
-        args,
-        argument_types,
-        explicit_variadic,
-        resolver,
-    )
-    .map(|selected| {
-        Some(match selected {
-            SelectedOverload::Builtin(return_type) => return_type,
-            SelectedOverload::User(overload) => overload.return_type,
-        })
-    })
-}
-
-enum SelectedOverload {
-    Builtin(ColumnType),
-    User(ResolvedFunctionOverload),
-}
-
 pub(crate) struct ResolvedArrayTransformCall {
     pub(crate) overload: Option<ResolvedFunctionOverload>,
-    pub(crate) builtin_argument_positions: Option<Vec<usize>>,
 }
 
 /// Select the same candidate during preparation and expression binding, before
@@ -63,32 +39,78 @@ pub(crate) fn resolve_array_transform_call(
     explicit_variadic: bool,
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ResolvedArrayTransformCall>, SQLError> {
+    Ok(resolve_array_transform_call_with_control(
+        name,
+        binding,
+        ArrayTransformArguments {
+            expressions: args,
+            types: argument_types,
+            parameters: params,
+            explicit_variadic,
+        },
+        resolver,
+        &ProductionControl::uncontrolled(),
+    )?
+    .map(|call| ResolvedArrayTransformCall {
+        overload: call.overload.map(|selected| {
+            selected
+                .into_uncontrolled()
+                .expect("ordinary array selection")
+        }),
+    }))
+}
+
+pub(crate) struct ControlledArrayTransformCall {
+    pub(crate) overload: Option<Produced<ResolvedFunctionOverload>>,
+    pub(crate) builtin_argument_positions: Option<Produced<Vec<usize>>>,
+}
+
+pub(crate) struct ArrayTransformArguments<'a> {
+    pub expressions: &'a [ScalarExpr],
+    pub types: &'a [Option<ColumnType>],
+    pub parameters: &'a [SQLParam],
+    pub explicit_variadic: bool,
+}
+
+pub(crate) fn resolve_array_transform_call_with_control(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    arguments: ArrayTransformArguments<'_>,
+    resolver: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<Option<ControlledArrayTransformCall>, SQLError> {
+    let ArrayTransformArguments {
+        expressions: args,
+        types: argument_types,
+        parameters: params,
+        explicit_variadic,
+    } = arguments;
+    control.check()?;
     if !is_function(name) {
         return Ok(None);
     }
-    let effective = argument_types_with_parameters(
-        name,
-        args,
-        argument_types,
-        params,
-        &ProductionControl::uncontrolled(),
-    )?;
-    let (overload, positions) = match select_overload(
+    let effective = argument_types_with_parameters(name, args, argument_types, params, control)?;
+    let (overload, positions) = match production::select_overload_with_control(
         name,
         binding,
         args,
         &effective,
         explicit_variadic,
         Some(resolver),
+        control,
     )? {
-        SelectedOverload::User(overload) => (Some(overload), None),
-        SelectedOverload::Builtin(_) => {
-            let names = args.iter().map(named_argument_name).collect::<Vec<_>>();
-            let positions = crate::expr::array_transform_argument_positions(name, &names)?;
-            (None, positions)
+        production::OwnedSelection::User(selected) => (Some(selected), None),
+        production::OwnedSelection::Builtin(_) => {
+            let names = argument_names_with_control(args, control)?;
+            (
+                None,
+                crate::expr::array_transform_argument_positions_with_control(
+                    name, &names, control,
+                )?,
+            )
         }
     };
-    Ok(Some(ResolvedArrayTransformCall {
+    Ok(Some(ControlledArrayTransformCall {
         overload,
         builtin_argument_positions: positions,
     }))
@@ -101,65 +123,27 @@ fn select_overload(
     argument_types: &[Option<ColumnType>],
     explicit_variadic: bool,
     resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<SelectedOverload, SQLError> {
-    if binding.and_then(|binding| binding.dispatch) == Some(FunctionDispatch::ArraySortJson) {
-        return resolve_builtin_type(name, args, argument_types).map(SelectedOverload::Builtin);
-    }
-    let builtin = if explicit_variadic
-        && args
-            .iter()
-            .any(|argument| named_argument_name(argument).is_some())
-    {
-        Err(undefined_function(name, args, argument_types))
-    } else {
-        resolve_builtin_type(name, args, argument_types)
-    };
-    let user = match resolve_user_overload(
+) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+    production::select_overload_with_control(
         name,
         binding,
         args,
         argument_types,
         explicit_variadic,
         resolver,
-    ) {
-        Err(error) if binding.is_none() && error.sqlstate() == Some("42883") => None,
-        other => other?,
-    };
-    if binding.is_some() {
-        return user.map(SelectedOverload::User).ok_or_else(|| {
-            builtin.err().unwrap_or_else(|| {
-                undefined_function(name, args, &user_argument_types(args, argument_types))
-            })
-        });
-    }
-    match (builtin, user) {
-        (Ok(return_type), None) => Ok(SelectedOverload::Builtin(return_type)),
-        (Ok(_), Some(user)) if user.is_exact_for_known_arguments() => {
-            Ok(SelectedOverload::User(user))
-        }
-        (Ok(_), Some(_)) => Err(ambiguous_function(name, args, argument_types)),
-        (Err(_), Some(user)) => Ok(SelectedOverload::User(user)),
-        (Err(error), None) => Err(error),
-    }
-}
-
-fn resolve_builtin_type(
-    name: &str,
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-) -> Result<ColumnType, SQLError> {
-    resolve_builtin_type_with_control(
-        name,
-        args,
-        argument_types,
         &ProductionControl::uncontrolled(),
     )
-    .map(|ty| {
-        ty.into_uncontrolled()
-            .expect("ordinary array transform type")
+    .map(|selected| match selected {
+        production::OwnedSelection::Builtin(_) => None,
+        production::OwnedSelection::User(selected) => Some(
+            selected
+                .into_uncontrolled()
+                .expect("ordinary array overload"),
+        ),
     })
 }
 
+#[cfg(test)]
 pub(super) fn resolve_type_with_control(
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -168,38 +152,15 @@ pub(super) fn resolve_type_with_control(
     explicit_variadic: bool,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    control.check()?;
-    let dispatched =
-        binding.and_then(|binding| binding.dispatch) == Some(FunctionDispatch::ArraySortJson);
-    let builtin = if !dispatched
-        && explicit_variadic
-        && args.iter().any(|arg| named_argument_name(arg).is_some())
-    {
-        Err(undefined_function(name, args, argument_types))
-    } else {
-        resolve_builtin_type_with_control(name, args, argument_types, control)
-    };
-    if !dispatched && binding.is_some() {
-        return Err(builtin.err().unwrap_or_else(|| {
-            function_resolution_error_borrowed(
-                "42883",
-                "does not exist",
-                name,
-                args,
-                args.iter().zip(argument_types).map(|(argument, ty)| {
-                    if matches!(
-                        named_argument_value(argument),
-                        ScalarExpr::Literal(Value::Str(_) | Value::Null)
-                    ) {
-                        None
-                    } else {
-                        ty.as_ref()
-                    }
-                }),
-            )
-        }));
-    }
-    builtin.map(Some)
+    resolve_type_with_resolver_and_control(
+        name,
+        binding,
+        args,
+        argument_types,
+        explicit_variadic,
+        None,
+        control,
+    )
 }
 
 fn resolve_builtin_type_with_control(
@@ -307,33 +268,6 @@ pub(super) fn argument_types_with_parameters(
     Ok(effective.finish()?)
 }
 
-fn resolve_user_overload(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-    explicit_variadic: bool,
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-    if binding.is_none() && name.to_ascii_lowercase().starts_with("pg_catalog.") {
-        return Ok(None);
-    }
-    let Some(resolver) = resolver else {
-        return Ok(None);
-    };
-    let argument_names = args
-        .iter()
-        .map(|argument| named_argument_name(argument).map(str::to_string))
-        .collect::<Vec<_>>();
-    resolver.resolve_function_overload(
-        name,
-        binding,
-        &argument_names,
-        &user_argument_types(args, argument_types),
-        explicit_variadic,
-    )
-}
-
 fn user_argument_types(
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
@@ -379,7 +313,7 @@ pub(super) fn bind_call(
         .iter()
         .map(|argument| super::scalar_type_inner(argument.value, schema, params, resolver))
         .collect::<Result<Vec<_>, _>>();
-    if let Ok(SelectedOverload::User(resolved)) = argument_types.and_then(|argument_types| {
+    if let Ok(Some(resolved)) = argument_types.and_then(|argument_types| {
         let argument_types = argument_types_with_parameters(
             &name,
             args,
@@ -455,52 +389,14 @@ pub(super) fn bind_call_in_place_with_control(
     if call.binding.is_some() || !is_function(&call.name) {
         return Ok(());
     }
-    for argument in &call.arguments {
-        if crate::scalar_call_argument(argument).is_err() {
-            return Ok(());
-        }
-    }
-    let mut positions = {
-        let names = argument_names_with_control(&call.arguments, control)?;
-        match crate::expr::array_transform_argument_positions_with_control(
-            &call.name, &names, control,
-        ) {
-            Ok(Some(positions)) => positions,
-            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
-            Ok(None) | Err(_) => return Ok(()),
-        }
+    let Some(preparation::Prepared {
+        mut positions,
+        mut cast_names,
+        selected,
+    }) = preparation::prepare(&call.name, &call.arguments, infer, control)?
+    else {
+        return Ok(());
     };
-    let mut cast_names: [Option<Produced<String>>; 3] = [None, None, None];
-    let mut selected = None;
-    for (argument, position) in call.arguments.iter().zip(positions.iter().copied()) {
-        let argument = named_argument_value(argument);
-        let ty = if position > 0
-            && matches!(
-                argument,
-                ScalarExpr::Param(_) | ScalarExpr::Literal(Value::Str(_) | Value::Null)
-            ) {
-            None
-        } else {
-            match super::call::infer_with_control(argument, infer, control) {
-                Ok(ty) => ty,
-                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
-                    return Err(error)
-                }
-                Err(_) => None,
-            }
-        };
-        if position > 0 && ty.is_none() {
-            cast_names[position] = Some(ColumnType::Boolean.catalog_name_with_control(control)?);
-        } else if position == 0
-            && local_name(&call.name).eq_ignore_ascii_case("array_sort")
-            && ty.as_deref().is_some_and(is_json_array_type)
-        {
-            selected = Some(FunctionBinding::dispatched_with_control(
-                FunctionDispatch::ArraySortJson,
-                control,
-            )?);
-        }
-    }
     let extra = control.reserve(cast_names.iter().flatten().count() * size_of::<ScalarExpr>())?;
     *memory = control.combine(memory.take(), extra);
     for destination in 0..call.arguments.len() {

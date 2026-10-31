@@ -6,6 +6,7 @@
 
 //! Logical-to-physical layout inspection and wildcard expansion.
 
+use super::identity_lookup::ColumnKey;
 use super::{ColumnIdentity, ColumnType, HashSet, RowSchema, NULL_SLOT};
 
 impl RowSchema {
@@ -191,10 +192,25 @@ impl RowSchema {
             .or_else(|| {
                 self.index
                     .aliases
-                    .get(&ColumnIdentity::unqualified(name))
+                    .get(&(None, name) as &dyn ColumnKey)
                     .copied()
             })
             .filter(|slot| *slot != NULL_SLOT)
+    }
+
+    pub(crate) fn has_qualified_slot_before(&self, qualifier: &str, boundary: usize) -> bool {
+        self.identities()
+            .iter()
+            .enumerate()
+            .any(|(logical, identity)| {
+                identity.qualifier() == Some(qualifier)
+                    && self.slot(logical).unwrap_or(NULL_SLOT) < boundary
+            })
+            || self
+                .index
+                .aliases
+                .iter()
+                .any(|(identity, slot)| identity.qualifier() == Some(qualifier) && *slot < boundary)
     }
 
     /// Physical projection layout for `qualifier.*` in relation-column order. Hidden identities introduced by `JOIN ... USING` remain selectable, so each side's wildcard retains its own merged-column value.
@@ -247,16 +263,36 @@ impl RowSchema {
     }
 
     pub fn qualified_slot(&self, qualifier: &str, column: &str) -> Option<usize> {
-        let identity = ColumnIdentity::qualified(qualifier, column);
-        if self.index.ambiguous_qualified.contains(&identity) {
+        let identity = (Some(qualifier), column);
+        let identity = &identity as &dyn ColumnKey;
+        if self.index.ambiguous_qualified.contains(identity) {
             return None;
         }
         self.index
             .qualified
-            .get(&identity)
+            .get(identity)
             .and_then(|logical| self.slot(*logical))
-            .or_else(|| self.index.aliases.get(&identity).copied())
+            .or_else(|| self.index.aliases.get(identity).copied())
             .filter(|slot| *slot != NULL_SLOT)
+    }
+
+    /// Borrow physical wildcard demand without copying column names or types. Visible and hidden identities may repeat the same slot; a positional consumer deduplicates them under its own allowance.
+    pub fn qualified_star_slots<'a>(
+        &'a self,
+        qualifier: &'a str,
+    ) -> impl Iterator<Item = usize> + 'a {
+        self.identities()
+            .iter()
+            .enumerate()
+            .filter(move |(_, identity)| identity.qualifier() == Some(qualifier))
+            .map(|(logical, _)| self.slot(logical).unwrap_or(NULL_SLOT))
+            .chain(
+                self.index
+                    .aliases
+                    .iter()
+                    .filter(move |(identity, _)| identity.qualifier() == Some(qualifier))
+                    .map(|(_, slot)| *slot),
+            )
     }
 }
 

@@ -11,45 +11,19 @@ use super::{
     UnifiedPlan,
 };
 use crate::{SQLError, ScalarExpr, ScalarWindowSpec};
+mod production;
+pub use production::resolved_window_definitions_with_control;
 
 /// Resolve the canonical own clauses without evaluating any expression.
 pub fn resolved_window_definitions(
     block: &QueryBlockPlan,
 ) -> Result<Vec<ScalarWindowSpec>, SQLError> {
-    let mut resolved: Vec<ScalarWindowSpec> = Vec::with_capacity(block.windows.len());
-    let mut names = std::collections::BTreeSet::new();
-    for (slot, window) in block.windows.iter().enumerate() {
-        if window.spec.definition.is_some() {
-            return Err(invalid("a canonical specification refers to a call slot"));
-        }
-        if let Some(name) = &window.name {
-            if name.is_empty() || !names.insert(name) {
-                return Err(invalid("a canonical window name is empty or repeated"));
-            }
-        }
-        let mut spec = window.spec.clone();
-        if let Some(parent) = window.inherited {
-            let base = resolved
-                .get(parent)
-                .filter(|_| parent < slot && block.windows[parent].name.is_some())
-                .ok_or_else(|| invalid("an inherited window is not an earlier named definition"))?;
-            if !spec.partition_by.is_empty()
-                || (!spec.order_by.is_empty() && !base.order_by.is_empty())
-                || base.frame.is_some()
-            {
-                return Err(invalid(
-                    "a canonical window has incompatible inherited clauses",
-                ));
-            }
-            spec.partition_by.clone_from(&base.partition_by);
-            if spec.order_by.is_empty() {
-                spec.order_by.clone_from(&base.order_by);
-            }
-        }
-        spec.definition = Some(slot);
-        resolved.push(spec);
-    }
-    Ok(resolved)
+    resolved_window_definitions_with_control(
+        block,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .map_err(|_| unreachable!("ordinary canonical window owner"))
 }
 
 impl UnifiedPlan {
@@ -224,7 +198,7 @@ fn visit_source_roots_mut(source: &mut SourcePlan, visit: &mut dyn FnMut(&mut Sc
     }
 }
 
-fn invalid(message: &str) -> SQLError {
+pub(in crate::plan) fn invalid(message: &str) -> SQLError {
     SQLError::Internal(format!("invalid stored window definitions: {message}"))
 }
 

@@ -230,3 +230,29 @@ fn stored_function_coercions_keep_named_argument_positions() {
         matches!(arguments[1].value, ScalarExpr::Cast { expr, ty, .. } if ty == &ColumnType::BigInteger.catalog_name() && matches!(expr.as_ref(), ScalarExpr::Literal(uqa_core::Value::Int(1))))
     );
 }
+
+#[test]
+fn default_membership_inputs_finish_before_enclosing_call_replacement() {
+    for (sql, expected) in [
+        ("pg_typeof(1 IN (NULL, NULL))", ColumnType::Regtype),
+        ("coalesce(1 NOT IN ('1', NULL), false)", ColumnType::Boolean),
+    ] {
+        let mut plan = expression(sql);
+        let binding = assignment_context();
+        for _ in 0..2 {
+            assert_eq!(
+                analyze_default_inputs(
+                    &NoRoutines,
+                    &|_: &str| false,
+                    &Aliases,
+                    &mut plan,
+                    &binding
+                )
+                .unwrap_or_else(|error| panic!("{sql}: {error}")),
+                Some(expected.clone()),
+            );
+            plan.scalar
+                .visit(&mut |node| assert!(!matches!(node, ScalarExpr::InList { .. })));
+        }
+    }
+}

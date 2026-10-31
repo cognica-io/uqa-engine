@@ -6,8 +6,11 @@
 
 //! Volatility of the coercion step a cast adds, as `contain_mutable_functions` sees it. A binary-coercible cast calls nothing, a function cast has its function's volatility, and an I/O conversion calls the source type's output function and the target type's input function. Domains coerce through their base types; `CoerceToDomain` itself counts as immutable, as in `PostgreSQL`.
 
-use super::{array_element, base_type, cast_catalog_entry, CastMethod};
+use super::{array_element, base_type, CastMethod};
+
+mod production;
 use crate::ast::{ColumnType, FunctionVolatility};
+pub use production::{cast_volatility_with_control, pg_catalog_builtin_type_with_control};
 
 /// `pg_cast` functions of `PostgreSQL` 18.4 that are not immutable; every one is stable because it reads a session setting or the catalog.
 const STABLE_CAST_FUNCTIONS: [i64; 13] = [
@@ -29,28 +32,12 @@ const STABLE_CAST_FUNCTIONS: [i64; 13] = [
 /// Volatility of evaluating `source::target` at run time. A literal of unknown type is converted during parse analysis instead and adds no run-time call.
 #[must_use]
 pub fn cast_volatility(source: &ColumnType, target: &ColumnType) -> FunctionVolatility {
-    let source = base_type(source).without_type_modifiers();
-    let target = base_type(target).without_type_modifiers();
-    if source == target {
-        return FunctionVolatility::Immutable;
-    }
-    match (&source, &target) {
-        (ColumnType::Array(source), ColumnType::Array(target)) => {
-            return cast_volatility(array_element(source), array_element(target));
-        }
-        (ColumnType::Array(_), _) | (_, ColumnType::Array(_)) => {
-            return input_output_volatility(&source, &target);
-        }
-        _ => {}
-    }
-    match cast_catalog_entry(&source, &target).map(|entry| entry.method) {
-        Some(CastMethod::Binary) => FunctionVolatility::Immutable,
-        Some(CastMethod::Function { oid, .. }) if STABLE_CAST_FUNCTIONS.contains(&oid) => {
-            FunctionVolatility::Stable
-        }
-        Some(CastMethod::Function { .. }) => FunctionVolatility::Immutable,
-        Some(CastMethod::InputOutput) | None => input_output_volatility(&source, &target),
-    }
+    cast_volatility_with_control(
+        source,
+        target,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary cast volatility")
 }
 
 /// Targets whose conversion from a constant reads neither a catalog descriptor nor a session setting. Together with an immutable `cast_volatility`, the conversion can run once instead of at every evaluation.
@@ -84,11 +71,9 @@ pub fn immutable_cast_type(ty: &ColumnType) -> bool {
 /// The builtin type named with an explicit `pg_catalog` namespace. Only such a spelling identifies its type without the live catalog; a free identifier can select a domain or another type through `search_path`.
 #[must_use]
 pub fn pg_catalog_builtin_type(name: &str) -> Option<ColumnType> {
-    let parsed = crate::parse_regtype_name(name).ok()??;
-    if !matches!(parsed.names.as_slice(), [schema, _] if schema == "pg_catalog") {
-        return None;
-    }
-    ColumnType::from_sql_name(name).ok()
+    pg_catalog_builtin_type_with_control(name, &uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("ordinary builtin type identity")
+        .map(|ty| ty.into_uncontrolled().expect("ordinary builtin type"))
 }
 
 fn input_output_volatility(source: &ColumnType, target: &ColumnType) -> FunctionVolatility {

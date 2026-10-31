@@ -89,6 +89,15 @@ impl CatalogSnapshotSource for ScopedEngineHook<'_> {
 }
 
 impl uqa_sql::expr::CatalogInputFunctions for ScopedEngineHook<'_> {
+    fn read_unknown_input_with_control(
+        &self,
+        text: &str,
+        target: &uqa_sql::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_core::Value>, SQLError> {
+        uqa_sql::expr::read_catalog_input_with_control(text, target, self, control)
+    }
+
     fn read_unknown_input(
         &self,
         text: &str,
@@ -99,6 +108,27 @@ impl uqa_sql::expr::CatalogInputFunctions for ScopedEngineHook<'_> {
 }
 
 impl uqa_sql::expr::composites::CompositeTypeCatalog for ScopedEngineHook<'_> {
+    fn composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::expr::composites::OwnedCompositeTypeDescriptor>, SQLError> {
+        let catalog = self.catalog_snapshot();
+        if let Some(descriptor) = self
+            .engine
+            .runtime
+            .composite_descriptor_cache
+            .descriptor_with_control(&catalog.snapshot().definitions.composites, oid, control)?
+        {
+            return Ok(Some(descriptor));
+        }
+        uqa_execution::catalog::composite_type::relations::descriptor_with_control(
+            &self.catalog_context(),
+            oid,
+            control,
+        )
+    }
+
     fn composite_type(
         &self,
         oid: u32,

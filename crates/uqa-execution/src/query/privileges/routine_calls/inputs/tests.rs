@@ -59,7 +59,7 @@ impl SourcePlanning<()> for Decisions {
         _: &SourcePlan,
         _: Option<&QualifierFilters>,
         _: &CteScope<()>,
-    ) -> Result<Option<ScalarExpr>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::OwnedScalarExpr>, SQLError> {
         unreachable!("initialization uses the supplied plan")
     }
     fn propagated_join_filters(
@@ -68,7 +68,7 @@ impl SourcePlanning<()> for Decisions {
         _: &SourcePlan,
         _: &SourcePlan,
         _: Option<&ScalarExpr>,
-    ) -> Option<QualifierFilters> {
+    ) -> Result<Option<QualifierFilters>, SQLError> {
         unreachable!("initialization uses the supplied plan")
     }
 }

@@ -170,7 +170,10 @@ fn events(
             triggers_changed |= change.expression_in_schema(expression, &schema)?;
         }
     }
-    for rule in rules.values_mut().flat_map(|entries| entries.values_mut()) {
+    for rule in rules
+        .values_mut()
+        .flat_map(|entries| std::sync::Arc::make_mut(entries).values_mut())
+    {
         let schema = change
             .rename
             .map_or(Ok(uqa_sql::RowSchema::default()), |rename| {

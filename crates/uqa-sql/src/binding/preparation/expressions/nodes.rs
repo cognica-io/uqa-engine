@@ -19,7 +19,16 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
         let schema = self.scalar_query_schema(index, input, subqueries)?;
-        let mut result = ExpressionType::leaf(schema.column_type(0).cloned());
+        let control = self.scope.control();
+        let mut result = ExpressionType::resolved_produced(
+            schema
+                .column_type(0)
+                .map(|ty| ty.clone_with_control(&control))
+                .transpose()?,
+            &control,
+        )?;
+        result.initial_collation =
+            u32::try_from(result.derivation.oid()).expect("type collation OID");
         if let Some(oid) = schema.column_collation(0) {
             result.derivation = Derivation::implicit(i64::from(oid));
             result.initial_collation = oid;
@@ -40,10 +49,17 @@ impl Preparation<'_> {
         let mut value = self.expression_inner(expr, input, subqueries)?;
         collation.validate(ty)?;
         // Collation assignment retains type identity, while a simplified arm keeps its own modifier.
-        if value.ty.as_ref().is_none_or(|inner| {
-            inner != ty && inner.without_type_modifiers() != ty.without_type_modifiers()
-        }) {
-            value.ty = Some(ty.clone());
+        let control = self.scope.control();
+        let differs = match value.ty.as_deref() {
+            Some(inner) if inner == ty => false,
+            Some(inner) => {
+                *inner.without_type_modifiers_with_control(&control)?
+                    != *ty.without_type_modifiers_with_control(&control)?
+            }
+            None => true,
+        };
+        if differs {
+            value.replace_type(Some(ty.clone_with_control(&control)?), &control)?;
         }
         value.derivation = value
             .derivation
@@ -75,7 +91,7 @@ impl Preparation<'_> {
             return Ok(result);
         }
         let ty = self.binary(op, &mut left, &mut right)?;
-        Ok(ExpressionType::combined(Some(ty), &[left, right]))
+        Ok(ExpressionType::combined_owned(Some(ty), &[left, right]))
     }
 
     pub(super) fn not_expression(
@@ -135,7 +151,7 @@ impl Preparation<'_> {
             ));
         }
         let ty = self.known_type(expression, input, subqueries)?;
-        Ok(ExpressionType::independent(ty, &[inner]))
+        Ok(ExpressionType::independent_owned(ty, &[inner]))
     }
 
     pub(super) fn array_expression(
@@ -144,17 +160,21 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
-        let mut observed = Vec::new();
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let mut observed = super::super::ownership::AnalysisVec::new(&control);
+        observed.reserve(items.len(), &control)?;
         for item in items {
-            observed.push(self.expression(item, input, subqueries)?);
+            observed.push(self.expression(item, input, subqueries)?, &control)?;
         }
         let ty = self
             .common(
                 crate::type_resolution::CommonTypeContext::Array,
                 &mut observed,
             )?
-            .map(|element| ColumnType::Array(Box::new(element)));
-        Ok(ExpressionType::combined(ty, &observed))
+            .map(|element| element.array(&control))
+            .transpose()?;
+        Ok(ExpressionType::combined_owned(ty, &observed))
     }
 
     pub(super) fn composite_row_expression(
@@ -172,7 +192,7 @@ impl Preparation<'_> {
                     .error_only(),
             );
         }
-        let mut result = ExpressionType::resolved(Some(self.type_name(&binding.ty)?));
+        let mut result = ExpressionType::resolved_owned(Some(self.type_name(&binding.ty)?));
         result.derivation = selected;
         Ok(result)
     }
@@ -184,7 +204,7 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
         let ty = self.known_type(expression, input, subqueries)?;
-        let mut result = ExpressionType::leaf(ty);
+        let mut result = ExpressionType::leaf_owned(ty);
         let literal_collation = match expression {
             ScalarExpr::TypedLiteral { collation_oid, .. } => Some(*collation_oid),
             ScalarExpr::RetainedLiteral(literal) => Some(literal.collation_oid),
@@ -192,7 +212,7 @@ impl Preparation<'_> {
         };
         if let Some(collation_oid) = literal_collation {
             crate::catalog::collations::expression::validate_literal_collation(
-                result.ty.as_ref(),
+                result.ty.as_deref(),
                 collation_oid,
             )?;
         }

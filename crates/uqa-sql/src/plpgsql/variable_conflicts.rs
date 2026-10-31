@@ -155,7 +155,7 @@ impl VariableResolver for VariableSiteFilter<'_> {
 }
 
 /// The error `plpgsql_post_column_ref` raises for a name that a variable and a column or relation both take under `plpgsql.variable_conflict = error`.
-fn ambiguous_variable_error(reference: &Expr) -> SQLError {
+pub(super) fn ambiguous_variable_error(reference: &Expr) -> SQLError {
     let name = match reference {
         Expr::QualifiedColumn { qualifier, column } => format!("{qualifier}.{column}"),
         Expr::Column(name) => name.to_string(),

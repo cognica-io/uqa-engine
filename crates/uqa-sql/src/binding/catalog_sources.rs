@@ -15,40 +15,21 @@ use crate::catalog::resolution::RelationNameResolution;
 
 use super::analysis;
 
+mod production;
+pub(super) use production::operator_join_relation_schemas_with_control;
+
 /// Bind both operator-join relations independently so each retrieval operand has its own namespace.
 pub(super) fn operator_join_relation_schemas(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     relations: Option<&OperatorJoinRelations>,
 ) -> Result<(RowSchema, RowSchema), SQLError> {
-    let relations = relations.ok_or_else(|| {
-        SQLError::TypeMismatch("operator join requires left and right table identifiers".into())
-    })?;
-    Ok((
-        relation_schema(catalog, resolution, &relations.left, "left")?,
-        relation_schema(catalog, resolution, &relations.right, "right")?,
-    ))
-}
-
-fn relation_schema(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-    relation: &str,
-    side: &str,
-) -> Result<RowSchema, SQLError> {
-    let resolved = catalog
-        .table_name_resolved(resolution, relation)?
-        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
-    let identity = crate::RelationIdentity::from_legacy_name(&resolved).map_err(|error| {
-        SQLError::Internal(format!(
-            "decode operator join {side} relation `{resolved}` schema: {error}"
-        ))
-    })?;
-    let table = catalog
-        .table_resolved(resolution, &resolved)?
-        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
-    let schema = RowSchema::with_column_definitions(Some(&identity.name), &table.columns);
-    Ok(analysis::with_table_pseudo_columns(&schema, &identity.name))
+    operator_join_relation_schemas_with_control(
+        catalog,
+        resolution,
+        relations,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// Output column names of a user-defined routine used as a FROM source: OUT / INOUT / `RETURNS TABLE` parameter names. `None` when the name is not a user routine or its result is a single unnamed column, which keeps the function-name default.
@@ -62,6 +43,26 @@ pub fn user_function_output_columns(
     };
     for function in &overloads {
         if let Some(columns) = crate::semantics::user_function_output_columns_for(function) {
+            return Ok(Some(columns));
+        }
+    }
+    Ok(None)
+}
+
+pub(in crate::binding) fn user_function_output_columns_with_control(
+    catalog: &dyn crate::catalog::analysis::AnalysisCatalog,
+    resolution: &RelationNameResolution,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+    control.check()?;
+    let Some(overloads) = catalog.sql_functions(resolution, name)? else {
+        return Ok(None);
+    };
+    for function in &overloads {
+        if let Some(columns) =
+            crate::semantics::user_function_output_columns_with_control(function, control)?
+        {
             return Ok(Some(columns));
         }
     }

@@ -172,6 +172,10 @@ def report_process_group(group: int) -> None:
             print(f"discovery process {fields[0]} parent {fields[1]} state {fields[3]} executable {pathlib.Path(fields[4]).name}", file=sys.stderr, flush=True)
 
 
+class _DiscoveryInterrupted(BaseException):
+    """Carry discovery signals past subprocess I/O recovery."""
+
+
 def capture(*command: str, timeout: float | None = None) -> str:
     if timeout is None:
         return subprocess.check_output(command, cwd=ROOT, text=True).strip()
@@ -183,7 +187,7 @@ def capture(*command: str, timeout: float | None = None) -> str:
     def interrupt(signum, _frame):
         nonlocal interruption
         if interruption is None:
-            interruption = InterruptedError(f"discovery interrupted by {signal.Signals(signum).name}")
+            interruption = _DiscoveryInterrupted(f"discovery interrupted by {signal.Signals(signum).name}")
         # Finish acquiring the child handle before raising, and let cleanup finish on repeated signals.
         if process is not None and not cleaning_up:
             raise interruption
@@ -221,6 +225,8 @@ def capture(*command: str, timeout: float | None = None) -> str:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         pass
+                if isinstance(error, _DiscoveryInterrupted):
+                    raise InterruptedError(str(error)) from error
                 if isinstance(error, subprocess.TimeoutExpired):
                     raise subprocess.TimeoutExpired(command[:3], timeout) from error
                 raise
@@ -229,7 +235,7 @@ def capture(*command: str, timeout: float | None = None) -> str:
         for signum, handler in reversed(previous_handlers.items()):
             signal.signal(signum, handler)
     if interruption is not None:
-        raise interruption
+        raise InterruptedError(str(interruption))
     return text
 
 

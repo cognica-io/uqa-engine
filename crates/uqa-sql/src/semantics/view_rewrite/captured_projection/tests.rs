@@ -24,32 +24,7 @@ impl crate::routines::RoutineResolution for Routines {}
 
 #[test]
 fn captured_system_attributes_bind_bare_qualified_and_correlated_names() {
-    let source = RowSchema::with_qualified_types(
-        "items",
-        vec!["id".into()],
-        vec![Some(ColumnType::Integer)],
-    );
-    let source = RowSchema::with_typed_virtual_identities(
-        &source,
-        &[
-            (
-                ColumnIdentity::qualified("items", "_doc_id"),
-                Some(ColumnType::BigInteger),
-            ),
-            (
-                ColumnIdentity::qualified("items", "_score"),
-                Some(ColumnType::DoublePrecision),
-            ),
-            (
-                ColumnIdentity::qualified("items", "tableoid"),
-                Some(ColumnType::Oid),
-            ),
-            (
-                ColumnIdentity::qualified("items", "xmin"),
-                Some(ColumnType::Xid),
-            ),
-        ],
-    );
+    let source = captured_source_schema();
     let raw = InternalRelationId::allocate();
     let schema = input_schema(&source, raw);
     let rewrite = metadata_rewrite(&schema, raw);
@@ -76,6 +51,19 @@ fn captured_system_attributes_bind_bare_qualified_and_correlated_names() {
             scalar: block.projections.remove(0).expr,
             subqueries: block.subqueries,
         };
+        let budget = uqa_core::memory::MemoryBudget::new(1 << 20);
+        let token = uqa_core::CancellationToken::new();
+        let control = uqa_core::memory::ProductionControl::new(&budget, &token, &token);
+        let owned = crate::binding::bind_expression_plan_routines_for_storage_owned(
+            &Routines,
+            expression.copy_for_rewrite(&control).unwrap(),
+            &[],
+            context.copy_with_control(&control).unwrap(),
+            &schema,
+            &control,
+        )
+        .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        let owned = owned.finish(&control).unwrap();
         crate::binding::bind_expression_plan_routines_for_storage(
             &Routines,
             &mut expression,
@@ -84,6 +72,13 @@ fn captured_system_attributes_bind_bare_qualified_and_correlated_names() {
             &schema,
         )
         .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert_eq!(
+            serde_json::to_value(&*owned).unwrap(),
+            serde_json::to_value(&expression).unwrap(),
+            "{sql}"
+        );
+        drop(owned);
+        assert_eq!(budget.used(), 0, "{sql}");
         rewrite.bind_expression(&mut expression);
         // Apply deferred names at the scalar query's lexical boundary without changing local columns.
         for query in &mut expression.subqueries {
@@ -123,4 +118,33 @@ fn captured_system_attributes_bind_bare_qualified_and_correlated_names() {
         }
         assert_eq!(inputs, expected, "{sql}");
     }
+}
+
+fn captured_source_schema() -> RowSchema {
+    let source = RowSchema::with_qualified_types(
+        "items",
+        vec!["id".into()],
+        vec![Some(ColumnType::Integer)],
+    );
+    RowSchema::with_typed_virtual_identities(
+        &source,
+        &[
+            (
+                ColumnIdentity::qualified("items", "_doc_id"),
+                Some(ColumnType::BigInteger),
+            ),
+            (
+                ColumnIdentity::qualified("items", "_score"),
+                Some(ColumnType::DoublePrecision),
+            ),
+            (
+                ColumnIdentity::qualified("items", "tableoid"),
+                Some(ColumnType::Oid),
+            ),
+            (
+                ColumnIdentity::qualified("items", "xmin"),
+                Some(ColumnType::Xid),
+            ),
+        ],
+    )
 }

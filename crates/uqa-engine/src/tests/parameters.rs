@@ -118,7 +118,9 @@ fn host_type_input_and_transaction_effects_match_postgresql(#[case] provider: Pr
 fn controlled_input_failure_uses_the_owning_transaction_frame(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("control.db"));
-    let budget = MemoryBudget::new(64);
+    // Include admitted type-name resolution scratch while keeping the 4 KiB
+    // text payload outside the allowance.
+    let budget = MemoryBudget::new(1024);
     let original = CancellationToken::new();
     let invoking = CancellationToken::new();
     let control = ProductionControl::new(&budget, &original, &invoking);

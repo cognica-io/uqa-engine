@@ -9,6 +9,85 @@ use crate::row_locks::RowLockManager;
 use std::cell::Cell;
 use uqa_core::CancellationToken;
 
+#[test]
+fn table_identity_wait_retires_rejected_names_and_revalidates_renames() {
+    use uqa_core::memory::MemoryBudget;
+    let session = Session::new();
+    let budget = MemoryBudget::new(1024);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let initial = control.copy_text("public.v").unwrap();
+    let occupied = budget.reserve(budget.available()).unwrap();
+    let result = lock_table_identity(
+        &session,
+        initial,
+        |name| name.as_str(),
+        || Ok(Some(control.copy_text("public.v")?)),
+        RelationLockMode::AccessExclusive,
+        false,
+        &control,
+    );
+    assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+    assert_eq!(budget.used(), occupied.bytes());
+    assert!(session.peer_acquires(RelationLockMode::AccessExclusive));
+    session.manager.release_session(2);
+    drop(occupied);
+
+    for cancellation in [&original, &invoking] {
+        let result = lock_table_identity(
+            &session,
+            control.copy_text("public.v").unwrap(),
+            |name| name.as_str(),
+            || {
+                cancellation.cancel();
+                Ok(Some(control.copy_text("public.v")?))
+            },
+            RelationLockMode::AccessExclusive,
+            false,
+            &control,
+        );
+        assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
+        assert_eq!(budget.used(), 0);
+        assert!(session.peer_acquires(RelationLockMode::AccessExclusive));
+        session.manager.release_session(2);
+        cancellation.reset();
+    }
+
+    let calls = Cell::new(0);
+    let renamed = lock_table_identity(
+        &session,
+        control.copy_text("public.v").unwrap(),
+        |name| name.as_str(),
+        || {
+            calls.set(calls.get() + 1);
+            Ok(Some(control.copy_text("public.renamed")?))
+        },
+        RelationLockMode::AccessExclusive,
+        false,
+        &control,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(calls.get(), 2);
+    assert_eq!(budget.used(), renamed.capacity());
+    assert!(session.peer_acquires(RelationLockMode::AccessExclusive));
+    assert!(!session
+        .manager
+        .try_acquire_relation(
+            2,
+            session.manager.table_key("public.renamed"),
+            RelationLockMode::AccessExclusive,
+            0,
+            &session.cancellation,
+        )
+        .unwrap());
+    drop(renamed);
+    assert_eq!(budget.used(), 0);
+    session.manager.release_session(1);
+    session.manager.release_session(2);
+}
+
 struct Session {
     manager: RowLockManager,
     cancellation: CancellationToken,

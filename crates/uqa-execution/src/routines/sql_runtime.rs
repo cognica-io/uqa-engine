@@ -189,7 +189,7 @@ impl Interpreter<'_> {
         &self,
         query: &PLpgSQLExpression,
         params: &[PLpgSQLExpression],
-    ) -> Result<(String, Vec<SQLParam>), SQLError> {
+    ) -> Result<(String, uqa_core::memory::Produced<Vec<SQLParam>>), SQLError> {
         let text = match self.eval_expr(query)? {
             Value::Str(text) => text,
             Value::Null => {
@@ -204,11 +204,17 @@ impl Interpreter<'_> {
                 )));
             }
         };
-        let mut bound_params = Vec::with_capacity(params.len());
+        let control = self.planning.control();
+        let mut bound_params = uqa_core::memory::ProductionVec::new(control);
+        bound_params.reserve(params.len())?;
         for param in params {
-            bound_params.push(SQLParam::Scalar(self.eval_expr(param)?));
+            // The value is the execution result; planning owns only the new parameter container.
+            bound_params.push_produced(control.finish(
+                SQLParam::Scalar(self.eval_expr(param)?),
+                control.empty_reservation(),
+            )?)?;
         }
-        Ok((text, bound_params))
+        Ok((text, bound_params.finish()?))
     }
 
     /// Post-process an embedded SQL statement's result: `ROW_COUNT`,

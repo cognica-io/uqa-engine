@@ -178,9 +178,7 @@ pub(super) fn build_function_group_source_operator<'a, S: Clone + Send + Sync + 
         column_aliases,
         ctes.lock_identities.emit,
     );
-    Ok(attach_closed_qualifier_filter(
-        operator, qualifier, filters, context, params, ctes,
-    ))
+    attach_closed_qualifier_filter(operator, qualifier, filters, context, params, ctes)
 }
 
 fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
@@ -192,17 +190,17 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
     filters: Option<&QualifierFilters>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let outer_row = ctes.row_lock_outer_row().cloned();
-    let hook = context.relational.expression_scope(ctes.clone());
+    let hook = context.relational.expression_scope(ctes)?;
     let initialized = initialize_function_source(context, &source, params, &hook, outer_row)?;
     let operator = initialized.operator(&source, prune, ctes.lock_identities.emit);
-    Ok(attach_closed_qualifier_filter(
+    attach_closed_qualifier_filter(
         operator,
         source.alias.unwrap_or(source.output_name),
         filters,
         context,
         params,
         ctes,
-    ))
+    )
 }
 
 struct InitializedFunctionSource<'a> {

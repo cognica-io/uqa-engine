@@ -79,7 +79,7 @@ fn observe(
                 .prepared
                 .read()
                 .keys()
-                .cloned()
+                .map(|name| name.to_string())
                 .collect::<std::collections::BTreeSet<_>>();
             let handle = engine.prepare_statement(case["sql"].as_str().unwrap(), &types)?;
             let native_name = engine
@@ -87,9 +87,9 @@ fn observe(
                 .prepared
                 .read()
                 .keys()
-                .find(|name| !previous.contains(*name))
+                .find(|name| !previous.contains(name.as_str()))
                 .unwrap()
-                .clone();
+                .to_string();
             names.insert(native_name, case["name"].as_str().unwrap().into());
             handles.insert(case["name"].as_str().unwrap().into(), handle);
             Ok(empty_observation(1))

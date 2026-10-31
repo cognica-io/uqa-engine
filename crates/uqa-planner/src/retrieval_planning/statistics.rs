@@ -14,7 +14,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use uqa_core::{IndexStats, Value, Vertex};
+use uqa_core::{memory::ProductionControl, IndexStatsBuilder, OwnedIndexStats, Value, Vertex};
 use uqa_operators::{tree::collect_graph_names, OperatorTree};
 use uqa_sql::SQLError;
 
@@ -25,118 +25,114 @@ pub(super) fn index_stats(
     catalog: &dyn RetrievalPlanningCatalog,
     table: &str,
     tree: &OperatorTree,
-) -> PlanningResult<IndexStats> {
+    control: &ProductionControl<'_>,
+) -> PlanningResult<OwnedIndexStats> {
     let row_count = if table.is_empty() {
         0
     } else {
         catalog.table_doc_count(table)?
     };
-    let mut stats = IndexStats::new(row_count);
+    let mut stats = IndexStatsBuilder::new(row_count, *control);
     if table.is_empty() {
-        return Ok(stats);
+        return Ok(stats.finish()?);
     }
     let Some(table_state) = catalog
         .try_query_table(table)
         .map_err(|error| operator_execution_error("resolve optimizer table", error))?
     else {
-        return Ok(stats);
+        return Ok(stats.finish()?);
     };
-
-    let mut text_queries = Vec::<(Option<String>, String)>::new();
-    let mut vector_queries = Vec::new();
-    tree.visit(&mut |node| match node {
-        OperatorTree::Term { query, field, .. } | OperatorTree::Phrase { query, field, .. } => {
-            text_queries.push((field.clone(), query.clone()));
-        }
-        OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
-            text_queries.push((Some(field.clone()), query.clone()));
-        }
-        OperatorTree::MultiFieldSearch {
-            fields, queries, ..
-        } => {
-            text_queries.extend(
-                fields
-                    .iter()
-                    .cloned()
-                    .map(Some)
-                    .zip(queries.iter().cloned()),
-            );
-        }
-        OperatorTree::VectorSimilarity {
-            field,
-            query_vector,
-            ..
-        }
-        | OperatorTree::KNN {
-            field,
-            query_vector,
-            ..
-        }
-        | OperatorTree::CalibratedVectorMatch {
-            field,
-            query_vector,
-            ..
-        } => {
-            vector_queries.push((field.clone(), query_vector.clone()));
-        }
-        _ => {}
-    });
 
     {
         let index = table_state.text_index();
-        for (field, query) in text_queries {
-            let (stats_field, document_frequency) = if let Some(field) = field {
-                let terms = index
-                    .analyze_utf16(&field, &query)
-                    .map_err(|error| operator_execution_error("analyze optimizer query", error))?;
-                let mut document_frequency = 0_u64;
-                for term in terms {
-                    document_frequency = document_frequency.saturating_add(
-                        index.doc_freq_utf16(&field, &term).map_err(|error| {
-                            operator_execution_error("read document frequency", error)
-                        })?,
-                    );
+        tree.try_visit(&mut |node| {
+            control.check()?;
+            match node {
+                OperatorTree::Term { query, field, .. }
+                | OperatorTree::Phrase { query, field, .. } => {
+                    text_statistics(&*index, &mut stats, field.as_deref(), query, control)
                 }
-                (field, document_frequency.min(row_count))
-            } else {
-                let document_frequency = index
-                    .query_doc_freq_any_field(&query)
-                    .map_err(|error| operator_execution_error("read document frequency", error))?;
-                ("_default".to_string(), document_frequency.min(row_count))
-            };
-            stats.set_doc_freq(stats_field, query, document_frequency);
-        }
+                OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
+                    text_statistics(&*index, &mut stats, Some(field), query, control)
+                }
+                OperatorTree::MultiFieldSearch {
+                    fields, queries, ..
+                } => {
+                    for (field, query) in fields.iter().zip(queries) {
+                        text_statistics(&*index, &mut stats, Some(field), query, control)?;
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        })?;
     }
 
     let vector_indexes = table_state.vector_indexes();
-    vector_statistics(&*vector_indexes, &mut stats, vector_queries)?;
-    Ok(stats)
+    tree.try_visit(&mut |node| {
+        control.check()?;
+        match node {
+            OperatorTree::VectorSimilarity {
+                field,
+                query_vector,
+                ..
+            }
+            | OperatorTree::KNN {
+                field,
+                query_vector,
+                ..
+            }
+            | OperatorTree::CalibratedVectorMatch {
+                field,
+                query_vector,
+                ..
+            } => vector_statistics(&*vector_indexes, &mut stats, field, query_vector, control),
+            _ => Ok(()),
+        }
+    })?;
+    Ok(stats.finish()?)
+}
+
+fn text_statistics(
+    index: &dyn super::TextStatisticsRead,
+    stats: &mut IndexStatsBuilder<'_>,
+    field: Option<&str>,
+    query: &str,
+    control: &ProductionControl<'_>,
+) -> PlanningResult<()> {
+    control.check()?;
+    let document_frequency = index.query_doc_freq_with_control(field, query, control)?;
+    stats.set_doc_freq(
+        field.unwrap_or("_default"),
+        query,
+        document_frequency.min(stats.total_docs),
+    )?;
+    Ok(())
 }
 
 fn vector_statistics(
     vector_indexes: &dyn super::VectorStatisticsRead,
-    stats: &mut IndexStats,
-    vector_queries: Vec<(String, Vec<f32>)>,
+    stats: &mut IndexStatsBuilder<'_>,
+    field: &str,
+    query: &[f32],
+    control: &ProductionControl<'_>,
 ) -> PlanningResult<()> {
-    for (field, query) in vector_queries {
-        let indexed_dimensions = vector_indexes.dimensions(&field);
-        let query_dimensions = u32::try_from(query.len()).ok();
-        stats.dimensions = stats
-            .dimensions
-            .max(indexed_dimensions.unwrap_or(0))
-            .max(query_dimensions.unwrap_or(0));
-        // Unusable cost inputs keep the generic estimate. Execution owns reached validation and its SQL diagnostics; do not preempt it with a physical metadata or norm error.
-        if indexed_dimensions.is_none()
-            || indexed_dimensions != query_dimensions
-            || query.is_empty()
-            || query.iter().any(|component| !component.is_finite())
-        {
-            continue;
-        }
-        if stats.diskann_query(&field, &query).is_none() {
-            if let Some(physical) = vector_indexes.diskann_query_statistics(&field, &query)? {
-                stats.set_diskann_query(field, &query, physical);
-            }
+    control.check()?;
+    let indexed_dimensions = vector_indexes.dimensions(field);
+    let query_dimensions = u32::try_from(query.len()).ok();
+    stats.include_vector_dimensions(indexed_dimensions.unwrap_or(0));
+    stats.include_vector_dimensions(query_dimensions.unwrap_or(0));
+    // Unusable cost inputs keep the generic estimate. Execution owns reached validation and its SQL diagnostics; do not preempt it with a physical metadata or norm error.
+    if indexed_dimensions.is_none()
+        || indexed_dimensions != query_dimensions
+        || query.is_empty()
+        || query.iter().any(|component| !component.is_finite())
+    {
+        return Ok(());
+    }
+    if stats.diskann_query(field, query).is_none() {
+        if let Some(physical) = vector_indexes.diskann_query_statistics(field, query)? {
+            stats.set_diskann_query(field, query, physical)?;
         }
     }
     Ok(())

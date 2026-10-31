@@ -105,37 +105,12 @@ impl RowSchema {
         input: &Self,
         columns: &[(crate::ast::InternalColumnRef, Option<ColumnType>)],
     ) -> Self {
-        let mut collations = input.index.cold.collations.clone();
-        let base = input.physical_width();
-        let mut internal = input.index.executor_attributes.clone();
-        let mut internal_types = input.index.cold.executor_attribute_types.clone();
-        for (offset, (column, ty)) in columns.iter().enumerate() {
-            collations.internal(*column, None, ty.as_ref());
-            internal.insert(*column, base + offset);
-            internal_types.insert(*column, ty.clone());
-        }
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            base + columns.len(),
-            SchemaBuildMetadata {
-                collations,
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal,
-                internal_types,
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only: input.index.cold.binding_only.clone(),
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                ..SchemaBuildMetadata::default()
-            },
+        Self::append_internal_typed_with_control(
+            input,
+            columns.iter().map(|(column, ty)| (*column, ty.as_ref())),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
         )
+        .expect("ordinary internal attributes")
     }
 
     /// Compose two child layouts while retaining duplicate logical labels.

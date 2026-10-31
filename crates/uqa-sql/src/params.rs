@@ -56,6 +56,14 @@ pub enum SQLParam {
 }
 
 impl SQLParam {
+    /// Copy a parameter without evaluating its carrier or a deferred diagnostic, retaining its declared type and every private payload under the original allowance.
+    pub fn clone_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        crate::plan::copy::copy_syntax_with_control(self, control)
+    }
+
     pub fn scalar(value: Value) -> Self {
         Self::Scalar(value)
     }

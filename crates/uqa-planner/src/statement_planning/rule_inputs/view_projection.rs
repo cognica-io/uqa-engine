@@ -9,6 +9,8 @@
 use super::{prune_captured_inputs, RuleInputPlanningContext};
 use crate::{optimizer::OptimizerConfig, CommandPlan, RelationalPlan, SourcePlan, UnifiedPlan};
 use uqa_sql::SQLError;
+mod owned;
+pub(super) use owned::rewrite_owned;
 
 pub(super) fn rewrite(
     context: &RuleInputPlanningContext<'_>,
@@ -93,26 +95,23 @@ fn simplify_conditions(
 ) -> Result<(), SQLError> {
     let mut config = config.clone();
     config.coerced_conditionals = true;
-    let mut result = Ok(());
-    let mut simplify = |expression: &mut Option<uqa_sql::ScalarExpr>| {
+    let simplify = |expression: &mut Option<uqa_sql::ScalarExpr>| {
         if let Some(expression) = expression {
-            if result.is_ok() {
-                result = crate::optimizer::optimize_qualification(expression, &config);
-            }
+            crate::optimizer::optimize_qualification(expression, &config)?;
         }
+        Ok::<_, SQLError>(())
     };
     if let UnifiedPlan::Command(command) = plan {
         match command.as_mut() {
-            CommandPlan::Update(plan) => simplify(&mut plan.predicate),
-            CommandPlan::Delete(plan) => simplify(&mut plan.predicate),
+            CommandPlan::Update(plan) => simplify(&mut plan.predicate)?,
+            CommandPlan::Delete(plan) => simplify(&mut plan.predicate)?,
             _ => {}
         }
     }
-    plan.visit_queries_mut(&mut |query| {
+    plan.try_visit_queries_mut(&mut |query| {
         if let RelationalPlan::QueryBlock(block) = &mut query.root {
-            simplify(&mut block.r#where);
+            simplify(&mut block.r#where)?;
         }
-        uqa_sql::plan::subqueries::prune_query(query);
-    });
-    result
+        uqa_sql::plan::subqueries::prune_query_with_control(query, config.production)
+    })
 }

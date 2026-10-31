@@ -305,14 +305,62 @@ pub fn call_bound_builtin(
     binding: &uqa_sql::ast::FunctionBinding,
     arguments: &[(Option<String>, Value)],
 ) -> Option<Result<Value, SQLError>> {
+    call_bound_builtin_with_control(
+        context,
+        binding,
+        arguments,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|result| {
+        result.map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary catalog scalar result")
+        })
+    })
+}
+
+/// Select the catalog callback before copying any argument. Its native execution result remains separate from the destination admitted for the caller.
+pub fn call_bound_builtin_with_control(
+    context: &ScalarFunctionContext<'_>,
+    binding: &uqa_sql::ast::FunctionBinding,
+    arguments: &[(Option<String>, Value)],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Option<Result<uqa_core::memory::Produced<Value>, SQLError>> {
     if !binding.builtin {
         return None;
     }
-    let values = arguments
-        .iter()
-        .map(|(_, value)| value.clone())
-        .collect::<Vec<_>>();
-    catalog_scalar_value(context, &binding.name, &values)
+    let name = match uqa_sql::semantics::builtin_function_dispatch_name_with_control(
+        &binding.name,
+        control,
+    ) {
+        Ok(name) => name,
+        Err(error) => return Some(Err(error.into())),
+    };
+    if !is_catalog_scalar(name.as_str())
+        && !matches!(
+            name.as_str(),
+            "has_table_privilege" | "has_column_privilege"
+        )
+    {
+        return None;
+    }
+    Some((|| {
+        let mut values = uqa_core::memory::ProductionVec::new(*control);
+        values.reserve(arguments.len())?;
+        for (_, value) in arguments {
+            values.push_produced(control.copy_value(value)?)?;
+        }
+        let values = values.finish()?;
+        let value =
+            catalog_scalar_value(context, &name, &values).expect("selected catalog scalar")?;
+        control.check()?;
+        if control.budget().is_none() {
+            Ok(control.finish(value, None)?)
+        } else {
+            Ok(control.copy_value(&value)?)
+        }
+    })())
 }
 
 #[cfg(test)]

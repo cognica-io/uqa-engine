@@ -53,7 +53,6 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_update(
             &context.statement.with_destination(destination),
-            context.prune_source_outputs,
             &statement,
             params,
             ctes,
@@ -81,7 +80,6 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_delete(
             &context.statement.with_destination(destination),
-            context.prune_source_outputs,
             &statement,
             params,
             ctes,
@@ -100,7 +98,6 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
     context.transactions.with_command(Box::new(move |context| {
         dispatch::run_merge(
             &context.statement.with_destination(destination),
-            context.prune_source_outputs,
             &statement,
             params,
             ctes,

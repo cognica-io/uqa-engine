@@ -10,11 +10,34 @@ use super::{Arc, ColumnType, RowSchema, SchemaLayoutError, SchemaLayoutResult, S
 use crate::ast::InternalColumnRef;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(super) struct RelationPresence(Option<Arc<SchemaMap<Box<str>, InternalColumnRef>>>);
+pub(super) struct RelationPresence(Option<Arc<PresenceBindings>>);
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct PresenceBindings {
+    bindings: SchemaMap<Box<str>, InternalColumnRef>,
+    _memory: super::production::lease::SchemaMemory,
+}
+
+impl std::ops::Deref for PresenceBindings {
+    type Target = SchemaMap<Box<str>, InternalColumnRef>;
+    fn deref(&self) -> &Self::Target {
+        &self.bindings
+    }
+}
+
+impl std::ops::DerefMut for PresenceBindings {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bindings
+    }
+}
+
+mod production;
 
 impl RelationPresence {
     fn insert(&mut self, qualifier: &str, marker: InternalColumnRef) {
-        let bindings = self.0.get_or_insert_with(|| Arc::new(SchemaMap::default()));
+        let bindings = self
+            .0
+            .get_or_insert_with(|| Arc::new(PresenceBindings::default()));
         Arc::make_mut(bindings).insert(qualifier.into(), marker);
     }
 
@@ -30,7 +53,12 @@ impl RelationPresence {
             .filter(|(_, marker)| keep(**marker))
             .map(|(qualifier, marker)| (qualifier.clone(), *marker))
             .collect();
-        Self((!retained.is_empty()).then(|| Arc::new(retained)))
+        Self((!retained.is_empty()).then(|| {
+            Arc::new(PresenceBindings {
+                bindings: retained,
+                ..PresenceBindings::default()
+            })
+        }))
     }
 
     pub(super) fn joined(left: &RowSchema, right: &RowSchema) -> Self {
@@ -94,17 +122,11 @@ impl RowSchema {
 
     /// Add one physical marker for the input's still-unmarked relation scopes. Existing inner-join NULL identities keep their original markers. The caller appends TRUE to produced rows; ordinary outer-join NULL extension clears the marker along with the fields.
     pub fn with_nullable_relations(&self, marker: InternalColumnRef) -> Option<Self> {
-        let mut qualifiers = self
-            .relation_qualifiers()
-            .filter(|qualifier| self.whole_row_presence(qualifier).is_none())
-            .peekable();
-        qualifiers.peek()?;
-        let mut result = Self::append_internal_typed(self, &[(marker, Some(ColumnType::Boolean))]);
-        let presence = &mut Arc::make_mut(&mut result.index).cold.row_presence;
-        for qualifier in qualifiers {
-            presence.insert(qualifier, marker);
-        }
-        Some(result)
+        self.with_nullable_relations_with_control(
+            marker,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary nullable relation layout")
     }
 
     /// Restore validated presence bindings after a physical layout is decoded. The marker must be a real Boolean internal attribute; duplicate namespaces are malformed input.

@@ -6,8 +6,6 @@
 
 //! Schema-only projection used after an expression-producing stage.
 
-use std::sync::Arc;
-
 use uqa_core::Value;
 
 use crate::{
@@ -47,9 +45,10 @@ pub struct ColumnSelection<'a> {
     /// Executor-only projection attributes are addressed structurally and
     /// never enter the public SQL column namespace.
     ordering: Vec<PhysicalOrder>,
-    rebind_lock_qualifier: Option<Arc<str>>,
+    rebind_lock_qualifier: Option<crate::RowLockName>,
     discard_lock_origins: bool,
     compact_slots: Option<Vec<Option<usize>>>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl<'a> ColumnSelection<'a> {
@@ -68,6 +67,7 @@ impl<'a> ColumnSelection<'a> {
             ordering: Vec::new(),
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots,
         }
     }
@@ -86,6 +86,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -114,6 +115,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -137,6 +139,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -174,6 +177,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -202,6 +206,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -242,6 +247,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: true,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -265,13 +271,19 @@ impl<'a> ColumnSelection<'a> {
             .collect::<Vec<_>>();
         let schema =
             RowSchema::remap_typed_identities_without_input_aliases(child.row_schema(), &columns);
+        let (schema, slots) = production::relation_namespace(
+            schema,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary relation namespace construction");
         Self {
             child,
             schema,
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
-            compact_slots: None,
+            _memory: None,
+            compact_slots: slots.map(|slots| slots.into_uncontrolled().expect("ordinary slots")),
         }
     }
 
@@ -298,6 +310,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: true,
+            _memory: None,
             compact_slots: (!identity_layout).then(|| source_slots.into_iter().map(Some).collect()),
         }
     }
@@ -363,6 +376,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: (!identity_layout).then_some(slots),
         })
     }
@@ -379,7 +393,7 @@ impl<'a> ColumnSelection<'a> {
     pub fn rebinding_lock_origins(mut self, qualifier: impl Into<String>) -> Self {
         let qualifier = qualifier.into();
         if !qualifier.is_empty() {
-            self.rebind_lock_qualifier = Some(Arc::from(qualifier));
+            self.rebind_lock_qualifier = Some(qualifier.into());
         }
         self
     }
@@ -432,7 +446,7 @@ impl<'a> ColumnSelection<'a> {
             }
         } else if let Some(qualifier) = self.rebind_lock_qualifier.as_ref() {
             for row in &mut rows {
-                row.rebind_lock_origin_qualifiers_mut(Arc::clone(qualifier));
+                row.rebind_lock_origin_qualifiers_mut(qualifier.clone());
             }
         }
         Batch::from_physical_rows(self.schema.clone(), rows)
@@ -670,7 +684,7 @@ mod tests {
         use uqa_sql::ColumnType;
 
         let fields: uqa_sql::schema::RecordFields =
-            Arc::from([Some(ColumnType::SmallInteger), Some(ColumnType::Text)]);
+            vec![Some(ColumnType::SmallInteger), Some(ColumnType::Text)].into();
         let bound = RowSchema::with_types(
             vec!["first".into(), "second".into(), "record".into()],
             vec![
@@ -680,7 +694,7 @@ mod tests {
             ],
         )
         .with_column_collations([Some(950), Some(951), None])
-        .with_record_fields([(2, Arc::clone(&fields))]);
+        .with_record_fields([(2, fields.clone())]);
         let input = RowSchema::with_types(
             vec!["hidden".into(), "text".into(), "record".into()],
             vec![
@@ -718,9 +732,9 @@ mod tests {
             ));
         }
         assert_eq!(result.lock_origins().len(), 1);
-        assert!(Arc::ptr_eq(
-            batches[0].schema.record_fields(2).unwrap(),
-            &fields
+        assert!(std::ptr::eq(
+            &raw const **batches[0].schema.record_fields(2).unwrap(),
+            &raw const *fields
         ));
     }
 
@@ -811,3 +825,5 @@ mod tests {
         }
     }
 }
+
+mod production;

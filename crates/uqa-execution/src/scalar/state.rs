@@ -7,13 +7,19 @@
 //! Function state belongs to immutable expressions prepared for one execution.
 
 use std::sync::OnceLock;
+mod entries;
 mod rows;
+use entries::StateEntries;
 pub(crate) use rows::RowConstructorState;
 use uqa_sql::expr::composites::constructor::CompositeConstructorState;
 
 use crate::RowSchema;
 
-use uqa_core::{memory::Produced, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
+use uqa_sql::SQLError;
 use uqa_sql::{
     ast::{BinaryOp, FunctionBinding, FunctionDispatch},
     expr::enums::EnumComparisonState,
@@ -103,55 +109,134 @@ pub struct FunctionCallStates {
     composite_constructors: Vec<(usize, CompositeConstructorState)>,
 }
 
-impl FunctionCallStates {
-    fn register(&mut self, expression: &ScalarExpr) {
+struct CallStateBuilder {
+    routines: StateEntries<(usize, RoutineCallDescriptions)>,
+    enums: StateEntries<((usize, u8), EnumComparisonState)>,
+    constant_casts: StateEntries<(usize, OnceLock<ConstantCast>)>,
+    columns: StateEntries<(usize, OnceLock<ColumnSlot>)>,
+    row_casts: StateEntries<(usize, OnceLock<RowCast>)>,
+    numeric_operators: StateEntries<(usize, OnceLock<NumericCall>)>,
+    row_constructors: StateEntries<(usize, RowConstructorState)>,
+    composite_constructors: StateEntries<(usize, CompositeConstructorState)>,
+}
+
+impl CallStateBuilder {
+    fn with_control(control: &ProductionControl<'_>) -> Self {
+        Self {
+            routines: StateEntries::new(control),
+            enums: StateEntries::new(control),
+            constant_casts: StateEntries::new(control),
+            columns: StateEntries::new(control),
+            row_casts: StateEntries::new(control),
+            numeric_operators: StateEntries::new(control),
+            row_constructors: StateEntries::new(control),
+            composite_constructors: StateEntries::new(control),
+        }
+    }
+
+    fn register(
+        &mut self,
+        expression: &ScalarExpr,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         let first_row_cast = self.row_casts.len();
         let first_numeric = self.numeric_operators.len();
         let mut parameter_dependent = false;
-        expression.visit(&mut |expression| match expression {
+        expression.try_visit(&mut |expression| {
+            control.check()?;
+            match expression {
             ScalarExpr::Func { name, binding, args, .. } => {
-                self.add(args.as_ptr() as usize, function_slots(name, binding.as_ref(), args));
+                self.add(args.as_ptr() as usize, function_slots(name, binding.as_ref(), args))?;
                 if let Some(invocation) = binding.as_ref().filter(|binding| !binding.builtin).and_then(|binding| binding.invocation.as_deref()) {
-                    self.routines.push((std::ptr::from_ref(invocation) as usize, RoutineCallDescriptions::default()));
+                    self.routines.push((std::ptr::from_ref(invocation) as usize, RoutineCallDescriptions::default()))?;
                 }
                 if binding.as_ref().is_some_and(|binding| binding.builtin
                     && matches!(binding.dispatch, Some(FunctionDispatch::NumericOperator(operator)) if args.len() == operator.arity())) {
-                    self.numeric_operators.push((args.as_ptr() as usize, OnceLock::new()));
+                    self.numeric_operators.push((args.as_ptr() as usize, OnceLock::new()))?;
                 }
             }
             ScalarExpr::Binary {
                 op: BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual,
                 lhs, ..
-            } => self.add(std::ptr::from_ref(lhs.as_ref()) as usize, 1),
+            } => self.add(std::ptr::from_ref(lhs.as_ref()) as usize, 1)?,
             ScalarExpr::Between { low, high, .. } => {
-                self.add(std::ptr::from_ref(low.as_ref()) as usize, 1);
-                self.add(std::ptr::from_ref(high.as_ref()) as usize, 1);
+                self.add(std::ptr::from_ref(low.as_ref()) as usize, 1)?;
+                self.add(std::ptr::from_ref(high.as_ref()) as usize, 1)?;
             }
             ScalarExpr::Cast { expr, .. }
                 if matches!(expr.as_ref(), ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }) =>
             {
                 self.constant_casts
-                    .push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()));
+                    .push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()))?;
             }
             ScalarExpr::Cast { expr, .. } => {
-                self.row_casts.push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()));
+                self.row_casts.push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()))?;
             }
-            ScalarExpr::Row(items) => self.row_constructors.push((items.as_ptr() as usize, RowConstructorState::default())),
-            ScalarExpr::CompositeRow { items, .. } => self.composite_constructors.push((items.as_ptr() as usize, CompositeConstructorState::default())),
+            ScalarExpr::Row(items) => self.row_constructors.push((items.as_ptr() as usize, RowConstructorState::default()))?,
+            ScalarExpr::CompositeRow { items, .. } => self.composite_constructors.push((items.as_ptr() as usize, CompositeConstructorState::default()))?,
             ScalarExpr::Param(_) => parameter_dependent = true,
             ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => {
                 self.columns
-                    .push((std::ptr::from_ref(expression) as usize, OnceLock::new()));
+                    .push((std::ptr::from_ref(expression) as usize, OnceLock::new()))?;
             }
             _ => {},
-        });
+            }
+            Ok::<_, SQLError>(true)
+        })?;
         // One traversal per root avoids rescanning every nested cast's subtree. Parameter-dependent roots keep live inference without disabling independent roots.
         if parameter_dependent {
             self.row_casts.truncate(first_row_cast);
             self.numeric_operators.truncate(first_numeric);
         }
+        Ok(())
     }
 
+    fn add(&mut self, address: usize, slots: u8) -> Result<(), SQLError> {
+        for slot in 0..slots {
+            self.enums
+                .push(((address, slot), EnumComparisonState::default()))?;
+        }
+        Ok(())
+    }
+
+    fn finish(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<FunctionCallStates>, SQLError> {
+        let mut memory = control.empty_reservation();
+        let (routines, lease) = self.routines.into_parts();
+        memory = control.combine(memory, lease);
+        let (enums, lease) = self.enums.into_parts();
+        memory = control.combine(memory, lease);
+        let (constant_casts, lease) = self.constant_casts.into_parts();
+        memory = control.combine(memory, lease);
+        let (columns, lease) = self.columns.into_parts();
+        memory = control.combine(memory, lease);
+        let (row_casts, lease) = self.row_casts.into_parts();
+        memory = control.combine(memory, lease);
+        let (numeric_operators, lease) = self.numeric_operators.into_parts();
+        memory = control.combine(memory, lease);
+        let (row_constructors, lease) = self.row_constructors.into_parts();
+        memory = control.combine(memory, lease);
+        let (composite_constructors, lease) = self.composite_constructors.into_parts();
+        memory = control.combine(memory, lease);
+        Ok(control.finish(
+            FunctionCallStates {
+                routines,
+                enums,
+                constant_casts,
+                columns,
+                row_casts,
+                numeric_operators,
+                row_constructors,
+                composite_constructors,
+            },
+            memory,
+        )?)
+    }
+}
+
+impl FunctionCallStates {
     fn is_empty(&self) -> bool {
         self.routines.is_empty()
             && self.enums.is_empty()
@@ -224,13 +309,6 @@ impl FunctionCallStates {
             .map(|index| &self.composite_constructors[index].1)
     }
 
-    fn add(&mut self, address: usize, slots: u8) {
-        for slot in 0..slots {
-            self.enums
-                .push(((address, slot), EnumComparisonState::default()));
-        }
-    }
-
     pub(crate) fn enum_comparisons(
         &self,
         arguments: &[ScalarExpr],
@@ -283,7 +361,8 @@ fn function_slots(name: &str, binding: Option<&FunctionBinding>, args: &[ScalarE
     }
 }
 
-type VisitRoots<T> = fn(&T, &mut dyn FnMut(&ScalarExpr));
+type VisitRoots<T> =
+    fn(&T, &mut dyn FnMut(&ScalarExpr) -> Result<(), SQLError>) -> Result<(), SQLError>;
 
 /// Retains both the immutable source and its call state. Argument vectors and
 /// comparison operands are heap allocations, so their identity survives moves. They cannot
@@ -291,7 +370,7 @@ type VisitRoots<T> = fn(&T, &mut dyn FnMut(&ScalarExpr));
 /// and are never dereferenced. Cloning prepares independent, initially empty state.
 pub(crate) struct PreparedExpressions<T> {
     expressions: T,
-    calls: Option<Box<PreparedCallStates<T>>>,
+    calls: Option<Box<Produced<PreparedCallStates<T>>>>,
 }
 
 struct PreparedCallStates<T> {
@@ -312,8 +391,20 @@ static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
 
 impl<T> PreparedExpressions<T> {
     pub(crate) fn new(expressions: T, visit_roots: VisitRoots<T>) -> Self {
-        let mut calls = FunctionCallStates::default();
-        visit_roots(&expressions, &mut |expression| calls.register(expression));
+        Self::new_with_control(expressions, visit_roots, &ProductionControl::uncontrolled())
+            .expect("ordinary immutable expression preparation")
+    }
+
+    pub(crate) fn new_with_control(
+        expressions: T,
+        visit_roots: VisitRoots<T>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        let mut calls = CallStateBuilder::with_control(control);
+        visit_roots(&expressions, &mut |expression| {
+            calls.register(expression, control)
+        })?;
         calls.routines.sort_unstable_by_key(|(address, _)| *address);
         calls.routines.dedup_by_key(|(address, _)| *address);
         calls.enums.sort_unstable_by_key(|(address, _)| *address);
@@ -344,10 +435,19 @@ impl<T> PreparedExpressions<T> {
         calls
             .composite_constructors
             .dedup_by_key(|(address, _)| *address);
-        Self {
-            expressions,
-            calls: (!calls.is_empty()).then(|| Box::new(PreparedCallStates { calls, visit_roots })),
-        }
+        let calls = calls.finish(control)?;
+        let calls = if calls.is_empty() {
+            None
+        } else {
+            let header = control.reserve(size_of::<Produced<PreparedCallStates<T>>>())?;
+            let (calls, memory) = calls.into_parts();
+            Some(Box::new(control.finish(
+                PreparedCallStates { calls, visit_roots },
+                control.combine(memory, header),
+            )?))
+        };
+        control.check()?;
+        Ok(Self { expressions, calls })
     }
 
     pub(crate) fn calls(&self) -> &FunctionCallStates {
@@ -363,11 +463,33 @@ impl PreparedExpressions<ScalarExpr> {
     }
 }
 
+impl PreparedExpressions<Produced<ScalarExpr>> {
+    pub(crate) fn produced_scalar(
+        expression: Produced<ScalarExpr>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Self::new_with_control(expression, |expression, visit| visit(expression), control)
+    }
+}
+
 impl PreparedExpressions<Vec<ScalarExpr>> {
     pub(crate) fn scalars(expressions: Vec<ScalarExpr>) -> Self {
         Self::new(expressions, |expressions, visit| {
-            expressions.iter().for_each(visit);
+            expressions.iter().try_for_each(visit)
         })
+    }
+}
+
+impl PreparedExpressions<Produced<Vec<ScalarExpr>>> {
+    pub(crate) fn produced_scalars(
+        expressions: Produced<Vec<ScalarExpr>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Self::new_with_control(
+            expressions,
+            |expressions, visit| expressions.iter().try_for_each(visit),
+            control,
+        )
     }
 }
 
@@ -375,8 +497,9 @@ impl PreparedExpressions<Vec<crate::SortKey>> {
     pub(crate) fn sort_keys(keys: Vec<crate::SortKey>) -> Self {
         Self::new(keys, |keys, visit| {
             for key in keys {
-                visit(&key.expr);
+                visit(&key.expr)?;
             }
+            Ok(())
         })
     }
 }
@@ -403,3 +526,6 @@ impl<T: Clone> Clone for PreparedExpressions<T> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod production_tests;

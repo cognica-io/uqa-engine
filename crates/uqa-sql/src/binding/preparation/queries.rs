@@ -6,7 +6,8 @@
 
 //! Query analysis follows `PostgreSQL`'s source, target, clause, and coercion order.
 
-use super::super::{analysis, overlay_outer_schema, projection_star_columns};
+use super::super::{analysis, overlay_outer_schema_with_control};
+use super::ownership::AnalysisVec;
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryOutput, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
@@ -44,11 +45,10 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
         let output = self.query_output(plan, outer, false)?;
-        Ok(self
-            .parameters
+        self.parameters
             .query_output_schema(plan)
             .cloned()
-            .unwrap_or_else(|| output.schema()))
+            .map_or_else(|| output.schema(&self.scope.control()), Ok)
     }
 
     pub(super) fn query_output(
@@ -81,7 +81,7 @@ impl Preparation<'_> {
             for value in &output.types {
                 value.derivation.validate()?;
             }
-            self.parameters.retain_query_output(plan, &output);
+            self.parameters.retain_query_output(plan, &output)?;
             Ok(output)
         })();
         self.scope.resolution.set_lookup_mode(lookup);
@@ -110,25 +110,32 @@ impl Preparation<'_> {
             } => {
                 let mut left_output = self.query_output(left, outer, true)?;
                 let mut right_output = self.query_output(right, outer, true)?;
-                left_output.retain_set_operand_names(left);
-                right_output.retain_set_operand_names(right);
-                let unknowns = |output: &QueryOutput| {
-                    output
-                        .types
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, value)| value.is_sql_unknown().then_some(index))
-                        .collect::<Vec<_>>()
+                left_output.retain_set_operand_names(left)?;
+                right_output.retain_set_operand_names(right)?;
+                let owner = self.scope.control().capture();
+                let control = owner.control();
+                let unknowns = |output: &QueryOutput| -> Result<AnalysisVec<usize>, SQLError> {
+                    let mut positions = AnalysisVec::new(&control);
+                    for (index, value) in output.types.iter().enumerate() {
+                        if value.is_sql_unknown() {
+                            positions.push(index, &control)?;
+                        }
+                    }
+                    Ok(positions)
                 };
-                let left_unknowns = unknowns(&left_output);
-                let right_unknowns = unknowns(&right_output);
+                let left_unknowns = unknowns(&left_output)?;
+                let right_unknowns = unknowns(&right_output)?;
                 let output = self.set_output(left_output, right_output, *kind, *all)?;
                 self.parameters
-                    .retain_set_operand_coercions(left, &left_unknowns, &output);
+                    .retain_set_operand_coercions(left, &left_unknowns, &output)?;
                 self.parameters
-                    .retain_set_operand_coercions(right, &right_unknowns, &output);
+                    .retain_set_operand_coercions(right, &right_unknowns, &output)?;
                 self.set_ordering(order_by, &output, subqueries)?;
-                let input = overlay_outer_schema(&RowSchema::default(), outer);
+                let input = overlay_outer_schema_with_control(
+                    &RowSchema::empty_with_control(&control)?,
+                    outer,
+                    &control,
+                )?;
                 self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
                 Ok(output)
             }
@@ -138,7 +145,7 @@ impl Preparation<'_> {
     pub(super) fn set_output(
         &mut self,
         mut left: QueryOutput,
-        mut right: QueryOutput,
+        right: QueryOutput,
         kind: crate::ast::SetOpKind,
         all: bool,
     ) -> Result<QueryOutput, SQLError> {
@@ -167,10 +174,10 @@ impl Preparation<'_> {
             )?;
             if let Some(target) = &ty {
                 for value in &mut values {
-                    value.derivation = value.derivation.coerce(value.ty.as_ref(), target);
+                    value.derivation = value.derivation.coerce(value.ty.as_deref(), target);
                 }
             }
-            let mut result = ExpressionType::combined(ty, &values);
+            let mut result = ExpressionType::combined_owned(ty, &values);
             let oid = result.derivation.common_oid(allow_indeterminate)?;
             if !allow_indeterminate {
                 if let Some(ty) = &result.ty {
@@ -189,7 +196,12 @@ impl Preparation<'_> {
             *left = result;
         }
         left.key_origins.clear();
-        left.set_sources.append(&mut right.set_sources);
+        let control = left.control.control();
+        left.set_sources
+            .reserve(right.set_sources.len(), &control)?;
+        for source in right.set_sources {
+            left.set_sources.push(source, &control)?;
+        }
         Ok(left)
     }
 
@@ -200,7 +212,14 @@ impl Preparation<'_> {
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
         let captured_outer = outer
-            .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+            .map(|schema| {
+                crate::semantics::view_rewrite::bind_outer_rewrite_scope_with_control(
+                    block,
+                    schema,
+                    &self.scope.control(),
+                )
+            })
+            .transpose()?;
         let outer = captured_outer.as_deref();
         if !block.deferred_outer_rewrites.is_empty() {
             return self.rewritten_block(block, outer, preserve_unknown);
@@ -218,11 +237,18 @@ impl Preparation<'_> {
             .from
             .as_ref()
             .map(|source| self.source(source, &block.subqueries, outer))
-            .transpose()?
-            .unwrap_or_default();
-        let source = analysis::with_query_source_columns(&source, block);
+            .transpose()?;
+        let source = match source {
+            Some(source) => source,
+            None => RowSchema::empty_with_control(&self.scope.control())?,
+        };
+        let source = analysis::with_query_source_columns_with_control(
+            &source,
+            block,
+            &self.scope.control(),
+        )?;
         if let Some(from) = &block.from {
-            self.parameters.retain_source_schema(from, &source);
+            self.parameters.retain_source_schema(from, &source)?;
         }
         self.in_query_level(|analysis| {
             analysis.block_level_output(block, &source, outer, preserve_unknown)
@@ -236,35 +262,45 @@ impl Preparation<'_> {
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
         if let Some(block) = self.parameters.take_rewritten_block(original) {
-            let result = self.analyzed_block(&block, outer, preserve_unknown);
-            self.parameters.retain_rewritten_block(original, block);
+            let RelationalPlan::QueryBlock(rewritten) = &block.root else {
+                unreachable!("rewritten query block");
+            };
+            let result = self.analyzed_block(rewritten, outer, preserve_unknown);
+            self.parameters.retain_rewritten_block(original, block)?;
             return result;
         }
         // Namespace discovery precedes identity-based input analysis. No constants or call selections may refer to temporary rewrite copies.
-        let params = self.parameters.values();
-        let source_rewrites = crate::semantics::view_rewrite::resolve_outer_sources(
-            original,
+        let params = self.parameters.values()?;
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let block = crate::semantics::view_rewrite::resolve_outer_sources_owned(
+            original.copy_for_rewrite(&control)?,
             outer,
             &mut |source, subqueries, scope| {
                 self.scope
                     .bind_source_input(self.routines, source, subqueries, &params, scope)
             },
+            &control,
         )?;
-        let block = source_rewrites.as_ref();
-        let source = block
+        let RelationalPlan::QueryBlock(query) = &block.root else {
+            unreachable!("rewritten query block");
+        };
+        let source = query
             .from
             .as_ref()
             .map(|source| {
                 self.scope
-                    .bind_source(self.routines, source, &block.subqueries, &params, outer)
+                    .bind_source(self.routines, source, &query.subqueries, &params, outer)
             })
             .transpose()?
             .unwrap_or_default();
-        let block = Box::new(
-            crate::semantics::view_rewrite::resolve_outer_rewrites(block, &source).into_owned(),
-        );
-        let result = self.analyzed_block(&block, outer, preserve_unknown);
-        self.parameters.retain_rewritten_block(original, block);
+        let block =
+            crate::semantics::view_rewrite::resolve_outer_rewrites_owned(block, &source, &control)?;
+        let RelationalPlan::QueryBlock(query) = &block.root else {
+            unreachable!("rewritten query block");
+        };
+        let result = self.analyzed_block(query, outer, preserve_unknown);
+        self.parameters.retain_rewritten_block(original, block)?;
         result
     }
 
@@ -276,21 +312,35 @@ impl Preparation<'_> {
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
         let captured_outer = outer
-            .map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+            .map(|schema| {
+                crate::semantics::view_rewrite::bind_outer_rewrite_scope_with_control(
+                    block,
+                    schema,
+                    &self.scope.control(),
+                )
+            })
+            .transpose()?;
         let outer = captured_outer.as_deref();
-        match crate::semantics::view_rewrite::resolve_outer_rewrites(block, source) {
-            std::borrow::Cow::Borrowed(block) => self.in_query_level(|analysis| {
+        if block.deferred_outer_rewrites.is_empty() {
+            return self.in_query_level(|analysis| {
                 analysis.block_level_output(block, source, outer, preserve_unknown)
-            }),
-            std::borrow::Cow::Owned(rewritten) => {
-                let rewritten = Box::new(rewritten);
-                let result = self.in_query_level(|analysis| {
-                    analysis.block_level_output(&rewritten, source, outer, preserve_unknown)
-                });
-                self.parameters.retain_rewritten_block(block, rewritten);
-                result
-            }
+            });
         }
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let rewritten = crate::semantics::view_rewrite::resolve_outer_rewrites_owned(
+            block.copy_for_rewrite(&control)?,
+            source,
+            &control,
+        )?;
+        let RelationalPlan::QueryBlock(query) = &rewritten.root else {
+            unreachable!("rewritten query block");
+        };
+        let result = self.in_query_level(|analysis| {
+            analysis.block_level_output(query, source, outer, preserve_unknown)
+        });
+        self.parameters.retain_rewritten_block(block, rewritten)?;
+        result
     }
 
     fn block_level_output(
@@ -302,8 +352,8 @@ impl Preparation<'_> {
     ) -> Result<QueryOutput, SQLError> {
         #[cfg(test)]
         BLOCK_ANALYSES.with(|count| count.set(count.get() + 1));
-        let input = overlay_outer_schema(source, outer);
-        let input = self.scope.with_stored_outer_internal_aliases(&input);
+        let input = overlay_outer_schema_with_control(source, outer, &self.scope.control())?;
+        let input = self.scope.with_stored_outer_internal_aliases(&input)?;
         let mut output = self.projections(&block.projections, source, &input, &block.subqueries)?;
         if let Some(predicate) = &block.r#where {
             self.in_placement(SetPlacement::Where, |analysis| {
@@ -315,7 +365,7 @@ impl Preparation<'_> {
                 analysis.require_boolean(having, &input, &block.subqueries, "HAVING")
             })?;
         }
-        let projected = output.schema();
+        let projected = output.schema(&self.scope.control())?;
         for order in &block.order_by {
             let value = self.alias_expression(
                 &order.expr,
@@ -331,29 +381,9 @@ impl Preparation<'_> {
             }
             self.query_key(&order.expr, value.derivation, block, &input)?;
         }
-        for expression in block
-            .group_by
-            .iter()
-            .chain(block.grouping_sets.iter().flatten())
-        {
-            let expression =
-                crate::semantics::grouping_sets::resolve_grouping_expression_reference(
-                    self.routines,
-                    expression,
-                    &block.projections,
-                    &input,
-                    outer,
-                    &self.parameters.values(),
-                )?;
-            let mut value = self.expression(expression, &input, &block.subqueries)?;
-            self.parameters
-                .coerce_unknown(&mut value, &ColumnType::Text)?;
-            if let Some(ty) = &value.ty {
-                crate::type_resolution::ComparisonSupport::Equality
-                    .require_in_catalog(ty, self.routines)?;
-            }
-            self.query_key(expression, value.derivation, block, &input)?;
-        }
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let grouping_inputs = self.grouping_inputs(block, source, &input, outer, &projected)?;
         for expression in &block.distinct_on {
             let value = self.alias_expression(
                 expression,
@@ -387,23 +417,82 @@ impl Preparation<'_> {
             &block.subqueries,
         )?;
         self.query_windows(block, &input)?;
-        crate::semantics::grouping_sets::validate_grouped_expressions(
+        crate::semantics::grouping_sets::validate_grouped_expressions_with_inputs(
             self.routines,
             block,
             &input,
             outer,
-            &self.parameters.values(),
+            &self.parameters.values()?,
+            grouping_inputs.iter().copied(),
+            &control,
         )?;
         self.parameters
-            .retain_distinct_grouping(block, &input, outer);
+            .retain_distinct_grouping(block, &input, outer)?;
         if !preserve_unknown {
             self.resolve_targets(&mut output)?;
         }
         Ok(output)
     }
 
+    fn grouping_inputs<'a>(
+        &mut self,
+        block: &'a QueryBlockPlan,
+        source: &RowSchema,
+        input: &RowSchema,
+        outer: Option<&RowSchema>,
+        projected: &RowSchema,
+    ) -> Result<uqa_core::memory::Produced<Vec<&'a ScalarExpr>>, SQLError> {
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let mut grouping_inputs = uqa_core::memory::ProductionVec::new(control);
+        for expression in block
+            .group_by
+            .iter()
+            .chain(block.grouping_sets.iter().flatten())
+        {
+            let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
+                let site = sites.site(expression)?;
+                let name = sites.bare_name(site)?;
+                if source.has_unqualified_column(name) || source.column_is_ambiguous(name) {
+                    return None;
+                }
+                let slot = projected.column_slot(name)?;
+                sites.resolutions.as_mut_slice()[site] =
+                    super::super::VariableSiteResolution::Output;
+                block
+                    .projections
+                    .get(slot)
+                    .map(|projection| &projection.expr)
+            });
+            let expression = site_output.unwrap_or(expression);
+            let expression =
+                crate::semantics::grouping_sets::resolve_grouping_expression_reference_with_control(
+                    self.routines,
+                    expression,
+                    &block.projections,
+                    input,
+                    outer,
+                    &self.parameters.values()?,
+                    &control,
+                )?;
+            grouping_inputs.push_copy(expression)?;
+            let mut value = self.expression(expression, input, &block.subqueries)?;
+            self.parameters
+                .coerce_unknown(&mut value, &ColumnType::Text)?;
+            if let Some(ty) = &value.ty {
+                crate::type_resolution::ComparisonSupport::Equality
+                    .require_in_catalog(ty, self.routines)?;
+            }
+            self.query_key(expression, value.derivation, block, input)?;
+        }
+        Ok(grouping_inputs.finish()?)
+    }
+
     fn query_windows(&mut self, block: &QueryBlockPlan, input: &RowSchema) -> Result<(), SQLError> {
-        let mut order_types = Vec::with_capacity(block.windows.len());
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let mut order_types = AnalysisVec::new(&control);
+        order_types.reserve(block.windows.len(), &control)?;
         for (slot, window) in block.windows.iter().enumerate() {
             let inherited = window
                 .inherited
@@ -420,7 +509,7 @@ impl Preparation<'_> {
                 .transpose()?;
             let order =
                 self.window_definition(&window.spec, input, &block.subqueries, inherited)?;
-            order_types.push(order);
+            order_types.push(order, &control)?;
         }
         let mut result = Ok(());
         for expression in block
@@ -456,71 +545,96 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<QueryOutput, SQLError> {
-        let mut output = QueryOutput {
-            columns: Vec::new(),
-            types: Vec::new(),
-            open: false,
-            key_origins: Vec::new(),
-            set_sources: Vec::new(),
-        };
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let mut output = QueryOutput::new(&control);
         for projection in projections {
             let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
                 input
             } else {
                 source
             };
-            if let Some(columns) = projection_star_columns(&projection.expr, expansion)? {
+            if super::super::projection::visit_projection_star_metadata(
+                &projection.expr,
+                expansion,
+                &control,
+                &mut |field| {
+                    output
+                        .columns
+                        .push(control.copy_text(field.name)?, &control)?;
+                    let mut value = ExpressionType::resolved_produced(
+                        field
+                            .ty
+                            .map(|ty| ty.clone_with_control(&control))
+                            .transpose()?,
+                        &control,
+                    )?;
+                    if let Some(oid) = field.collation {
+                        value.derivation =
+                            crate::catalog::collations::derivation::Derivation::implicit(
+                                i64::from(oid),
+                            );
+                    }
+                    if let Some(record) = field.record {
+                        value.record_fields.clone_from(&record.types);
+                        value.record_descriptor.clone_from(&record.descriptor);
+                    }
+                    output.types.push(value, &control)?;
+                    Ok(())
+                },
+            )? {
                 output.open |= match &projection.expr {
                     ScalarExpr::QualifiedStar(qualifier) => {
                         expansion.columns_are_open(Some(qualifier))
                     }
                     _ => expansion.columns_are_open(None),
                 };
-                let fields =
-                    super::super::record_fields::star_metadata(&projection.expr, expansion)
-                        .unwrap_or_default();
-                for ((column, ty, collation), fields) in columns.into_iter().zip(fields) {
-                    output.columns.push(column);
-                    let mut value = ExpressionType::resolved(ty);
-                    if let Some(oid) = collation {
-                        value.derivation =
-                            crate::catalog::collations::derivation::Derivation::implicit(
-                                i64::from(oid),
-                            );
-                    }
-                    if let Some(fields) = fields {
-                        value.record_fields = fields.types;
-                        value.record_descriptor = fields.descriptor;
-                    }
-                    output.types.push(value);
-                }
             } else {
                 let mut value = self.expression(&projection.expr, input, subqueries)?;
-                if matches!(value.ty, Some(ColumnType::Composite(_))) {
+                if matches!(value.ty.as_deref(), Some(ColumnType::Composite(_))) {
                     value.record_fields = self.scope.bind_record_fields(
                         self.routines,
                         &projection.expr,
                         input,
                         subqueries,
-                        &self.parameters.values(),
+                        &self.parameters.values()?,
                     )?;
                 }
                 if matches!(
                     value.derivation,
                     crate::catalog::collations::derivation::Derivation::Conflict(..)
                 ) {
-                    output.key_origins.push((
-                        output.types.len(),
-                        std::ptr::NonNull::from(&projection.expr),
-                    ));
+                    output.key_origins.push(
+                        (
+                            output.types.len(),
+                            std::ptr::NonNull::from(&projection.expr),
+                        ),
+                        &control,
+                    )?;
                     self.parameters
                         .collations
-                        .record_target(&projection.expr, value.derivation);
+                        .record_target(&projection.expr, value.derivation)?;
                 }
-                output
-                    .columns
-                    .push(crate::semantics::projection_label_at(projection));
-                output.types.push(value);
+                let site_label = projection
+                    .alias
+                    .is_none()
+                    .then(|| {
+                        self.scope.variable_sites.as_ref().and_then(|sites| {
+                            sites
+                                .site(&projection.expr)
+                                .and_then(|site| sites.label(site))
+                        })
+                    })
+                    .flatten();
+                let name = if let Some(name) = site_label {
+                    control.copy_text(name)?
+                } else {
+                    crate::semantics::with_projection_label(projection, &control, |name| {
+                        Ok(control.copy_text(name)?)
+                    })?
+                };
+                output.columns.push(name, &control)?;
+                output.types.push(value, &control)?;
             }
         }
         Ok(output)
@@ -539,9 +653,15 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
     ) -> Result<QueryOutput, SQLError> {
+        let owner = self.scope.control().capture();
+        let control = owner.control();
         let width = rows.first().map_or(0, Vec::len);
-        let mut columns = vec![Vec::new(); width];
-        let empty = RowSchema::default();
+        let mut columns = AnalysisVec::new(&control);
+        columns.reserve(width, &control)?;
+        for _ in 0..width {
+            columns.push(AnalysisVec::new(&control), &control)?;
+        }
+        let empty = RowSchema::empty_with_control(&control)?;
         let input = outer.unwrap_or(&empty);
         for row in rows {
             for (position, expression) in row.iter().enumerate() {
@@ -549,7 +669,7 @@ impl Preparation<'_> {
                     analysis.expression(expression, input, subqueries)
                 })?;
                 if let Some(column) = columns.get_mut(position) {
-                    column.push(value);
+                    column.push(value, &control)?;
                 }
             }
             if row.len() != width {
@@ -559,31 +679,25 @@ impl Preparation<'_> {
                 ));
             }
         }
-        let types = columns
-            .iter_mut()
-            .map(|column| {
-                let ty = self.common(crate::type_resolution::CommonTypeContext::Values, column)?;
-                let mut value = ExpressionType::combined(ty, column);
-                // VALUES resolves each column after all row expressions have been analyzed, before proceeding to the next column.
-                let oid = value.derivation.common_oid(true)?;
-                // The VALUES relation exports a column selection, not its input expression's explicit strength.
-                value.derivation =
-                    crate::catalog::collations::derivation::Derivation::implicit(oid);
-                value.record_fields = super::super::record_fields::common_fields(
-                    column.iter().map(|item| item.record_fields.as_ref()),
-                );
-                Ok::<ExpressionType, SQLError>(value)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(QueryOutput {
-            open: false,
-            key_origins: Vec::new(),
-            set_sources: Vec::new(),
-            columns: (1..=width)
-                .map(|position| format!("column{position}"))
-                .collect(),
-            types,
-        })
+        let mut output = QueryOutput::new(&control);
+        output.types.reserve(width, &control)?;
+        output.columns.reserve(width, &control)?;
+        for (index, column) in columns.iter_mut().enumerate() {
+            let ty = self.common(crate::type_resolution::CommonTypeContext::Values, column)?;
+            let mut value = ExpressionType::combined_owned(ty, column);
+            // Resolve each column after all row expressions, retaining the relation's implicit output selection.
+            let oid = value.derivation.common_oid(true)?;
+            value.derivation = crate::catalog::collations::derivation::Derivation::implicit(oid);
+            value.record_fields = super::super::record_fields::common_fields(
+                column.iter().map(|item| item.record_fields.as_ref()),
+            );
+            output.types.push(value, &control)?;
+            output.columns.push(
+                control.format(format_args!("column{}", index + 1))?,
+                &control,
+            )?;
+        }
+        Ok(output)
     }
 
     pub(super) fn alias_expression(
@@ -595,7 +709,14 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
         clause: &str,
     ) -> Result<ExpressionType, SQLError> {
-        let index = match expression {
+        let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
+            let site = sites.site(expression)?;
+            let name = sites.bare_name(site)?;
+            let slot = primary.column_slot(name)?;
+            sites.resolutions.as_mut_slice()[site] = super::super::VariableSiteResolution::Output;
+            Some(slot)
+        });
+        let index = site_output.or(match expression {
             ScalarExpr::Literal(uqa_core::Value::Int(position)) => Some(
                 crate::semantics::query_output_position(*position, primary.len(), clause)?,
             ),
@@ -608,17 +729,18 @@ impl Preparation<'_> {
             ScalarExpr::Column(name) => primary.column_slot(name),
             ScalarExpr::Position(position) if *position < output.types.len() => Some(*position),
             _ => None,
-        };
+        });
         if let Some(index) = index.filter(|index| *index < output.types.len()) {
             if let Some(origin) = output.key_origin(index) {
                 self.parameters.collations.require_key_at(origin);
             }
-            let mut value = ExpressionType::resolved(output.types[index].ty.clone());
+            let mut value = ExpressionType::resolved_owned(output.types[index].ty.clone());
             value.derivation = output.types[index].derivation;
             return Ok(value);
         }
         let mut value = if matches!(expression, ScalarExpr::Column(_) | ScalarExpr::Position(_)) {
-            let input = overlay_outer_schema(primary, Some(fallback));
+            let input =
+                overlay_outer_schema_with_control(primary, Some(fallback), &self.scope.control())?;
             self.expression(expression, &input, subqueries)?
         } else {
             self.expression(expression, fallback, subqueries)?
@@ -639,7 +761,9 @@ impl Preparation<'_> {
         if !matches!(selected, Derivation::Conflict(..)) {
             return Ok(());
         }
-        self.parameters.collations.require_key(expression, selected);
+        self.parameters
+            .collations
+            .require_key(expression, selected)?;
         let mut identity = None;
         for projection in &block.projections {
             if !self
@@ -652,7 +776,7 @@ impl Preparation<'_> {
             let same = if projection.expr == *expression {
                 true
             } else {
-                let parameters = self.parameters.values();
+                let parameters = self.parameters.values()?;
                 let key = match &identity {
                     Some(key) => key,
                     None => identity.insert(crate::semantics::grouping_sets::expression_identity(
@@ -672,7 +796,7 @@ impl Preparation<'_> {
             if same {
                 self.parameters
                     .collations
-                    .require_key(&projection.expr, selected);
+                    .require_key(&projection.expr, selected)?;
                 break;
             }
         }
@@ -696,7 +820,7 @@ impl Preparation<'_> {
             })?;
             self.parameters
                 .coerce_unknown(&mut value, &ColumnType::BigInteger)?;
-            let ty = value.ty.as_ref().expect("coerced slice expression");
+            let ty = value.ty.as_deref().expect("coerced slice expression");
             if !crate::assignment_type_compatible(ty, &ColumnType::BigInteger) {
                 return Err(error(
                     "42804",

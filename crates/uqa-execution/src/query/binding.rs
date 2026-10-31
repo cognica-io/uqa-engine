@@ -13,7 +13,9 @@ use uqa_sql::plan::{
 };
 use uqa_sql::routines::RoutineResolution;
 use uqa_sql::{ColumnType, SQLError, SQLParam};
+mod capture;
 mod context;
+pub use capture::{binding_context_with_control, binding_snapshot_with_control};
 pub(crate) mod sources;
 pub use context::binding_context;
 mod subqueries;
@@ -89,40 +91,40 @@ pub fn infer_prepared_parameter_types<S: Clone>(
 pub fn bind_projection_output_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     projections: &[ProjectionPlan],
-    expression_schema: &RowSchema,
-    star_schema: &RowSchema,
+    schemas: uqa_sql::binding::ProjectionSchemas<'_>,
     subqueries: &[QueryPlan],
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::bind_projection_output_schema(
+    uqa_sql::binding::bind_projection_output_schema_with_control(
         routines,
         projections,
-        expression_schema,
-        star_schema,
+        schemas,
         subqueries,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
+        control,
     )
 }
 
 pub fn analyze_projection_output_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     projections: &[ProjectionPlan],
-    expression_schema: &RowSchema,
-    star_schema: &RowSchema,
+    schemas: uqa_sql::binding::ProjectionSchemas<'_>,
     subqueries: &[QueryPlan],
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::analyze_projection_output_schema(
+    uqa_sql::binding::analyze_projection_output_schema_with_control(
         routines,
         projections,
-        expression_schema,
-        star_schema,
+        schemas,
         subqueries,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
+        control,
     )
 }
 
@@ -132,13 +134,15 @@ pub fn validate_query_block_expression_types<S: Clone>(
     schema: &RowSchema,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    uqa_sql::binding::validate_query_block_expression_types(
+    uqa_sql::binding::validate_query_block_expression_types_with_control(
         routines,
         statement,
         schema,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
+        control,
     )
 }
 
@@ -149,14 +153,16 @@ pub fn validate_query_block_references<S: Clone>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    uqa_sql::binding::validate_query_block_references(
+    uqa_sql::binding::validate_query_block_references_with_control(
         routines,
         statement,
         schema,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
         outer,
+        control,
     )
 }
 
@@ -199,16 +205,6 @@ pub fn bind_expression_plan_routines_for_storage<S: Clone>(
         &binding_context(ctes)?,
         schema,
     )
-}
-
-pub(crate) fn restore_query_layouts<S: Clone>(
-    routines: &dyn RoutineResolution,
-    plan: &mut QueryPlan,
-    params: &[SQLParam],
-    ctes: &CteScope<S>,
-    outer: Option<&RowSchema>,
-) -> Result<(), SQLError> {
-    uqa_sql::binding::restore_query_layouts(routines, plan, params, &binding_context(ctes)?, outer)
 }
 
 pub fn bind_query_plan_schema<S: Clone>(
@@ -291,13 +287,15 @@ pub fn bind_source_plan_schema<S: Clone>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::bind_source_plan_schema(
+    uqa_sql::binding::production::bind_source_plan_schema_with_control(
         routines,
         source,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
         outer,
+        control,
     )
 }
 
@@ -317,19 +315,21 @@ pub fn analyze_source_plan_schema<S: Clone>(
     )
 }
 
-pub fn bind_source_plan_schema_for_execution<S: Clone>(
+pub fn bind_source_plan_for_execution<S: Clone>(
     routines: &dyn RoutineResolution,
-    source: &mut SourcePlan,
+    source: uqa_sql::plan::MutableSourcePlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
-) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::bind_source_plan_schema_for_execution(
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(uqa_sql::plan::MutableSourcePlan, RowSchema), SQLError> {
+    uqa_sql::binding::bind_source_plan_for_execution_owned(
         routines,
         source,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
         outer,
+        control,
     )
 }
 
@@ -338,16 +338,16 @@ pub fn bind_query_block_for_execution<'a, S: Clone>(
     block: &'a QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
-    outer: Option<&RowSchema>,
-    defer_distinct_limit: bool,
-) -> Result<(std::borrow::Cow<'a, QueryBlockPlan>, RowSchema), SQLError> {
-    uqa_sql::binding::bind_query_block_for_execution(
+    options: uqa_sql::binding::ExecutionBindingOptions<'_>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(uqa_sql::binding::ExecutionQueryBlock<'a>, RowSchema), SQLError> {
+    uqa_sql::binding::bind_query_block_for_execution_with_control(
         routines,
         block,
         params,
-        &binding_context(ctes)?,
-        outer,
-        defer_distinct_limit,
+        binding_context_with_control(ctes, control)?,
+        options,
+        control,
     )
 }
 
@@ -371,6 +371,13 @@ pub fn analyze_command_parameters<S: Clone>(
 }
 
 impl<S: Clone> uqa_sql::binding::statements::StatementBindingScope for CteScope<S> {
+    fn binding_context_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::ControlledBindingContext<'_>, SQLError> {
+        binding_context_with_control(self, control)
+    }
+
     fn binding_context(&self) -> Result<uqa_sql::binding::BindingContext<'_>, SQLError> {
         binding_context(self)
     }

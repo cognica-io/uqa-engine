@@ -258,8 +258,8 @@ impl ScoredDocumentSource {
     fn materialize_locking_physical_entries(
         &self,
         entries: &[ScoredEntry],
-        qualifier: &std::sync::Arc<str>,
-        storage_name: &std::sync::Arc<str>,
+        qualifier: &crate::RowLockName,
+        storage_name: &crate::RowLockName,
     ) -> ExecResult<Vec<crate::PhysicalRow>> {
         let mut rows = Vec::with_capacity(entries.len());
         self.for_each_kept_entry(entries, true, &mut |doc_id, entry, _fields, values| {
@@ -274,8 +274,8 @@ impl ScoredDocumentSource {
                     entry.score,
                 )?
                 .with_lock_origin(crate::RowLockOrigin::from_shared(
-                    std::sync::Arc::clone(qualifier),
-                    std::sync::Arc::clone(storage_name),
+                    qualifier.clone(),
+                    storage_name.clone(),
                     doc_id,
                 ));
             rows.push(row);

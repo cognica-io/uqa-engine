@@ -22,7 +22,7 @@ mod source;
 
 /// Optimize and execute at the call boundary so writer promotion cannot leave a stale query generation.
 pub trait TableAsQuerySource {
-    fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError>;
+    fn optimize(&self, plan: &QueryPlan) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError>;
     fn execute(
         &self,
         plan: &QueryPlan,

@@ -12,13 +12,16 @@ use crate::{
     SharedExpressionEvaluator,
 };
 use std::sync::Arc;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryReservation, ProductionControl},
+    Value,
+};
 use uqa_sql::{expr::RowLookup, SQLError, SQLParam};
 
 mod outer;
 #[cfg(test)]
 mod tests;
-pub(crate) use outer::with_outer_row;
+pub(crate) use outer::with_outer_row_with_control;
 
 /// Scalar execution services that can intercept a function requiring its unevaluated argument expressions.
 pub trait ScalarExpressionContext: QueryExpressionContext {
@@ -32,9 +35,29 @@ pub trait ScalarExpressionContext: QueryExpressionContext {
 }
 
 pub struct ScopedExpressionEvaluator<'a> {
-    context: Arc<dyn ScalarExpressionContext + 'a>,
+    context: ExpressionContext<'a>,
     params: &'a [SQLParam],
     cancellation: uqa_core::CancellationToken,
+    _memory: Option<MemoryReservation>,
+}
+
+enum ExpressionContext<'a> {
+    Shared(Arc<dyn ScalarExpressionContext + 'a>),
+    Borrowed(&'a dyn ScalarExpressionContext),
+}
+impl<'a> AsRef<dyn ScalarExpressionContext + 'a> for ExpressionContext<'a> {
+    fn as_ref(&self) -> &(dyn ScalarExpressionContext + 'a) {
+        match self {
+            Self::Shared(context) => context.as_ref(),
+            Self::Borrowed(context) => *context,
+        }
+    }
+}
+impl<'a> std::ops::Deref for ExpressionContext<'a> {
+    type Target = dyn ScalarExpressionContext + 'a;
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
 }
 
 impl<'a> ScopedExpressionEvaluator<'a> {
@@ -43,11 +66,57 @@ impl<'a> ScopedExpressionEvaluator<'a> {
         params: &'a [SQLParam],
         cancellation: uqa_core::CancellationToken,
     ) -> SharedExpressionEvaluator<'a> {
-        Arc::new(Self {
+        Self::shared_with_control(
             context,
             params,
             cancellation,
-        })
+            &ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary expression evaluator")
+    }
+
+    pub fn shared_with_control(
+        context: Arc<dyn ScalarExpressionContext + 'a>,
+        params: &'a [SQLParam],
+        cancellation: uqa_core::CancellationToken,
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        Self::capture(
+            ExpressionContext::Shared(context),
+            params,
+            cancellation,
+            control,
+        )
+    }
+
+    /// A grouping or window evaluator borrows its already retained hook instead of recapturing the same lexical scope.
+    pub fn borrowed_with_control(
+        context: &'a dyn ScalarExpressionContext,
+        params: &'a [SQLParam],
+        cancellation: uqa_core::CancellationToken,
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        Self::capture(
+            ExpressionContext::Borrowed(context),
+            params,
+            cancellation,
+            control,
+        )
+    }
+
+    fn capture(
+        context: ExpressionContext<'a>,
+        params: &'a [SQLParam],
+        cancellation: uqa_core::CancellationToken,
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        let memory = control.reserve(size_of::<Self>())?;
+        Ok(Arc::new(Self {
+            context,
+            params,
+            cancellation,
+            _memory: memory,
+        }))
     }
 
     fn evaluate_physical_scoped(
@@ -168,6 +237,29 @@ impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
     ) -> ScalarExpr {
         crate::bind_type_introspection_with_resolver(expression, schema, self.params, self)
     }
+    fn bind_type_introspection_owned(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        schema: &crate::RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        uqa_sql::bind_type_introspection_owned(expression, schema, self.params, Some(self), control)
+    }
+
+    fn expression_type_with_control(
+        &self,
+        expression: &ScalarExpr,
+        schema: &crate::RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        uqa_sql::scalar_type_with_resolver_and_control(
+            expression,
+            schema,
+            self.params,
+            Some(self),
+            control,
+        )
+    }
 }
 
 fn intercepted_call<'expression>(
@@ -197,6 +289,124 @@ fn intercepted_call<'expression>(
 }
 
 impl FunctionTypeResolver for ScopedExpressionEvaluator<'_> {
+    fn has_untyped_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.context
+            .has_untyped_function_with_control(name, control)
+    }
+
+    fn resolve_collation_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<u32>, SQLError> {
+        self.context
+            .resolve_collation_name_with_control(name, control)
+    }
+
+    fn is_scalar_function_binding_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.context
+            .is_scalar_function_binding_with_control(binding, control)
+    }
+
+    fn format_type_name_with_control(
+        &self,
+        ty: &uqa_sql::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.context.format_type_name_with_control(ty, control)
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        FunctionTypeResolver::resolve_type_name_with_control(self.context.as_ref(), name, control)
+    }
+
+    fn resolve_scalar_subquery_type_with_control(
+        &self,
+        subquery: crate::SubqueryId,
+        outer_schema: &crate::RowSchema,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        self.context.resolve_scalar_subquery_type_with_control(
+            subquery,
+            outer_schema,
+            params,
+            control,
+        )
+    }
+
+    fn resolve_function_type_with_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        self.context.resolve_function_type_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ResolvedFunctionOverload>>, SQLError> {
+        self.context.resolve_function_overload_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_builtins_and_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        builtins: &[uqa_sql::BuiltinFunctionOverload],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ResolvedFunctionOverload>>, SQLError> {
+        self.context
+            .resolve_function_overload_with_builtins_and_control(
+                name,
+                binding,
+                argument_names,
+                argument_types,
+                explicit_variadic,
+                builtins,
+                control,
+            )
+    }
+
     fn format_type_name(&self, ty: &uqa_sql::ColumnType) -> Result<String, SQLError> {
         self.context.format_type_name(ty)
     }

@@ -11,6 +11,87 @@ use uqa_execution::statement::batch::context::BatchTransactions;
 use uqa_sql::SQLError;
 
 #[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn persistent_statement_catalog_admission_owns_failure_and_savepoint_recovery(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("catalog-admission.db"));
+    engine
+        .sql(
+            "CREATE TABLE items (n integer); INSERT INTO items VALUES (7)",
+            &[],
+        )
+        .unwrap();
+    let sibling = engine.new_session().unwrap();
+    let sql = "SELECT n, repeat('x', 32768) FROM items";
+    let prepared = engine.prepare_statement(sql, &[]).unwrap();
+    let control = engine.query_retention_control().unwrap();
+    for entry in 0..4 {
+        engine
+            .sql(
+                "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT n FROM items; SAVEPOINT retry",
+                &[],
+            )
+            .unwrap();
+        // A real catalog publication requires the pinned reader to acquire a new catalog view while preserving its transaction's data snapshot.
+        sibling
+            .sql(&format!("CREATE TABLE published_{entry} (n integer)"), &[])
+            .unwrap();
+        let occupied = control
+            .memory()
+            .reserve(control.memory().available())
+            .unwrap();
+        let mut consumed = false;
+        let result = match entry {
+            0 => engine.sql(sql, &[]).map(drop),
+            1 => engine.sql_simple_query(sql, &[], |_| {
+                consumed = true;
+                Ok(())
+            }),
+            2 => engine.sql_cursor(sql, &[]).map(drop),
+            _ => engine.execute_prepared_statement(&prepared, &[]).map(drop),
+        };
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.sqlstate(),
+            Some("53200"),
+            "{provider:?}, {entry}: {error:?}"
+        );
+        assert!(!consumed);
+        assert_eq!(engine.transaction_depth(), 1);
+        assert!(
+            engine.transaction_failed(),
+            "{provider:?}, {entry}: {error:?}"
+        );
+        let rejected = engine.sql("SELECT 1", &[]).unwrap_err();
+        assert_eq!(
+            rejected.sqlstate(),
+            Some("25P02"),
+            "{provider:?}, {entry}: {rejected:?}"
+        );
+        drop(occupied);
+        engine.sql("ROLLBACK TO retry", &[]).unwrap();
+        assert_eq!(
+            engine
+                .sql("SELECT n FROM items", &[])
+                .unwrap()
+                .value_at(0, 0),
+            Some(&uqa_core::Value::Int(7))
+        );
+        engine.sql("COMMIT", &[]).unwrap();
+    }
+    engine.finalize_prepared_statement(&prepared);
+    drop(prepared);
+    sibling.close().unwrap();
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
 #[case::memory(Provider::Memory)]
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
@@ -285,9 +366,11 @@ fn sql_cleanup_keeps_the_callback_failure_across_entry_points(#[case] provider: 
                 .detail()
                 .unwrap()
                 .starts_with("original callback detail"));
-            if !matches!(provider, Provider::Memory) {
+            // Statement owners can release enough memory for rollback before
+            // cleanup starts. Any cleanup error must remain secondary to the callback.
+            if let Some((_, cleanup)) = error.cleanup() {
                 assert!(
-                    error.detail().unwrap().contains("memory requires"),
+                    cleanup.to_string().contains("memory requires"),
                     "{entry}: {error:?}"
                 );
             }

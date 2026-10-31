@@ -8,11 +8,11 @@ use super::*;
 use crate::catalog::roles::{identity::RoleReference, RoleDefinition};
 
 fn binding(name: &str, oid: u32) -> Arc<RoleBinding> {
-    Arc::new(RoleBinding {
-        name: name.into(),
+    Arc::new(RoleBinding::new(
+        name.into(),
         oid,
-        object_id: [u8::try_from(oid).unwrap(); 16],
-    })
+        [u8::try_from(oid).unwrap(); 16],
+    ))
 }
 
 #[test]

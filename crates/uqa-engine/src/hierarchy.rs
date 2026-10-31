@@ -7,7 +7,7 @@
 //! Durable table-hierarchy lookup and mutation.
 
 use super::{Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult};
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 impl Engine {
     /// Read hierarchy metadata from an already-loaded relation without synchronizing catalogs or consulting a transaction snapshot. Trigger catalog restoration uses this path while the transaction state mutex is already held.
@@ -69,69 +69,60 @@ impl Engine {
         table: &str,
         include_descendants: bool,
     ) -> Result<Vec<String>, SQLError> {
-        let Some(tables) = self.query_table_snapshots.as_ref() else {
-            return self.hierarchy_scan_tables(table, include_descendants);
-        };
-        let root = self
-            .relation_lookup_candidates(table)
-            .map_err(|error| SQLError::Internal(format!("resolve query table `{table}`: {error}")))?
-            .into_iter()
-            .find(|candidate| tables.contains_key(candidate))
-            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-        if !include_descendants {
-            return Ok(vec![root.qualified_name()]);
-        }
-        let mut output = Vec::new();
-        let mut visiting = BTreeSet::new();
-        let mut visited = BTreeSet::new();
-        Self::collect_snapshot_hierarchy_descendants(
-            tables,
-            &root,
-            &mut visiting,
-            &mut visited,
-            &mut output,
-        )?;
-        Ok(output)
+        Ok(self
+            .query_hierarchy_scan_tables_with_control(
+                table,
+                include_descendants,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )?
+            .into_uncontrolled()
+            .expect("ordinary query hierarchy"))
     }
 
-    fn collect_snapshot_hierarchy_descendants(
-        tables: &std::collections::BTreeMap<RelationIdentity, std::sync::Arc<super::TableState>>,
-        parent: &RelationIdentity,
-        visiting: &mut BTreeSet<RelationIdentity>,
-        visited: &mut BTreeSet<RelationIdentity>,
-        output: &mut Vec<String>,
-    ) -> Result<(), SQLError> {
-        if visiting.contains(parent) {
-            return Err(SQLError::Internal(format!(
-                "table inheritance cycle reaches `{}`",
-                parent.qualified_name()
-            )));
+    pub(crate) fn query_hierarchy_scan_tables_with_control(
+        &self,
+        table: &str,
+        include_descendants: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<String>>, SQLError> {
+        control.check()?;
+        if self.query_table_snapshots.is_none() {
+            self.synchronize_table_catalog()
+                .and_then(|()| self.synchronize_table_data())
+                .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?;
         }
-        if !visited.insert(parent.clone()) {
-            return Ok(());
-        }
-        visiting.insert(parent.clone());
-        output.push(parent.qualified_name());
-        let parent_name = parent.qualified_name();
-        let children = tables
-            .iter()
-            .filter(|(_, state)| {
-                state
-                    .hierarchy
-                    .read()
-                    .parents
-                    .iter()
-                    .any(|candidate| candidate == &parent_name)
-            })
-            .map(|(identity, _)| identity.clone())
-            .collect::<Vec<_>>();
-        for child in children {
-            Self::collect_snapshot_hierarchy_descendants(
-                tables, &child, visiting, visited, output,
+        let candidates =
+            uqa_sql::catalog::resolution::candidates::relation_lookup_candidates_with_control(
+                self, table, control,
             )?;
+        let scan =
+            |tables: &std::collections::BTreeMap<RelationIdentity, Arc<super::TableState>>| {
+                let root = candidates
+                    .iter()
+                    .find(|candidate| tables.contains_key(*candidate))
+                    .ok_or_else(|| match control.copy_text(table) {
+                        Ok(name) => SQLError::UnknownTable(name.into_parts().0),
+                        Err(error) => error.into(),
+                    })?;
+                uqa_execution::catalog::hierarchy::hierarchy_scan_entries_with_control(
+                    root,
+                    include_descendants,
+                    || tables.iter(),
+                    |state, parent| {
+                        state
+                            .hierarchy
+                            .read()
+                            .parents
+                            .iter()
+                            .any(|candidate| candidate == parent)
+                    },
+                    control,
+                )
+            };
+        match &self.query_table_snapshots {
+            Some(tables) => scan(tables),
+            None => scan(&self.storage.tables.read()),
         }
-        visiting.remove(parent);
-        Ok(())
     }
 
     fn collect_hierarchy_descendants(

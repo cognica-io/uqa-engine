@@ -9,6 +9,62 @@
 use super::{ExpressionPlan, ScalarExpr};
 use crate::{ast::InternalColumnRef, SQLError};
 use std::collections::BTreeMap;
+use uqa_core::memory::{OwnedMap, Produced, ProductionControl};
+
+pub type OwnedInputProjections = OwnedMap<InternalColumnRef, Produced<ExpressionPlan>>;
+
+pub fn substitute_expression_inputs_owned(
+    mut plan: super::MutableExpressionPlan,
+    inputs: &OwnedInputProjections,
+    control: &ProductionControl<'_>,
+) -> Result<super::MutableExpressionPlan, SQLError> {
+    if inputs.is_empty() {
+        control.check()?;
+        return Ok(plan);
+    }
+    for index in 0..plan.queries().len() {
+        plan = plan.map_query(index, control, |query| {
+            query.transform_scalar_arenas(control, &mut |_, expression, arena| {
+                substitute_owned(expression, arena, inputs, control)
+            })
+        })?;
+    }
+    plan = plan.map_scalar(control, |expression, arena| {
+        expression.transform_nodes(control, &mut |_, expression| {
+            substitute_owned(expression, arena, inputs, control)
+        })
+    })?;
+    Ok(plan)
+}
+
+pub fn substitute_plan_inputs_owned(
+    plan: super::MutableExecutablePlan,
+    inputs: &OwnedInputProjections,
+    control: &ProductionControl<'_>,
+) -> Result<super::MutableExecutablePlan, SQLError> {
+    if inputs.is_empty() {
+        control.check()?;
+        return Ok(plan);
+    }
+    plan.transform_scalar_arenas(control, &mut |_, expression, arena| {
+        substitute_owned(expression, arena, inputs, control)
+    })
+}
+
+fn substitute_owned(
+    expression: super::OwnedScalarExpr,
+    arena: &mut super::ScalarQueryArena,
+    inputs: &OwnedInputProjections,
+    control: &ProductionControl<'_>,
+) -> Result<super::OwnedScalarExpr, SQLError> {
+    control.check()?;
+    if let ScalarExpr::InternalColumn(column) = &*expression {
+        if let Some(input) = inputs.get(column) {
+            return arena.append_expression(input.copy_for_rewrite(control)?, control);
+        }
+    }
+    Ok(expression)
+}
 
 #[cfg(test)]
 mod tests;

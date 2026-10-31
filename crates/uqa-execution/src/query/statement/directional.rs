@@ -12,7 +12,10 @@ use crate::{
     PhysicalScanDirection, RowSchema,
 };
 use std::{cell::Cell, rc::Rc};
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryReservation, ProductionControl},
+    Value,
+};
 use uqa_sql::SQLError;
 
 enum DirectionalPlanRequest {
@@ -133,25 +136,29 @@ pub struct DirectionalQueryPlanOperator {
     support: BackwardScanSupport,
     input: Option<Box<dyn DirectionalQueryTask>>,
     worker: Option<DirectionalPlanWorker>,
+    _memory: Option<MemoryReservation>,
 }
 
 impl DirectionalQueryPlanOperator {
-    pub fn new(
+    pub fn new_with_control(
         input: Box<dyn DirectionalQueryTask>,
         support: BackwardScanSupport,
         schema: RowSchema,
-    ) -> Self {
-        Self {
+        control: &ProductionControl<'_>,
+    ) -> Result<Box<Self>, SQLError> {
+        let memory = control.reserve(size_of::<Self>())?;
+        Ok(Box::new(Self {
             diagnostics: None,
             schema,
             support,
             input: Some(input),
             worker: None,
-        }
+            _memory: memory,
+        }))
     }
 
     #[must_use]
-    pub fn with_diagnostics(mut self, diagnostics: QueryDiagnostics) -> Self {
+    pub fn with_diagnostics(mut self: Box<Self>, diagnostics: QueryDiagnostics) -> Box<Self> {
         self.diagnostics = Some(diagnostics);
         self
     }
@@ -287,3 +294,6 @@ impl PhysicalOperator for DirectionalQueryPlanOperator {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

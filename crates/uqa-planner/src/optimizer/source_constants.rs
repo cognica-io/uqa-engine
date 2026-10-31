@@ -6,6 +6,9 @@
 
 //! Propagate admitted constants from VALUES and source-free subqueries, preserving empty-input grouping.
 
+mod map;
+pub(super) mod owned;
+
 use std::collections::BTreeMap;
 
 use crate::{QueryBlockPlan, RelationalPlan, SourcePlan};
@@ -13,6 +16,8 @@ use uqa_sql::routines::declaration::RoutineTypeCatalog;
 use uqa_sql::{ColumnType, SQLError, ScalarExpr};
 
 type Constants = BTreeMap<String, Option<ScalarExpr>>;
+
+mod production;
 
 #[cfg(test)]
 mod tests;
@@ -80,154 +85,68 @@ fn source_constants(
     types: Option<&dyn RoutineTypeCatalog>,
     views: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
 ) -> Result<Option<Constants>, SQLError> {
-    match source {
-        SourcePlan::Table {
-            name,
-            bound_columns,
-            column_aliases,
-            ..
-        } => {
-            let Some(views) = views else {
-                return Ok(None);
-            };
-            let mut constants = None;
-            views.with_view_query(name, &mut |body| {
-                // Inspect outputs without replacing the view source: authorization, cardinality and dependency observations still execute normally.
-                constants = query_constants(
-                    body,
-                    |index| {
-                        column_aliases
-                            .get(index)
-                            .or_else(|| bound_columns.as_ref().and_then(|names| names.get(index)))
-                    },
-                    types,
-                );
-                Ok(constants.is_some())
-            })?;
-            Ok(constants)
-        }
-        SourcePlan::Values {
-            rows,
-            column_aliases,
-            internal_relation: None,
-            ..
-        } if rows.len() == 1 => Ok(Some(constants_from_values(
-            &rows[0],
-            |index| value_column_name(column_aliases.get(index), index),
-            types,
-        ))),
-        SourcePlan::Subquery {
-            captured_output: None,
-            body,
-            column_aliases,
-            ..
-        } => Ok(query_constants(
-            body,
-            |index| column_aliases.get(index),
-            types,
-        )),
-        _ => Ok(None),
-    }
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let mut constants = Constants::new();
+    let selected =
+        production::observe_source(source, types, views, &control, &mut |name, value| {
+            insert_constant(&mut constants, name, value, &control)
+        })?;
+    Ok(selected.then_some(constants))
 }
 
-fn query_constants<'a>(
-    body: &uqa_sql::plan::QueryPlan,
-    column_name: impl Fn(usize) -> Option<&'a String>,
-    types: Option<&dyn RoutineTypeCatalog>,
-) -> Option<Constants> {
-    if !body.ctes.is_empty() {
-        return None;
-    }
-    match &body.root {
-        RelationalPlan::Values { rows, subqueries } if rows.len() == 1 && subqueries.is_empty() => {
-            Some(constants_from_values(
-                &rows[0],
-                |index| value_column_name(column_name(index), index),
-                types,
-            ))
-        }
-        RelationalPlan::QueryBlock(inner)
-            if inner.from.is_none()
-                && inner
-                    .projections
-                    .iter()
-                    .all(|p| constant_literal(&p.expr, types)) =>
-        {
-            Some(constants_from_values(
-                inner.projections.iter().map(|projection| &projection.expr),
-                |index| {
-                    column_name(index).cloned().unwrap_or_else(|| {
-                        uqa_sql::semantics::projection_label_at(&inner.projections[index])
-                    })
-                },
-                types,
-            ))
-        }
-        _ => None,
-    }
+fn insert_constant(
+    constants: &mut Constants,
+    name: uqa_core::memory::Produced<String>,
+    value: Option<uqa_sql::plan::OwnedScalarExpr>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let name = name
+        .into_uncontrolled()
+        .expect("ordinary constant identity");
+    let value = value
+        .map(|value| {
+            Ok::<_, SQLError>(
+                value
+                    .finish(control)?
+                    .into_uncontrolled()
+                    .expect("ordinary source constant"),
+            )
+        })
+        .transpose()?;
+    constants
+        .entry(name)
+        .and_modify(|value| *value = None)
+        .or_insert(value);
+    Ok(())
 }
 
-fn value_column_name(name: Option<&String>, index: usize) -> String {
-    name.cloned()
-        .unwrap_or_else(|| format!("column{}", index + 1))
-}
-
+#[cfg(test)]
 fn constants_from_values<'a>(
     values: impl IntoIterator<Item = &'a ScalarExpr>,
     column_name: impl Fn(usize) -> String,
     types: Option<&dyn RoutineTypeCatalog>,
 ) -> Constants {
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
     let mut constants = Constants::new();
-    for (index, value) in values.into_iter().enumerate() {
-        let name = column_name(index);
-        let value = constant_literal(value, types).then(|| match value {
-            // SELECT targets and one-row VALUES resolve unknown literals to text before an outer query can observe their type. Substitution must preserve that boundary.
-            ScalarExpr::Literal(value @ (uqa_core::Value::Null | uqa_core::Value::Str(_))) => {
-                ScalarExpr::TypedLiteral {
-                    collation_oid: None,
-                    composite_source: None,
-                    value: value.clone(),
-                    ty: "text".into(),
-                    bound_type: Some(ColumnType::Text),
-                    parameter_index: None,
-                }
-            }
-            ScalarExpr::Cast { expr, .. } => expr.as_ref().clone(),
-            value => value.clone(),
-        });
-        constants
-            .entry(name)
-            .and_modify(|value| *value = None)
-            .or_insert(value);
-    }
+    production::observe_values(
+        values,
+        |index| Ok(control.finish(column_name(index), None)?),
+        types,
+        &control,
+        &mut |name, value| insert_constant(&mut constants, name, value, &control),
+    )
+    .expect("ordinary source constants");
     constants
 }
 
-fn constant_literal(expr: &ScalarExpr, types: Option<&dyn RoutineTypeCatalog>) -> bool {
-    match expr {
-        ScalarExpr::Collated { expr, .. } => constant_literal(expr, types),
-        ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral {
-            parameter_index: None,
-            ..
-        } => true,
-        ScalarExpr::Cast { expr, ty, .. } => {
-            let ScalarExpr::TypedLiteral {
-                ty: original,
-                bound_type,
-                parameter_index: None,
-                ..
-            } = expr.as_ref()
-            else {
-                return false;
-            };
-            original == ty || match (bound_type, types) {
-                (Some(ColumnType::Composite(reference)), Some(types)) => types.resolve_catalog_column_type_name(ty).is_ok_and(|target| matches!(target, ColumnType::Composite(target) if target.oid == reference.oid)),
-                _ => false,
-            }
-        }
-        _ => false,
-    }
+#[cfg(test)]
+fn constant_literal(expression: &ScalarExpr, types: Option<&dyn RoutineTypeCatalog>) -> bool {
+    production::constant_literal(
+        expression,
+        types,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary source constant eligibility")
 }
 
 /// An admitted constant key defines a single equivalence class without invoking its type's equality or hash functions. Retain a key so an empty input still produces no group.
@@ -235,24 +154,13 @@ pub(super) fn simplify_constant_group(
     block: &mut QueryBlockPlan,
     types: Option<&dyn RoutineTypeCatalog>,
 ) {
-    if block.group_by.is_empty()
-        || !block.grouping_sets.is_empty()
-        || !block
-            .group_by
-            .iter()
-            .all(|expr| constant_literal(expr, types))
+    if production::constant_group(
+        block,
+        types,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary constant grouping")
     {
-        return;
-    }
-    let mut grouping = false;
-    block.visit_expressions(&mut |expression| {
-        expression.visit(&mut |node| {
-            if let ScalarExpr::Func { name, .. } = node {
-                grouping |= name.eq_ignore_ascii_case("grouping");
-            }
-        });
-    });
-    if !grouping {
         block.group_by = vec![ScalarExpr::Literal(uqa_core::Value::Bool(true))];
     }
 }

@@ -194,8 +194,8 @@ fn validate_command_rules(
         // Virtual catalog relations have no entries in the stored rewrite-rule registry.
         return Ok(());
     }
-    let rules = context.catalog.rules_for(&table, event)?;
-    if rules.is_empty() {
+    let rules = context.catalog.capture_rules(&table, event)?;
+    if rules.is_empty()? {
         return Ok(());
     }
     super::rules::validate_rule_returning_contract(
@@ -206,8 +206,8 @@ fn validate_command_rules(
             .returning()
             .is_some_and(|returning| !returning.is_empty()),
     )?;
-    for rule in rules {
-        let rule = &rule.definition;
+    for rule in rules.iter() {
+        let rule = &rule?.definition;
         let kind = if !rule.instead && !rule.actions.is_empty() {
             Some("DO ALSO")
         } else if rule.instead && rule.condition.is_some() {

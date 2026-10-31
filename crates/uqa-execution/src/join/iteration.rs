@@ -67,13 +67,13 @@ impl HashJoin<'_> {
             (
                 &self.right_keys,
                 &self.right_key_types,
-                self.right_key_positions.as_deref(),
+                self.right_key_positions.as_deref().map(Vec::as_slice),
             )
         } else {
             (
                 &self.left_keys,
                 &self.left_key_types,
-                self.left_key_positions.as_deref(),
+                self.left_key_positions.as_deref().map(Vec::as_slice),
             )
         };
         state.matches = match self.key(keys, types, positions, &row, &schema)? {

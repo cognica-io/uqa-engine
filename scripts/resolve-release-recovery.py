@@ -39,7 +39,7 @@ PACKAGE_ARTIFACTS = {
 C_TARGETS = TARGETS[:-1]
 C_BUILD_JOBS = {f"c packages / C package ({target})" for target in C_TARGETS}
 
-WHEEL_RUNNERS = ("ubuntu-24.04", "ubuntu-24.04-arm", "macos-15-intel", "macos-14", "windows-latest", "windows-11-arm")
+WHEEL_RUNNERS = ("ubuntu-24.04", "ubuntu-24.04-arm", "macos-15-intel", "macos-15", "windows-latest", "windows-11-arm")
 WHEEL_MATRIX = {
     "python / " + label: {"label": label, "target": target, "os": runner,
                           "manylinux": "2_28" if label.startswith("linux") else "auto"}

@@ -6,6 +6,8 @@
 
 //! Rewrite stored relation, column, and literal sequence references in SQL schema expressions.
 use super::walk_schema_expr_mut;
+mod production;
+pub use production::visit_sequence_function_references_with_control;
 use uqa_core::{RelationIdentity, Value};
 
 pub fn stored_relation_reference_matches(reference: &str, target: &RelationIdentity) -> bool {
@@ -80,9 +82,13 @@ pub(super) fn is_sequence_function(
     } else {
         name
     };
-    let lower = name.to_ascii_lowercase();
-    let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    matches!(local, "nextval" | "currval" | "setval")
+    let local = name
+        .get(..11)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("pg_catalog."))
+        .map_or(name, |_| &name[11..]);
+    ["nextval", "currval", "setval"]
+        .iter()
+        .any(|builtin| local.eq_ignore_ascii_case(builtin))
 }
 
 fn regclass_literal_mut(expression: &mut crate::ast::Expr) -> Option<&mut String> {

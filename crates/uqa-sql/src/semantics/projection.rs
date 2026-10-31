@@ -11,6 +11,22 @@ use crate::ast::ReturningAliases;
 use crate::plan::ProjectionPlan;
 use crate::{ColumnIdentity, RowSchema, SQLError, ScalarExpr};
 
+mod labels;
+mod mutation;
+mod stars;
+pub(crate) use labels::{field_selection_label, rule_function_label};
+pub use labels::{
+    function_projection_label, projection_label_at, projection_labels_with_control,
+    visit_query_output_columns, with_projection_label, ProjectionLabels,
+};
+pub use mutation::{mutation_clause_schema_with_control, returning_expression_schema_with_control};
+pub(crate) use stars::row_star_fields_with_control;
+pub use stars::{
+    bound_projection_expression_with_control, visit_bound_projection_star_fields,
+    ProjectionFieldVisitor,
+};
+pub use stars::{visit_bound_projection_star_metadata, ProjectionStarMetadata};
+
 pub fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
     projections.iter().map(projection_label_at).collect()
 }
@@ -29,119 +45,6 @@ pub fn output_position_error(clause: &str, position: i64) -> SQLError {
         sqlstate: "42P10".into(),
         message: format!("{clause} position {position} is not in select list"),
     }
-}
-
-/// Compute a projection's `PostgreSQL` output column name. Standalone expressions use `?column?`; repeated labels remain repeated until the final named-map compatibility boundary.
-pub fn projection_label_at(proj: &ProjectionPlan) -> String {
-    if let Some(a) = &proj.alias {
-        return a.clone();
-    }
-    let mut expression = &proj.expr;
-    while let ScalarExpr::Collated { expr, .. } = expression {
-        expression = expr;
-    }
-    match expression {
-        ScalarExpr::Column(c) => c.to_string(),
-        ScalarExpr::QualifiedColumn { column, .. } => column.to_string(),
-        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            ..
-        } => field_selection_label(binding.as_ref(), args.get(1))
-            .unwrap_or_else(|| function_projection_label(name, binding.as_ref())),
-        ScalarExpr::WindowCall { name, .. } => function_projection_label(name, None),
-        _ => "?column?".into(),
-    }
-}
-
-/// `FigureColname` names a field selection by its field.
-pub(crate) fn field_selection_label<E: FieldNameLiteral>(
-    binding: Option<&crate::ast::FunctionBinding>,
-    field: Option<&E>,
-) -> Option<String> {
-    (binding.and_then(|binding| binding.dispatch)
-        == Some(crate::ast::FunctionDispatch::FieldSelect))
-    .then(|| field.and_then(FieldNameLiteral::field_name))
-    .flatten()
-    .map(str::to_owned)
-}
-
-/// The field name literal of a field selection in parsed or planned expressions.
-pub(crate) trait FieldNameLiteral {
-    fn field_name(&self) -> Option<&str>;
-}
-
-impl FieldNameLiteral for ScalarExpr {
-    fn field_name(&self) -> Option<&str> {
-        match self {
-            ScalarExpr::Literal(uqa_core::Value::Str(field)) => Some(field),
-            _ => None,
-        }
-    }
-}
-
-impl FieldNameLiteral for crate::ast::Expr {
-    fn field_name(&self) -> Option<&str> {
-        match self {
-            crate::ast::Expr::Literal(uqa_core::Value::Str(field)) => Some(field),
-            _ => None,
-        }
-    }
-}
-
-pub fn function_projection_label(
-    name: &str,
-    binding: Option<&crate::ast::FunctionBinding>,
-) -> String {
-    // Operators and other syntax that the parser lowers to calls have no name of their own.
-    if matches!(
-        binding.and_then(|binding| binding.dispatch),
-        Some(
-            crate::ast::FunctionDispatch::NumericOperator(_)
-                | crate::ast::FunctionDispatch::Pattern { .. }
-                | crate::ast::FunctionDispatch::Concat { .. }
-                | crate::ast::FunctionDispatch::ArrayConcat
-                | crate::ast::FunctionDispatch::ArrayAppend
-                | crate::ast::FunctionDispatch::ArrayPrepend
-                | crate::ast::FunctionDispatch::IsDistinct
-                | crate::ast::FunctionDispatch::DistinctNot
-                | crate::ast::FunctionDispatch::RowDistinct
-                | crate::ast::FunctionDispatch::ValueIsDistinct
-                | crate::ast::FunctionDispatch::ValueNullTest { .. }
-                | crate::ast::FunctionDispatch::BooleanTest(_)
-                | crate::ast::FunctionDispatch::AnyOperator
-                | crate::ast::FunctionDispatch::AllOperator
-                | crate::ast::FunctionDispatch::BetweenSymmetric
-                | crate::ast::FunctionDispatch::JsonExtract { .. }
-        )
-    ) {
-        return "?column?".into();
-    }
-    let name = crate::parse_regobject_name(name)
-        .and_then(|mut names| names.pop())
-        .unwrap_or_else(|| name.to_string());
-    if operator_call(&name) {
-        return "?column?".into();
-    }
-    name
-}
-
-/// The calls the parser lowers operator syntax to under names no `PostgreSQL` function has: `||`, `@@`, `@?`, `@>`, `<@`, `&&`, `?`, `?|`, `?&`, `#-`, `~`, `~*`, `LIKE`, `ILIKE` and `SIMILAR TO`.
-fn operator_call(name: &str) -> bool {
-    matches!(
-        name,
-        "fts_match"
-            | "jsonpath_exists"
-            | "contains_op"
-            | "contained_by_op"
-            | "array_overlap"
-            | "json_has_key"
-            | "json_has_any_key"
-            | "json_has_all_keys"
-            | "json_delete_path"
-    )
 }
 
 pub fn expand_from_star_columns(
@@ -192,17 +95,13 @@ pub fn expand_from_star_columns(
 }
 
 pub fn bound_projection_expression(schema: &RowSchema, position: usize) -> ScalarExpr {
-    let Some(identity) = schema.identity(position) else {
-        return ScalarExpr::Position(position);
-    };
-    if let Some(qualifier) = identity.qualifier() {
-        if schema.qualified_position(qualifier, identity.column()) == Some(position) {
-            return ScalarExpr::qualified_column(qualifier, identity.column());
-        }
-    } else if schema.unqualified_position(identity.column()) == Some(position) {
-        return ScalarExpr::Column(identity.column().to_string().into());
-    }
-    ScalarExpr::Position(position)
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    bound_projection_expression_with_control(schema, position, &control)
+        .expect("ordinary projection reference")
+        .finish(&control)
+        .expect("ordinary reference completion")
+        .into_uncontrolled()
+        .expect("ordinary reference ownership")
 }
 
 pub fn expand_bound_projection_stars(
@@ -210,24 +109,6 @@ pub fn expand_bound_projection_stars(
     schema: &RowSchema,
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
     expand_bound_projection_stars_in_scope(projections, schema, schema)
-}
-
-/// A qualified star in a ROW constructor expands its source fields; an ordinary whole-row reference remains one nested value.
-pub(crate) fn row_star_fields(
-    expression: &ScalarExpr,
-    schema: &RowSchema,
-) -> Result<Option<Vec<ScalarExpr>>, SQLError> {
-    if !matches!(expression, ScalarExpr::QualifiedStar(_)) {
-        return Ok(None);
-    }
-    expand_bound_projection_stars(
-        &[ProjectionPlan {
-            expr: expression.clone(),
-            alias: None,
-        }],
-        schema,
-    )
-    .map(|fields| Some(fields.into_iter().map(|field| field.expr).collect()))
 }
 
 /// Bare stars expand the local FROM output, while qualified stars can select an admitted enclosing namespace.
@@ -238,44 +119,34 @@ pub fn expand_bound_projection_stars_in_scope(
 ) -> Result<Vec<ProjectionPlan>, SQLError> {
     let mut expanded = Vec::new();
     for projection in projections {
-        match &projection.expr {
-            ScalarExpr::Star => {
-                for (position, column) in schema.columns().iter().enumerate() {
-                    if !visible_projection_source_position(schema, position) {
-                        continue;
-                    }
-                    expanded.push(ProjectionPlan {
-                        expr: bound_projection_expression(schema, position),
-                        alias: Some(schema.public_name(position).unwrap_or(column).to_string()),
-                    });
-                }
-            }
-            ScalarExpr::QualifiedStar(qualifier) => {
-                let schema = expression_schema;
-                schema.require_lateral_qualifier(qualifier)?;
-                let layout = schema.qualified_star_position_layout(qualifier);
-                if layout.is_empty() && !schema.has_qualifier(qualifier) {
-                    if let Some(error) = schema.unavailable_qualifier_error(qualifier) {
-                        return Err(error);
-                    }
-                    return Err(SQLError::UnknownTable(qualifier.to_string()));
-                }
-                for (column, logical, _, _) in layout {
-                    if logical.is_some_and(|position| {
-                        !visible_projection_source_position(schema, position)
-                    }) {
-                        continue;
-                    }
-                    expanded.push(ProjectionPlan {
-                        expr: logical.map_or_else(
-                            || ScalarExpr::qualified_column(qualifier, &column),
-                            |position| bound_projection_expression(schema, position),
-                        ),
-                        alias: Some(column),
-                    });
-                }
-            }
-            _ => expanded.push(projection.clone()),
+        let star = visit_bound_projection_star_fields(
+            &projection.expr,
+            schema,
+            expression_schema,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut |column, position, qualifier| {
+                let selected = if qualifier.is_some() {
+                    expression_schema
+                } else {
+                    schema
+                };
+                expanded.push(ProjectionPlan {
+                    expr: position.map_or_else(
+                        || {
+                            ScalarExpr::qualified_column(
+                                qualifier.expect("hidden qualified field"),
+                                column,
+                            )
+                        },
+                        |position| bound_projection_expression(selected, position),
+                    ),
+                    alias: Some(column.to_string()),
+                });
+                Ok(())
+            },
+        )?;
+        if !star {
+            expanded.push(projection.clone());
         }
     }
     Ok(expanded)
@@ -410,6 +281,25 @@ fn target_with_system_columns(
     (columns, types)
 }
 
+/// Observe declared output width without constructing or copying public labels.
+pub fn query_plan_output_width_with_control(
+    mut plan: &crate::plan::QueryPlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<usize>, SQLError> {
+    loop {
+        control.check()?;
+        match &plan.root {
+            crate::plan::RelationalPlan::QueryBlock(block) => {
+                return Ok(Some(block.projections.len()))
+            }
+            crate::plan::RelationalPlan::SetOp { left, .. } => plan = left,
+            crate::plan::RelationalPlan::Values { rows, .. } => {
+                return Ok(rows.first().map(Vec::len))
+            }
+        }
+    }
+}
+
 pub fn query_plan_output_columns(plan: &crate::plan::QueryPlan) -> Option<Vec<String>> {
     match &plan.root {
         crate::plan::RelationalPlan::QueryBlock(block) => {
@@ -439,4 +329,18 @@ pub fn select_execution_stmt(
     exec_stmt.limit = None;
     exec_stmt.offset = None;
     exec_stmt
+}
+
+pub fn query_plan_output_columns_with_control(
+    plan: &crate::plan::QueryPlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+    let mut names = uqa_core::memory::ProductionVec::new(*control);
+    if !visit_query_output_columns(plan, &[], control, &mut |name| {
+        names.push_produced(control.copy_text(name)?)?;
+        Ok(())
+    })? {
+        return Ok(None);
+    }
+    Ok(Some(names.finish()?))
 }

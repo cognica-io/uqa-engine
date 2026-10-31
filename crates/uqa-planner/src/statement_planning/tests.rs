@@ -8,13 +8,12 @@ use super::{
     statistics::CatalogSourceStatistics, PlannerStatisticsCatalog, RetrievalSourceCosting,
     StatementStatisticsContext, StatisticsTableState,
 };
-use crate::{ColumnStats, LocalAccessEstimate, SourceStatistics};
+use crate::{ColumnStatistics, LocalAccessEstimate, SourceStatistics};
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
     sync::{Arc, Weak},
 };
-use uqa_core::catalog_index::CatalogIndexRow;
+use uqa_core::catalog_index::CatalogIndexSnapshot;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility, OperatorJoinRelations},
     plan::QueryPlan,
@@ -33,12 +32,12 @@ struct FailingCatalog {
 }
 
 impl PlannerStatisticsCatalog for FailingCatalog {
-    fn storage_table(&self, _: &str) -> Result<Option<Arc<dyn StatisticsTableState>>, String> {
+    fn storage_table(&self, _: &str) -> Result<Option<Arc<dyn StatisticsTableState>>, SQLError> {
         self.table
             .borrow_mut()
             .take()
             .map(|table| Some(table as Arc<dyn StatisticsTableState>))
-            .ok_or_else(|| "later table lookup failed".into())
+            .ok_or_else(|| SQLError::Internal("later table lookup failed".into()))
     }
 
     fn hierarchy_scan_tables(&self, _: &str) -> Result<Vec<String>, SQLError> {
@@ -54,17 +53,17 @@ impl PlannerStatisticsCatalog for FailingCatalog {
         unreachable!("hierarchy discovery failed")
     }
 
-    fn column_statistics(&self, _: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
+    fn column_statistics(&self, _: &str) -> Result<ColumnStatistics, SQLError> {
         assert!(self.retained.upgrade().is_some());
         self.reads.borrow_mut().push("columns");
-        Err("column metadata failed".into())
+        Err(SQLError::Internal("column metadata failed".into()))
     }
 
     fn resolved_table_name(&self, _: &str) -> Result<Option<String>, SQLError> {
         unreachable!("relation statistics do not resolve index targets")
     }
 
-    fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError> {
+    fn catalog_indexes(&self) -> Result<CatalogIndexSnapshot, SQLError> {
         unreachable!("relation statistics do not read indexes")
     }
 }
@@ -123,6 +122,7 @@ fn relation_statistics_retain_table_generation_and_first_failure() {
             retrieval: &catalog,
         },
         error: &error,
+        production: uqa_core::memory::ProductionControl::uncontrolled(),
     };
 
     assert!(statistics.relation_statistics("items").is_none());

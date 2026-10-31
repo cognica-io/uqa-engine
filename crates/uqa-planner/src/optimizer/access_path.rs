@@ -8,25 +8,22 @@
 
 use super::{AccessPathPlan, BinaryOp, QueryBlockPlan, ScalarExpr, SourcePlan};
 
+pub(super) mod owned;
+
 /// Put posting-list-compatible conjuncts before row residuals. The executor
 /// can then build the smallest candidate set before touching documents.
 pub(super) fn prioritize_access_predicates(expression: &mut ScalarExpr) {
-    if let ScalarExpr::And(items) = expression {
-        for item in items.iter_mut() {
-            prioritize_access_predicates(item);
-        }
-        let mut access = Vec::with_capacity(items.len());
-        let mut residual = Vec::new();
-        for item in std::mem::take(items) {
-            if operator_compatible(&item) {
-                access.push(item);
-            } else {
-                residual.push(item);
-            }
-        }
-        access.extend(residual);
-        *items = access;
-    }
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let input = std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null));
+    *expression = owned::prioritize(
+        uqa_sql::plan::OwnedScalarExpr::uncontrolled(input),
+        &control,
+    )
+    .expect("ordinary access ordering")
+    .finish(&control)
+    .expect("ordinary access result")
+    .into_uncontrolled()
+    .expect("ordinary access owner");
 }
 
 pub(super) fn choose_access_path(block: &QueryBlockPlan) -> AccessPathPlan {
@@ -61,14 +58,9 @@ pub(super) fn choose_access_path(block: &QueryBlockPlan) -> AccessPathPlan {
 }
 
 fn root_score_retrieval(expression: &ScalarExpr) -> bool {
-    matches!(
-        expression,
-        ScalarExpr::Func { name, .. }
-            if matches!(
-                name.to_ascii_lowercase().as_str(),
-                "text_match" | "bayesian_match" | "fts_match" | "bayesian_match_with_prior"
-            )
-    )
+    matches!(expression, ScalarExpr::Func { name, .. } if
+        ["text_match", "bayesian_match", "fts_match", "bayesian_match_with_prior"]
+            .iter().any(|candidate| name.eq_ignore_ascii_case(candidate)))
 }
 
 pub use uqa_sql::semantics::contains_retrieval;

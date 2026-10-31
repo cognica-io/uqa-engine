@@ -23,11 +23,11 @@ pub fn build_projection_physical_row_with_ctes<S: Clone + 'static>(
     use crate::scan::TableScan;
     use crate::{PhysicalOperator, Project};
 
+    let evaluator = context.evaluator(params, ctes)?;
     let scan: Box<dyn PhysicalOperator + '_> = Box::new(TableScan::from_physical_rows(
         input.schema.clone(),
         vec![input.row.clone()],
     ));
-    let evaluator = context.evaluator(params, ctes);
     let mut project =
         Project::with_target_evaluator(scan, physical_projections(projections), evaluator);
     let mut rows = run_to_batches(&mut project)

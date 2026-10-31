@@ -12,6 +12,10 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod attached_queries;
+mod parameters;
+mod syntax;
+
 fn one(sql: &str) -> UnifiedPlan {
     UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
 }
@@ -61,11 +65,64 @@ fn payload_query(size: usize) -> QueryPlan {
         vec!["value".into()],
         vec![Some(crate::ColumnType::Text)],
     ));
-    query.analyzed_source = Some(Arc::new(AnalyzedSource {
-        schema: RowSchema::default(),
-        children: None,
-    }));
+    query.analyzed_source = Some(
+        Arc::new(AnalyzedSource {
+            schema: RowSchema::default(),
+            children: None,
+        })
+        .into(),
+    );
     *query
+}
+
+#[test]
+fn borrowed_query_copy_admits_one_executable_destination() {
+    let query = payload_query(4 * 1024 * 1024);
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(8 * 1024 * 1024);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let query_copy = query.clone_with_control(&control).unwrap();
+    let required = query_copy.reserved_bytes() + size_of::<QueryPlan>();
+    drop(query_copy);
+    let reference = crate::plan::PlanRef::Query(&query);
+    let exact = budget.child(required);
+    let mut copied = None;
+    let allocation = allocation_counter::measure(|| {
+        copied = Some(
+            reference
+                .clone_executable_with_control(&ProductionControl::new(&exact, &token, &token))
+                .unwrap(),
+        );
+    });
+    let copied = copied.unwrap();
+    assert_eq!(copied.reserved_bytes(), required);
+    assert_eq!(allocation.bytes_current, required as i64);
+    assert!(
+        allocation.bytes_total < 4 * 1024 * 1024 + 16 * 1024,
+        "{allocation:?}"
+    );
+    let UnifiedPlan::Query(destination) = &*copied else {
+        panic!("query destination");
+    };
+    assert_eq!(
+        serde_json::to_value(destination.as_ref()).unwrap(),
+        serde_json::to_value(&query).unwrap()
+    );
+    assert!(crate::plan::SharedAnalyzedSource::shares_storage(
+        destination.analyzed_source.as_ref().unwrap(),
+        query.analyzed_source.as_ref().unwrap()
+    ));
+    drop(copied);
+    assert_eq!(budget.used(), 0);
+    let insufficient = budget.child(required - 1);
+    assert_eq!(
+        reference
+            .clone_executable_with_control(&ProductionControl::new(&insufficient, &token, &token))
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(budget.used(), 0);
 }
 
 #[test]
@@ -79,7 +136,7 @@ fn executable_payload_copies_admit_actual_destinations_and_release_every_failure
         let required = copied.reserved_bytes();
         assert!(required >= size);
         assert_eq!(budget.used(), required);
-        assert!(Arc::ptr_eq(
+        assert!(crate::plan::SharedAnalyzedSource::shares_storage(
             source.analyzed_source.as_ref().unwrap(),
             copied.analyzed_source.as_ref().unwrap()
         ));
@@ -152,3 +209,48 @@ fn scalar_arena_copy_retains_query_slots_and_utility_commands_use_their_own_owne
         .clone_executable_with_control(&ProductionControl::uncontrolled())
         .is_err());
 }
+
+#[test]
+fn immutable_query_block_capture_admits_owned_payload_and_releases_on_failure() {
+    let query = payload_query(4 << 20);
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    let budget = MemoryBudget::new(8 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let occupied = budget.reserve(budget.available() - (64 << 10)).unwrap();
+    let mut error = None;
+    let allocation = allocation_counter::measure(|| {
+        error = Some(block.clone_with_control(&control).unwrap_err());
+    });
+    assert!(allocation.bytes_total < 256 << 10, "{allocation:?}");
+    assert_eq!(error.unwrap().sqlstate(), Some("53200"));
+    assert_eq!(budget.used(), occupied.bytes());
+    drop(occupied);
+    for token in [&original, &invoking] {
+        token.cancel();
+        assert_eq!(
+            block.clone_with_control(&control).unwrap_err().sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(budget.used(), 0);
+        token.reset();
+    }
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        retained = Some(block.clone_with_control(&control).unwrap());
+    });
+    let retained = retained.unwrap();
+    assert_eq!(retained.reserved_bytes(), budget.used());
+    assert_eq!(allocation.bytes_current as usize, budget.used());
+    assert_eq!(
+        serde_json::to_value(&*retained).unwrap(),
+        serde_json::to_value(block).unwrap()
+    );
+    drop(retained);
+    assert_eq!(budget.used(), 0);
+}
+
+mod retained;

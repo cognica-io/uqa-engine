@@ -108,7 +108,7 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
     }
     let empty_schema = RowSchema::default();
     let schema = row.map_or(&empty_schema, |row| &row.schema);
-    let hook = services.expressions.expressions.bind_scope(ctes.clone());
+    let hook = services.expressions.expressions.bind_scope(ctes)?;
     let source = uqa_sql::type_resolution::assignment_source_type(
         expression,
         schema,
@@ -139,7 +139,7 @@ fn evaluate_column_default<S: Clone + 'static>(
     let (value, source) = expression.map_or(Ok((Value::Null, None)), |expression| {
         crate::query::catalog_expression::eval_lowered_expression_with_type(
             services.expressions.expressions,
-            services.scopes.current_routine_scope(),
+            services.scopes.current_routine_scope()?,
             expression,
             None,
             params,
@@ -151,7 +151,7 @@ fn evaluate_column_default<S: Clone + 'static>(
         table,
         column,
         value,
-        source.as_ref(),
+        source.as_deref(),
     )
 }
 
@@ -190,7 +190,7 @@ pub fn eval_typed_assignment<S: Clone + 'static>(
     }
     uqa_sql::assignment::targets::validate_assignment_type(target.target, target.ty)?;
     let schema = RowSchema::default();
-    let hook = services.expressions.expressions.bind_scope(ctes.clone());
+    let hook = services.expressions.expressions.bind_scope(ctes)?;
     let source = uqa_sql::type_resolution::assignment_source_type(
         expression,
         row.map_or(&schema, |row| &row.schema),
@@ -406,15 +406,17 @@ fn refresh_generated_columns<S: Clone + 'static>(
     document: &mut Document,
     selected: Option<&[String]>,
 ) -> Result<(), SQLError> {
+    let resources = services.expressions.expressions.production_resources()?;
     super::generated::refresh_stored_generated_columns(
         services.assignment,
         columns,
         selected,
         document,
+        &resources.control(),
         &mut |expression, row, schema| {
             crate::query::catalog_expression::eval_lowered_expression_with_schema_and_type(
                 services.expressions.expressions,
-                services.scopes.current_routine_scope(),
+                services.scopes.current_routine_scope()?,
                 expression,
                 row,
                 schema,

@@ -56,7 +56,9 @@ impl Fixture {
                 resolution: &self.resolution,
                 scoped_relations: None,
             },
-            optimizer: &Ok,
+            optimizer: &|plan, control| {
+                uqa_sql::plan::OwnedQueryPlan::from_produced(plan.finish(control)?, control)
+            },
         }
     }
     pub(super) fn scope(&self) -> FilterPushdownScope<'_> {

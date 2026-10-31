@@ -8,6 +8,30 @@ use super::*;
 use crate::memory::MemoryError;
 
 #[test]
+fn shared_production_retains_payload_and_header_until_the_last_owner_drops() {
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let text = control.copy_text("shared constant").unwrap();
+    let payload = text.reserved_bytes();
+    let shared = text.into_shared(&control).unwrap();
+    assert_eq!(memory.used(), payload + size_of::<Produced<String>>());
+    let copy = shared.clone();
+    drop(shared);
+    assert_eq!(&***copy, "shared constant");
+    assert_eq!(memory.used(), payload + size_of::<Produced<String>>());
+    drop(copy);
+    assert_eq!(memory.used(), 0);
+
+    let text = control.copy_text("survives failed sharing").unwrap();
+    let occupied = memory.reserve(memory.available()).unwrap();
+    assert!(text.into_shared(&control).is_err());
+    assert_eq!(memory.used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn impossible_ordinary_capacity_returns_an_error_without_losing_existing_values() {
     let control = ProductionControl::uncontrolled();
     let mut text = ProductionString::new(control);

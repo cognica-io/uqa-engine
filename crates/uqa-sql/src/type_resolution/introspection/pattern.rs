@@ -20,20 +20,20 @@ impl Binder<'_, '_> {
         if !(1..=2).contains(&call.arguments.len()) {
             return Err(SQLError::Internal("invalid pattern operands".into()));
         }
-        let mut types = uqa_core::memory::ProductionVec::new(self.control);
+        let mut types = uqa_core::memory::ProductionVec::new(self.context.control);
         for argument in &call.arguments {
             let ty = self.semantic(self.common_context(argument))?.flatten();
             if ty.is_none() && !super::comparison::unknown_input(argument) {
                 return Ok(true);
             }
             let (ty, memory) = ty.map_or_else(
-                || (None, self.control.empty_reservation()),
+                || (None, self.context.control.empty_reservation()),
                 |ty| {
                     let (ty, memory) = ty.into_parts();
                     (Some(ty), memory)
                 },
             );
-            types.push_produced(self.control.finish(ty, memory)?)?;
+            types.push_produced(self.context.control.finish(ty, memory)?)?;
         }
         let types = types.finish()?;
         let arguments = [
@@ -41,22 +41,23 @@ impl Binder<'_, '_> {
             types.get(1).and_then(Option::as_ref),
             types.get(2).and_then(Option::as_ref),
         ];
-        let mut helper_types = uqa_core::memory::ProductionVec::new(self.control);
+        let mut helper_types = uqa_core::memory::ProductionVec::new(self.context.control);
         let dispatch = match dispatch {
             FunctionDispatch::PatternEscape { similar } => {
                 let Some(selected) =
                     self.semantic(crate::type_resolution::pattern::select_escape(
                         similar,
                         &arguments[..types.len()],
-                        &self.control,
+                        &self.context.control,
                     ))?
                 else {
                     return Ok(true);
                 };
                 for argument in &mut call.arguments {
                     self.operand_cast(argument, &selected)?;
-                    helper_types
-                        .push_produced(selected.catalog_name_with_control(&self.control)?)?;
+                    helper_types.push_produced(
+                        selected.catalog_name_with_control(&self.context.control)?,
+                    )?;
                 }
                 dispatch
             }
@@ -64,7 +65,7 @@ impl Binder<'_, '_> {
                 let Some(selected) = self.semantic(crate::type_resolution::pattern::select(
                     operator,
                     &arguments[..types.len()],
-                    &self.control,
+                    &self.context.control,
                 ))?
                 else {
                     return Ok(true);
@@ -85,7 +86,7 @@ impl Binder<'_, '_> {
             }
             _ => unreachable!("pattern call dispatch"),
         };
-        let binding = FunctionBinding::dispatched_with_control(dispatch, &self.control)?;
+        let binding = FunctionBinding::dispatched_with_control(dispatch, &self.context.control)?;
         let mut binding = self.retain(binding);
         binding.argument_types = self.retain(helper_types.finish()?);
         FunctionBinding::rebind(&mut call.binding, binding);

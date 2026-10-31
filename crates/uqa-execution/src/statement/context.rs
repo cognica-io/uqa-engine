@@ -29,7 +29,10 @@ pub type PhysicalExplainRenderer = fn(
 /// Capture physical facts before an optional execution without invoking the explained query.
 pub trait PhysicalExplainPlanning: Sync {
     /// Optimize the already analyzed body only after the command has interpreted its options.
-    fn plan_explained_statement(&self, body: &UnifiedPlan) -> Result<UnifiedPlan, SQLError>;
+    fn plan_explained_statement(
+        &self,
+        body: uqa_sql::plan::PlanRef<'_>,
+    ) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError>;
     fn explained_plan_estimates(
         &self,
         body: &UnifiedPlan,

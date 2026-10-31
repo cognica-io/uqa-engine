@@ -24,12 +24,14 @@ pub(super) fn compile_logical_plans(
         .map(|statement| lower_statement(engine, statement))
         .collect::<Vec<_>>();
     if plans.len() == 1 {
+        let owner = uqa_sql::plan::ExecutablePlanOptimizer::planning_control(engine)?;
         engine.cache_sql_statement(
-            sql.to_string(),
+            sql,
             Arc::new(statements[0].clone()),
-            Arc::new(plans[0].clone()),
+            plans[0].clone().into(),
             parser,
-        );
+            &owner.control(),
+        )?;
     }
     Ok(plans)
 }

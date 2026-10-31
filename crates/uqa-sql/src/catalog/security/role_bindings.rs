@@ -58,17 +58,38 @@ pub(super) fn role_name<'a>(
     identity: RoleIdentity,
     catalog: &str,
 ) -> Result<&'a str, String> {
+    role_definition_with_control(
+        roles,
+        identity,
+        catalog,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|role| role.name.as_str())
+    .map_err(|error| match error {
+        SQLError::Internal(message) => message,
+        error => error.to_string(),
+    })
+}
+
+pub(super) fn role_definition_with_control<'a>(
+    roles: &'a BTreeMap<String, RoleDefinition>,
+    identity: RoleIdentity,
+    catalog: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<&'a RoleDefinition, SQLError> {
+    use crate::catalog::roles::identity::RoleSubject;
+    control.check()?;
     if !identity.is_valid() {
-        return Err(format!("invalid persisted {catalog} role identity"));
+        return Err(SQLError::Internal(format!(
+            "invalid persisted {catalog} role identity"
+        )));
     }
-    roles
-        .values()
-        .find(|role| role.identity() == identity)
-        .map(|role| role.name.as_str())
+    identity
+        .role_definition_with_control(roles, control)?
         .ok_or_else(|| {
-            format!(
+            SQLError::Internal(format!(
                 "persisted {catalog} privileges reference missing role incarnation {}",
                 identity.oid
-            )
+            ))
         })
 }

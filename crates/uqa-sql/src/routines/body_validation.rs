@@ -26,6 +26,11 @@ use crate::{
     SQLError, SQLParam, ScalarExpr,
 };
 use uqa_core::Value;
+mod production;
+pub use production::routine_parameter_values_with_control;
+pub use production::{
+    reject_output_argument_call_with_control, reject_undefined_parameters_with_control,
+};
 
 /// The catalog `CREATE FUNCTION` validates a SQL body against.
 pub struct SQLBodyValidationContext<'a> {
@@ -218,15 +223,12 @@ pub fn routine_parameter_values(
     types: &dyn RoutineTypeCatalog,
     def: &CreateFunction,
 ) -> Vec<SQLParam> {
-    sql_body_parameters(def)
-        .map(|parameter| {
-            match types
-                .resolve_catalog_column_type(&parameter.type_name)
-                .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok())
-            {
-                Some(ty) => SQLParam::typed_scalar(Value::Null, ty),
-                None => SQLParam::scalar(Value::Null),
-            }
-        })
-        .collect()
+    routine_parameter_values_with_control(
+        types,
+        def,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine parameter types")
+    .into_uncontrolled()
+    .expect("ordinary routine parameters have no reservation")
 }

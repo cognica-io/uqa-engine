@@ -20,21 +20,24 @@ pub(super) fn optimize_unified_plan(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
-    plan.visit_queries_mut(&mut |query| {
+    plan.try_visit_queries_mut(&mut |query| {
+        config.production.check()?;
         if query.analyzed_output.is_none() {
             if let RelationalPlan::QueryBlock(block) = &mut query.root {
                 block.compute = block.compute_kind(aggregates);
             }
         }
-    });
+        Ok::<_, SQLError>(())
+    })?;
     super::source_demand::prune(plan, config, aggregates)?;
     super::derived_pullup::rewrite(plan, config)?;
     // Analyzed layouts describe the original topology, not later source expansion or join order.
-    plan.visit_queries_mut(&mut |query| {
-        query.analyzed_source = None;
+    plan.try_visit_queries_mut(&mut |query| {
         // Discarded scalar arenas must not keep an enclosing command's CTE alive during constant evaluation.
-        super::subqueries::prune_query(query);
-    });
+        super::subqueries::prune_query(query, config.production)?;
+        query.analyzed_source = None;
+        Ok::<_, SQLError>(())
+    })?;
     match plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
@@ -81,7 +84,7 @@ pub(super) fn optimize_query(
         };
         grouping.apply(block)?;
     }
-    super::subqueries::prune_query(query);
+    super::subqueries::prune_query(query, config.production)?;
     if query.analyzed_output.is_none() {
         if let Some(routines) = &config.routine_inlining {
             super::cte_projection::prune(
@@ -89,6 +92,7 @@ pub(super) fn optimize_query(
                 aggregates,
                 routines.volatility,
                 Some(routines.routines),
+                config.production,
             )?;
         }
     }
@@ -130,12 +134,13 @@ pub(super) fn optimize_query(
                     .map(|order| &order.expr)
                     .chain(limit.as_deref())
                     .chain(offset.as_deref()),
+                config.production,
             )?;
             super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
         }
         RelationalPlan::Values { rows, subqueries } => {
             optimize_values(rows, config)?;
-            let live = super::subqueries::live_slots(rows.iter().flatten())?;
+            let live = super::subqueries::live_slots(rows.iter().flatten(), config.production)?;
             super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
         }
     }
@@ -153,6 +158,7 @@ pub(super) fn optimize_query_block(
         super::derived_projection::prune(
             block,
             super::OutputPruningContext {
+                production: config.production,
                 aggregates,
                 routines: routines.map(|context| context.routines),
                 volatility: routines.map(|context| context.volatility),
@@ -219,7 +225,7 @@ pub(super) fn optimize_query_block(
             .as_ref()
             .map(|context| context.types),
     );
-    let live_subqueries = super::subqueries::live_slots_for_block(block)?;
+    let live_subqueries = super::subqueries::live_slots_for_block(block, config.production)?;
     super::subqueries::optimize_live(&mut block.subqueries, &live_subqueries, config, aggregates)?;
 
     // Removing an unused aggregate's value does not remove its implicit group on empty input.

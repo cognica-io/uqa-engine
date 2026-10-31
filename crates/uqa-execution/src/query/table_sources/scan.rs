@@ -8,28 +8,30 @@
 use super::TableScanContext;
 use crate::query::{
     local_table::{
-        table_lock_origin, HierarchyRowSource, LocalTableRowSource, LocalTableScanConfig,
+        table_lock_origin_with_control, HierarchyRowSource, LocalTableRowSource,
+        LocalTableScanConfig,
     },
     CteScope,
 };
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionMap, ProductionVec},
+    Value,
+};
+mod schema;
+use schema::{append_scan_metadata, projected_scan_schema_with_control};
 use uqa_sql::{
     plan::{
         source_projection::{ColumnPrune, QualifierFilters, SourceProjection},
         SourcePlan,
     },
     semantics::{
-        source_filters::{has_filters_for_qualifier, qualifier_filter, qualifier_for},
+        source_filters::{has_filters_for_qualifier, qualifier_filter_with_control},
         TABLE_OID_COLUMN, XMIN_COLUMN,
     },
     SQLError, SQLParam,
 };
 type StreamingLocalTableScan<'a> = (Box<dyn crate::PhysicalOperator + 'a>, bool);
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
 pub fn try_streaming_local_table_scan<'a, S: Clone>(
     context: TableScanContext<'_>,
     source: &SourcePlan,
@@ -38,6 +40,31 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
     filters: Option<&QualifierFilters>,
     params: &[SQLParam],
 ) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
+    try_streaming_local_table_scan_with_control(
+        context,
+        source,
+        ctes,
+        prune,
+        filters,
+        params,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
+pub fn try_streaming_local_table_scan_with_control<'a, S: Clone>(
+    context: TableScanContext<'_>,
+    source: &SourcePlan,
+    ctes: &CteScope<S>,
+    prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
+    control.check()?;
     let SourcePlan::Table {
         executable_query: _,
         name,
@@ -50,65 +77,46 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
     else {
         return Ok(None);
     };
-    let qualifier = qualifier_for(qualifier, alias.as_deref());
+    let qualifier = alias.as_deref().unwrap_or(qualifier);
     if let Some(materialized) = ctes.materialized_for_scan(name) {
-        if has_filters_for_qualifier(filters, &qualifier) {
+        if has_filters_for_qualifier(filters, qualifier) {
             return Ok(None);
         }
-        let mapping = materialized
-            .row_schema()
-            .identities()
-            .iter()
-            .enumerate()
-            .filter_map(|(position, identity)| {
-                let source_column = identity.column();
-                let column = column_aliases
-                    .get(position)
-                    .map_or(source_column, String::as_str);
-                if prune
-                    .and_then(|prune| prune.get(&qualifier))
-                    .is_some_and(|wanted| !wanted.contains(column))
-                {
-                    return None;
-                }
-                let output_identity = crate::ColumnIdentity::qualified(&qualifier, column);
-                Some((column.to_string(), output_identity, position))
-            })
-            .collect();
-        let scan: Box<dyn crate::PhysicalOperator + 'a> = materialized.into_operator();
-        let selection = crate::ColumnSelection::with_identities(scan, mapping);
-        let selection = if ctes.lock_identities.emit {
-            selection.rebinding_lock_origins(qualifier)
-        } else {
-            selection
-        };
-        return Ok(Some((Box::new(selection), false)));
+        let scan = materialized.into_operator_with_control(control)?;
+        let selection = crate::ColumnSelection::with_scan_projection_with_control(
+            scan,
+            qualifier,
+            column_aliases,
+            prune.and_then(|prune| prune.get(qualifier)),
+            ctes.lock_identities.emit,
+            control,
+        )?;
+        return Ok(Some((selection, false)));
     }
     let catalog = ctes.catalog_read_view()?;
-    let resolution = ctes.relation_name_resolution()?;
-    if catalog.view_resolved(&resolution, name)?.is_some()
-        || catalog.foreign_table_resolved(&resolution, name)?.is_some()
+    let resolution = ctes.relation_name_resolution_with_control(control)?;
+    if catalog
+        .view_resolved_with_control(&resolution, name, control)?
+        .is_some()
+        || catalog
+            .foreign_table_resolved_with_control(&resolution, name, control)?
+            .is_some()
     {
         return Ok(None);
     }
-    let Some(root_name) = catalog.table_name_resolved(&resolution, name)? else {
+    let Some(root_name) = catalog.table_name_resolved_with_control(&resolution, name, control)?
+    else {
         return Ok(None);
     };
     let root_table = catalog
-        .table_resolved(&resolution, &root_name)?
+        .table_resolved_with_control(&resolution, &root_name, control)?
         .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
-    let wanted = prune.and_then(|prune| prune.get(&qualifier)).cloned();
-    let metadata = wanted
-        .as_ref()
-        .map(SourceProjection::metadata)
-        .unwrap_or_default();
-    let mut table_columns = uqa_sql::semantics::bound_source_column_names(
-        root_table
-            .columns
-            .iter()
-            .map(|column| column.name.clone())
-            .collect::<Vec<_>>(),
+    let wanted = prune.and_then(|prune| prune.get(qualifier));
+    let metadata = wanted.map(SourceProjection::metadata).unwrap_or_default();
+    let table_columns = uqa_sql::semantics::bound_source_column_names_with_control(
+        root_table.columns.iter().map(|column| column.name.as_str()),
         bound_columns.as_deref(),
+        control,
     )?;
     if column_aliases.len() > table_columns.len() {
         return Err(SQLError::Routine {
@@ -121,41 +129,31 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
         });
     }
     let open_document = root_table.columns.is_empty() && !root_table.columns_declared;
+    let mut selected = ProductionVec::new(*control);
+    for column in table_columns.iter() {
+        selected.push_copy(column.as_str())?;
+    }
     if open_document {
-        if let Some(wanted) = &wanted {
-            table_columns.extend(requested_document_fields(wanted));
+        if let Some(wanted) = wanted {
+            for field in requested_document_fields(wanted) {
+                selected.push_copy(field)?;
+            }
         }
     }
-    // The name a filter writes for each column of the table: its alias, or its own name.
-    let visible_names = table_columns
-        .iter()
-        .enumerate()
-        .map(|(position, physical)| {
-            (
-                physical.clone(),
-                column_aliases
-                    .get(position)
-                    .cloned()
-                    .unwrap_or_else(|| physical.clone()),
-            )
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
-    // An unqualified reference is conservatively requested from every FROM source during pruning. The scan schema must still describe only real table columns: advertising those over-inclusive requests as columns can make later joins bind an unqualified name to a non-existent value.
-    let selected_columns = table_columns
-        .into_iter()
-        .enumerate()
-        .filter_map(|(position, physical)| {
-            let visible = column_aliases
-                .get(position)
-                .cloned()
-                .unwrap_or_else(|| physical.clone());
-            wanted
-                .as_ref()
-                .is_none_or(|wanted| wanted.contains(&visible))
-                .then_some((physical, visible))
-        })
-        .collect::<Vec<_>>();
-    let (mut columns, mut schema): (Vec<_>, Vec<_>) = selected_columns.into_iter().unzip();
+    // Aliases retain their declaration positions even when a projection omits preceding fields.
+    let mut visible_names = ProductionMap::new(*control);
+    let mut columns = ProductionVec::new(*control);
+    let mut schema = ProductionVec::new(*control);
+    for (position, physical) in selected.iter().enumerate() {
+        let visible = column_aliases
+            .get(position)
+            .map_or(*physical, String::as_str);
+        visible_names.insert_copy(*physical, visible)?;
+        if wanted.is_none_or(|wanted| wanted.contains(visible)) {
+            columns.push_produced(control.copy_text(physical)?)?;
+            schema.push_produced(control.copy_text(visible)?)?;
+        }
+    }
     let include_table_oid = wanted.as_ref().is_some_and(|wanted| {
         wanted
             .requested_columns()
@@ -167,132 +165,82 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             .any(|column| column == XMIN_COLUMN)
     });
     if include_xmin {
-        columns.push(XMIN_COLUMN.into());
-        schema.push(XMIN_COLUMN.into());
+        columns.push_produced(control.copy_text(XMIN_COLUMN)?)?;
+        schema.push_produced(control.copy_text(XMIN_COLUMN)?)?;
     }
     if include_table_oid {
-        schema.push(TABLE_OID_COLUMN.into());
+        schema.push_produced(control.copy_text(TABLE_OID_COLUMN)?)?;
     }
-    let mut physical_schema = projected_scan_schema(
-        &qualifier,
+    let columns = columns.finish()?;
+    let schema = schema.finish()?;
+    let identity = uqa_core::RelationIdentity::try_borrowed_reference(&root_name)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .identity_with_control(uqa_core::RelationName::decoded("public"), control)?;
+    let row_type = root_table
+        .catalog_oids
+        .row_type_reference_with_control(&identity, control)?;
+    let mut physical_schema = projected_scan_schema_with_control(
+        qualifier,
         &columns,
         &schema,
         &root_table.columns,
         include_table_oid,
-        root_table.catalog_oids.row_type_reference(
-            &uqa_core::RelationIdentity::from_legacy_name(&root_name)
-                .map_err(SQLError::Internal)?,
-        ),
+        row_type.as_deref(),
+        control,
     )?;
     if open_document {
-        physical_schema =
-            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, 0..schema.len());
+        physical_schema = crate::RowSchema::with_wildcard_hidden_positions_with_control(
+            &physical_schema,
+            0..schema.len(),
+            control,
+        )?;
     }
-    let metadata_relation = uqa_sql::ast::InternalRelationId::allocate();
-    let mut metadata_attributes = Vec::with_capacity(2);
-    if metadata.includes_doc_id() {
-        metadata_attributes.push((
-            metadata_relation.column(0),
-            Some(uqa_sql::ast::ColumnType::BigInteger),
-        ));
-    }
-    if metadata.includes_score() {
-        metadata_attributes.push((
-            metadata_relation.column(1),
-            Some(uqa_sql::ast::ColumnType::DoublePrecision),
-        ));
-    }
-    if !metadata_attributes.is_empty() {
-        physical_schema =
-            crate::RowSchema::append_internal_typed(&physical_schema, &metadata_attributes);
-        let mut aliases = Vec::with_capacity(metadata_attributes.len() * 3);
-        if metadata.includes_doc_id() {
-            let column = metadata_relation.column(0);
-            let slot = physical_schema
-                .internal_slot(column)
-                .expect("document metadata attribute must have a physical slot");
-            let ty = Some(uqa_sql::ast::ColumnType::BigInteger);
-            aliases.push((
-                crate::ColumnIdentity::qualified(
-                    uqa_sql::semantics::META_QUALIFIER,
-                    uqa_sql::semantics::META_DOC_ID_COLUMN,
-                ),
-                slot,
-                ty.clone(),
-            ));
-            if !physical_schema.has_qualified_column(&qualifier, uqa_sql::semantics::DOC_ID_COLUMN)
-            {
-                aliases.push((
-                    crate::ColumnIdentity::qualified(&qualifier, uqa_sql::semantics::DOC_ID_COLUMN),
-                    slot,
-                    ty.clone(),
-                ));
-            }
-            if !physical_schema.has_unqualified_column(uqa_sql::semantics::DOC_ID_COLUMN) {
-                aliases.push((
-                    crate::ColumnIdentity::unqualified(uqa_sql::semantics::DOC_ID_COLUMN),
-                    slot,
-                    ty,
-                ));
-            }
-        }
-        if metadata.includes_score() {
-            let column = metadata_relation.column(1);
-            let slot = physical_schema
-                .internal_slot(column)
-                .expect("score metadata attribute must have a physical slot");
-            let ty = Some(uqa_sql::ast::ColumnType::DoublePrecision);
-            aliases.push((
-                crate::ColumnIdentity::qualified(
-                    uqa_sql::semantics::META_QUALIFIER,
-                    uqa_sql::semantics::META_SCORE_COLUMN,
-                ),
-                slot,
-                ty.clone(),
-            ));
-            if !physical_schema.has_qualified_column(&qualifier, uqa_sql::semantics::SCORE_COLUMN) {
-                aliases.push((
-                    crate::ColumnIdentity::qualified(&qualifier, uqa_sql::semantics::SCORE_COLUMN),
-                    slot,
-                    ty.clone(),
-                ));
-            }
-            if !physical_schema.has_unqualified_column(uqa_sql::semantics::SCORE_COLUMN) {
-                aliases.push((
-                    crate::ColumnIdentity::unqualified(uqa_sql::semantics::SCORE_COLUMN),
-                    slot,
-                    ty,
-                ));
-            }
-        }
-        physical_schema =
-            crate::RowSchema::with_physical_identity_aliases(&physical_schema, &aliases);
-    }
-    let table_names = catalog.hierarchy_scan_tables(&resolution, name, *include_descendants)?;
-    let mut sources = Vec::with_capacity(table_names.len());
+    physical_schema = append_scan_metadata(&physical_schema, qualifier, metadata, control)?;
+    let table_names = catalog.hierarchy_scan_tables_with_control(
+        &resolution,
+        name,
+        *include_descendants,
+        control,
+    )?;
+    let mut sources = ProductionVec::new(*control);
     let mut filter_pushed = false;
-    for table_name in table_names {
-        let table = context.tables.table(&table_name)?;
-        let column_definitions = catalog
-            .table_resolved(&resolution, &table_name)?
-            .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
-            .columns
-            .clone();
-        let lock_origin = table_lock_origin(
+    for table_name in table_names.iter() {
+        control.check()?;
+        let table = context.tables.table(table_name)?;
+        let table_snapshot = catalog
+            .table_resolved_with_control(&resolution, table_name, control)?
+            .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        let column_definitions = table_snapshot.columns.clone();
+        let lock_origin = table_lock_origin_with_control(
             &catalog,
             &resolution,
-            &table_name,
-            &qualifier,
+            table_name,
+            qualifier,
             ctes.lock_identities.emit,
+            control,
         )?;
         // Candidate selection and row evaluation must share the selected SQL operand types. A lossy column cast cannot use an index over the uncast values.
-        let predicate_expression = qualifier_filter(filters, &qualifier)
-            .map(|predicate| uqa_sql::bind_type_introspection(predicate, &physical_schema, params));
+        let predicate_expression = qualifier_filter_with_control(filters, qualifier, control)?
+            .map(|predicate| {
+                uqa_sql::bind_type_introspection_owned(
+                    predicate,
+                    &physical_schema,
+                    params,
+                    None,
+                    control,
+                )
+            })
+            .transpose()?;
         let predicate = predicate_expression
             .as_ref()
             .filter(|predicate| !expression_references_tableoid(predicate))
             .map(|predicate| {
-                crate::ProjectedPredicate::compile_bound(predicate, &physical_schema, params)
+                crate::ProjectedPredicate::compile_bound_with_control(
+                    predicate,
+                    &physical_schema,
+                    params,
+                    control,
+                )
             })
             .transpose()?
             .flatten();
@@ -311,7 +259,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                     crate::query::key_candidates::IdentityColumns::new(
                         &column_definitions,
                         table.maps_integer_keys(),
-                        |name| visible_names.get(name).map_or(name, String::as_str),
+                        |name| visible_names.get(name).copied().unwrap_or(name),
                     ),
                 )
             })
@@ -330,14 +278,9 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             if let Some(filter) = &predicate_expression {
                 candidates = crate::query::index_candidates::IndexCandidates {
                     reads: context.tables,
-                    table: &table_name,
+                    table: table_name,
                     columns: &column_definitions,
-                    visible: &|name| {
-                        visible_names
-                            .get(name)
-                            .cloned()
-                            .unwrap_or_else(|| name.to_owned())
-                    },
+                    visible: &|name| visible_names.get(name).copied().unwrap_or(name).to_owned(),
                     params,
                     command_visible: ctes.reads_command_overlay(),
                     cancellation: &context.runtime.cancellation_token(),
@@ -347,33 +290,31 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
             }
         }
         let command_changes = if ctes.reads_command_overlay() {
-            context.tables.command_overlay_changes(&table_name)?
+            context.tables.command_overlay_changes(table_name)?
         } else {
             None
         };
         let estimated_cardinality = match &candidates {
             Some(candidates) => u64::try_from(candidates.len()).unwrap_or(u64::MAX),
-            None => context.tables.table_row_estimate(&table_name)?,
+            None => context.tables.table_row_estimate(table_name)?,
         };
-        let table_oid = include_table_oid
-            .then(|| {
-                crate::catalog::projection::snapshot_table_relation_oid(
-                    &catalog,
-                    &resolution,
-                    &table_name,
-                )
-            })
-            .transpose()?
-            .map(Value::Int);
-        sources.push(
-            LocalTableRowSource::new(LocalTableScanConfig {
+        let table_oid =
+            include_table_oid.then(|| Value::Int(i64::from(table_snapshot.catalog_oids.relation)));
+        let name = control.copy_text(table_name)?;
+        let copied_columns = copy_names(&columns, control)?;
+        let copied_schema = copy_names(&schema, control)?;
+        let (table_name, name_memory) = name.into_parts();
+        let (columns, column_memory) = copied_columns.into_parts();
+        let (schema, schema_memory) = copied_schema.into_parts();
+        let config = control.finish(
+            LocalTableScanConfig {
                 cancellation: context.runtime.cancellation_token(),
                 serializable: context.tables.serializable_read(&table_name)?,
                 table_name,
                 table,
                 column_definitions,
-                columns: columns.clone(),
-                schema: schema.clone(),
+                columns,
+                schema,
                 physical_schema: physical_schema.clone(),
                 metadata,
                 table_oid,
@@ -383,45 +324,64 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 recheck_pins,
                 candidates,
                 command_changes,
-            })
-            .with_scan_batch_bytes(context.runtime.work_mem_bytes()?),
-        );
+            },
+            control.combine(control.combine(name_memory, column_memory), schema_memory),
+        )?;
+        let source = LocalTableRowSource::from_produced(config)
+            .with_scan_batch_bytes(context.runtime.work_mem_bytes()?);
+        sources.push_produced(control.finish(source, control.empty_reservation())?)?;
     }
+    let sources = sources.finish()?;
     let source: Box<dyn crate::RowSource> = if sources.len() == 1 {
-        Box::new(
-            sources
-                .pop()
-                .ok_or_else(|| SQLError::Internal("single-table scan lost its source".into()))?,
-        )
+        let (mut sources, _memory) = sources.into_parts();
+        sources
+            .pop()
+            .expect("single-table scan owns its source")
+            .into_boxed(control)?
     } else {
-        Box::new(HierarchyRowSource::new(sources)?)
+        HierarchyRowSource::boxed_with_control(sources, control)?
     };
     Ok(Some((
-        Box::new(crate::TableScan::new(source)),
+        crate::TableScan::boxed_with_control(source, control)?,
         filter_pushed,
     )))
 }
 
 fn expression_references_tableoid(expression: &crate::ScalarExpr) -> bool {
-    let mut columns = std::collections::BTreeSet::new();
-    expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
+    let mut references = false;
+    let projectable = expression
+        .try_visit_columns(&mut |column| {
+            references |= column == TABLE_OID_COLUMN;
+            Ok::<_, std::convert::Infallible>(())
+        })
+        .unwrap_or_else(|never| match never {});
+    projectable && references
 }
 
-fn requested_document_fields(projection: &SourceProjection) -> Vec<String> {
+fn copy_names(
+    names: &[String],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<String>>, SQLError> {
+    let mut output = ProductionVec::new(*control);
+    for name in names {
+        output.push_produced(control.copy_text(name)?)?;
+    }
+    Ok(output.finish()?)
+}
+
+fn requested_document_fields(projection: &SourceProjection) -> impl Iterator<Item = &str> {
     let metadata = projection.metadata();
     projection
         .requested_columns()
-        .filter(|column| match *column {
+        .filter(move |column| match *column {
             XMIN_COLUMN | TABLE_OID_COLUMN => false,
             uqa_sql::semantics::DOC_ID_COLUMN => !metadata.includes_doc_id(),
             uqa_sql::semantics::SCORE_COLUMN => !metadata.includes_score(),
             _ => true,
         })
-        .map(str::to_owned)
-        .collect()
 }
 
-/// Keep a scan's selected stored fields, public aliases and system-column metadata in one positional layout.
+#[cfg(test)]
 fn projected_scan_schema(
     qualifier: &str,
     columns: &[String],
@@ -430,44 +390,15 @@ fn projected_scan_schema(
     include_table_oid: bool,
     row_type: Option<uqa_sql::ast::CompositeTypeReference>,
 ) -> Result<crate::RowSchema, SQLError> {
-    let column_metadata = columns.iter().zip(visible).map(|(column, visible)| {
-        let definition = definitions
-            .iter()
-            .find(|definition| definition.name == *column);
-        (
-            visible.clone(),
-            definition
-                .map(|definition| definition.ty.clone())
-                .or_else(|| (column == XMIN_COLUMN).then_some(uqa_sql::ast::ColumnType::Xid)),
-            definition.and_then(|definition| definition.collation_oid),
-        )
-    });
-    let table_oid = include_table_oid.then(|| {
-        (
-            TABLE_OID_COLUMN.to_string(),
-            Some(uqa_sql::ast::ColumnType::Oid),
-            None,
-        )
-    });
-    let mut physical_schema =
-        crate::RowSchema::with_column_metadata(Some(qualifier), column_metadata.chain(table_oid));
-    // System columns are addressable by name but never expand into `*` or a whole-row value.
-    let system_positions = visible
-        .iter()
-        .enumerate()
-        .filter_map(|(position, column)| {
-            (column == XMIN_COLUMN || column == TABLE_OID_COLUMN).then_some(position)
-        })
-        .collect::<Vec<_>>();
-    if !system_positions.is_empty() {
-        physical_schema =
-            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, system_positions);
-    }
-    if let Some(row_type) = row_type {
-        physical_schema = physical_schema
-            .with_relation_row_type(qualifier, uqa_sql::ast::ColumnType::Composite(row_type))?;
-    }
-    Ok(physical_schema)
+    projected_scan_schema_with_control(
+        qualifier,
+        columns,
+        visible,
+        definitions,
+        include_table_oid,
+        row_type.as_ref(),
+        &ProductionControl::uncontrolled(),
+    )
 }
 
 #[cfg(test)]

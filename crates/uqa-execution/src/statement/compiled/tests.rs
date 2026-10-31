@@ -41,7 +41,7 @@ impl ExecutablePlanOptimizer for Inputs {
         &self,
         plan: UnifiedPlan,
         params: &[SQLParam],
-    ) -> Result<UnifiedPlan, SQLError> {
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
         assert!(matches!(params, [SQLParam::Scalar(Value::Int(7))]));
         assert!(uqa_sql::expr::statement_cancellation()
             .is_some_and(|current| current.shares_signal(&self.cancellation)));
@@ -56,7 +56,13 @@ impl ExecutablePlanOptimizer for Inputs {
         &self,
         _: UnifiedPlan,
         _: &[SQLParam],
-    ) -> Result<(UnifiedPlan, uqa_sql::binding::statements::AnalyzedResult), SQLError> {
+    ) -> Result<
+        (
+            uqa_sql::plan::SharedExecutablePlan,
+            uqa_sql::binding::statements::AnalyzedResult,
+        ),
+        SQLError,
+    > {
         panic!("these statements run without a result check")
     }
 }

@@ -6,15 +6,19 @@
 
 //! Projection-slot binding for supported scalar predicates.
 
-use uqa_core::Value;
-use uqa_sql::expr::cast_value;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    Value,
+};
+use uqa_sql::expr::cast_value_from_with_control;
 use uqa_sql::{SQLError, SQLParam};
 
-use super::{ProjectedExpr, ProjectedIntPredicate};
-use crate::scalar::scalar_integer_binary_width;
+use super::ProjectedExpr;
 use crate::{RowSchema, ScalarExpr};
 
+mod construction;
 mod session;
+use construction::{boxed, inline, literal};
 
 #[expect(
     clippy::too_many_lines,
@@ -24,79 +28,108 @@ pub(super) fn compile(
     expression: &ScalarExpr,
     schema: &RowSchema,
     params: &[SQLParam],
-) -> Result<Option<ProjectedExpr>, SQLError> {
-    if session::required(expression, schema, params)? {
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ProjectedExpr>>, SQLError> {
+    if session::required(expression, schema, params, control)? {
         return Ok(None);
     }
     // This evaluator has no value catalog. Preserve such operands for the canonical evaluator instead of losing record/enum identity during predicate pushdown.
     if matches!(
         expression,
         ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_)
-    ) && crate::scalar_type(expression, schema, params)?
+    ) && uqa_sql::scalar_type_with_control(expression, schema, params, control)?
         .as_ref()
-        .is_some_and(uqa_sql::type_resolution::catalog_value_type)
+        .is_some_and(|ty| uqa_sql::type_resolution::catalog_value_type(ty))
     {
         return Ok(None);
     }
     let compiled = match expression {
-        ScalarExpr::Collated { expr, .. } => return compile(expr, schema, params),
+        ScalarExpr::Collated { expr, .. } => return compile(expr, schema, params, control),
         ScalarExpr::Column(column) => {
             let Some(index) = schema.unqualified_position(column) else {
                 return Ok(None);
             };
-            field(index, schema)?
+            inline(field(index, schema)?, control)?
         }
-        ScalarExpr::Position(index) if *index < schema.len() => field(*index, schema)?,
+        ScalarExpr::Position(index) if *index < schema.len() => {
+            inline(field(*index, schema)?, control)?
+        }
         ScalarExpr::QualifiedColumn { qualifier, column } => {
             let Some(index) = schema.qualified_position(qualifier, column) else {
                 return Ok(None);
             };
-            field(index, schema)?
+            inline(field(index, schema)?, control)?
         }
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
-            ProjectedExpr::Literal(value.clone())
+            literal(control.copy_value(value)?, control)?
         }
-        ScalarExpr::Param(index) => ProjectedExpr::Literal(parameter(*index, params)?),
+        ScalarExpr::Param(index) => literal(parameter(*index, params, control)?, control)?,
         ScalarExpr::Binary { op, lhs, rhs } => {
-            let integer_width = scalar_integer_binary_width(lhs, rhs, schema, params);
+            let integer_width = match uqa_sql::scalar_integer_operation_width_with_control(
+                lhs, rhs, schema, params, control,
+            ) {
+                Ok(width) => width,
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Err(_) => None,
+            };
             let real_arithmetic = matches!(
-                crate::scalar_type(expression, schema, params)?,
+                uqa_sql::scalar_type_with_control(expression, schema, params, control)?.as_deref(),
                 Some(uqa_sql::ast::ColumnType::Real)
             );
-            compiled_binary(
+            construction::binary(
                 *op,
-                require(lhs, schema, params)?,
-                require(rhs, schema, params)?,
+                require(lhs, schema, params, control)?,
+                require(rhs, schema, params, control)?,
                 integer_width,
                 real_arithmetic,
-            )
+                control,
+            )?
         }
-        ScalarExpr::UnaryMinus(expression) => {
-            ProjectedExpr::UnaryMinus(Box::new(require(expression, schema, params)?))
+        ScalarExpr::UnaryMinus(expression) => construction::unary(
+            require(expression, schema, params, control)?,
+            ProjectedExpr::UnaryMinus,
+            control,
+        )?,
+        ScalarExpr::Not(expression) => construction::unary(
+            require(expression, schema, params, control)?,
+            ProjectedExpr::Not,
+            control,
+        )?,
+        ScalarExpr::And(items) => {
+            construction::boolean(require_all(items, schema, params, control)?, true, control)?
         }
-        ScalarExpr::Not(expression) => {
-            ProjectedExpr::Not(Box::new(require(expression, schema, params)?))
+        ScalarExpr::Or(items) => {
+            construction::boolean(require_all(items, schema, params, control)?, false, control)?
         }
-        ScalarExpr::And(items) => compiled_and(require_all(items, schema, params)?),
-        ScalarExpr::Or(items) => ProjectedExpr::Or(require_all(items, schema, params)?),
-        ScalarExpr::IsNull { expr, negated } => ProjectedExpr::IsNull {
-            expression: Box::new(require(expr, schema, params)?),
-            negated: *negated,
-        },
-        ScalarExpr::Between { expr, low, high } => compiled_between(
-            require(expr, schema, params)?,
-            require(low, schema, params)?,
-            require(high, schema, params)?,
-        ),
+        ScalarExpr::IsNull { expr, negated } => {
+            let (expression, memory) =
+                boxed(require(expr, schema, params, control)?, control)?.into_parts();
+            control.finish(
+                ProjectedExpr::IsNull {
+                    expression,
+                    negated: *negated,
+                },
+                memory,
+            )?
+        }
+        ScalarExpr::Between { expr, low, high } => construction::between(
+            require(expr, schema, params, control)?,
+            require(low, schema, params, control)?,
+            require(high, schema, params, control)?,
+            control,
+        )?,
         ScalarExpr::InList {
             expr,
             list,
             negated,
-        } => ProjectedExpr::InList {
-            expression: Box::new(require(expr, schema, params)?),
-            list: require_all(list, schema, params)?,
-            negated: *negated,
-        },
+        } => construction::membership(
+            require(expr, schema, params, control)?,
+            require_all(list, schema, params, control)?,
+            *negated,
+            control,
+        )?,
         ScalarExpr::Func {
             binding: Some(binding),
             args,
@@ -110,7 +143,7 @@ pub(super) fn compile(
                 Some(
                     dispatch @ (uqa_sql::ast::FunctionDispatch::AnyOperator
                     | uqa_sql::ast::FunctionDispatch::AllOperator),
-                ) => return compiled_array_membership(dispatch, args, schema, params),
+                ) => return compiled_array_membership(dispatch, args, schema, params, control),
                 _ => return Ok(None),
             };
             if !operator.is_like() {
@@ -124,49 +157,50 @@ pub(super) fn compile(
             let [expression, pattern] = args.as_slice() else {
                 return Ok(None);
             };
-            let Some(pattern) = pattern_literal(pattern, params)? else {
+            let Some(pattern) = pattern_literal(pattern, params, control)? else {
                 return Ok(None);
             };
-            if matches!(&pattern, Value::Null) {
-                return Ok(Some(ProjectedExpr::Literal(Value::Null)));
+            if matches!(&*pattern, Value::Null) {
+                return Ok(Some(inline(ProjectedExpr::Literal(Value::Null), control)?));
             }
-            let compiled = ProjectedExpr::Like {
-                expression: Box::new(require(expression, schema, params)?),
-                pattern: uqa_sql::expr::CompiledLikePattern::from_value_with_escape_with_control(
-                    &pattern,
-                    operator.case_insensitive(),
-                    None,
-                    collation,
-                    &uqa_core::memory::ProductionControl::uncontrolled(),
-                )?,
-            };
+            let expression = boxed(require(expression, schema, params, control)?, control)?;
+            let pattern = uqa_sql::expr::CompiledLikePattern::from_value_with_escape_with_control(
+                &pattern,
+                operator.case_insensitive(),
+                None,
+                collation,
+                control,
+            )?;
+            let (expression, memory) = expression.into_parts();
+            let compiled = control.finish(
+                ProjectedExpr::Like {
+                    expression,
+                    pattern,
+                },
+                memory,
+            )?;
             if operator.negated() {
-                ProjectedExpr::Not(Box::new(compiled))
+                construction::unary(compiled, ProjectedExpr::Not, control)?
             } else {
                 compiled
             }
         }
         ScalarExpr::Cast { expr, ty, .. } => {
             // A cast to a type whose input function reads the catalog, such as `regclass`, resolves names through the engine, which the projected form has no access to.
-            if uqa_sql::ast::ColumnType::from_sql_name(ty)
-                .map_or(true, |ty| uqa_sql::type_resolution::catalog_input_type(&ty))
-            {
+            if catalog_input(ty, control)? {
                 return Ok(None);
             }
-            let expression = require(expr, schema, params)?;
-            match expression {
-                // Session-independent noninteger literal casts can be evaluated once; integer casts retain row-evaluation error timing.
-                ProjectedExpr::Literal(value) if is_integer_type(ty) => ProjectedExpr::Cast {
-                    expression: Box::new(ProjectedExpr::Literal(value)),
-                    ty: ty.clone(),
-                },
-                ProjectedExpr::Literal(value) => ProjectedExpr::Literal(cast_value(&value, ty)?),
-                expression => ProjectedExpr::Cast {
-                    expression: Box::new(expression),
-                    ty: ty.clone(),
-                },
+            let expression = require(expr, schema, params, control)?;
+            match &*expression {
+                // Integer casts retain their original row-evaluation error timing.
+                ProjectedExpr::Literal(value) if !is_integer_type(ty) => literal(
+                    cast_value_from_with_control(value, ty, None, control)?,
+                    control,
+                )?,
+                _ => construction::cast(expression, ty, control)?,
             }
         }
+
         ScalarExpr::RetainedLiteral(_)
         | ScalarExpr::Position(_)
         | ScalarExpr::InternalColumn(_)
@@ -192,7 +226,8 @@ fn compiled_array_membership(
     args: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
-) -> Result<Option<ProjectedExpr>, SQLError> {
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ProjectedExpr>>, SQLError> {
     let [expression, array, ScalarExpr::Literal(Value::Str(operator))] = args else {
         return Ok(None);
     };
@@ -223,112 +258,17 @@ fn compiled_array_membership(
     {
         return Ok(None);
     }
-    Ok(Some(ProjectedExpr::InList {
-        expression: Box::new(require(expression, schema, params)?),
-        list: array
-            .elements()
-            .iter()
-            .cloned()
-            .map(ProjectedExpr::Literal)
-            .collect(),
+    let expression = require(expression, schema, params, control)?;
+    let mut list = ProductionVec::new(*control);
+    for value in array.elements() {
+        list.push_produced(literal(control.copy_value(value)?, control)?)?;
+    }
+    Ok(Some(construction::membership(
+        expression,
+        list.finish()?,
         negated,
-    }))
-}
-
-fn compiled_and(items: Vec<ProjectedExpr>) -> ProjectedExpr {
-    let all_integer_fields = items.iter().all(|item| {
-        matches!(
-            item,
-            ProjectedExpr::IntFieldComparison { .. }
-                | ProjectedExpr::IntFieldBetween { .. }
-                | ProjectedExpr::IntFieldConjunction(_)
-        )
-    });
-    if !all_integer_fields {
-        return ProjectedExpr::And(items);
-    }
-    let mut predicates = Vec::with_capacity(items.len());
-    for item in items {
-        match item {
-            ProjectedExpr::IntFieldComparison {
-                field,
-                op,
-                literal,
-                field_on_left,
-            } => {
-                push_integer_predicate(
-                    &mut predicates,
-                    ProjectedIntPredicate::Comparison {
-                        field,
-                        op,
-                        literal,
-                        field_on_left,
-                    },
-                );
-            }
-            ProjectedExpr::IntFieldBetween { field, low, high } => {
-                push_integer_predicate(
-                    &mut predicates,
-                    ProjectedIntPredicate::Between { field, low, high },
-                );
-            }
-            ProjectedExpr::IntFieldConjunction(items) => {
-                for item in items {
-                    push_integer_predicate(&mut predicates, item);
-                }
-            }
-            _ => unreachable!("integer predicate conjunction was validated"),
-        }
-    }
-    ProjectedExpr::IntFieldConjunction(predicates)
-}
-
-fn push_integer_predicate(
-    predicates: &mut Vec<ProjectedIntPredicate>,
-    next: ProjectedIntPredicate,
-) {
-    if let Some(range) = predicates
-        .last()
-        .and_then(|previous| adjacent_range(previous, &next))
-    {
-        *predicates
-            .last_mut()
-            .expect("matched the preceding comparison") = range;
-    } else {
-        predicates.push(next);
-    }
-}
-
-/// Borrowing one field is stable within the input row. Coalesce only adjacent
-/// inclusive lower/upper comparisons; no cast, effect or intervening predicate moves.
-/// Commuted operands keep their original order in fallback error diagnostics.
-fn adjacent_range(
-    lower: &ProjectedIntPredicate,
-    upper: &ProjectedIntPredicate,
-) -> Option<ProjectedIntPredicate> {
-    use uqa_sql::ast::BinaryOp::{GreaterEqual, LessEqual};
-    let (
-        ProjectedIntPredicate::Comparison {
-            field: lower_field,
-            op: GreaterEqual,
-            literal: low,
-            field_on_left: true,
-        },
-        ProjectedIntPredicate::Comparison {
-            field: upper_field,
-            op: LessEqual,
-            literal: high,
-            field_on_left: true,
-        },
-    ) = (lower, upper)
-    else {
-        return None;
-    };
-    (*lower_field == *upper_field).then_some(ProjectedIntPredicate::Between {
-        field: *lower_field,
-        low: *low,
-        high: *high,
-    })
+        control,
+    )?))
 }
 
 fn is_integer_type(ty: &str) -> bool {
@@ -355,83 +295,13 @@ fn is_integer_type(ty: &str) -> bool {
     )
 }
 
-fn compiled_binary(
-    op: uqa_sql::ast::BinaryOp,
-    lhs: ProjectedExpr,
-    rhs: ProjectedExpr,
-    integer_width: Option<uqa_sql::expr::IntegerWidth>,
-    real_arithmetic: bool,
-) -> ProjectedExpr {
-    use uqa_sql::ast::BinaryOp;
-
-    if matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    ) {
-        match (&lhs, &rhs) {
-            (ProjectedExpr::Field(field), ProjectedExpr::Literal(Value::Int(literal))) => {
-                return ProjectedExpr::IntFieldComparison {
-                    field: *field,
-                    op,
-                    literal: *literal,
-                    field_on_left: true,
-                };
-            }
-            (ProjectedExpr::Literal(Value::Int(literal)), ProjectedExpr::Field(field)) => {
-                return ProjectedExpr::IntFieldComparison {
-                    field: *field,
-                    op,
-                    literal: *literal,
-                    field_on_left: false,
-                };
-            }
-            _ => {}
-        }
-    }
-    ProjectedExpr::Binary {
-        op,
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        integer_width,
-        real_arithmetic,
-    }
-}
-
-fn compiled_between(
-    expression: ProjectedExpr,
-    low: ProjectedExpr,
-    high: ProjectedExpr,
-) -> ProjectedExpr {
-    if let (
-        ProjectedExpr::Field(field),
-        ProjectedExpr::Literal(Value::Int(low)),
-        ProjectedExpr::Literal(Value::Int(high)),
-    ) = (&expression, &low, &high)
-    {
-        return ProjectedExpr::IntFieldBetween {
-            field: *field,
-            low: *low,
-            high: *high,
-        };
-    }
-    ProjectedExpr::Between {
-        expression: Box::new(expression),
-        low: Box::new(low),
-        high: Box::new(high),
-    }
-}
-
 fn require(
     expression: &ScalarExpr,
     schema: &RowSchema,
     params: &[SQLParam],
-) -> Result<ProjectedExpr, SQLError> {
-    compile(expression, schema, params)?.ok_or_else(|| {
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ProjectedExpr>, SQLError> {
+    compile(expression, schema, params, control)?.ok_or_else(|| {
         SQLError::Unsupported("expression cannot use positional predicate evaluation".into())
     })
 }
@@ -440,32 +310,34 @@ fn require_all(
     expressions: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
-) -> Result<Vec<ProjectedExpr>, SQLError> {
-    expressions
-        .iter()
-        .map(|expression| require(expression, schema, params))
-        .collect()
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<ProjectedExpr>>, SQLError> {
+    let mut output = ProductionVec::new(*control);
+    output.reserve(expressions.len())?;
+    for expression in expressions {
+        output.push_produced(require(expression, schema, params, control)?)?;
+    }
+    Ok(output.finish()?)
 }
 
 /// Evaluate constant parser-owned escape helpers once while preparing the projection matcher.
 fn pattern_literal(
     expression: &ScalarExpr,
     params: &[SQLParam],
-) -> Result<Option<Value>, SQLError> {
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>, SQLError> {
     match expression {
         ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
-            Ok(Some(value.clone()))
+            Ok(Some(control.copy_value(value)?))
         }
-        ScalarExpr::Param(index) => parameter(*index, params).map(Some),
-        ScalarExpr::Collated { expr, .. } => pattern_literal(expr, params),
+        ScalarExpr::Param(index) => parameter(*index, params, control).map(Some),
+        ScalarExpr::Collated { expr, .. } => pattern_literal(expr, params, control),
         ScalarExpr::Cast { expr, ty, .. } => {
-            if uqa_sql::ColumnType::from_sql_name(ty)
-                .map_or(true, |ty| uqa_sql::type_resolution::catalog_input_type(&ty))
-            {
+            if catalog_input(ty, control)? {
                 return Ok(None);
             }
-            pattern_literal(expr, params)?
-                .map(|value| cast_value(&value, ty))
+            pattern_literal(expr, params, control)?
+                .map(|value| cast_value_from_with_control(&value, ty, None, control))
                 .transpose()
         }
         ScalarExpr::Func {
@@ -481,16 +353,20 @@ fn pattern_literal(
                 Some(uqa_sql::ast::FunctionDispatch::PatternEscape { .. })
             ) =>
         {
-            let mut values = Vec::with_capacity(args.len());
+            let mut values = ProductionVec::new(*control);
+            values.reserve(args.len())?;
             for argument in args {
-                let Some(value) = pattern_literal(argument, params)? else {
+                let Some(value) = pattern_literal(argument, params, control)? else {
                     return Ok(None);
                 };
-                values.push((None, value));
+                let (value, memory) = value.into_parts();
+                values.push_produced(control.finish((None, value), memory)?)?;
             }
-            uqa_sql::expr::eval_bound_builtin_function_call(
-                binding,
-                values,
+            uqa_sql::expr::eval_builtin_function_call_with_control(
+                &binding.name,
+                Some(binding),
+                values.finish()?,
+                control,
                 &uqa_sql::expr::EvalContext::new(None, params),
             )
             .map(Some)
@@ -499,9 +375,15 @@ fn pattern_literal(
     }
 }
 
-fn parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> {
+fn parameter(
+    index: usize,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     match index.checked_sub(1).and_then(|offset| params.get(offset)) {
-        Some(SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. }) => Ok(value.clone()),
+        Some(SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. }) => {
+            Ok(control.copy_value(value)?)
+        }
         Some(
             SQLParam::Vector(_)
             | SQLParam::Tensor(_)
@@ -524,4 +406,12 @@ fn field(index: usize, schema: &RowSchema) -> Result<ProjectedExpr, SQLError> {
         ));
     }
     Ok(ProjectedExpr::Field(index))
+}
+
+fn catalog_input(ty: &str, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
+    match uqa_sql::ColumnType::from_sql_name_with_control(ty, control) {
+        Ok(ty) => Ok(uqa_sql::type_resolution::catalog_input_type(&ty)),
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
+        Err(_) => Ok(true),
+    }
 }

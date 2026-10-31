@@ -22,6 +22,47 @@ fn estimate(sql: &str) -> PlanCost {
 }
 
 #[test]
+fn controlled_plan_costing_admits_constant_casts_before_materialization() {
+    let statistics = |_: &str| None;
+    let estimator = PlanCostEstimator::new(&statistics);
+    let token = CancellationToken::new();
+    for sql in [
+        "SELECT id FROM items WHERE id = 'payload'::text",
+        "SELECT 1 WHERE 'x' = 'payload'::text",
+        "SELECT count(*) FROM items HAVING 'x' = 'payload'::text",
+        "SELECT a.id FROM items a JOIN items b ON a.id = 'payload'::text",
+        "SELECT a.id FROM items a JOIN items b ON a.id = b.id WHERE a.id = 'payload'::text",
+    ] {
+        let mut body = plan(sql);
+        body.rewrite_scalar_expressions(&mut |expression| {
+            if let ScalarExpr::Literal(Value::Str(value)) = expression {
+                if value == "payload" {
+                    *value = "x".repeat(4 * 1024 * 1024);
+                }
+            }
+        });
+        for limit in [0, 1024, 16384] {
+            let budget = MemoryBudget::new(limit);
+            let control = ProductionControl::new(&budget, &token, &token);
+            let mut result = None;
+            let allocation = allocation_counter::measure(|| {
+                result = Some(estimator.estimate_with_control(&body, &control));
+            });
+            assert!(
+                allocation.bytes_total < 16 * 1024,
+                "{sql}, limit={limit}: {allocation:?}"
+            );
+            assert_eq!(
+                result.unwrap().unwrap_err().sqlstate(),
+                Some("53200"),
+                "{sql}"
+            );
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn named_sources_cost_the_retained_executable_instead_of_a_fallback_table() {
     let mut explained = plan("SELECT n FROM named_input");
     let UnifiedPlan::Query(query) = &mut explained else {

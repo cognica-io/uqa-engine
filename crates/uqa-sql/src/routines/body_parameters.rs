@@ -21,6 +21,9 @@ use crate::{
 use std::cell::Cell;
 use std::collections::BTreeSet;
 
+mod production;
+pub use production::sql_body_parameter_scope_with_control;
+
 /// The parameters a SQL body can name: the routine's input parameters, which `get_func_input_arg_names` lists.
 #[must_use]
 pub fn sql_body_parameters(
@@ -57,14 +60,11 @@ pub fn sql_body_parameter_scope(
     def: &CreateFunction,
     params: &[SQLParam],
 ) -> Result<RoutineParameterScope, SQLError> {
-    Ok(RoutineParameterScope::new(
-        &routine_local_name(&def.name)?,
-        sql_body_parameter_names(def),
-        params
-            .iter()
-            .map(|param| param.declared_scalar_type().cloned())
-            .collect(),
-    ))
+    sql_body_parameter_scope_with_control(
+        def,
+        params,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// Record in the statements of a SQL-standard body each name that resolves to a parameter, as the positional parameter it names, so that a later change to the relations the body reads cannot take the name: `PostgreSQL` stores the analyzed statements, in which a parameter reference stays a parameter. Returns whether a statement changed.

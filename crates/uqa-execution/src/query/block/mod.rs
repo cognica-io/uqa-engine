@@ -78,7 +78,7 @@ fn run_select_without_from_output<'a, S: Clone + 'static>(
     execute_query_block_operator_output(
         context.relational,
         operator,
-        statement.r#where.clone(),
+        statement.r#where.as_ref(),
         statement,
         original,
         params,

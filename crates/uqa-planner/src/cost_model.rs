@@ -257,12 +257,10 @@ impl CostEstimator {
 // Algebraic-tree cost model constants and estimator.
 // ---------------------------------------------------------------
 
-use std::collections::BTreeMap;
-
 use uqa_core::IndexStats;
 use uqa_operators::{DeepFusionLayer, OperatorTree};
 
-use crate::cardinality::{ColumnStats, GraphStats};
+use crate::cardinality::{ColumnStatistics, GraphStats};
 
 /// Multiplier for score-producing operators.
 pub const SCORE_OVERHEAD_FACTOR: f64 = 1.1;
@@ -279,7 +277,7 @@ pub const TRAVERSE_FRACTION: f64 = 0.1;
 #[derive(Debug, Clone, Default)]
 pub struct CostModel {
     pub graph_stats: Option<GraphStats>,
-    pub column_stats: BTreeMap<String, ColumnStats>,
+    pub column_stats: ColumnStatistics,
     pub physical_cost: CostEstimator,
 }
 
@@ -296,8 +294,8 @@ impl CostModel {
         self
     }
 
-    pub fn with_column_stats(mut self, stats: BTreeMap<String, ColumnStats>) -> Self {
-        self.column_stats = stats;
+    pub fn with_column_stats(mut self, stats: impl Into<ColumnStatistics>) -> Self {
+        self.column_stats = stats.into();
         self
     }
 

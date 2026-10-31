@@ -386,7 +386,7 @@ fn scoped_type_resolution_reuses_retained_catalog() {
             &[],
         )
         .unwrap();
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     let names = [
         "information_schema.sql_identifier",
@@ -428,7 +428,7 @@ fn scoped_type_resolution_keeps_domain_identity_until_next_scope() {
         .unwrap();
     assert_eq!(values.rows[0]["numeric_value"], Value::Int(2));
     assert_eq!(values.rows[0]["text_value"], Value::Str("value".into()));
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     let original = EngineHook::resolve_type_name(&hook, "item")
         .unwrap()
@@ -455,7 +455,7 @@ fn scoped_type_resolution_keeps_domain_identity_until_next_scope() {
         uqa_execution::FunctionTypeResolver::resolve_type_name(&hook, "item").unwrap(),
         Some(original.clone())
     );
-    let current_scope = query_scope::new_for_current_routine(&engine);
+    let current_scope = query_scope::new_for_current_routine(&engine).unwrap();
     let current_hook = ScopedEngineHook::new(&engine, &current_scope);
     assert_ne!(
         EngineHook::resolve_type_name(&current_hook, "item").unwrap(),
@@ -464,7 +464,7 @@ fn scoped_type_resolution_keeps_domain_identity_until_next_scope() {
     engine
         .sql("SET search_path = second_path, first_path", &[])
         .unwrap();
-    let reordered_scope = query_scope::new_for_current_routine(&engine);
+    let reordered_scope = query_scope::new_for_current_routine(&engine).unwrap();
     let reordered_hook = ScopedEngineHook::new(&engine, &reordered_scope);
     assert_eq!(
         EngineHook::resolve_type_name(&reordered_hook, "item").unwrap(),

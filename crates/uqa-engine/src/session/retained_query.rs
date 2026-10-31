@@ -7,6 +7,7 @@
 //! Own the selected session and statement inputs while Execution retains a child pipeline.
 
 use crate::{session::StatementReadSnapshot, Engine};
+use uqa_core::memory::{MemoryReservation, Produced, ProductionVec};
 use uqa_execution::{
     query::{
         statement::{
@@ -17,13 +18,17 @@ use uqa_execution::{
     },
     PhysicalOperator,
 };
-use uqa_sql::{plan::QueryPlan, SQLError, SQLParam};
+use uqa_sql::{
+    plan::{OwnedQueryPlan, QueryPlan},
+    SQLError, SQLParam,
+};
 
 struct RetainedSessionQuery {
     engine: Engine,
-    plan: QueryPlan,
-    params: Vec<SQLParam>,
+    plan: OwnedQueryPlan,
+    params: Produced<Vec<SQLParam>>,
     scope: CteScope<StatementReadSnapshot>,
+    _memory: Option<MemoryReservation>,
 }
 impl RetainedQueryInput for RetainedSessionQuery {
     fn build(&self) -> Result<Option<Box<dyn PhysicalOperator + '_>>, SQLError> {
@@ -38,10 +43,21 @@ impl RetainedQueryInput for RetainedSessionQuery {
 impl Engine {
     pub(crate) fn retained_query_operator(
         &self,
-        plan: QueryPlan,
-        params: Vec<SQLParam>,
-        scope: CteScope<StatementReadSnapshot>,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        scope: &CteScope<StatementReadSnapshot>,
     ) -> Result<Option<Box<dyn PhysicalOperator>>, SQLError> {
+        let resources = self.cte_execution_context().production_resources()?;
+        let control = resources.control();
+        let plan = OwnedQueryPlan::from_produced(plan.clone_with_control(&control)?, &control)?;
+        let mut retained_params = ProductionVec::new(control);
+        retained_params.reserve(params.len())?;
+        for parameter in params {
+            retained_params.push_produced(parameter.clone_with_control(&control)?)?;
+        }
+        let params = retained_params.finish()?;
+        let scope = scope.copy_with_control(&control)?;
+        let memory = control.reserve(size_of::<RetainedSessionQuery>())?;
         let engine = if let Some(snapshot) = scope.command_cte_snapshot() {
             self.statement_read_snapshot_engine(&snapshot)
         } else if self.query_table_snapshots.is_some() {
@@ -53,12 +69,21 @@ impl Engine {
         } else {
             self.statement_read_snapshot_engine(&self.capture_statement_read_snapshot()?)
         };
-        RetainedQueryOperator::try_new(Box::new(RetainedSessionQuery {
-            engine,
-            plan,
-            params,
-            scope,
-        }))
-        .map(|operator| operator.map(|operator| Box::new(operator) as Box<dyn PhysicalOperator>))
+        RetainedQueryOperator::try_new_with_control(
+            Box::new(RetainedSessionQuery {
+                engine,
+                plan,
+                params,
+                scope,
+                _memory: memory,
+            }),
+            &control,
+        )?
+        .map(|operator| {
+            operator
+                .into_boxed(&control)
+                .map(|operator| operator as Box<dyn PhysicalOperator>)
+        })
+        .transpose()
     }
 }

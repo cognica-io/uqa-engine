@@ -8,13 +8,13 @@
 /// Build the physical operator for a join source.
 use super::{
     alias_join_operator, bind_join_on_schema, build_join_operator_with_ctes_at_path,
-    join_using_predicate, null_row_for_schema, physical_exec_error, physical_work_mem_bytes,
-    resolve_join_using, shape_join_using_output, ColumnPrune, CteScope, JoinExecutionStrategy,
+    physical_work_mem_bytes, shape_join_using_output, ColumnPrune, CteScope, JoinExecutionStrategy,
     PhysicalOperator, QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::physical::construction::OperatorBuild;
 use crate::query::binding::sources::SourceBindings;
 use crate::{HashJoin, NestedLoopJoin};
+use uqa_sql::semantics::{join_using_predicate_owned, resolve_join_using_with_control};
 
 #[expect(
     clippy::too_many_lines,
@@ -34,6 +34,8 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
     recheck_path: Option<Vec<u8>>,
     bindings: Option<&SourceBindings<'_>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
     match from {
         SourcePlan::Join {
             left,
@@ -64,11 +66,14 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 path.push(1);
                 path
             });
-            let left_filters = filters.and_then(|filters| {
-                context
-                    .planning
-                    .propagated_join_filters(filters, right, left, on.as_ref())
-            });
+            let left_filters = filters
+                .map(|filters| {
+                    context
+                        .planning
+                        .propagated_join_filters(filters, right, left, on.as_ref())
+                })
+                .transpose()?
+                .flatten();
             let left_filter_ref = left_filters.as_ref().or(filters);
             let left_operator = if context.planning.join_input_is_empty(from, false) {
                 super::empty_source_operator(context, left, params, ctes, None)?
@@ -108,7 +113,11 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 };
                 let mut source_scope;
                 let ctes = if let Some(binding) = &source_binding {
-                    source_scope = ctes.enter_scalar_subqueries(&binding.subqueries);
+                    let arena_resources = context.ctes.production_resources()?;
+                    source_scope = ctes.enter_scalar_subqueries_with_control(
+                        &binding.subqueries,
+                        &arena_resources.control(),
+                    )?;
                     &mut *source_scope
                 } else {
                     ctes
@@ -126,11 +135,14 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     SourcePlan::FunctionGroup { .. } => true,
                     _ => false,
                 };
-                let right_filters = filters.and_then(|filters| {
-                    context
-                        .planning
-                        .propagated_join_filters(filters, left, right, on.as_ref())
-                });
+                let right_filters = filters
+                    .map(|filters| {
+                        context
+                            .planning
+                            .propagated_join_filters(filters, left, right, on.as_ref())
+                    })
+                    .transpose()?
+                    .flatten();
                 let right_filter_ref = right_filters.as_ref().or(filters);
                 let lateral_input = (*lateral
                     || implicit_lateral_function
@@ -221,7 +233,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         right_nulls,
                         work_mem,
                     ),
-                ) = OperatorBuild::run(right_operator, |right_operator| {
+                ) = OperatorBuild::run(right_operator, |_| {
                     let (on, evaluator) = bind_join_on_schema(
                         context,
                         on.as_ref(),
@@ -230,27 +242,48 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         params,
                         ctes,
                     )?;
-                    let resolved_using =
-                        resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+                    let resolved_using = resolve_join_using_with_control(
+                        using.as_ref(),
+                        *natural,
+                        &left_schema,
+                        &right_schema,
+                        &control,
+                    )?;
                     let effective_on = resolved_using
                         .as_ref()
-                        .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
+                        .map(|using| {
+                            join_using_predicate_owned(using, &left_schema, &right_schema, &control)
+                        })
+                        .transpose()?
+                        .flatten()
                         .or(on);
-                    let effective_on = effective_on.map(|predicate| {
-                        let schema = crate::RowSchema::join(&left_schema, &right_schema, []);
-                        evaluator.bind_type_introspection(predicate, &schema)
-                    });
+                    let effective_on = effective_on
+                        .map(|predicate| {
+                            let schema = crate::RowSchema::join_with_control(
+                                &left_schema,
+                                &right_schema,
+                                [],
+                                &control,
+                            )?;
+                            evaluator.bind_type_introspection_owned(predicate, &schema, &control)
+                        })
+                        .transpose()?;
                     let hash_plan = super::join_keys::join_keys(
                         *kind,
-                        effective_on.as_ref(),
+                        effective_on.as_deref(),
                         &left_schema,
                         &right_schema,
                         params,
                         context.types,
                         context.volatility,
+                        &control,
                     )?;
-                    let left_nulls = null_row_for_schema(left_operator.schema());
-                    let right_nulls = null_row_for_schema(right_operator.schema());
+                    // Both descriptors already contain every NULL-extended attribute; no duplicate named NULL rows are needed for physical construction.
+                    let left_nulls = uqa_sql::ResultRow::new();
+                    let right_nulls = uqa_sql::ResultRow::new();
+                    let effective_on = effective_on
+                        .map(|predicate| predicate.finish(&control))
+                        .transpose()?;
                     let work_mem = physical_work_mem_bytes(context.relational.runtime)?;
                     Ok((
                         resolved_using,
@@ -265,25 +298,25 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 left_operator.attach(|left_operator| {
                     let joined: Box<dyn PhysicalOperator + 'a> = match (strategy, hash_plan) {
                         (JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash, Some(keys)) => {
-                            Box::new(
-                                HashJoin::try_new_with_work_mem_and_predicate(
-                                    left_operator,
-                                    right_operator,
-                                    *kind,
-                                    keys.left,
-                                    keys.right,
-                                    keys.residual,
-                                    evaluator,
-                                    left_nulls,
-                                    right_nulls,
-                                    work_mem,
-                                    params,
-                                )
-                                .map_err(physical_exec_error)?,
-                            )
+                            drop(effective_on);
+                            HashJoin::with_owned_expressions(
+                                left_operator,
+                                right_operator,
+                                *kind,
+                                keys.left,
+                                keys.right,
+                                keys.residual,
+                                evaluator,
+                                left_nulls,
+                                right_nulls,
+                                work_mem,
+                                params,
+                                &control,
+                            )?
+                            .into_boxed(&control)?
                         }
                         (JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash, None) => {
-                            Box::new(NestedLoopJoin::new_with_work_mem(
+                            NestedLoopJoin::with_owned_predicate(
                                 left_operator,
                                 right_operator,
                                 *kind,
@@ -292,18 +325,28 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                                 left_nulls,
                                 right_nulls,
                                 work_mem,
-                            ))
+                                &control,
+                            )?
+                            .into_boxed(&control)?
                         }
                     };
                     Ok(joined)
                 })?;
                 if let Some(using) = resolved_using.as_ref() {
                     left_operator.attach(|input| {
-                        shape_join_using_output(input, *kind, &left_schema, &right_schema, using)
+                        shape_join_using_output(
+                            input,
+                            *kind,
+                            &left_schema,
+                            &right_schema,
+                            using,
+                            &control,
+                        )
                     })?;
                 }
-                left_operator
-                    .attach(|input| alias_join_operator(input, alias.as_deref(), column_aliases))
+                left_operator.attach(|input| {
+                    alias_join_operator(input, alias.as_deref(), column_aliases, &control)
+                })
             })
         }
         _ => unreachable!("join source builder called for a different source kind"),

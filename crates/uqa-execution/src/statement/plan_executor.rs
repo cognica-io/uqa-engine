@@ -119,7 +119,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         let mut ctes = self
             .context
             .queries
-            .statement_scope(self.privilege_subject.as_ref());
+            .statement_scope(self.privilege_subject.as_ref())?;
         if let Some(parent) = &self.inherited_ctes {
             ctes.inherit_cte_bindings(parent);
         }
@@ -159,7 +159,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         let mut ctes = self
             .context
             .queries
-            .statement_scope(self.privilege_subject.as_ref());
+            .statement_scope(self.privilege_subject.as_ref())?;
         if let Some(parent) = &self.inherited_ctes {
             ctes.inherit_cte_bindings(parent);
         }
@@ -321,7 +321,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             arguments,
             self.params,
         )?;
-        let scope = self.context.queries.statement_scope(None);
+        let scope = self.context.queries.statement_scope(None)?;
         let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
         let argument_types = uqa_sql::routines::call::infer_call_argument_types(
             arguments,
@@ -352,7 +352,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
 
     fn validate_command_target(&self, command: &CommandPlan) -> Result<(), SQLError> {
         if uqa_sql::semantics::virtual_relation_mutation_candidate(command) {
-            let ctes = self.context.queries.statement_scope(None);
+            let ctes = self.context.queries.statement_scope(None)?;
             if let Some(error) = crate::catalog::projection::virtual_relation_mutation_error(
                 &ctes.catalog_read_view()?,
                 &ctes.relation_name_resolution()?,

@@ -18,9 +18,13 @@ mod arrays;
 mod collations;
 mod comparison;
 mod concat;
+mod context;
 mod enums;
 mod helpers;
 mod membership;
+mod owned;
+pub(crate) use owned::bind_stored_inputs_owned;
+pub use owned::{bind_type_introspection_owned, validate_catalog_literals_with_control};
 mod pattern;
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types.
@@ -66,23 +70,13 @@ pub fn validate_catalog_literals(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
-    if !resolver
-        .enum_labels()
-        .is_some_and(crate::expr::enums::EnumLabelCatalog::has_enum_types)
-    {
-        return Ok(());
-    }
-    let control = ProductionControl::uncontrolled();
-    let expression = control.finish(expression.clone(), None)?;
-    bind_owned(
+    validate_catalog_literals_with_control(
         expression,
         schema,
         params,
-        Some(resolver),
-        &control,
-        LiteralBinding::Validate,
+        resolver,
+        &ProductionControl::uncontrolled(),
     )
-    .map(drop)
 }
 
 /// Bind a copy of a stored expression as parse analysis does, so the caller can keep the enum constants that binding coerces from `unknown` literals. Returns `None` when the statement catalog defines no enum type. Input that no label matches stays unconverted for the literal's own validation to report.
@@ -186,30 +180,35 @@ fn bind_owned(
     let mut root = RootOwner { expression, memory };
     let expression = std::mem::replace(&mut root.expression, ScalarExpr::Literal(Value::Null));
     root.expression = Binder {
-        schema,
-        params,
-        resolver,
-        control: *control,
+        context: context::BinderContext {
+            schema,
+            params,
+            resolver,
+            control: *control,
+            literal_binding,
+        },
         memory: &mut root.memory,
-        literal_binding,
     }
     .bind(expression)?;
     Ok(control.finish(root.expression, root.memory)?)
 }
 
 struct Binder<'a, 'b> {
-    schema: &'a dyn ScalarTypeSchema,
-    params: &'a [SQLParam],
-    resolver: Option<&'a dyn FunctionTypeResolver>,
-    control: ProductionControl<'a>,
+    context: context::BinderContext<'a>,
     memory: &'b mut Option<MemoryReservation>,
-    /// Report an `unknown` literal that its coerced type rejects instead of leaving the conversion to evaluation.
-    literal_binding: LiteralBinding,
+}
+
+impl<'a> std::ops::Deref for Binder<'a, '_> {
+    type Target = context::BinderContext<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.context
+    }
 }
 
 impl Binder<'_, '_> {
     fn bind(&mut self, expression: ScalarExpr) -> Result<ScalarExpr, SQLError> {
-        self.control.check()?;
+        self.context.control.check()?;
         match expression {
             ScalarExpr::Func {
                 name,
@@ -319,7 +318,7 @@ impl Binder<'_, '_> {
                     .map(|ty| {
                         self.semantic(super::operators::unary_minus_result_type_with_control(
                             &ty,
-                            &self.control,
+                            &self.context.control,
                         ))
                     })
                     .transpose()?
@@ -515,7 +514,7 @@ impl Binder<'_, '_> {
         let schema = self.schema;
         let params = self.params;
         let resolver = self.resolver;
-        let control = self.control;
+        let control = self.context.control;
         let mut infer = |expression: &ScalarExpr| {
             super::scalar_type_inner_with_control(expression, schema, params, resolver, &control)
         };

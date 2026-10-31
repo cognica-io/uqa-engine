@@ -232,7 +232,7 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
                 {
                     crate::query::catalog_expression::eval_lowered_expression_with_type(
                         context.assignment.expressions.expressions,
-                        context.assignment.scopes.current_routine_scope(),
+                        context.assignment.scopes.current_routine_scope()?,
                         &expr,
                         Some(old_doc),
                         &[],
@@ -253,7 +253,7 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
             table,
             column,
             value,
-            source.as_ref(),
+            source.as_deref(),
         )?;
         new_doc.insert(column.clone(), value);
     }

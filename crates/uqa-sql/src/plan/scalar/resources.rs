@@ -48,6 +48,7 @@ impl<'a> Control<'a> {
 
 pub(super) struct Lowering<'a> {
     pub(super) control: Option<Control<'a>>,
+    pub(super) owned_children: Option<BudgetedVec<Option<super::owned::ScalarMemory>>>,
 }
 
 impl Lowering<'_> {
@@ -125,10 +126,9 @@ impl Lowering<'_> {
     }
 
     pub(super) fn copy_text(&mut self, text: &str) -> Result<String> {
-        let control = self
-            .control
-            .as_mut()
-            .expect("borrowed AST uses controlled lowering");
+        let Some(control) = self.control.as_mut() else {
+            return Ok(text.to_owned());
+        };
         let copied = control.production.copy_text(text)?;
         let (output, memory) = copied.into_parts();
         control
@@ -208,10 +208,9 @@ impl Lowering<'_> {
         match source {
             Source::Owned(value) => Ok(value),
             Source::Borrowed(value) => {
-                let control = self
-                    .control
-                    .as_mut()
-                    .expect("borrowed AST uses controlled lowering");
+                let Some(control) = self.control.as_mut() else {
+                    return Ok(value.clone());
+                };
                 let copied = control.production.copy_value(value)?;
                 let (value, memory) = copied.into_parts();
                 control

@@ -54,7 +54,7 @@ impl<'a, S: Clone + 'static> MutationPredicate<'a, S> {
             .as_ref()
             .is_none_or(|prepared| prepared.schema != row.schema)
         {
-            let hook = self.services.expressions.bind_scope(self.ctes.clone());
+            let hook = self.services.expressions.bind_scope(self.ctes)?;
             crate::scalar_type_with_resolver(
                 expression,
                 &row.schema,

@@ -11,11 +11,18 @@ use std::{borrow::Borrow, cmp::Ordering};
 use super::{Link, Node, OwnedNode};
 
 pub(super) fn get<'a, K: Borrow<Q>, V, Q: Ord + ?Sized>(
-    mut link: &'a Link<K, V>,
+    link: &'a Link<K, V>,
     key: &Q,
 ) -> Option<&'a Node<K, V>> {
+    get_by(link, |stored| key.cmp(stored.borrow()))
+}
+
+pub(super) fn get_by<K, V>(
+    mut link: &Link<K, V>,
+    mut compare: impl FnMut(&K) -> Ordering,
+) -> Option<&Node<K, V>> {
     while let Some(node) = link {
-        match key.cmp(node.key.borrow()) {
+        match compare(&node.key) {
             Ordering::Less => link = &node.left,
             Ordering::Greater => link = &node.right,
             Ordering::Equal => return Some(node),
@@ -25,12 +32,19 @@ pub(super) fn get<'a, K: Borrow<Q>, V, Q: Ord + ?Sized>(
 }
 
 pub(super) fn get_mut<'a, K: Borrow<Q>, V, Q: Ord + ?Sized>(
-    mut link: &'a mut Link<K, V>,
+    link: &'a mut Link<K, V>,
     key: &Q,
 ) -> Option<&'a mut Node<K, V>> {
+    get_mut_by(link, |stored| key.cmp(stored.borrow()))
+}
+
+pub(super) fn get_mut_by<K, V>(
+    mut link: &mut Link<K, V>,
+    mut compare: impl FnMut(&K) -> Ordering,
+) -> Option<&mut Node<K, V>> {
     while let Some(node) = link {
         let node = &mut *node.value;
-        match key.cmp(node.key.borrow()) {
+        match compare(&node.key) {
             Ordering::Less => link = &mut node.left,
             Ordering::Greater => link = &mut node.right,
             Ordering::Equal => return Some(node),
@@ -61,10 +75,17 @@ pub(super) fn remove<K: Borrow<Q>, V, Q: Ord + ?Sized>(
     link: &mut Link<K, V>,
     key: &Q,
 ) -> Option<(K, V)> {
+    extract(link, key).map(into_entry)
+}
+
+pub(super) fn extract<K: Borrow<Q>, V, Q: Ord + ?Sized>(
+    link: &mut Link<K, V>,
+    key: &Q,
+) -> Option<OwnedNode<K, V>> {
     let node = link.as_mut()?;
     let removed = match key.cmp(node.key.borrow()) {
-        Ordering::Less => remove(&mut node.value.left, key),
-        Ordering::Greater => remove(&mut node.value.right, key),
+        Ordering::Less => extract(&mut node.value.left, key),
+        Ordering::Greater => extract(&mut node.value.right, key),
         Ordering::Equal => {
             let mut node = link.take().expect("selected removal node");
             *link = if node.right.is_none() {
@@ -75,7 +96,8 @@ pub(super) fn remove<K: Borrow<Q>, V, Q: Ord + ?Sized>(
                 successor.value.right = node.value.right.take();
                 Some(successor)
             };
-            Some(into_entry(node))
+            node.value.height = 1;
+            Some(node)
         }
     };
     if removed.is_some() {

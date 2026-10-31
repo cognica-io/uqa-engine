@@ -92,14 +92,15 @@ fn native_rule_expressions_retain_event_collation_in_each_scalar_scope() {
         let CommandPlan::Insert(insert) = command.as_ref() else {
             panic!("INSERT")
         };
-        let queries = InsertRuleQueries::bind(
+        let queries = OwnedInsertRuleQueries::bind(
             context,
             insert,
             &|_| Ok(RoleReference::from("owner")),
             &RoleReference::from("caller"),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
         )
         .unwrap();
-        let insert = &queries.relations[0];
+        let insert = queries.relations().next().unwrap();
         let relation = InternalRelationId::allocate();
         let mut resolver = RuleQueryResolver::from_insert(context, insert, relation).unwrap();
         let action = crate::compile("SELECT NEW.n, NEW.n COLLATE \"POSIX\", (SELECT NEW.n)")

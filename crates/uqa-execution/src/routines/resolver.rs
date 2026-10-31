@@ -9,6 +9,7 @@
 use super::{DatumResolver, PLpgSQLDatum, ResolvedVariable, SQLError, Value, VariableResolver};
 use uqa_sql::{ast::ColumnType, plpgsql::PLpgSQLVariableReference, SQLParam};
 
+mod owned;
 #[cfg(test)]
 mod tests;
 
@@ -209,6 +210,14 @@ impl TypedVariable {
 }
 
 impl VariableResolver for DatumResolver<'_> {
+    fn resolve_input_with_control(
+        &mut self,
+        reference: &PLpgSQLVariableReference,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::plpgsql::PLpgSQLInput>>, SQLError> {
+        self.resolve_owned_input(reference, control)
+    }
+
     fn parameter_type(&self, name: &str) -> Option<ColumnType> {
         self.types.catalog_column_type(name)
     }

@@ -38,6 +38,27 @@ impl StoredRelationCatalog for Engine {
     fn resolve_bound_relation_kind(&self, reference: &str) -> Result<RelationResolution, SQLError> {
         Engine::resolve_bound_relation_kind(self, reference)
     }
+    fn resolve_visible_relation_kind_with_control(
+        &self,
+        reference: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationResolution>, SQLError> {
+        self.resolve_relation_kind_for_query_with_control(reference, false, control)
+    }
+    fn resolve_loaded_visible_relation_kind_with_control(
+        &self,
+        reference: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationResolution>, SQLError> {
+        self.resolve_loaded_relation_kind_with_control(reference, false, control)
+    }
+    fn resolve_bound_relation_kind_with_control(
+        &self,
+        reference: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RelationResolution>, SQLError> {
+        self.resolve_loaded_relation_kind_with_control(reference, true, control)
+    }
 }
 impl StoredQuerySequences for Engine {
     fn query_sequence(&self, reference: &str) -> Result<String, String> {

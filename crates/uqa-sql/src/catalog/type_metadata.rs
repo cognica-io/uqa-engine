@@ -13,10 +13,12 @@ use crate::SQLError;
 use super::oids::stable_oid;
 
 mod builtins;
+mod production;
 pub use builtins::{
     builtin_array_element, builtin_scalar_type, builtin_scalar_type_by_name, builtin_type_name,
     pg_type_name,
 };
+pub use production::routine_type_oid_with_control;
 
 pub fn catalog_type_name(oid: i64) -> &'static str {
     match oid {
@@ -175,18 +177,19 @@ pub fn routine_pseudo_type_name(oid: i64) -> Option<&'static str> {
         .find_map(|(name, candidate)| (*candidate == oid).then_some(*name))
 }
 
-pub fn routine_type_oid(type_name: &str) -> i64 {
-    let canonical = canonical_routine_type_name(type_name);
-    let pseudo_type_oid = ROUTINE_PSEUDO_TYPES
+/// Resolve an already canonical pseudo-type catalog name without constructing a declaration.
+pub fn routine_pseudo_type_oid(name: &str) -> Option<i64> {
+    ROUTINE_PSEUDO_TYPES
         .iter()
-        .find_map(|(name, oid)| (*name == canonical).then_some(*oid));
-    if let Some(oid) = pseudo_type_oid {
-        return oid;
-    }
-    if let Ok(column_type) = ColumnType::from_sql_name(&canonical) {
-        return pg_type_oid(&column_type);
-    }
-    stable_oid("type", &canonical)
+        .find_map(|(candidate, oid)| (*candidate == name).then_some(*oid))
+}
+
+pub fn routine_type_oid(type_name: &str) -> i64 {
+    routine_type_oid_with_control(
+        type_name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary routine type identity observation")
 }
 
 pub fn routine_variadic_element_oid(type_name: &str) -> Result<i64, SQLError> {
@@ -480,7 +483,7 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
 /// The OID of a domain's generated array type: the recorded one, or for a domain created before array OIDs were recorded, the one derived from its OID.
 pub fn pg_domain_array_oid(domain_oid: u32, array_oid: Option<u32>) -> i64 {
     array_oid.map_or_else(
-        || super::oids::stable_oid("domain_array", &domain_oid.to_string()),
+        || super::oids::stable_numeric_oid("domain_array", domain_oid),
         i64::from,
     )
 }

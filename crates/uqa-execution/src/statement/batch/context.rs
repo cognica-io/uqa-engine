@@ -16,7 +16,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_sql::{
     ast::TransactionStmt,
-    plan::{AggregateClassifier, ExecutablePlanOptimizer, UnifiedPlan},
+    plan::{AggregateClassifier, ExecutablePlanOptimizer},
     SQLError, SQLParam, Statement,
 };
 
@@ -36,14 +36,17 @@ pub fn statement_deadline<S: Clone + 'static>(
 /// Owned cache contents after the session has validated its catalog epochs.
 pub struct CachedStatement {
     pub statement: Arc<Statement>,
-    pub logical_plan: Arc<UnifiedPlan>,
-    pub optimized_plan: Option<Arc<UnifiedPlan>>,
+    pub logical_plan: uqa_sql::plan::SharedExecutablePlan,
+    pub optimized_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub parser: uqa_sql::parser::ParserMetadata,
 }
 
 impl CachedStatement {
     /// Optimized entries were analyzed without parameters; any supplied inputs require native binding, including inputs the query does not reference.
-    pub(crate) fn optimized_plan_for(&self, params: &[SQLParam]) -> Option<&Arc<UnifiedPlan>> {
+    pub(crate) fn optimized_plan_for(
+        &self,
+        params: &[SQLParam],
+    ) -> Option<&uqa_sql::plan::SharedExecutablePlan> {
         if params.is_empty() {
             self.optimized_plan.as_ref()
         } else {
@@ -57,29 +60,39 @@ pub trait StatementCache {
     fn cached_sql_analysis(
         &self,
         _sql: &str,
-    ) -> Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>> {
+    ) -> Option<uqa_sql::binding::statements::AnalyzedStatement> {
         None
     }
     fn cache_sql_analysis(
         &self,
         _sql: &str,
-        _analysis: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
-    ) {
+        _analysis: Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        Ok(())
     }
 
     fn cached_sql_statement(&self, sql: &str) -> Option<CachedStatement>;
     fn cache_sql_statement(
         &self,
-        sql: String,
+        sql: &str,
         statement: Arc<Statement>,
-        logical_plan: Arc<UnifiedPlan>,
+        logical_plan: uqa_sql::plan::SharedExecutablePlan,
         parser: uqa_sql::parser::ParserMetadata,
-    );
-    fn cache_optimized_sql_plan(&self, sql: &str, optimized_plan: Arc<UnifiedPlan>);
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError>;
+    fn cache_optimized_sql_plan(
+        &self,
+        sql: &str,
+        optimized_plan: uqa_sql::plan::SharedExecutablePlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError>;
 }
 
 /// Transaction state changes requested at the native scheduler's boundaries.
 pub trait BatchTransactions: StatementTransactions {
+    /// Refresh an idle session before reading its statement cache. An active transaction retains its view until its admitted statement selects a snapshot, including ownership of refresh failure.
+    fn refresh_idle_statement_view(&self) -> Result<(), SQLError>;
     fn begin_simple_query_transaction(&self) -> Result<(), SQLError>;
     fn promote_simple_query_transaction(&self) -> Result<(), SQLError>;
     fn run_transaction_statement(&self, statement: TransactionStmt) -> Result<(), SQLError>;

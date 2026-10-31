@@ -6,20 +6,17 @@
 
 //! Catalog identities selected by parse analysis, before executable-plan dependencies are introduced.
 
-use crate::{ast::FunctionBinding, ColumnType, ScalarExpr};
-use std::{
-    any::Any,
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-    sync::Arc,
-};
-use uqa_core::Value;
+use crate::ScalarExpr;
+use std::{any::Any, fmt, sync::Arc};
+use uqa_core::memory::{MemoryReservation, OwnedMap, OwnedSet, Produced, ProductionControl};
+
+mod production;
 
 /// Relations and selected routines used by the analyzed statement. Domain constraint dependencies introduced by optimization do not invalidate the statement's already-read input constants.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PreparedAnalysisDependencies {
-    pub relations: BTreeSet<u32>,
-    pub routines: BTreeSet<[u8; 16]>,
+    pub relations: OwnedSet<u32>,
+    pub routines: OwnedSet<[u8; 16]>,
 }
 
 /// An exact provider-owned revision whose representation and retained resources stay opaque to SQL. Equality invokes the original type's equality; no serialization, hash or pointer-to-integer conversion discards its identity lifetime.
@@ -31,20 +28,42 @@ trait RevisionEquality: Send + Sync {
     fn equals(&self, other: &dyn RevisionEquality) -> bool;
 }
 
-impl<T: Eq + Send + Sync + 'static> RevisionEquality for T {
+struct Revision<T> {
+    value: T,
+    _memory: Option<MemoryReservation>,
+}
+
+impl<T: Eq + Send + Sync + 'static> RevisionEquality for Revision<T> {
     fn as_any(&self) -> &dyn Any {
-        self
+        &self.value
     }
 
     fn equals(&self, other: &dyn RevisionEquality) -> bool {
-        other.as_any().downcast_ref::<Self>() == Some(self)
+        other.as_any().downcast_ref::<T>() == Some(&self.value)
     }
 }
 
 impl PreparedDependencyRevision {
     #[must_use]
     pub fn new<T: Eq + Send + Sync + 'static>(revision: T) -> Self {
-        Self(Arc::new(revision))
+        let control = ProductionControl::uncontrolled();
+        Self::from_produced(
+            control.finish(revision, None).expect("ordinary revision"),
+            &control,
+        )
+        .expect("ordinary revision publication")
+    }
+
+    pub fn from_produced<T: Eq + Send + Sync + 'static>(
+        revision: Produced<T>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, crate::SQLError> {
+        let header = control.reserve(size_of::<Revision<T>>())?;
+        let (value, memory) = revision.into_parts();
+        Ok(Self(Arc::new(Revision {
+            value,
+            _memory: control.combine(memory, header),
+        })))
     }
 }
 
@@ -69,48 +88,55 @@ impl fmt::Debug for PreparedDependencyRevision {
 pub struct PreparedDependencySnapshot {
     /// Global parse-analysis invalidations, such as replacement of a namespace catalog tuple.
     pub global_catalog: Option<PreparedDependencyRevision>,
-    pub relations: BTreeMap<u32, Option<PreparedDependencyRevision>>,
-    pub routines: BTreeMap<[u8; 16], Option<PreparedDependencyRevision>>,
+    pub relations: OwnedMap<u32, Option<PreparedDependencyRevision>>,
+    pub routines: OwnedMap<[u8; 16], Option<PreparedDependencyRevision>>,
+}
+
+impl PreparedDependencySnapshot {
+    /// Copy only selected map nodes; opaque revision payloads keep their original shared owners.
+    pub fn copy_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, crate::SQLError> {
+        let mut output = Self {
+            global_catalog: self.global_catalog.clone(),
+            ..Self::default()
+        };
+        for (key, value) in &self.relations {
+            control.check()?;
+            match control.budget() {
+                Some(budget) => {
+                    output
+                        .relations
+                        .insert_budgeted(*key, value.clone(), budget)?;
+                }
+                None => {
+                    output.relations.insert(*key, value.clone());
+                }
+            }
+        }
+        for (key, value) in &self.routines {
+            control.check()?;
+            match control.budget() {
+                Some(budget) => {
+                    output
+                        .routines
+                        .insert_budgeted(*key, value.clone(), budget)?;
+                }
+                None => {
+                    output.routines.insert(*key, value.clone());
+                }
+            }
+        }
+        Ok(output)
+    }
 }
 
 impl PreparedAnalysisDependencies {
-    pub(crate) fn include_routine(&mut self, binding: &FunctionBinding) {
-        if !binding.builtin {
-            if let Some(identity) = binding.object_id {
-                self.routines.insert(identity);
-            }
-        }
-    }
-
-    /// `PostgreSQL`'s `ISREGCLASSCONST` includes non-null scalar regclass and oid constants. A whole array constant contributes no scalar relation identity; an array expression's scalar children do.
+    /// Scalar regclass and OID constants retain relation identity; an array constant does not contribute its elements.
     pub(crate) fn include_expression(&mut self, expression: &ScalarExpr) {
-        expression.visit(&mut |expression| match expression {
-            ScalarExpr::TypedLiteral {
-                value: Value::Int(oid),
-                ty,
-                bound_type,
-                parameter_index: None,
-                ..
-            } => {
-                let parsed;
-                let ty = if let Some(ty) = bound_type.as_ref() {
-                    Some(ty)
-                } else {
-                    parsed = ColumnType::from_sql_name(ty).ok();
-                    parsed.as_ref()
-                };
-                if matches!(ty, Some(ColumnType::Regclass | ColumnType::Oid)) {
-                    if let Ok(oid) = u32::try_from(*oid) {
-                        self.relations.insert(oid);
-                    }
-                }
-            }
-            ScalarExpr::Func {
-                binding: Some(binding),
-                ..
-            } => self.include_routine(binding),
-            _ => {}
-        });
+        self.include_expression_with_control(expression, &ProductionControl::uncontrolled())
+            .expect("ordinary expression dependency");
     }
 }
 

@@ -23,7 +23,7 @@ pub(super) fn optimize_command(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
-    super::subqueries::prune_command(command);
+    super::subqueries::prune_command(command, config.production)?;
     let reachable = uqa_sql::semantics::reachable_command_cte_names(command);
     if let Some(ctes) = command.ctes_mut() {
         for cte in ctes.iter_mut().filter(|cte| reachable.contains(&cte.name)) {
@@ -50,7 +50,7 @@ pub(super) fn optimize_command(
             }
             optimize_projections(&mut plan.returning, config)?;
             let expressions = plan.expressions();
-            let live = super::subqueries::live_slots(expressions)?;
+            let live = super::subqueries::live_slots(expressions, config.production)?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::Update(plan) => {
@@ -68,6 +68,7 @@ pub(super) fn optimize_command(
             let live = super::subqueries::live_slots_with_source(
                 plan.expressions(),
                 plan.source.as_deref(),
+                config.production,
             )?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
@@ -85,6 +86,7 @@ pub(super) fn optimize_command(
             let live = super::subqueries::live_slots_with_source(
                 plan.expressions(),
                 plan.source.as_deref(),
+                config.production,
             )?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
@@ -128,8 +130,11 @@ pub(super) fn optimize_command(
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
-            let live =
-                super::subqueries::live_slots_with_source(plan.expressions(), Some(&plan.source))?;
+            let live = super::subqueries::live_slots_with_source(
+                plan.expressions(),
+                Some(&plan.source),
+                config.production,
+            )?;
             super::subqueries::optimize_live(&mut plan.subqueries, &live, config, aggregates)?;
         }
         CommandPlan::DeclareCursor { query, .. } => {
@@ -222,7 +227,7 @@ fn optimize_expression_plan(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     optimize_scalar_slot(&mut expression.scalar, config)?;
-    let live = super::subqueries::live_slots([&expression.scalar])?;
+    let live = super::subqueries::live_slots([&expression.scalar], config.production)?;
     super::subqueries::optimize_live(&mut expression.subqueries, &live, config, aggregates)?;
     Ok(())
 }

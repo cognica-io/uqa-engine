@@ -87,3 +87,75 @@ fn removing_internal_attributes_retires_only_their_presence_bindings() {
     let unchanged = RowSchema::without_internal_attributes(&joined, &[]);
     assert!(joined.has_same_physical_layout(&unchanged));
 }
+
+#[test]
+fn nullable_layout_admits_growth_and_keeps_shared_marker_owners() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let memory = MemoryBudget::new(4 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let marker = InternalRelationId::allocate().column(0);
+    let input = RowSchema::with_qualified_types(
+        "r",
+        vec!["x".repeat(1 << 20)],
+        vec![Some(ColumnType::Integer)],
+    );
+    let occupied = memory.reserve(memory.available() - (32 << 10)).unwrap();
+    let mut result = None;
+    let allocation = allocation_counter::measure(|| {
+        result = Some(input.with_nullable_relations_with_control(marker, &control));
+    });
+    assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("53200"));
+    assert!(allocation.bytes_total < 128 << 10, "{allocation:?}");
+    assert_eq!(memory.used(), occupied.bytes());
+    drop(occupied);
+    for token in [&original, &invoking] {
+        token.cancel();
+        assert_eq!(
+            input
+                .with_nullable_relations_with_control(marker, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), 0);
+        token.reset();
+    }
+    let input = source("r");
+    let output = input
+        .with_nullable_relations_with_control(marker, &control)
+        .unwrap()
+        .unwrap();
+    let expected = RowSchema::append_internal_typed(&input, &[(marker, Some(ColumnType::Boolean))])
+        .with_whole_row_presences([("r".into(), marker)])
+        .unwrap();
+    assert_eq!(output, expected);
+    let held = memory.used();
+    assert!(held > 0);
+    let clone = output.clone();
+    drop(output);
+    assert_eq!(memory.used(), held);
+    assert!(clone
+        .with_nullable_relations_with_control(InternalRelationId::allocate().column(0), &control)
+        .unwrap()
+        .is_none());
+    assert_eq!(memory.used(), held);
+    let nested = RowSchema::join_with_control(&source("l"), &clone, [], &control).unwrap();
+    let next_marker = InternalRelationId::allocate().column(0);
+    let complete = nested
+        .with_nullable_relations_with_control(next_marker, &control)
+        .unwrap()
+        .unwrap();
+    drop((clone, nested));
+    assert_eq!(complete.whole_row_presence("r"), Some(marker));
+    assert_eq!(complete.whole_row_presence("l"), Some(next_marker));
+    assert_eq!(complete.internal_slot(marker), Some(2));
+    assert_eq!(complete.internal_slot(next_marker), Some(3));
+    assert!(memory.used() > 0);
+    drop(complete);
+    assert_eq!(memory.used(), 0);
+}

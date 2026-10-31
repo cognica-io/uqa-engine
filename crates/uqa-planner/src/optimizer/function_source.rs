@@ -6,6 +6,8 @@
 
 //! Function range-table entries share scalar planning and SQL body expansion.
 
+pub(super) mod owned;
+
 use super::{AggregateClassifier, OptimizerConfig, SourcePlan};
 use uqa_sql::{SQLError, ScalarExpr};
 

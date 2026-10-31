@@ -9,6 +9,9 @@
 use crate::{plan::source_projection::QualifierFilters, SQLError, ScalarExpr};
 use uqa_core::Value;
 
+mod production;
+pub use production::{combine_filter_refs_with_control, qualifier_filter_with_control};
+
 pub fn checked_integer_value<T>(value: T, label: &str) -> Result<Value, SQLError>
 where
     T: Copy + std::fmt::Display,

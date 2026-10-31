@@ -50,7 +50,7 @@ pub fn eval_builtin_function_call_with_control(
         ));
     }
     if let (Some(binding), Some(hook)) = (binding, context.engine) {
-        hook.require_builtin_execute(binding)?;
+        hook.require_builtin_execute_with_control(binding, control)?;
     }
     if crate::semantics::sets::static_setness::builtin_call_returns_set(name, binding) {
         return Err(crate::semantics::sets::placement::set_valued_call_error());
@@ -149,6 +149,11 @@ fn eval_scalar(
     context: &super::EvalContext<'_>,
     collation: u32,
 ) -> Result<Produced<Value>> {
+    if matches!(name, "nextval" | "currval" | "lastval" | "setval") {
+        return super::super::scalar_dispatch::eval_sequence_function_with_control(
+            name, arguments, context, control,
+        );
+    }
     if matches!(name, "coalesce" | "nullif" | "greatest" | "least") {
         return super::super::scalar_core::selection_with_context(
             name, arguments, control, context,

@@ -46,8 +46,14 @@ impl Engine {
         subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
+        let resources = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
         self.table_authorization_context()
-            .ensure_table_privilege_for(name, subject, privilege)
+            .ensure_table_privilege_for_with_control(name, subject, privilege, &control)
     }
     pub(crate) fn bound_table_column_names(&self, name: &str) -> Result<Vec<String>, SQLError> {
         self.table_authorization_context()
@@ -69,8 +75,14 @@ impl Engine {
         subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
+        let resources = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
         self.table_authorization_context()
-            .ensure_column_privilege_for(name, column, subject, privilege)
+            .ensure_column_privilege_for_with_control(name, column, subject, privilege, &control)
     }
     pub(crate) fn ensure_any_column_privilege(
         &self,
@@ -86,8 +98,14 @@ impl Engine {
         subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
+        let resources = self.query_retention_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            resources.memory(),
+            resources.cancellation(),
+            self.query_runtime_view().cancellation,
+        );
         self.table_authorization_context()
-            .ensure_any_column_privilege_for(name, subject, privilege)
+            .ensure_any_column_privilege_for_with_control(name, subject, privilege, &control)
     }
     pub(crate) fn ensure_table_owner(&self, name: &str) -> Result<String, SQLError> {
         self.table_authorization_context().ensure_table_owner(name)

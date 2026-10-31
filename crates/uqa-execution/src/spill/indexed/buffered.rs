@@ -6,7 +6,9 @@
 
 //! Bounded positional rows switch atomically to the existing encrypted spill owner.
 
-use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
+mod production;
+
+use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation, Produced, ProductionControl};
 
 use super::{
     decode_physical_row_record, encode_physical_row_record, encoded_physical_row_record_size,
@@ -21,6 +23,18 @@ pub(crate) struct BufferedIndexedSpill {
 }
 
 impl BufferedIndexedSpill {
+    /// Read resident capacities while the caller holds this store's guard. Serialized disk bytes and decoding workspace are not resident planning storage.
+    pub(crate) fn observe_resident_allocations(
+        &self,
+        observer: &mut uqa_core::memory::AllocationObserver<'_, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        observer.buffer::<Vec<u8>>(self.rows.len(), self.rows.capacity())?;
+        for record in self.rows.iter() {
+            observer.buffer::<u8>(record.len(), record.capacity())?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(schema: RowSchema, budget_bytes: usize) -> Self {
         Self::with_memory(schema, &MemoryBudget::new(budget_bytes))
     }
@@ -113,6 +127,27 @@ impl BufferedIndexedSpill {
         self.payload = memory.empty_reservation();
         self.disk = Some(disk);
         Ok(())
+    }
+
+    pub(crate) fn get_constant_with_control(
+        &mut self,
+        index: u64,
+        control: &ProductionControl<'_>,
+    ) -> ExecResult<Produced<uqa_core::Value>> {
+        control.check()?;
+        if let Some(disk) = &mut self.disk {
+            return disk.get_constant_with_control(index, control);
+        }
+        let record = usize::try_from(index)
+            .ok()
+            .and_then(|index| self.rows.get(index))
+            .ok_or_else(|| {
+                spill_error(format!(
+                    "indexed spill row {index} is outside 0..{}",
+                    self.rows.len()
+                ))
+            })?;
+        super::decode_constant_record(record, control)
     }
 
     pub(crate) fn get(&mut self, index: u64) -> ExecResult<PhysicalRow> {

@@ -10,10 +10,22 @@ use crate::{
     ast::{AssignmentStep, AssignmentTarget},
     ColumnType, SQLError,
 };
-use std::collections::BTreeMap;
+use uqa_core::memory::{ProductionControl, ProductionMap};
+
+mod types;
+pub use types::{assignment_input_type_with_control, field_assignment_types_with_control};
 
 #[cfg(test)]
 mod tests;
+
+/// Produce an implicit whole-column target without cloning unrelated declaration expressions.
+pub fn whole_column_with_control<E>(
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<AssignmentTarget<E>>, SQLError> {
+    let (column, memory) = control.copy_text(name)?.into_parts();
+    Ok(control.finish(AssignmentTarget::from(column), memory)?)
+}
 
 fn error(code: &str, message: String) -> SQLError {
     SQLError::Routine {
@@ -38,21 +50,35 @@ pub fn validate_repeated_targets<'a, E: 'a>(
     targets: impl IntoIterator<Item = &'a AssignmentTarget<E>>,
     insert: bool,
 ) -> Result<(), SQLError> {
-    let mut seen = BTreeMap::new();
+    validate_repeated_targets_with_control(targets, insert, &ProductionControl::uncontrolled())
+}
+
+pub fn validate_repeated_targets_with_control<'a, E: 'a>(
+    targets: impl IntoIterator<Item = &'a AssignmentTarget<E>>,
+    insert: bool,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    let mut seen = ProductionMap::new(*control);
     for target in targets {
         let whole = target.is_whole_column();
-        if let Some(previous) = seen.insert(&target.column, whole) {
+        if let Some(previous) = seen.insert_copy(target.column.as_str(), whole)? {
             if whole || previous {
-                return Err(if insert {
-                    error(
-                        "42701",
-                        format!("column \"{}\" specified more than once", target.column),
-                    )
+                let sqlstate = control.copy_text(if insert { "42701" } else { "42601" })?;
+                let message = if insert {
+                    control.format(format_args!(
+                        "column \"{}\" specified more than once",
+                        target.column
+                    ))?
                 } else {
-                    error(
-                        "42601",
-                        format!("multiple assignments to same column \"{}\"", target.column),
-                    )
+                    control.format(format_args!(
+                        "multiple assignments to same column \"{}\"",
+                        target.column
+                    ))?
+                };
+                return Err(SQLError::Routine {
+                    sqlstate: sqlstate.into_parts().0,
+                    message: message.into_parts().0,
                 });
             }
         }
@@ -65,26 +91,50 @@ pub fn array_assignment_type<E>(
     target: &AssignmentTarget<E>,
     declared: &ColumnType,
 ) -> Result<ColumnType, SQLError> {
+    Ok(array_assignment_type_with_control(
+        target,
+        declared,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary array assignment type"))
+}
+
+pub fn array_assignment_type_with_control<E>(
+    target: &AssignmentTarget<E>,
+    declared: &ColumnType,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<ColumnType>, SQLError> {
+    control.check()?;
     let mut base = declared;
     while let ColumnType::Domain { base: inner, .. } = base {
+        control.check()?;
         base = inner;
     }
     if let Some(AssignmentStep::Field(field)) = target.indirection.first() {
         return Err(error("42804", format!(
             "cannot assign to field \"{field}\" of column \"{}\" because its type {} is not a composite type",
-            target.column, declared.sql_name()
+            target.column, &*declared.sql_name_with_control(control)?
         )));
     }
     let array = match base {
-        ColumnType::Array(_) => base.clone(),
-        ColumnType::Int2Vector => ColumnType::Array(Box::new(ColumnType::SmallInteger)),
-        ColumnType::OidVector => ColumnType::Array(Box::new(ColumnType::Oid)),
+        ColumnType::Array(_) => base.clone_with_control(control)?,
+        ColumnType::Int2Vector | ColumnType::OidVector => {
+            let output = crate::plan::copy::SyntaxProduction::new(*control);
+            let element = if matches!(base, ColumnType::Int2Vector) {
+                ColumnType::SmallInteger
+            } else {
+                ColumnType::Oid
+            };
+            let array = ColumnType::Array(output.boxed(element)?);
+            output.finish(array)?
+        }
         _ => {
             return Err(error(
                 "42804",
                 format!(
                     "cannot subscript type {} because it does not support subscripting",
-                    declared.sql_name()
+                    &*declared.sql_name_with_control(control)?
                 ),
             ))
         }
@@ -94,13 +144,13 @@ pub fn array_assignment_type<E>(
         .iter()
         .find(|step| matches!(step, AssignmentStep::Field(_)))
     {
-        let mut element = &array;
+        let mut element = &*array;
         while let ColumnType::Array(inner) = element {
             element = inner;
         }
         return Err(error("42804", format!(
             "cannot assign to field \"{field}\" of column \"{}\" because its type {} is not a composite type",
-            target.column, element.sql_name()
+            target.column, &*element.sql_name_with_control(control)?
         )));
     }
     if target.indirection.len() > 6 {
@@ -135,21 +185,28 @@ impl<E> AssignmentLevel<'_, E> {
 
 /// Group an assignment's indirection into fields and subscript groups, in order.
 pub fn assignment_levels<E>(steps: &[AssignmentStep<E>]) -> Vec<AssignmentLevel<'_, E>> {
-    let mut levels = Vec::new();
-    let mut position = 0;
-    while position < steps.len() {
-        if let AssignmentStep::Field(field) = &steps[position] {
-            levels.push(AssignmentLevel::Field(field));
-            position += 1;
-            continue;
+    assignment_level_iter(steps).collect()
+}
+
+pub(crate) fn assignment_level_iter<E>(
+    steps: &[AssignmentStep<E>],
+) -> impl Iterator<Item = AssignmentLevel<'_, E>> {
+    let mut remaining = steps;
+    std::iter::from_fn(move || {
+        let first = remaining.first()?;
+        if let AssignmentStep::Field(field) = first {
+            remaining = &remaining[1..];
+            Some(AssignmentLevel::Field(field))
+        } else {
+            let count = remaining
+                .iter()
+                .take_while(|step| !matches!(step, AssignmentStep::Field(_)))
+                .count();
+            let (group, tail) = remaining.split_at(count);
+            remaining = tail;
+            Some(AssignmentLevel::Subscripts(group))
         }
-        let start = position;
-        while position < steps.len() && !matches!(steps[position], AssignmentStep::Field(_)) {
-            position += 1;
-        }
-        levels.push(AssignmentLevel::Subscripts(&steps[start..position]));
-    }
-    levels
+    })
 }
 
 /// Whether an assignment writes a composite field somewhere along its indirection.
@@ -166,71 +223,14 @@ pub fn field_assignment_types<E>(
     declared: &ColumnType,
     composites: Option<&dyn crate::expr::composites::CompositeTypeCatalog>,
 ) -> Result<Vec<ColumnType>, SQLError> {
-    let mut types = vec![declared.clone()];
-    for level in assignment_levels(&target.indirection) {
-        let current = types.last().expect("the declared type starts the levels");
-        let mut base = current;
-        while let ColumnType::Domain { base: inner, .. } = base {
-            base = inner;
-        }
-        let next = match level {
-            AssignmentLevel::Field(field) => {
-                let ColumnType::Composite(reference) = base else {
-                    return Err(error("42804", format!(
-                        "cannot assign to field \"{field}\" of column \"{}\" because its type {} is not a composite type",
-                        target.column, current.display_name()
-                    )));
-                };
-                let descriptor = crate::expr::composites::descriptor(composites, reference.oid)?;
-                let Some((_, attribute)) = descriptor.attribute(field) else {
-                    return Err(error("42703", format!(
-                        "cannot assign to field \"{field}\" of column \"{}\" because there is no such column in data type {}",
-                        target.column, current.display_name()
-                    )));
-                };
-                attribute.ty.clone()
-            }
-            AssignmentLevel::Subscripts(steps) => {
-                let array = match base {
-                    ColumnType::Array(_) => base.clone(),
-                    ColumnType::Int2Vector => ColumnType::Array(Box::new(ColumnType::SmallInteger)),
-                    ColumnType::OidVector => ColumnType::Array(Box::new(ColumnType::Oid)),
-                    _ => {
-                        return Err(error(
-                            "42804",
-                            format!(
-                                "cannot subscript type {} because it does not support subscripting",
-                                current.display_name()
-                            ),
-                        ))
-                    }
-                };
-                if steps.len() > 6 {
-                    return Err(error(
-                        "54000",
-                        format!(
-                            "number of array dimensions ({}) exceeds the maximum allowed (6)",
-                            steps.len()
-                        ),
-                    ));
-                }
-                if steps
-                    .iter()
-                    .any(|step| matches!(step, AssignmentStep::Slice { .. }))
-                {
-                    array
-                } else {
-                    let mut element = &array;
-                    while let ColumnType::Array(inner) = element {
-                        element = inner;
-                    }
-                    element.clone()
-                }
-            }
-        };
-        types.push(next);
-    }
-    Ok(types)
+    Ok(field_assignment_types_with_control(
+        target,
+        declared,
+        composites,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary assignment types"))
 }
 
 /// Slices consume an array; any number of element subscripts consumes one scalar element.
@@ -309,18 +309,31 @@ pub fn validate_assignment_result<E>(
     target: &AssignmentTarget<E>,
     declared: &ColumnType,
 ) -> Result<(), SQLError> {
+    validate_assignment_result_with_control(
+        target,
+        declared,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn validate_assignment_result_with_control<E>(
+    target: &AssignmentTarget<E>,
+    declared: &ColumnType,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     // A field write rebuilds the column's own composite value.
     if target.is_whole_column() || has_field_step(target) {
         return Ok(());
     }
-    let container = array_assignment_type(target, declared)?;
+    let container = array_assignment_type_with_control(target, declared, control)?;
     if !crate::type_resolution::explicit_type_compatible(&container, declared) {
         return Err(error(
             "42846",
             format!(
                 "cannot cast type {} to {}",
-                container.sql_name(),
-                declared.sql_name()
+                &*container.sql_name_with_control(control)?,
+                &*declared.sql_name_with_control(control)?
             ),
         ));
     }

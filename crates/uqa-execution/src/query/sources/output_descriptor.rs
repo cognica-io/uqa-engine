@@ -6,21 +6,44 @@
 //! Whether SQL's public descriptor also describes a derived query's physical output.
 
 use crate::query::CteScope;
+use uqa_core::{
+    memory::{OwnedMap, ProductionControl},
+    RelationIdentity, RelationName,
+};
 use uqa_sql::{
     catalog::{resolution::RelationLookupMode, view::StoredViewKind},
     plan::{CtePlan, QueryPlan, RelationalPlan, SourcePlan},
-    semantics::{contains_retrieval, cte_reference_name},
+    semantics::contains_retrieval,
     SQLError,
 };
 
 #[cfg(test)]
 mod tests;
 
-/// Retrieval attaches opaque score identities during physical assembly. Public SQL columns alone cannot bind a consumer of that output, even when their names and types are closed. Inspect the actual relation scopes, including folded and materialized CTEs and stored views, before choosing a deferred public descriptor.
+#[cfg(test)]
 pub(super) fn requires_physical_descriptor<S: Clone>(
     query: &QueryPlan,
     ctes: &CteScope<S>,
 ) -> Result<bool, SQLError> {
+    requires_physical_descriptor_with_control(query, ctes, ProductionControl::uncontrolled())
+}
+
+/// Retrieval attaches opaque score identities during physical assembly. Public SQL columns alone cannot bind a consumer of that output. Borrow lexical frames while admitting the completed-query index and selected catalog observations.
+pub(super) fn requires_physical_descriptor_with_control<S: Clone>(
+    query: &QueryPlan,
+    ctes: &CteScope<S>,
+    control: ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    inspect_scope(query, ctes, control, None)
+}
+
+fn inspect_scope<S: Clone>(
+    query: &QueryPlan,
+    ctes: &CteScope<S>,
+    control: ProductionControl<'_>,
+    visiting: Option<&Visiting<'_>>,
+) -> Result<bool, SQLError> {
+    control.check()?;
     if ctes
         .row_lock_outer_row()
         .is_some_and(|outer| outer.schema.score_sources().next().is_some())
@@ -29,131 +52,196 @@ pub(super) fn requires_physical_descriptor<S: Clone>(
     }
     DescriptorScope {
         ctes,
-        local_ctes: Vec::new(),
-        visiting: Vec::new(),
-        completed: std::collections::BTreeMap::new(),
+        control,
+        completed: OwnedMap::new(),
     }
-    .query(query)
+    .query(query, None, visiting)
 }
 
-struct DescriptorScope<'a, S: Clone> {
+struct LocalDefinitions<'a> {
+    declarations: &'a [CtePlan],
+    parent: Option<&'a Self>,
+}
+
+impl LocalDefinitions<'_> {
+    fn find(&self, reference: RelationName<'_>) -> Option<(&Self, usize)> {
+        let mut frame = Some(self);
+        while let Some(current) = frame {
+            if let Some(position) = current
+                .declarations
+                .iter()
+                .position(|cte| RelationName::decoded(&cte.name) == reference)
+            {
+                return Some((current, position));
+            }
+            frame = current.parent;
+        }
+        None
+    }
+}
+
+struct Visiting<'a> {
+    identity: usize,
+    parent: Option<&'a Self>,
+}
+
+impl Visiting<'_> {
+    fn contains(&self, identity: usize) -> bool {
+        let mut frame = Some(self);
+        while let Some(current) = frame {
+            if current.identity == identity {
+                return true;
+            }
+            frame = current.parent;
+        }
+        false
+    }
+}
+
+struct DescriptorScope<'a, 'c, S: Clone> {
     ctes: &'a CteScope<S>,
-    local_ctes: Vec<&'a [CtePlan]>,
-    visiting: Vec<*const QueryPlan>,
-    completed: std::collections::BTreeMap<*const QueryPlan, bool>,
+    control: ProductionControl<'c>,
+    completed: OwnedMap<usize, bool>,
 }
 
-impl<'a, S: Clone> DescriptorScope<'a, S> {
-    fn query(&mut self, query: &'a QueryPlan) -> Result<bool, SQLError> {
-        let identity = std::ptr::from_ref(query);
+impl<S: Clone> DescriptorScope<'_, '_, S> {
+    fn query(
+        &mut self,
+        query: &QueryPlan,
+        definitions: Option<&LocalDefinitions<'_>>,
+        visiting: Option<&Visiting<'_>>,
+    ) -> Result<bool, SQLError> {
+        self.control.check()?;
+        let identity = std::ptr::from_ref(query) as usize;
         if let Some(required) = self.completed.get(&identity) {
             return Ok(*required);
         }
-        if self.visiting.contains(&identity) {
+        if visiting.is_some_and(|visiting| visiting.contains(identity)) {
             return Ok(false);
         }
-        self.visiting.push(identity);
-        self.local_ctes.push(&query.ctes);
-        let result = match &query.root {
+        let visiting = Visiting {
+            identity,
+            parent: visiting,
+        };
+        let definitions = LocalDefinitions {
+            declarations: &query.ctes,
+            parent: definitions,
+        };
+        let required = match &query.root {
             RelationalPlan::QueryBlock(block) => {
                 if block.r#where.as_ref().is_some_and(contains_retrieval) {
-                    Ok(true)
+                    true
                 } else {
                     block.from.as_ref().map_or(Ok(false), |source| {
-                        self.source(source, query.relations_bound)
-                    })
+                        self.source(source, query.relations_bound, Some(&definitions), &visiting)
+                    })?
                 }
             }
             RelationalPlan::SetOp { left, right, .. } => {
-                self.query(left)
-                    .and_then(|left| if left { Ok(true) } else { self.query(right) })
+                self.query(left, Some(&definitions), Some(&visiting))?
+                    || self.query(right, Some(&definitions), Some(&visiting))?
             }
-            RelationalPlan::Values { .. } => Ok(false),
+            RelationalPlan::Values { .. } => false,
         };
-        self.local_ctes.pop();
-        self.visiting.pop();
-        if let Ok(required) = result {
-            self.completed.insert(identity, required);
+        self.control.check()?;
+        match self.control.budget() {
+            Some(budget) => {
+                self.completed.insert_budgeted(identity, required, budget)?;
+            }
+            None => {
+                self.completed.insert(identity, required);
+            }
         }
-        result
+        Ok(required)
     }
 
-    fn source(&mut self, source: &'a SourcePlan, bound: bool) -> Result<bool, SQLError> {
+    fn source(
+        &mut self,
+        source: &SourcePlan,
+        bound: bool,
+        definitions: Option<&LocalDefinitions<'_>>,
+        visiting: &Visiting<'_>,
+    ) -> Result<bool, SQLError> {
+        self.control.check()?;
         match source {
             SourcePlan::RetainedRows(_) => Ok(true),
-            SourcePlan::Subquery { body, .. } => self.query(body),
+            SourcePlan::Subquery { body, .. } => self.query(body, definitions, Some(visiting)),
             SourcePlan::Join { left, right, .. } => {
-                Ok(self.source(left, bound)? || self.source(right, bound)?)
+                Ok(self.source(left, bound, definitions, visiting)?
+                    || self.source(right, bound, definitions, visiting)?)
             }
-            SourcePlan::Table { name, .. } => self.table(name, bound),
+            SourcePlan::Table { name, .. } => self.table(name, bound, definitions, visiting),
             SourcePlan::Values { .. }
             | SourcePlan::Function { .. }
             | SourcePlan::FunctionGroup { .. } => Ok(false),
         }
     }
 
-    fn table(&mut self, name: &str, bound: bool) -> Result<bool, SQLError> {
-        if let Some(reference) = cte_reference_name(name) {
-            if let Some((scope, position, cte)) =
-                self.local_ctes
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .find_map(|(scope, ctes)| {
-                        ctes.iter()
-                            .enumerate()
-                            .find(|(_, cte)| cte.name == reference)
-                            .map(|(position, cte)| (scope, position, cte))
-                    })
+    fn table(
+        &mut self,
+        name: &str,
+        bound: bool,
+        definitions: Option<&LocalDefinitions<'_>>,
+        visiting: &Visiting<'_>,
+    ) -> Result<bool, SQLError> {
+        if let Some(reference) = RelationIdentity::borrowed_reference(name)
+            .filter(|reference| reference.schema.is_none())
+        {
+            if let Some((frame, position)) =
+                definitions.and_then(|frame| frame.find(reference.name))
             {
-                let hidden = self.local_ctes.split_off(scope + 1);
-                let definitions = self.local_ctes[scope];
-                if !cte.recursive {
-                    self.local_ctes[scope] = &definitions[..position];
-                }
-                let result = cte
-                    .body
-                    .query()
-                    .map_or(Ok(false), |query| self.query(query));
-                self.local_ctes[scope] = definitions;
-                self.local_ctes.extend(hidden);
-                return result;
+                let cte = &frame.declarations[position];
+                let definitions = LocalDefinitions {
+                    declarations: if cte.recursive {
+                        frame.declarations
+                    } else {
+                        &frame.declarations[..position]
+                    },
+                    parent: frame.parent,
+                };
+                return cte.body.query().map_or(Ok(false), |query| {
+                    self.query(query, Some(&definitions), Some(visiting))
+                });
             }
             if let Some(rows) = self.ctes.materialized_for_scan(name) {
                 return Ok(rows.row_schema().score_sources().next().is_some());
             }
             if let Some(cte) = self.ctes.deferred_reference(name) {
-                if let Some(definition) = self.ctes.definition_scope(name) {
+                if let Some(definition) = self
+                    .ctes
+                    .definition_scope_with_control(name, &self.control)?
+                {
                     return cte.body.query().map_or(Ok(false), |query| {
-                        requires_physical_descriptor(query, &definition)
+                        inspect_scope(query, &definition, self.control, Some(visiting))
                     });
                 }
-                let hidden = std::mem::take(&mut self.local_ctes);
-                let result = cte
+                return cte
                     .body
                     .query()
-                    .map_or(Ok(false), |query| self.query(query));
-                self.local_ctes = hidden;
-                return result;
+                    .map_or(Ok(false), |query| self.query(query, None, Some(visiting)));
             }
             if self.ctes.is_visible_cte(name) {
                 return Ok(false);
             }
         }
         let catalog = self.ctes.catalog_read_view()?;
-        let mut resolution = self.ctes.relation_name_resolution()?;
+        let (mut resolution, _memory) = self
+            .ctes
+            .relation_name_resolution_with_control(&self.control)?
+            .into_parts();
         resolution.set_lookup_mode(if bound {
             RelationLookupMode::Bound
         } else {
             RelationLookupMode::Dynamic
         });
-        let Some(view) = catalog.view_resolved(&resolution, name)? else {
+        let Some(view) = catalog.view_resolved_with_control(&resolution, name, &self.control)?
+        else {
             return Ok(false);
         };
         if view.kind == StoredViewKind::Materialized {
             return Ok(false);
         }
         // Stored views bind their own relation names; caller-local WITH definitions cannot shadow those identities.
-        requires_physical_descriptor(&view.query, self.ctes)
+        inspect_scope(&view.query, self.ctes, self.control, Some(visiting))
     }
 }

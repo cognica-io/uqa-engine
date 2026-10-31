@@ -10,6 +10,7 @@ use super::*;
 
 mod locking;
 mod memory_threshold;
+mod production;
 
 fn sessions(provider: usize) -> (tempfile::TempDir, Engine, Engine) {
     let directory = tempfile::tempdir().unwrap();

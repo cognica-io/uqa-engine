@@ -42,14 +42,16 @@ pub fn enter_statement(statement: Arc<StatementCommands>) -> RunningStatement {
 
 /// The statement a command belongs to: the one whose WITH holds the command, or a statement of its own, which runs above the statements that started it while the guard lives.
 pub fn statement_commands<S: Clone>(
+    context: crate::query::cte::CteExecutionContext<'_, S>,
     inherited: Option<&CteScope<S>>,
-) -> (Arc<StatementCommands>, Option<RunningStatement>) {
+) -> Result<(Arc<StatementCommands>, Option<RunningStatement>), SQLError> {
     if let Some(statement) = inherited.and_then(CteScope::statement_commands) {
-        return (Arc::clone(statement), None);
+        return Ok((Arc::clone(statement), None));
     }
-    let statement = Arc::<StatementCommands>::default();
+    let resources = context.production_resources()?;
+    let statement = StatementCommands::with_control(&resources.control())?;
     let running = enter_statement(Arc::clone(&statement));
-    (statement, Some(running))
+    Ok((statement, Some(running)))
 }
 
 /// Whether a statement started the running one, whose writes it then finds modified by a later command.

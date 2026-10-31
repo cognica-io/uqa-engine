@@ -13,6 +13,8 @@ use crate::{
     ColumnIdentity, RowSchema, SQLError, ScalarExpr,
 };
 use std::collections::BTreeMap;
+mod owned;
+pub use owned::{capture_view_projection_owned, OwnedCapturedViewProjection};
 
 pub struct CapturedViewProjection {
     pub source: SourcePlan,
@@ -54,7 +56,6 @@ pub fn capture_view_projection(
     let subject = crate::semantics::view_privileges::next_layer_privilege_subject(
         services.authorization,
         &layer.canonical_name,
-        query.relation_privilege_subject.as_ref(),
     )?;
     services.authorization.ensure_query_select(query)?;
     let names = bind_outputs(

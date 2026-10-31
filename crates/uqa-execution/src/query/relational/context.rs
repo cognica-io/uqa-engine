@@ -6,7 +6,7 @@
 
 //! Physical relational assembly with independent expression and lock construction services.
 
-use crate::query::recheck_source::LockRowsRecheckSource;
+use crate::query::recheck_source::LockRowsRecheckInput;
 use crate::query::runtime::QueryRuntimeView;
 use crate::query::set_projection::{SetFunctionRuntime, SetProjectionOutput};
 use crate::query::CteScope;
@@ -16,9 +16,16 @@ use uqa_sql::{plan::QueryBlockPlan, semantics::sets::SetFunctionCatalog, SQLErro
 
 /// Bind scoped expression services without exposing the owning session or storage state.
 pub trait QueryExpressionFactory<S: Clone + 'static>: Sync {
-    fn bind_scope(&self, scope: CteScope<S>) -> Arc<dyn SetFunctionRuntime + '_>;
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError>;
+    fn bind_scope(&self, scope: &CteScope<S>)
+        -> Result<Arc<dyn SetFunctionRuntime + '_>, SQLError>;
     /// Apply the owning planner to a validated schema/procedural execution copy.
     fn optimize_catalog_scalar(&self, expression: &mut ScalarExpr) -> Result<(), SQLError>;
+    fn optimize_owned_catalog_scalar(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError>;
     fn prepare_predicate<'a>(
         &'a self,
         expression: &ScalarExpr,
@@ -38,7 +45,7 @@ pub trait RowLockOperatorFactory<S: Clone + 'static>: Sync {
         params: &'a [SQLParam],
         scope: &CteScope<S>,
         max_rows: Option<u64>,
-        recheck: Option<LockRowsRecheckSource<S>>,
+        recheck: Option<LockRowsRecheckInput<'_, S>>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError>;
 }
 
@@ -53,7 +60,10 @@ pub struct RelationalContext<'a, S: Clone + 'static> {
 impl<S: Clone + 'static> Copy for RelationalContext<'_, S> {}
 
 impl<'a, S: Clone + 'static> RelationalContext<'a, S> {
-    pub fn expression_scope(self, scope: CteScope<S>) -> Arc<dyn SetFunctionRuntime + 'a> {
+    pub fn expression_scope(
+        self,
+        scope: &CteScope<S>,
+    ) -> Result<Arc<dyn SetFunctionRuntime + 'a>, SQLError> {
         self.expressions.bind_scope(scope)
     }
 
@@ -61,11 +71,13 @@ impl<'a, S: Clone + 'static> RelationalContext<'a, S> {
         self,
         params: &'a [SQLParam],
         scope: &CteScope<S>,
-    ) -> SharedExpressionEvaluator<'a> {
-        crate::query::expression::ScopedExpressionEvaluator::shared(
-            self.expression_scope(scope.clone()),
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        let resources = self.expressions.production_resources()?;
+        crate::query::expression::ScopedExpressionEvaluator::shared_with_control(
+            self.expression_scope(scope)?,
             params,
             self.runtime.cancellation_token(),
+            &resources.control(),
         )
     }
 }
@@ -78,13 +90,17 @@ pub fn build_set_projection<'a, S: Clone + 'static>(
     evaluator: SharedExpressionEvaluator<'a>,
     output: SetProjectionOutput,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
-    let (operator, work_mem) = crate::physical::construction::OperatorBuild::run(operator, |_| {
-        context.runtime.work_mem_bytes()
-    })?;
+    let (operator, (work_mem, scope)) =
+        crate::physical::construction::OperatorBuild::run(operator, |_| {
+            Ok((
+                context.runtime.work_mem_bytes()?,
+                context.expression_scope(ctes)?,
+            ))
+        })?;
     crate::query::set_projection::build_set_projection(
         operator,
         context.catalog,
-        context.expression_scope(ctes.clone()),
+        scope,
         params,
         evaluator,
         work_mem,
@@ -99,7 +115,7 @@ pub fn attach_lock_rows<'a, S: Clone + 'static>(
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
     max_rows: Option<u64>,
-    recheck: Option<LockRowsRecheckSource<S>>,
+    recheck: Option<LockRowsRecheckInput<'_, S>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     context
         .row_locks

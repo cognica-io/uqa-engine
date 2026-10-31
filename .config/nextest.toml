@@ -15,3 +15,8 @@ max-threads = 1
 [[profile.ci.overrides]]
 filter = 'package(=uqa-engine) & test(native_session_groups_preserve_metadata_under_concurrent_load)'
 test-group = 'native-session-schedules'
+
+[[profile.ci.overrides]]
+# Each provider replays the complete rule transcript in independently created durable databases.
+filter = 'package(=uqa-engine) & test(/rule_query_inputs_match_postgresql::case_[234]_/)'
+threads-required = "num-test-threads"

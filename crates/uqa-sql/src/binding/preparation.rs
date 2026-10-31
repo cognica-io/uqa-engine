@@ -19,12 +19,28 @@ mod fields;
 mod function_calls;
 mod json_operators;
 mod membership;
+mod ownership;
 mod parameters;
+mod production;
+pub(crate) use production::bind_rule_inputs_owned;
+pub(in crate::binding) use production::retain_input_metadata_owned;
+pub use production::{
+    bind_expression_plan_routines_for_storage_owned, resolve_variable_sites_owned,
+};
+pub use production::{
+    bind_routine_parameter_references_owned, parameter_input_types_with_control,
+    prepare_routine_body_inputs_owned, read_prepared_inputs_owned, read_procedural_inputs_owned,
+    read_procedure_inputs_owned, retain_prepared_input_metadata_owned, PreparedOwnedInputs,
+    PreparedOwnedRoutineBody, ProceduralOwnedInputs,
+};
+pub(in crate::binding) use production::{
+    read_executable_inputs_owned, read_generic_explain_inputs_owned,
+};
 mod queries;
 mod query_layouts;
 #[cfg(test)]
 pub(crate) use queries::BLOCK_ANALYSES;
-pub use query_layouts::restore_query_layouts;
+pub use query_layouts::{restore_query_layouts, restore_query_layouts_owned};
 mod routines;
 mod rows;
 pub(crate) use routines::{
@@ -384,7 +400,7 @@ fn analyze_expression_inputs<'a>(
             routines,
             &[],
         )?;
-    Ok(ty)
+    Ok(ty.map(ownership::AnalysisType::into_ordinary))
 }
 
 fn retain_compute_kinds(routines: &dyn RoutineResolution, plan: &mut UnifiedPlan) {
@@ -416,15 +432,15 @@ pub(super) fn projection_metadata(
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
+        parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
     let mut value = analysis.expression(expression, input, subqueries)?;
     analysis
         .parameters
         .coerce_unknown(&mut value, &ColumnType::Text)?;
-    if matches!(value.ty, Some(ColumnType::Composite(_))) {
+    if matches!(value.ty.as_deref(), Some(ColumnType::Composite(_))) {
         value.record_fields = analysis
             .scope
             .bind_record_fields(routines, expression, input, subqueries, params)?;
@@ -435,12 +451,15 @@ pub(super) fn projection_metadata(
         .append(analysis.parameters.collations);
     let collation = value
         .ty
-        .as_ref()
+        .as_deref()
         .filter(|ty| crate::schema::composites::type_is_collatable(ty))
         .map(|_| u32::try_from(value.derivation.oid()).expect("selected collation is an OID"));
     let record = value.record_metadata();
     Ok(super::projection::ProjectionMetadata {
-        ty: value.ty,
+        ty: value
+            .ty
+            .map(|ty| ty.into_produced(&analysis.scope.control()))
+            .transpose()?,
         collation,
         record,
     })
@@ -500,8 +519,8 @@ pub(super) fn call_input_collation(
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
+        parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
     let arguments = analysis.observe_function_arguments(name, args, &[], input, subqueries)?;
@@ -519,8 +538,8 @@ pub(super) fn condition_metadata(
     let mut analysis = Preparation {
         bound_condition_queries: Some(queries),
         routines,
+        parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
     let placement = match construct {
@@ -551,13 +570,13 @@ pub(super) fn values_metadata(
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
+        parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
     analysis
         .values(rows, subqueries, outer)
-        .map(|output| output.schema())
+        .and_then(|output| output.schema(&analysis.scope.control()))
 }
 
 /// Keep each set operand's original output observations until common type and collation selection finish.
@@ -571,8 +590,8 @@ pub(super) fn set_metadata(
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
+        parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
     let output = analysis.root(root, outer, false)?;
@@ -580,7 +599,7 @@ pub(super) fn set_metadata(
         .scope
         .collations
         .append(analysis.parameters.collations);
-    Ok(output.schema())
+    output.schema(&analysis.scope.control())
 }
 
 /// Ordinary query blocks retain the same original output observations through clause and key selection.
@@ -595,8 +614,8 @@ pub(super) fn block_metadata(
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
+        parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        parameters: ParameterTypes::fixed(params),
         schema_expression: None,
     };
     let output = analysis.block_with_source(block, source, outer, false)?;
@@ -604,20 +623,32 @@ pub(super) fn block_metadata(
         .scope
         .collations
         .append(analysis.parameters.collations);
-    Ok(output.schema())
+    output.schema(&analysis.scope.control())
 }
 
 struct QueryOutput {
-    columns: Vec<String>,
-    types: Vec<ExpressionType>,
+    columns: ownership::AnalysisVec<uqa_core::memory::Produced<String>>,
+    types: ownership::AnalysisVec<ExpressionType>,
     open: bool,
     /// Sparse original targets for indeterminate output collations; addresses are never dereferenced.
-    key_origins: Vec<(usize, std::ptr::NonNull<ScalarExpr>)>,
+    key_origins: ownership::AnalysisVec<(usize, std::ptr::NonNull<ScalarExpr>)>,
     /// Leaf output names of this set-operation query, retained only for inaccessible-column diagnostics.
-    set_sources: Vec<Vec<String>>,
+    set_sources: ownership::AnalysisVec<ownership::AnalysisVec<uqa_core::memory::Produced<String>>>,
+    control: uqa_core::memory::OwnedProductionControl,
 }
 
 impl QueryOutput {
+    fn new(control: &uqa_core::memory::ProductionControl<'_>) -> Self {
+        Self {
+            columns: ownership::AnalysisVec::new(control),
+            types: ownership::AnalysisVec::new(control),
+            open: false,
+            key_origins: ownership::AnalysisVec::new(control),
+            set_sources: ownership::AnalysisVec::new(control),
+            control: control.capture(),
+        }
+    }
+
     fn key_origin(&self, position: usize) -> Option<std::ptr::NonNull<ScalarExpr>> {
         self.key_origins
             .binary_search_by_key(&position, |(position, _)| *position)
@@ -625,32 +656,25 @@ impl QueryOutput {
             .map(|index| self.key_origins[index].1)
     }
 
-    fn schema(&self) -> RowSchema {
-        let schema = RowSchema::with_types(
-            self.columns.clone(),
-            self.types.iter().map(|value| value.ty.clone()).collect(),
+    fn schema(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        RowSchema::with_output_metadata_with_control(
+            None,
+            self.columns.iter().zip(&self.types).map(|(name, value)| {
+                // Unknown targets keep their original collation until coercion selects a collatable output type.
+                let ty = value.ty.as_deref();
+                let collation = ty
+                    .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+                    .map(|_| {
+                        u32::try_from(value.derivation.oid()).expect("selected collation is an OID")
+                    });
+                (name.as_str(), ty, collation, value.record_metadata())
+            }),
+            self.open,
+            control,
         )
-        // Unknown target entries retain their selection in ExpressionType until coercion determines a collatable output type; clause binding also uses this provisional schema before that coercion.
-        .with_column_collations(self.types.iter().map(|value| {
-            value
-                .ty
-                .as_ref()
-                .filter(|ty| crate::schema::composites::type_is_collatable(ty))
-                .map(|_| {
-                    u32::try_from(value.derivation.oid()).expect("selected collation is an OID")
-                })
-        }))
-        .with_record_metadata(
-            self.types
-                .iter()
-                .enumerate()
-                .filter_map(|(index, value)| value.record_metadata().map(|fields| (index, fields))),
-        );
-        if self.open {
-            RowSchema::with_open_columns(&schema, None)
-        } else {
-            schema
-        }
     }
 }
 
@@ -672,42 +696,58 @@ impl Preparation<'_> {
         expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<Option<ColumnType>, SQLError> {
-        let mut canonical;
+    ) -> Result<Option<ownership::AnalysisType>, SQLError> {
+        let owner = self.scope.control().capture();
+        let control = owner.control();
         let defer_windows = self.schema_expression.is_none()
             && crate::semantics::windows::expr_has_window(expression);
-        let expression = if self.scope.routine_parameters.is_some() || defer_windows {
-            canonical = expression.clone();
-            self.scope
-                .canonicalize_routine_parameters(&mut canonical, input);
-            if defer_windows {
-                // Window functions bind their arguments with the target list;
-                // their specifications are transformed after the query clauses.
-                canonical.visit_mut(&mut |node| {
-                    if let ScalarExpr::WindowCall { spec, .. } = node {
-                        spec.partition_by.clear();
-                        spec.order_by.clear();
-                        spec.frame = None;
+        let canonical = if self.scope.routine_parameters.is_some() || defer_windows {
+            Some(expression.copy_for_rewrite(&control)?.transform_nodes(
+                &control,
+                &mut |_, node| {
+                    if let Some(parameter) = self.scope.routine_parameter_reference(&node, input) {
+                        return Ok(ScalarExpr::Param(parameter).copy_for_rewrite(&control)?);
                     }
-                });
-            }
-            &canonical
+                    if defer_windows {
+                        if let ScalarExpr::WindowCall { spec, .. } = &*node {
+                            let spec = crate::ScalarWindowSpec {
+                                definition: spec.definition,
+                                partition_by: Vec::new(),
+                                order_by: Vec::new(),
+                                frame: None,
+                            };
+                            return Ok(node.replace_window_spec(&spec, &control)?);
+                        }
+                    }
+                    Ok(node)
+                },
+            )?)
         } else {
-            expression
+            None
         };
-        self.scope.bind_expression_type(
-            self.routines,
-            expression,
-            input,
-            subqueries,
-            &self.parameters.values(),
-        )
+        let expression = canonical.as_deref().unwrap_or(expression);
+        self.scope
+            .bind_expression_type_with_control(
+                self.routines,
+                expression,
+                input,
+                subqueries,
+                &self.parameters.values()?,
+            )?
+            .map(|ty| ownership::AnalysisType::from_produced(ty, &control))
+            .transpose()
     }
 
-    fn type_name(&self, name: &str) -> Result<ColumnType, SQLError> {
-        self.routines
-            .resolve_type_name(name)?
-            .map_or_else(|| ColumnType::from_sql_name(name), Ok)
+    fn type_name(&self, name: &str) -> Result<ownership::AnalysisType, SQLError> {
+        let control = self.scope.control();
+        let ty = self
+            .routines
+            .resolve_type_name_with_control(name, &control)?
+            .map_or_else(
+                || ColumnType::from_sql_name_with_control(name, &control),
+                Ok,
+            )?;
+        ownership::AnalysisType::from_produced(ty, &control)
     }
 
     fn require_boolean(
@@ -734,7 +774,7 @@ impl Preparation<'_> {
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
         crate::type_resolution::boolean::require_argument_type(
-            observed.ty.as_ref(),
+            observed.ty.as_deref(),
             context,
             Some(self.routines),
         )?;

@@ -133,6 +133,12 @@ fn builtin_scalar_overload_names_match_sql_name_normalization() {
         ColumnType::Json,
         ColumnType::JsonB,
         ColumnType::Oid,
+        ColumnType::Bit(None),
+        ColumnType::Bit(Some(3)),
+        ColumnType::Int2Vector,
+        ColumnType::OidVector,
+        ColumnType::Record,
+        ColumnType::Void,
     ] {
         let sql_name = ty.sql_name_with_control(&control).unwrap();
         let normalized = canonical_routine_type_name_with_control(&sql_name, &control).unwrap();
@@ -147,7 +153,6 @@ fn builtin_scalar_overload_names_match_sql_name_normalization() {
     for ty in [
         ColumnType::Array(Box::new(ColumnType::Integer)),
         ColumnType::Named("custom".into()),
-        ColumnType::Bit(Some(3)),
         ColumnType::IntervalWithFields {
             fields: crate::ast::IntervalFields::YearToMonth,
             precision: None,
@@ -176,3 +181,5 @@ fn builtin_scalar_overload_names_retain_exact_reservations() {
     drop(name);
     assert_eq!(budget.used(), 0);
 }
+
+mod production;

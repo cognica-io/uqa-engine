@@ -12,6 +12,7 @@ use crate::{
 };
 
 mod comparisons;
+pub(in crate::binding) mod owned;
 
 pub(crate) fn retain_composite_inputs(
     routines: &dyn RoutineResolution,

@@ -107,3 +107,19 @@ impl RecordDescriptor {
         control.finish(descriptor, control.combine(retained, memory))
     }
 }
+
+impl crate::memory::ObserveAllocations for RecordDescriptor {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), ValueRetentionError> {
+        if observer.shared_owner(self.names.as_ref())? {
+            observer.allocation(size_of::<FieldNames>(), size_of::<FieldNames>())?;
+            observer.buffer::<String>(self.names.names.len(), self.names.names.len())?;
+            for name in &self.names.names {
+                observer.child(name)?;
+            }
+        }
+        Ok(())
+    }
+}

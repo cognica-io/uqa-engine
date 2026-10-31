@@ -19,14 +19,14 @@ use crate::query::{sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use std::collections::BTreeSet;
 use uqa_core::Value;
-use uqa_sql::semantics::view_mutation::resolve_view_target;
+
 pub use uqa_sql::semantics::view_mutation::{target_columns, ViewMutationTarget as ViewDmlTarget};
 use uqa_sql::semantics::{
     mutation_qualifiers::validate_dml_expression_qualifiers,
     returning::validate_returning_alias_relations,
 };
 use uqa_sql::{
-    plan::{DeletePlan, InsertPlan, QueryPlan, UpdatePlan},
+    plan::{DeletePlan, InsertPlan, UpdatePlan},
     SQLError, SQLParam, ScalarExpr,
 };
 use uqa_storage::document_store::Document;
@@ -34,11 +34,13 @@ use uqa_storage::document_store::Document;
 pub type SourceOutputPruning = fn(
     &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
     &dyn uqa_sql::routines::RoutineResolution,
-    &mut QueryPlan,
-    &BTreeSet<usize>,
+    uqa_sql::plan::MutableQueryPlan,
+    &dyn Fn(usize) -> bool,
     usize,
     &dyn Fn(&str) -> bool,
-) -> Result<(), SQLError>;
+    &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::plan::MutableQueryPlan, SQLError>;
+
 mod checks;
 mod insert;
 mod update_delete;
@@ -46,40 +48,50 @@ pub use checks::TriggerViewChecks;
 pub use insert::run_view_insert_inner;
 pub use update_delete::{run_view_delete_inner, run_view_update_inner};
 
+pub(crate) fn resolve_view_target<S: Clone + 'static>(
+    context: &MutationStatementContext<'_, S>,
+    name: &str,
+) -> Result<uqa_core::memory::Produced<ViewDmlTarget>, SQLError> {
+    let retained = context.query.source.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.query.source.ctes.runtime.cancellation,
+    );
+    uqa_sql::semantics::view_mutation::resolve_view_target_with_control(
+        context.mutation.rules.views,
+        name,
+        &control,
+    )
+}
+
 pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
     context: &crate::query::statement::context::QueryContext<'_, S>,
-    prune_source_outputs: SourceOutputPruning,
     target: &ViewDmlTarget,
-    required_columns: Option<&BTreeSet<String>>,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
 ) -> Result<crate::SharedSpill, SQLError> {
-    let mut query = target.definition.query.clone();
-    if let Some(required_columns) = required_columns {
-        let required_positions = target
-            .columns
-            .iter()
-            .enumerate()
-            .filter_map(|(position, column)| required_columns.contains(column).then_some(position))
-            .collect::<BTreeSet<_>>();
-        prune_source_outputs(
-            context.source.volatility,
-            context.source.relational.catalog,
-            &mut query,
-            &required_positions,
-            target.columns.len(),
-            &|_| false,
-        )?;
-    }
-    let privilege_subject = if target.definition.security_invoker() {
-        scope.privilege_subject()?.clone()
+    let retained = context.source.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.source.ctes.runtime.cancellation,
+    );
+    let privilege_subject = if target.security_invoker {
+        scope.invoking_role()?.clone_with_control(&control)?
     } else {
-        scope.catalog_read_view()?.view_owner(&target.definition)?
+        control.finish(
+            scope
+                .catalog_read_view()?
+                .view_owner_with_control(target.security.role_owner, &control)?,
+            control.empty_reservation(),
+        )?
     };
-    let mut privilege_scope = scope.enter_privilege_subject(privilege_subject);
+    let mut privilege_scope =
+        scope.enter_privilege_subject_with_control(privilege_subject, &control)?;
     let result = crate::query::statement::execute_query_plan_output(
         context,
-        &query,
+        &target.query,
         params,
         &mut privilege_scope,
         crate::query::statement::consumer::QueryOutputMode::SharedSpill,
@@ -93,7 +105,11 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
         )));
     }
     let runtime = context.source.relational.runtime;
-    let schema = RowSchema::new(target.columns.clone());
+    let mut columns = uqa_core::memory::ProductionVec::new(control);
+    for column in &target.columns {
+        columns.push_produced(control.copy_text(column)?)?;
+    }
+    let schema = RowSchema::new_with_control(columns.finish()?, &control)?;
     let mut rows = crate::SpillBuffer::new(runtime.work_mem_bytes()?);
     for row in crate::query::output::PublicQueryRows::new(result, "view mutation input")? {
         runtime.check_cancelled()?;

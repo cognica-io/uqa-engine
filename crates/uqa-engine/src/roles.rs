@@ -34,8 +34,15 @@ struct RoutineParameterSnapshot {
 pub(crate) use uqa_execution::routines::invocation::scopes::active_routine_reads_command_overlay;
 
 impl RoutineSessionStateGuard<'_> {
-    fn capture(engine: &Engine, preserve_statement_cache: bool) -> RoutineSessionStateGuard<'_> {
-        let state = engine.session.state.read();
+    fn capture(engine: &Engine) -> RoutineSessionStateGuard<'_> {
+        Self::from_state(engine, &engine.session.state.read(), None)
+    }
+
+    fn from_state<'a>(
+        engine: &'a Engine,
+        state: &crate::SessionStateSnapshot,
+        sql_statement_cache: Option<SQLStatementCache>,
+    ) -> RoutineSessionStateGuard<'a> {
         RoutineSessionStateGuard {
             engine,
             saved: Some(RoutineParameterSnapshot {
@@ -44,8 +51,7 @@ impl RoutineSessionStateGuard<'_> {
                 authorization: state.authorization.clone(),
                 parameter_scopes: state.parameter_scopes.clone(),
             }),
-            sql_statement_cache: preserve_statement_cache
-                .then(|| state.sql_statement_cache.clone()),
+            sql_statement_cache,
             parameter_scope: None,
             restore_effective: false,
         }
@@ -158,11 +164,12 @@ impl Engine {
     }
 
     pub(crate) fn routine_session_state_guard(&self) -> RoutineSessionStateGuard<'_> {
-        RoutineSessionStateGuard::capture(self, false)
+        RoutineSessionStateGuard::capture(self)
     }
 
     pub(crate) fn routine_config_state_guard(&self) -> RoutineSessionStateGuard<'_> {
-        RoutineSessionStateGuard::capture(self, true)
+        let state = self.session.state.read();
+        RoutineSessionStateGuard::from_state(self, &state, Some(state.sql_statement_cache.clone()))
     }
 
     pub(crate) fn routine_invocation_state_guard(
@@ -170,7 +177,7 @@ impl Engine {
         configured: bool,
         security_definer: bool,
     ) -> RoutineSessionStateGuard<'_> {
-        let mut guard = RoutineSessionStateGuard::capture(self, false);
+        let mut guard = RoutineSessionStateGuard::capture(self);
         if configured {
             guard.parameter_scope =
                 Some(self.session.state.write().parameter_scopes.enter_function());

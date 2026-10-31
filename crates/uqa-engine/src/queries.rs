@@ -166,18 +166,6 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
-        self.synchronize_table_catalog().map_err(|error| {
-            uqa_execution::storage_errors::storage_error("refresh table catalog", &error)
-        })?;
-        self.synchronize_table_data().map_err(|error| {
-            uqa_execution::storage_errors::storage_error("refresh committed table data", &error)
-        })?;
-        self.synchronize_catalog_registries().map_err(|error| {
-            uqa_execution::storage_errors::storage_error(
-                "refresh durable catalog registries",
-                &error,
-            )
-        })?;
         uqa_execution::statement::batch::execute_simple_query(
             &self.batch_execution_context(),
             query,
@@ -191,15 +179,6 @@ impl Engine {
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
-        self.synchronize_table_catalog().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh table catalog", &err)
-        })?;
-        self.synchronize_table_data().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh committed table data", &err)
-        })?;
-        self.synchronize_catalog_registries().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh durable catalog registries", &err)
-        })?;
         if nested {
             uqa_execution::statement::batch::execute_nested(
                 &self.batch_execution_context(),
@@ -220,15 +199,6 @@ impl Engine {
     ) -> Result<SQLResult, SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, nested) = SQLExecutionScope::enter(self);
-        self.synchronize_table_catalog().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh table catalog", &err)
-        })?;
-        self.synchronize_table_data().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh committed table data", &err)
-        })?;
-        self.synchronize_catalog_registries().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh durable catalog registries", &err)
-        })?;
         uqa_execution::statement::batch::execute_prepared_statement(
             &self.batch_execution_context(),
             statement,
@@ -246,15 +216,6 @@ impl Engine {
     pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
         let _statement = self.lock_statement_gate();
         let (_execution, _) = SQLExecutionScope::enter(self);
-        self.synchronize_table_catalog().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh table catalog", &err)
-        })?;
-        self.synchronize_table_data().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh committed table data", &err)
-        })?;
-        self.synchronize_catalog_registries().map_err(|err| {
-            uqa_execution::storage_errors::storage_error("refresh durable catalog registries", &err)
-        })?;
         uqa_execution::statement::cursor::execute(&self.batch_execution_context(), query, params)
     }
 

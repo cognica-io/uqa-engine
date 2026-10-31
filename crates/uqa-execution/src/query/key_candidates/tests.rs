@@ -212,6 +212,24 @@ fn analyzed_membership_keeps_exact_key_candidates() {
         crate::eval_scalar(&args[1], &crate::ScalarEvalContext::new(None, &[])).unwrap(),
     );
     assert_eq!(keyed(&folded, &[], &definitions, true), Some(vec![2, 5]));
+    let ScalarExpr::Func { args, .. } = &mut folded else {
+        unreachable!()
+    };
+    let ScalarExpr::Literal(value) = &args[1] else {
+        unreachable!()
+    };
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    args[1] = ScalarExpr::RetainedLiteral(uqa_sql::ir::RetainedScalarLiteral::new(
+        uqa_sql::ir::RetainedConstantValue::from_produced(
+            control.copy_value(value).unwrap(),
+            &control,
+        )
+        .unwrap(),
+        None,
+        None,
+        None,
+    ));
+    assert_eq!(keyed(&folded, &[], &definitions, true), Some(vec![2, 5]));
     let negated = uqa_sql::bind_type_introspection(
         ScalarExpr::InList {
             expr: Box::new(column("id")),

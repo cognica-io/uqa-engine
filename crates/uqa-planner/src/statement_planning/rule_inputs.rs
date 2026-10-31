@@ -14,7 +14,24 @@ use uqa_sql::{
     semantics::{rules::RuleCatalog, view_rewrite::context::ViewRewriteContext},
     SQLError, ScalarExpr,
 };
+mod owned;
 mod view_projection;
+pub use owned::{prune_captured_inputs_owned, prune_command_inputs_owned};
+
+pub fn rewrite_plan_owned(
+    context: &RuleInputPlanningContext<'_>,
+    plan: uqa_sql::plan::MutableExecutablePlan,
+    config: &crate::optimizer::OptimizerConfig<'_>,
+) -> Result<uqa_sql::plan::MutableExecutablePlan, SQLError> {
+    let plan = view_projection::rewrite_owned(context, plan, config)?;
+    let plan = prune_captured_inputs_owned(
+        context.volatility,
+        context.views.routines,
+        plan,
+        &config.production,
+    )?;
+    prune_command_inputs_owned(context, plan, &config.production)
+}
 
 pub trait RuleInputColumns {
     fn source_column_names(
@@ -22,6 +39,23 @@ pub trait RuleInputColumns {
         table: &str,
         relations_bound: bool,
     ) -> Result<Option<Vec<String>>, SQLError>;
+
+    fn source_column_names_with_control(
+        &self,
+        table: &str,
+        relations_bound: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+        control.check()?;
+        let Some(columns) = self.source_column_names(table, relations_bound)? else {
+            return Ok(None);
+        };
+        let mut output = uqa_core::memory::ProductionVec::new(*control);
+        for column in columns {
+            output.push_produced(control.copy_text(&column)?)?;
+        }
+        Ok(Some(output.finish()?))
+    }
 }
 pub struct RuleInputPlanningContext<'a> {
     pub rules: &'a dyn RuleCatalog,

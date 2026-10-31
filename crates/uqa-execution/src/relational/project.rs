@@ -17,6 +17,7 @@ use crate::spill::{SpillBatchWriter, SpillDrain};
 
 pub use uqa_sql::plan::ProjectionTarget;
 
+mod production;
 #[cfg(test)]
 mod tests;
 
@@ -26,7 +27,7 @@ mod tests;
 pub struct Project<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     input_pending: crate::physical::demand::PendingRows,
-    computed: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+    computed: crate::scalar::PreparedExpressions<uqa_core::memory::Produced<Vec<ScalarExpr>>>,
     evaluator: SharedExpressionEvaluator<'a>,
     schema: RowSchema,
     ordering: Vec<crate::PhysicalOrder>,
@@ -220,7 +221,13 @@ impl<'a> Project<'a> {
         Self {
             child,
             input_pending: crate::physical::demand::PendingRows::default(),
-            computed: crate::scalar::PreparedExpressions::scalars(computed),
+            computed: crate::scalar::PreparedExpressions::produced_scalars(
+                uqa_core::memory::ProductionControl::uncontrolled()
+                    .finish(computed, None)
+                    .expect("ordinary projection expressions"),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .expect("ordinary projection call state"),
             evaluator,
             schema,
             ordering: Vec::new(),
@@ -284,7 +291,13 @@ impl<'a> Project<'a> {
         Self {
             child,
             input_pending: crate::physical::demand::PendingRows::default(),
-            computed: crate::scalar::PreparedExpressions::scalars(computed),
+            computed: crate::scalar::PreparedExpressions::produced_scalars(
+                uqa_core::memory::ProductionControl::uncontrolled()
+                    .finish(computed, None)
+                    .expect("ordinary projection expressions"),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .expect("ordinary projection call state"),
             evaluator,
             schema,
             ordering,

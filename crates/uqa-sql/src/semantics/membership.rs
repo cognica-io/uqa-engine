@@ -16,7 +16,7 @@ pub struct MembershipOperands<'a> {
     pub negated: bool,
 }
 
-/// Analyzed expressions or the borrowed values left after constant array folding.
+/// Analyzed expressions or the borrowed resident values left after constant array folding.
 #[derive(Clone, Copy)]
 pub enum MembershipItems<'a> {
     Expressions(&'a [ScalarExpr]),
@@ -82,6 +82,15 @@ pub fn membership_operands(expression: &ScalarExpr) -> Option<MembershipOperands
                     value: Value::Array(array),
                     ..
                 } if array.dimensions().len() <= 1 => MembershipItems::Constants(array.elements()),
+                ScalarExpr::RetainedLiteral(literal) => {
+                    let Some(Value::Array(array)) = literal.value.resident_value() else {
+                        return None;
+                    };
+                    if array.dimensions().len() > 1 {
+                        return None;
+                    }
+                    MembershipItems::Constants(array.elements())
+                }
                 _ => return None,
             };
             let negated = match (binding.dispatch, operator.as_str()) {
@@ -98,6 +107,9 @@ pub fn membership_operands(expression: &ScalarExpr) -> Option<MembershipOperands
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// Query-local columns participate in IN-list partitioning and window placement; an enclosing query's columns do not. A declared schema without physical scopes treats every column as local.
 pub(crate) fn references_current_row(

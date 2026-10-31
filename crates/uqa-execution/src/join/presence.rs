@@ -10,8 +10,9 @@ use crate::{
     BackwardScanSupport, Batch, ExecError, ExecResult, OwnedPhysicalRow, PhysicalOperator,
     PhysicalOrder, PhysicalRow, PhysicalScanDirection, RowSchema, RowSchemaExecution,
 };
-use uqa_core::Value;
+use uqa_core::memory::{MemoryReservation, ProductionControl};
 use uqa_sql::ast::InternalRelationId;
+use uqa_sql::SQLError;
 
 pub(crate) struct NullableRow {
     input: RowSchema,
@@ -20,18 +21,31 @@ pub(crate) struct NullableRow {
 }
 
 impl NullableRow {
+    #[cfg(test)]
     pub(crate) fn new(input: &RowSchema, nullable: bool) -> Self {
+        Self::with_control(input, nullable, &ProductionControl::uncontrolled())
+            .expect("ordinary nullable input")
+    }
+
+    pub(crate) fn with_control(
+        input: &RowSchema,
+        nullable: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
         let marked = if nullable {
-            input.with_nullable_relations(InternalRelationId::allocate().column(0))
+            input.with_nullable_relations_with_control(
+                InternalRelationId::allocate().column(0),
+                control,
+            )?
         } else {
             None
         };
-        Self {
+        Ok(Self {
             input: input.clone(),
             schema: marked.as_ref().unwrap_or(input).clone(),
-            // Every produced row shares this immutable fragment. NULL extension uses the ordinary physical NULL row of the marked width.
-            marker: marked.map(|_| PhysicalRow::from_values(vec![Value::Bool(true)])),
-        }
+            marker: marked.map(|_| PhysicalRow::present()),
+        })
     }
 
     pub(crate) fn row(&self, row: PhysicalRow) -> PhysicalRow {
@@ -67,21 +81,54 @@ impl NullableRow {
     }
 }
 
-pub(crate) fn input<'a>(
+pub(crate) fn input_with_control<'a>(
     child: Box<dyn PhysicalOperator + 'a>,
     nullable: bool,
-) -> Box<dyn PhysicalOperator + 'a> {
-    let presence = NullableRow::new(child.row_schema(), nullable);
-    if presence.marker.is_none() {
-        child
-    } else {
-        Box::new(NullableInput { child, presence })
-    }
+    control: &ProductionControl<'_>,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    crate::physical::construction::OperatorBuild::build(child, |child| {
+        let presence = NullableRow::with_control(child.row_schema(), nullable, control)?;
+        if presence.marker.is_some() {
+            let memory = control.reserve(size_of::<NullableInput<'_>>())?;
+            child.wrap(|child| {
+                Box::new(NullableInput {
+                    child,
+                    presence,
+                    _memory: memory,
+                })
+            });
+        }
+        Ok(())
+    })
+}
+
+pub(super) fn join_inputs<'a>(
+    left: &mut crate::physical::construction::OperatorBuild<'a>,
+    right: &mut crate::physical::construction::OperatorBuild<'a>,
+    kind: uqa_sql::ast::JoinKind,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    use uqa_sql::ast::JoinKind;
+    left.attach(|input| {
+        input_with_control(
+            input,
+            matches!(kind, JoinKind::Right | JoinKind::Full),
+            control,
+        )
+    })?;
+    right.attach(|input| {
+        input_with_control(
+            input,
+            matches!(kind, JoinKind::Left | JoinKind::Full),
+            control,
+        )
+    })
 }
 
 struct NullableInput<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     presence: NullableRow,
+    _memory: Option<MemoryReservation>,
 }
 
 impl PhysicalOperator for NullableInput<'_> {

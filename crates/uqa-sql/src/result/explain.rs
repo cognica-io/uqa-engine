@@ -60,6 +60,14 @@ pub struct ExplainSerializationMetrics {
 pub struct ExplainPlanningMetrics {
     pub io: uqa_core::io_usage::IOUsage,
     pub io_timing: bool,
+    pub memory: Option<ExplainPlanningMemory>,
+}
+
+/// Live exposed executable and resident constant storage before execution. Used bytes exclude unused container capacity; allocated bytes include it. Separately owned analysis/catalog and spill-file services, opaque dependency allocations and allocator bookkeeping are outside this observation. Neither quantity is a process total, execution peak or estimate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExplainPlanningMemory {
+    pub used_bytes: usize,
+    pub allocated_bytes: usize,
 }
 
 /// Physical diagnostic values keep numeric primitives inline and retain only admitted containers and copied text. Field names and fixed labels borrow static definitions.

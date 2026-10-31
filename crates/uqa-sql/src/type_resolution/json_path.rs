@@ -7,8 +7,11 @@
 //! Typed JSON path calls share ordinary routine precedence and bounded builtin matching.
 
 mod binding;
+mod owned;
 pub(super) use binding::bind_call;
 pub(crate) use binding::normalize_retained;
+pub(super) use owned::bind_owned_call;
+pub(crate) use owned::normalize_retained_owned;
 
 use super::{
     BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload, RoutineCallDescriptor,
@@ -69,19 +72,16 @@ pub(crate) fn resolve_call(
         call.explicit_variadic = true;
     }
     if let Some(resolver) = resolver {
-        assert!(
-            control.budget().is_none(),
-            "catalog callback is ordinary-only"
-        );
-        if let Some(selected) = resolver.resolve_function_overload_with_builtins(
+        if let Some(selected) = resolver.resolve_function_overload_with_builtins_and_control(
             name,
             binding,
             call.argument_names,
             call.argument_types,
             call.explicit_variadic,
             &*DECLARATIONS,
+            control,
         )? {
-            return Ok(Some(control.finish(selected, control.empty_reservation())?));
+            return Ok(Some(selected));
         }
     }
     super::resolve_local_builtin_call_with_control(name, binding, call, &*DECLARATIONS, control)

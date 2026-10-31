@@ -18,6 +18,15 @@ impl uqa_sql::semantics::volatility::VolatilityCatalog for Engine {
         self.registered_runtime_function_volatility(name)
     }
 
+    fn routine_volatility_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<FunctionVolatility>, SQLError> {
+        self.sql_routine_volatility_with_control(name, binding, control)
+    }
+
     fn routine_volatilities(
         &self,
         name: &str,

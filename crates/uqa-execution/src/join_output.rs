@@ -7,7 +7,10 @@
 //! Positional output shaping for `JOIN ... USING` and `NATURAL JOIN`.
 
 use crate::RowSchemaExecution;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
 use uqa_sql::expr::cast_value;
 
 use crate::{Batch, ColumnIdentity, ExecError, ExecResult, PhysicalOperator, RowSchema};
@@ -21,7 +24,8 @@ pub struct JoinOutput<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
     input_pending: crate::physical::demand::PendingRows,
     schema: RowSchema,
-    computed: Vec<JoinOutputSource>,
+    computed: Produced<Vec<JoinOutputSource>>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl<'a> JoinOutput<'a> {
@@ -41,16 +45,61 @@ impl<'a> JoinOutput<'a> {
         columns: Vec<(String, ColumnIdentity, JoinOutputSource)>,
         aliases: Vec<(ColumnIdentity, JoinOutputSource)>,
     ) -> ExecResult<Self> {
+        Self::with_control(
+            child,
+            &columns,
+            &aliases,
+            &ProductionControl::uncontrolled(),
+        )
+    }
+
+    pub fn with_control(
+        child: Box<dyn PhysicalOperator + 'a>,
+        columns: &[(String, ColumnIdentity, JoinOutputSource)],
+        aliases: &[(ColumnIdentity, JoinOutputSource)],
+        control: &ProductionControl<'_>,
+    ) -> ExecResult<Self> {
         let (child, (schema, computed)) =
             crate::physical::construction::OperatorBuild::run(child, |child| {
-                compile_layout(child.row_schema(), &columns, &aliases)
-                    .map_err(|error| crate::physical::physical_exec_error(error.into()))
+                uqa_sql::schema::join_output::compile_layout_with_control(
+                    child.row_schema(),
+                    columns,
+                    aliases,
+                    control,
+                )
             })?;
         Ok(Self {
             child,
             input_pending: crate::physical::demand::PendingRows::default(),
             schema,
             computed,
+            _memory: None,
+        })
+    }
+
+    pub fn into_boxed(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Box<dyn PhysicalOperator + 'a>, uqa_sql::SQLError> {
+        let Self {
+            child,
+            input_pending,
+            schema,
+            computed,
+            _memory: _,
+        } = self;
+        crate::physical::construction::OperatorBuild::build(child, |owner| {
+            let memory = control.reserve(size_of::<Self>())?;
+            owner.wrap(|child| {
+                Box::new(Self {
+                    child,
+                    input_pending,
+                    schema,
+                    computed,
+                    _memory: memory,
+                })
+            });
+            Ok(())
         })
     }
 }
@@ -235,3 +284,6 @@ mod tests {
         assert_eq!(rows[0]["id"], Value::Int(3));
     }
 }
+
+#[cfg(test)]
+mod production_tests;

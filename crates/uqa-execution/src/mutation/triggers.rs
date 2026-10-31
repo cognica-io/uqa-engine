@@ -86,6 +86,16 @@ pub fn current_transition_relations() -> BTreeMap<String, crate::SharedSpill> {
         .with(|relations| relations.borrow().last().cloned().unwrap_or_default())
 }
 
+/// Borrow the current trigger's immutable materializations while the caller captures its own bindings.
+pub fn with_current_transition_relations<T>(
+    visit: impl FnOnce(Option<&BTreeMap<String, crate::SharedSpill>>) -> T,
+) -> T {
+    ACTIVE_TRANSITION_RELATIONS.with(|relations| {
+        let relations = relations.borrow();
+        visit(relations.last())
+    })
+}
+
 pub fn current_transition_relation_names() -> BTreeSet<String> {
     ACTIVE_TRANSITION_RELATIONS.with(|relations| {
         relations
@@ -93,6 +103,22 @@ pub fn current_transition_relation_names() -> BTreeSet<String> {
             .last()
             .map(|relations| relations.keys().cloned().collect())
             .unwrap_or_default()
+    })
+}
+
+/// Capture owned transition names while the TLS map is borrowed; recursive SQL runs only after this snapshot returns.
+pub fn current_transition_relation_names_with_control(
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::binding::production::BindingNameSet> {
+    control.check()?;
+    with_current_transition_relations(|relations| {
+        let mut names = uqa_sql::binding::production::BindingNameSet::new();
+        if let Some(relations) = relations {
+            for name in relations.keys() {
+                names.insert_with_control(name, control)?;
+            }
+        }
+        Ok(names)
     })
 }
 

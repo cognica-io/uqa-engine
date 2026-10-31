@@ -15,37 +15,9 @@ use super::{
     QueryPlan, RelationalPlan, ScalarExpr, SelectStmt, SourcePlan, TableFunctionPlan, CTE,
 };
 
-impl QueryBlockPlan {
-    /// Select the computation from resolved calls before output-demand rewrites remove unobserved aggregate values.
-    pub fn compute_kind(&self, aggregates: &dyn AggregateClassifier) -> ComputePlan {
-        let contains_aggregate = |expression: &ScalarExpr| {
-            crate::semantics::aggregates::contains_aggregate(aggregates, expression)
-        };
-        let has_aggregate = !self.group_by.is_empty()
-            || !self.grouping_sets.is_empty()
-            || self.having.is_some()
-            || self
-                .projections
-                .iter()
-                .any(|projection| contains_aggregate(&projection.expr))
-            || self
-                .windows
-                .iter()
-                .flat_map(|window| window.spec.expressions())
-                .any(contains_aggregate);
-        let has_window = self
-            .projections
-            .iter()
-            .any(|projection| projection.expr.contains_window());
-        if has_aggregate {
-            ComputePlan::Aggregate
-        } else if has_window {
-            ComputePlan::Window
-        } else {
-            ComputePlan::Project
-        }
-    }
+mod computation;
 
+impl QueryBlockPlan {
     /// One scalar SELECT with no relational clauses or subplans. The caller must also reject set-returning routines using its selected catalog.
     pub fn is_single_expression(&self) -> bool {
         self.deferred_outer_rewrites.is_empty()

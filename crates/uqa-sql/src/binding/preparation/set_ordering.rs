@@ -17,7 +17,7 @@ impl Preparation<'_> {
         output: &QueryOutput,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        let schema = output.schema();
+        let schema = output.schema(&self.scope.control())?;
         let mut computed = false;
         for order in order_by {
             match &order.expr {
@@ -51,7 +51,7 @@ impl Preparation<'_> {
             }
             self.parameters
                 .collations
-                .require_key(&order.expr, value.derivation);
+                .require_key(&order.expr, value.derivation)?;
         }
         if computed {
             return Err(SQLError::Diagnostic {
@@ -66,13 +66,21 @@ impl Preparation<'_> {
 }
 
 impl QueryOutput {
-    pub(super) fn retain_set_operand_names(&mut self, query: &QueryPlan) {
+    pub(super) fn retain_set_operand_names(&mut self, query: &QueryPlan) -> Result<(), SQLError> {
         let nested = query.ctes.is_empty()
             && matches!(&query.root, RelationalPlan::SetOp { order_by, limit, offset, .. }
                 if order_by.is_empty() && limit.is_none() && offset.is_none());
         if !nested {
-            self.set_sources = vec![self.columns.clone()];
+            let control = self.control.control();
+            let mut columns = super::ownership::AnalysisVec::new(&control);
+            columns.reserve(self.columns.len(), &control)?;
+            for column in &self.columns {
+                columns.push(control.copy_text(column)?, &control)?;
+            }
+            self.set_sources.clear();
+            self.set_sources.push(columns, &control)?;
         }
+        Ok(())
     }
 
     fn set_column_error(&self, error: SQLError) -> SQLError {
@@ -83,7 +91,7 @@ impl QueryOutput {
             .set_sources
             .iter()
             .enumerate()
-            .filter(|(_, names)| names.contains(column));
+            .filter(|(_, names)| names.iter().any(|name| name.as_str() == column));
         let Some((position, _)) = matches.next() else {
             return error;
         };

@@ -130,7 +130,22 @@ pub fn alias_join_operator<'a>(
     alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
-    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+    alias_join_operator_with_control(
+        operator,
+        alias,
+        column_aliases,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(crate) fn alias_join_operator_with_control<'a>(
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
+    alias: Option<&str>,
+    column_aliases: &[String],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
+    crate::physical::construction::OperatorBuild::build(operator, |owner| {
+        control.check()?;
         let Some(alias) = alias else {
             if column_aliases.is_empty() {
                 return Ok(());
@@ -139,27 +154,9 @@ pub fn alias_join_operator<'a>(
                 "JOIN column aliases exist without a relation alias".into(),
             ));
         };
-        let columns = join_alias_columns(operator.row_schema(), alias, column_aliases)?;
-        let mapping = columns
-            .into_iter()
-            .enumerate()
-            .map(|(position, column)| {
-                (
-                    column.clone(),
-                    crate::ColumnIdentity::qualified(alias, column),
-                    position,
-                )
-            })
-            .collect();
-        operator.wrap(|input| {
-            let mut selection = crate::ColumnSelection::with_fresh_identities(input, mapping)
-                .rebinding_score_sources(alias);
-            if selection.row_schema().is_empty() {
-                selection = selection.with_relation_qualifier(alias);
-            }
-            Box::new(selection)
-        });
-        Ok(())
+        owner.attach(|input| {
+            ColumnSelection::with_join_alias_with_control(input, alias, column_aliases, control)
+        })
     })
 }
 

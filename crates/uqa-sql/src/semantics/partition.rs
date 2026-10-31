@@ -21,6 +21,17 @@ pub trait PartitionCatalog {
     fn try_table_hierarchy(&self, table: &str) -> Result<TableHierarchy, String>;
     fn direct_hierarchy_children(&self, parent: &str) -> Result<Vec<String>, SQLError>;
     fn try_resolve_table_name(&self, name: &str) -> Result<Option<String>, String>;
+    fn try_resolve_table_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
+        control.check()?;
+        self.try_resolve_table_name(name)
+            .map_err(SQLError::Internal)?
+            .map(|name| control.copy_text(&name).map_err(Into::into))
+            .transpose()
+    }
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     /// The object identity of a table, which survives renames.
     fn try_table_object_id(&self, table: &str) -> Result<Option<[u8; 16]>, String>;

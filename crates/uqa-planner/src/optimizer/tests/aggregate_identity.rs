@@ -34,7 +34,7 @@ fn recomputed_aggregate_kind_preserves_qualified_builtin_and_selected_scalar() {
     *binding = Some(selected);
     let plan = optimize(
         plan,
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
     )
     .unwrap();
     assert!(matches!(query_block(&plan).compute, ComputePlan::Project));

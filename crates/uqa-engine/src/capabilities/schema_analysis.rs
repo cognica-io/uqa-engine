@@ -75,6 +75,46 @@ impl ConstraintNameCatalog for Engine {
 }
 
 impl uqa_sql::assignment::AssignmentContext for Engine {
+    fn evaluate_domain_check_with_control(
+        &self,
+        expression: &Expr,
+        row: &dyn uqa_sql::expr::RowLookup,
+        schema: &uqa_sql::RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<uqa_core::Value>, SQLError> {
+        let scope =
+            crate::capabilities::query_scope::new_for_current_routine_with_control(self, control)?;
+        let hook = crate::capabilities::query_expressions::ScopedEngineHook::new(self, &scope);
+        uqa_execution::query::catalog_expression::evaluate_catalog_scalar_with_control(
+            uqa_sql::plan::ExpressionPlan::lower_scalar_for_rewrite(expression, control)?,
+            row,
+            schema,
+            &[],
+            &hook,
+            control,
+            |expression| {
+                uqa_planner::statement_planning::schema_expressions::optimize_owned_catalog_scalar(
+                    &self.statement_planning_context(),
+                    expression,
+                    control,
+                )
+            },
+        )
+    }
+
+    fn domain_display_name_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        let context = self.catalog_execution();
+        let ty = uqa_execution::catalog::projection::resolve_catalog_user_type_by_oid_with_control(
+            &context, oid, control,
+        )?
+        .ok_or_else(|| SQLError::Internal("domain type has no catalog display name".into()))?;
+        uqa_execution::catalog::projection::format_type_name_with_control(&context, &ty, control)
+    }
+
     fn evaluate_domain_check(
         &self,
         expression: &Expr,

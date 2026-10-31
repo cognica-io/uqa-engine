@@ -7,12 +7,15 @@
 //! Bind physical retrieval leaves to the source that receives their predicate.
 
 use super::{Collector, Scope};
-use crate::filter_pushdown::push_derived_output_filter;
+use crate::filter_pushdown::push_derived_output_filter_with_control;
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_sql::{
     ast::OperatorJoinRelations,
     plan::{source_projection::QualifierFilters, QueryPlan, SourcePlan},
-    semantics::{cte_reference_name, source_filters::qualifier_filter},
+    semantics::{
+        cte_reference_name,
+        source_filters::{qualifier_filter, qualifier_filter_with_control},
+    },
     SQLError, ScalarExpr,
 };
 
@@ -95,19 +98,20 @@ impl Collector<'_, '_, '_> {
         aliases: &[String],
         filters: Option<&QualifierFilters>,
     ) -> Result<(), SQLError> {
-        let specialized = qualifier_filter(filters, qualifier)
+        let specialized = qualifier_filter_with_control(filters, qualifier, &self.control)?
             .map(|predicate| {
-                push_derived_output_filter(
+                push_derived_output_filter_with_control(
                     self.context.filters,
                     query,
                     qualifier,
                     &predicate,
                     Some(aliases),
+                    &self.control,
                 )
             })
             .transpose()?
             .flatten();
-        self.query(specialized.as_ref().unwrap_or(query), scope, path)
+        self.query(specialized.as_deref().unwrap_or(query), scope, path)
     }
 
     fn table_source(

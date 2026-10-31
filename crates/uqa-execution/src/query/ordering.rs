@@ -138,6 +138,13 @@ pub fn resolve_order_expression(
     expression: &ScalarExpr,
     output_columns: &[OutputColumnMapping],
 ) -> Result<ScalarExpr, SQLError> {
+    resolve_order_expression_ref(expression, output_columns).cloned()
+}
+
+pub fn resolve_order_expression_ref<'a>(
+    expression: &'a ScalarExpr,
+    output_columns: &'a [OutputColumnMapping],
+) -> Result<&'a ScalarExpr, SQLError> {
     match expression {
         ScalarExpr::Literal(Value::Int(position)) => {
             let index = uqa_sql::semantics::query_output_position(
@@ -145,19 +152,19 @@ pub fn resolve_order_expression(
                 output_columns.len(),
                 "ORDER BY",
             )?;
-            Ok(output_columns[index].1.clone())
+            Ok(&output_columns[index].1)
         }
         ScalarExpr::Column(name) => {
             let mut matches = output_columns.iter().filter(|(output, _)| output == name);
             let Some((_, physical)) = matches.next() else {
-                return Ok(expression.clone());
+                return Ok(expression);
             };
             if matches.next().is_some() {
                 return Err(SQLError::AmbiguousColumn(name.to_string()));
             }
-            Ok(physical.clone())
+            Ok(physical)
         }
-        _ => Ok(expression.clone()),
+        _ => Ok(expression),
     }
 }
 

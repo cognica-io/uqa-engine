@@ -18,7 +18,7 @@ impl Binder<'_, '_> {
         expression: &ScalarExpr,
         target: &ColumnType,
     ) -> Result<Option<ScalarExpr>, SQLError> {
-        if !is_enum_bearing(target) || self.control.budget().is_some() {
+        if !is_enum_bearing(target) || self.context.control.budget().is_some() {
             return Ok(None);
         }
         let ScalarExpr::Literal(value @ (Value::Str(_) | Value::Null)) = expression else {
@@ -49,7 +49,7 @@ impl Binder<'_, '_> {
         ty: &str,
     ) -> Result<Option<ScalarExpr>, SQLError> {
         if !matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
-            || self.control.budget().is_some()
+            || self.context.control.budget().is_some()
         {
             return Ok(None);
         }
@@ -91,7 +91,7 @@ impl Binder<'_, '_> {
         let Some(constant) = self.fold_enum_literal(expression, &base)? else {
             return Ok(None);
         };
-        let ty = self.control.copy_text(ty)?;
+        let ty = self.context.control.copy_text(ty)?;
         self.cast(constant, ty).map(Some)
     }
 
@@ -101,7 +101,7 @@ impl Binder<'_, '_> {
         expression: &mut ScalarExpr,
         ty: &str,
     ) -> Result<(), SQLError> {
-        if !matches!(expression, ScalarExpr::Array(_)) || self.control.budget().is_some() {
+        if !matches!(expression, ScalarExpr::Array(_)) || self.context.control.budget().is_some() {
             return Ok(());
         }
         let Some(target) = self.user_cast_target(ty)? else {
@@ -169,7 +169,7 @@ impl Binder<'_, '_> {
                 operation,
                 type_oid: reference.oid,
             },
-            &self.control,
+            &self.context.control,
         )?;
         let binding = self.retain(binding);
         FunctionBinding::rebind(&mut call.binding, binding);

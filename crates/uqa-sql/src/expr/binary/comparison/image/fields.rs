@@ -71,11 +71,9 @@ pub(super) fn with_type<T>(
         return use_type(ty);
     }
     let selected = catalog
-        .map(|catalog| catalog.value_type_by_oid(oid))
+        .map(|catalog| catalog.value_type_by_oid_with_control(oid, control))
         .transpose()?
-        .flatten()
-        .map(|ty| ty.retain_external_with_control(control))
-        .transpose()?;
+        .flatten();
     let ty = selected.as_deref().ok_or_else(|| SQLError::Routine {
         sqlstate: "42704".into(),
         message: format!("type with OID {oid} does not exist"),

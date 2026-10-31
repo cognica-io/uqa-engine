@@ -92,8 +92,8 @@ pub mod type_resolution;
 pub mod window;
 
 pub use batch::{
-    Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowLockOrigin,
-    RowProjectionValue, RowSchema, RowSchemaExecution, DEFAULT_BATCH_SIZE,
+    Batch, ColumnIdentity, OwnedPhysicalRow, PhysicalRow, PhysicalRowView, RowLockName,
+    RowLockOrigin, RowProjectionValue, RowSchema, RowSchemaExecution, DEFAULT_BATCH_SIZE,
 };
 pub use column_selection::ColumnSelection;
 pub use columnar_batch::{ColumnVector, ColumnarBatch};

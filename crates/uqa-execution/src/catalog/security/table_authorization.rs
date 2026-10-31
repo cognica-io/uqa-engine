@@ -5,6 +5,8 @@
 //
 
 //! Authorize access through retained table generations and read-only catalog guards.
+mod production;
+
 use super::table_inquiry::{TablePrivilegeRegistry, TablePrivilegeState};
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
@@ -18,7 +20,6 @@ use uqa_sql::{
             table::{role_has_privilege, TableAclPrivilege, TablePrivilegeCheck},
             BoundTableSecurity,
         },
-        stored_view::StoredView,
     },
     SQLError,
 };
@@ -87,12 +88,12 @@ impl TableAuthorizationContext<'_> {
     /// The columns of a view that the description of a row its `INSTEAD OF` trigger stores shows, which `ExecBuildSlotValueDescription` decides for the view as it does for a table: `None` when the current role may read the view, otherwise, in view order, each column the role may read or the statement supplies.
     pub fn view_row_description_columns(
         &self,
-        view: &StoredView,
+        security: &uqa_sql::catalog::security::table_binding::CapturedTablePrivileges,
         columns: &[String],
         supplied: &[String],
     ) -> Result<Option<Vec<String>>, SQLError> {
-        self.visible_row_columns(
-            &view.security(),
+        self.visible_row_columns_with(
+            |roles| security.resolve(roles),
             &self.names.current_role(),
             columns.to_vec(),
             supplied,
@@ -106,9 +107,21 @@ impl TableAuthorizationContext<'_> {
         columns: Vec<String>,
         supplied: &[String],
     ) -> Result<Option<Vec<String>>, SQLError> {
+        self.visible_row_columns_with(|roles| security.resolve(roles), subject, columns, supplied)
+    }
+
+    fn visible_row_columns_with(
+        &self,
+        resolve: impl FnOnce(
+            &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+        ) -> Result<uqa_sql::catalog::security::TableSecurity, String>,
+        subject: &dyn RoleSubject,
+        columns: Vec<String>,
+        supplied: &[String],
+    ) -> Result<Option<Vec<String>>, SQLError> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
-        let security = security.resolve(&roles).map_err(SQLError::Internal)?;
+        let security = resolve(&roles).map_err(SQLError::Internal)?;
         let check = TablePrivilegeCheck {
             privilege: TableAclPrivilege::Select,
             grant_option: false,
@@ -186,27 +199,12 @@ impl TableAuthorizationContext<'_> {
         subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let (relation, table) = self.bound_table_for_security(name)?;
-        let bound = table.security();
-        let roles = self.roles.role_definitions();
-        let memberships = self.roles.role_memberships();
-        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
-        if role_has_privilege(
-            &security,
+        self.ensure_table_privilege_for_with_control(
+            name,
             subject,
-            TablePrivilegeCheck {
-                privilege,
-                grant_option: false,
-            },
-            &roles,
-            &memberships,
-        ) {
-            return Ok(());
-        }
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!("permission denied for table {}", relation.name),
-        })
+            privilege,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
     pub fn bound_table_column_names(&self, name: &str) -> Result<Vec<String>, SQLError> {
         let (_, table) = self.bound_table_for_security(name)?;
@@ -233,28 +231,13 @@ impl TableAuthorizationContext<'_> {
         subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let (relation, table) = self.bound_table_for_security(name)?;
-        let bound = table.security();
-        let roles = self.roles.role_definitions();
-        let memberships = self.roles.role_memberships();
-        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
-        if column_privilege_check(
-            &security,
+        self.ensure_column_privilege_for_with_control(
+            name,
             column,
             subject,
-            TablePrivilegeCheck {
-                privilege,
-                grant_option: false,
-            },
-            &roles,
-            &memberships,
-        ) {
-            return Ok(());
-        }
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!("permission denied for table {}", relation.name),
-        })
+            privilege,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
     pub fn ensure_any_column_privilege(
         &self,
@@ -270,33 +253,12 @@ impl TableAuthorizationContext<'_> {
         subject: &(impl RoleSubject + ?Sized),
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
-        let (relation, table) = self.bound_table_for_security(name)?;
-        let bound = table.security();
-        let roles = self.roles.role_definitions();
-        let memberships = self.roles.role_memberships();
-        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
-        let table_check = TablePrivilegeCheck {
+        self.ensure_any_column_privilege_for_with_control(
+            name,
+            subject,
             privilege,
-            grant_option: false,
-        };
-        if role_has_privilege(&security, subject, table_check, &roles, &memberships)
-            || table.columns().iter().any(|column| {
-                column_privilege_check(
-                    &security,
-                    &column.name,
-                    subject,
-                    table_check,
-                    &roles,
-                    &memberships,
-                )
-            })
-        {
-            return Ok(());
-        }
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!("permission denied for table {}", relation.name),
-        })
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
     pub fn ensure_table_owner(&self, name: &str) -> Result<String, SQLError> {
         let (relation, table) = self.bound_table_for_security(name)?;

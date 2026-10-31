@@ -4,23 +4,27 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! View mutation target identity, declared columns, and rewrite-rule input analysis.
-use super::{
-    rules::analysis::RuleAnalysisContext,
-    view_rewrite::context::{stored_view_schema, ViewRewriteContext},
-};
+//! View mutation target identity, declared columns, assignment and MERGE validation.
+use super::view_rewrite::context::ViewRewriteContext;
 use crate::{
-    catalog::stored_view::StoredView,
-    plan::{DeletePlan, MergePlan, MergeWhenPlan, UpdatePlan},
+    plan::{MergePlan, MergeWhenPlan},
     SQLError, ScalarExpr,
 };
-use std::collections::BTreeSet;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
 
+mod production;
+
+/// A captured mutation target retains only the definition used to read rows and its public identity.
+#[derive(Debug)]
 pub struct ViewMutationTarget {
     pub schema: crate::RowSchema,
     pub canonical_name: String,
-    pub definition: StoredView,
+    pub query: crate::plan::QueryPlan,
+    pub security: Produced<crate::catalog::security::table_binding::CapturedTablePrivileges>,
+    pub security_invoker: bool,
     pub columns: Vec<String>,
 }
 
@@ -28,98 +32,19 @@ pub fn resolve_view_target(
     context: ViewRewriteContext<'_>,
     name: &str,
 ) -> Result<ViewMutationTarget, SQLError> {
-    let canonical_name = context
-        .catalog
-        .try_resolve_view_name(name)
-        .map_err(|error| SQLError::Internal(format!("resolve DML view `{name}`: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-    let definition = context
-        .authorization
-        .view_definition(&canonical_name)?
-        .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-    if definition.kind != crate::catalog::view::StoredViewKind::View {
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("relation \"{canonical_name}\" is not a view"),
-        });
-    }
-    let schema = stored_view_schema(context, &definition.rewrite_definition())?;
-    let columns = schema
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(position, column)| schema.public_name(position).unwrap_or(column).to_string())
-        .collect::<Vec<_>>();
-    Ok(ViewMutationTarget {
-        schema,
-        canonical_name,
-        definition,
-        columns,
-    })
+    Ok(
+        resolve_view_target_with_control(context, name, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary view mutation target"),
+    )
 }
 
-fn collect_view_expression_columns(
-    expression: &ScalarExpr,
-    columns: &mut BTreeSet<String>,
-) -> bool {
-    expression.collect_columns(columns)
-}
-
-pub fn required_view_update_columns(
-    analysis: RuleAnalysisContext<'_>,
-    target: &ViewMutationTarget,
-    stmt: &UpdatePlan,
-) -> Result<Option<BTreeSet<String>>, SQLError> {
-    let Some(mut columns) = super::rules::analysis::relation_rule_row_columns(
-        analysis,
-        &target.canonical_name,
-        crate::ast::RuleEvent::Update,
-    )?
-    else {
-        return Ok(None);
-    };
-    columns.extend(
-        stmt.assignments
-            .iter()
-            .flat_map(|assignment| assignment.target.column_names())
-            .map(str::to_owned),
-    );
-    for expression in stmt
-        .assignments
-        .iter()
-        .flat_map(crate::plan::AssignmentPlan::expressions)
-    {
-        if !collect_view_expression_columns(expression, &mut columns) {
-            return Ok(None);
-        }
-    }
-    if let Some(predicate) = stmt.predicate.as_ref() {
-        if !collect_view_expression_columns(predicate, &mut columns) {
-            return Ok(None);
-        }
-    }
-    Ok(Some(columns))
-}
-
-pub fn required_view_delete_columns(
-    analysis: RuleAnalysisContext<'_>,
-    target: &ViewMutationTarget,
-    stmt: &DeletePlan,
-) -> Result<Option<BTreeSet<String>>, SQLError> {
-    let Some(mut columns) = super::rules::analysis::relation_rule_row_columns(
-        analysis,
-        &target.canonical_name,
-        crate::ast::RuleEvent::Delete,
-    )?
-    else {
-        return Ok(None);
-    };
-    if let Some(predicate) = stmt.predicate.as_ref() {
-        if !collect_view_expression_columns(predicate, &mut columns) {
-            return Ok(None);
-        }
-    }
-    Ok(Some(columns))
+pub fn resolve_view_target_with_control(
+    context: ViewRewriteContext<'_>,
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ViewMutationTarget>, SQLError> {
+    production::resolve(context, name, control)
 }
 
 pub fn target_columns(
@@ -147,31 +72,6 @@ pub fn target_columns(
         )));
     }
     Ok(columns)
-}
-
-pub fn view_qualification_references_target(
-    target: &ViewMutationTarget,
-    target_qualifier: &str,
-    predicate: Option<&ScalarExpr>,
-) -> bool {
-    let Some(predicate) = predicate else {
-        return false;
-    };
-    if super::expr_contains_subquery(predicate) {
-        return true;
-    }
-    if super::expr_qualifiers(predicate).iter().any(|qualifier| {
-        qualifier.eq_ignore_ascii_case(target_qualifier)
-            || qualifier.eq_ignore_ascii_case(&target.canonical_name)
-    }) {
-        return true;
-    }
-    if !super::expr_has_unqualified_column(predicate) {
-        return false;
-    }
-    let mut columns = BTreeSet::new();
-    !predicate.collect_columns(&mut columns)
-        || columns.iter().any(|column| target.columns.contains(column))
 }
 
 pub fn coerce_view_value(

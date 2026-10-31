@@ -61,10 +61,12 @@ pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
             dependencies: None,
             catalog_oid: Some(80_000 + i64::try_from(position).unwrap()),
         };
-        Arc::make_mut(&mut snapshot.definitions.rules)
-            .entry(relation.clone())
-            .or_default()
-            .insert(rule.definition.name.clone(), rule);
+        Arc::make_mut(
+            Arc::make_mut(&mut snapshot.definitions.rules)
+                .entry(relation.clone())
+                .or_default(),
+        )
+        .insert(rule.definition.name.clone(), rule);
         Arc::make_mut(&mut snapshot.definitions.views).insert(
             RelationIdentity::new("public", format!("view_{position:03}")),
             view(position),

@@ -23,9 +23,11 @@ fn retained_event_addresses_survive_rename_and_removal() {
     let mut trigger = triggers.remove("watch_000").unwrap();
     trigger.definition.name = "renamed_trigger".into();
     triggers.insert(trigger.definition.name.clone(), trigger);
-    let rules = Arc::make_mut(&mut snapshot.definitions.rules)
-        .get_mut(&relation)
-        .unwrap();
+    let rules = Arc::make_mut(
+        Arc::make_mut(&mut snapshot.definitions.rules)
+            .get_mut(&relation)
+            .unwrap(),
+    );
     let mut rule = rules.remove("rule_000").unwrap();
     rule.definition.name = "renamed_rule".into();
     rules.insert(rule.definition.name.clone(), rule);

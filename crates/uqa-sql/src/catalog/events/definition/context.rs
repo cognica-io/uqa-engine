@@ -37,9 +37,31 @@ pub trait EventRelationCatalog {
     ) -> Result<(crate::catalog::roles::RoleIdentity, &'static str), SQLError>;
     fn view_kind(&self, relation: &RelationIdentity) -> Option<StoredViewKind>;
     fn view(&self, relation: &RelationIdentity) -> Option<StoredView>;
+    /// Read the current restored definition, without search-path resolution or another catalog refresh.
+    fn with_view_with_control(
+        &self,
+        relation: &RelationIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&StoredView) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let Some(view) = self.view(relation) else {
+            return Ok(false);
+        };
+        read(&view)?;
+        Ok(true)
+    }
     fn foreign_columns(&self, relation: &RelationIdentity) -> Option<Vec<ColumnDef>>;
     fn restored_catalog_view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
     fn stored_view_schema(&self, view: &StoredView) -> Result<RowSchema, SQLError>;
+    fn stored_view_schema_with_control(
+        &self,
+        view: &StoredView,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        control.check()?;
+        self.stored_view_schema(view)
+    }
     fn loaded_table_hierarchy(&self, relation: &RelationIdentity) -> Option<TableHierarchy>;
 }
 /// Foreign-table authorization retains its own role and security read guards.

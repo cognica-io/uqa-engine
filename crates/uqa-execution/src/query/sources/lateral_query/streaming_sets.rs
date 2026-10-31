@@ -52,7 +52,9 @@ pub(super) fn try_stream_union<S: Clone + Send + Sync + 'static>(
         Some(&outer.schema),
     )?;
     let (offset, limit) = {
-        let scope = ctes.enter_scalar_subqueries(subqueries);
+        let arena_resources = context.ctes.production_resources()?;
+        let scope =
+            ctes.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
         let resolve = |expression, name| {
             crate::query::relational::row_count::resolve_limit_offset_with_ctes(
                 expression,

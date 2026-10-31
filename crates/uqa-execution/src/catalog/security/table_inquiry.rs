@@ -43,6 +43,26 @@ pub trait TablePrivilegeState {
     fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity;
     fn columns(&self) -> TableColumnsRead<'_>;
     fn security(&self) -> BoundTableSecurity;
+    /// Native tables retain their immutable authority generation without copying its ACL payloads.
+    fn security_snapshot_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Arc<BoundTableSecurity>>, SQLError> {
+        control.check()?;
+        let security = self.security();
+        let memory = control.reserve(size_of::<BoundTableSecurity>())?;
+        Ok(control.finish(Arc::new(security), memory)?)
+    }
+    /// Keep the selected table's declaration guard only while the consumer observes its columns.
+    fn with_columns_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[uqa_sql::ast::ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        read(&self.columns())?;
+        Ok(control.check()?)
+    }
     fn column_names(&self) -> Vec<String>;
 }
 /// Borrowed lookups hold the registry guard; retained lookups keep the selected table generation after releasing it.
@@ -65,6 +85,15 @@ pub trait TablePrivilegeRegistry:
 {
     fn refresh_tables(&self) -> StorageBackendResult<()>;
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
+    /// Release the registry before observing a selected table's immutable authority and column declarations.
+    fn retained_table_with_control(
+        &self,
+        relation: &RelationIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Arc<dyn TablePrivilegeState>>, SQLError> {
+        control.check()?;
+        Ok(self.tables().retained(relation))
+    }
     fn tables(&self) -> Box<dyn TablePrivilegeRead + '_>;
     fn views(&self) -> PrivilegeViewsRead<'_>;
     fn foreign_tables(&self) -> PrivilegeForeignTablesRead<'_>;

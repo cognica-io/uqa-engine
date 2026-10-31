@@ -88,7 +88,7 @@ fn session_utilities_read_only_their_existing_descriptors() {
         assert!(definition.effective_search_path.is_none());
         assert!(definition.dependency_snapshot.is_none());
         assert_eq!(
-            definition.dependencies,
+            *definition.dependencies,
             PreparedAnalysisDependencies::default()
         );
     }
@@ -114,7 +114,7 @@ fn utility_errors_and_explicit_parameters_do_not_capture_binding_scopes() {
         &[ColumnType::Integer],
     )
     .unwrap();
-    assert_eq!(definition.parameter_types, vec![Some(ColumnType::Integer)]);
+    assert_eq!(*definition.parameter_types, vec![Some(ColumnType::Integer)]);
     let error = analyze_definition(
         &context,
         UnifiedPlan::lower(crate::compile("SHOW missing_setting").unwrap().remove(0)),

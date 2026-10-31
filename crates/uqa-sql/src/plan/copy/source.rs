@@ -9,11 +9,34 @@ use crate::ast::{FunctionBinding, OperatorJoinRelations};
 use crate::plan::{SourcePlan, TableFunctionPlan};
 
 impl Copying<'_> {
+    pub(in crate::plan) fn function_group_member(
+        &mut self,
+        function: &TableFunctionPlan,
+        alias: Option<&str>,
+    ) -> Result<SourcePlan> {
+        let function = self.table_function(function)?;
+        Ok(SourcePlan::Function {
+            name: function.name,
+            binding: function.binding,
+            output_name: function.output_name,
+            relations: function.relations,
+            args: function.args,
+            alias: self.optional_text(alias)?,
+            column_aliases: function.column_aliases,
+            column_types: function.column_types,
+            ordinality: false,
+        })
+    }
+
+    pub(super) fn source(&mut self, source: &SourcePlan) -> Result<SourcePlan> {
+        self.field("source", |copying| copying.source_fields(source))
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "exhaustive source copying admits every destination field"
     )]
-    pub(super) fn source(&mut self, source: &SourcePlan) -> Result<SourcePlan> {
+    pub(in crate::plan) fn source_fields(&mut self, source: &SourcePlan) -> Result<SourcePlan> {
         self.check()?;
         Ok(match source {
             SourcePlan::RetainedRows(rows) => SourcePlan::RetainedRows(rows.clone()),
@@ -26,12 +49,14 @@ impl Copying<'_> {
                 bound_columns,
                 include_descendants,
             } => SourcePlan::Table {
-                name: self.text(name)?,
-                executable_query: executable_query
-                    .as_ref()
-                    .map(|query| self.boxed(|copying| copying.query(query)))
-                    .transpose()?,
-                qualifier: self.text(qualifier)?,
+                name: self.field("name", |copying| copying.text(name))?,
+                executable_query: self.field("executable_query", |copying| {
+                    executable_query
+                        .as_ref()
+                        .map(|query| copying.boxed(|copying| copying.query(query)))
+                        .transpose()
+                })?,
+                qualifier: self.field("qualifier", |copying| copying.text(qualifier))?,
                 alias: self.optional_text(alias.as_deref())?,
                 column_aliases: self.texts(column_aliases)?,
                 bound_columns: bound_columns
@@ -54,10 +79,14 @@ impl Copying<'_> {
                 strategy,
             } => SourcePlan::Join {
                 comma: *comma,
-                left: self.boxed(|copying| copying.source(left))?,
-                right: self.boxed(|copying| copying.source(right))?,
+                left: self.field("left", |copying| {
+                    copying.boxed(|copying| copying.source(left))
+                })?,
+                right: self.field("right", |copying| {
+                    copying.boxed(|copying| copying.source(right))
+                })?,
                 kind: *kind,
-                on: self.optional_scalar(on.as_ref())?,
+                on: self.field("on", |copying| copying.optional_scalar(on.as_ref()))?,
                 using: using
                     .as_ref()
                     .map(|using| {
@@ -83,7 +112,7 @@ impl Copying<'_> {
                 internal_column_collations,
             } => SourcePlan::Values {
                 lateral: *lateral,
-                rows: self.rows(rows)?,
+                rows: self.field("rows", |copying| copying.rows(rows))?,
                 alias: self.optional_text(alias.as_deref())?,
                 column_aliases: self.texts(column_aliases)?,
                 internal_relation: *internal_relation,
@@ -107,10 +136,14 @@ impl Copying<'_> {
                 column_types,
             } => SourcePlan::Function {
                 name: self.text(name)?,
-                binding: self.function_binding(binding.as_ref())?,
-                output_name: self.text(output_name)?,
-                relations: self.join_relations(relations.as_ref())?,
-                args: self.map(args.iter(), Self::scalar)?,
+                binding: self.field("binding", |copying| {
+                    copying.function_binding(binding.as_ref())
+                })?,
+                output_name: self.field("output_name", |copying| copying.text(output_name))?,
+                relations: self.field("relations", |copying| {
+                    copying.join_relations(relations.as_ref())
+                })?,
+                args: self.field("args", |copying| copying.map(args.iter(), Self::scalar))?,
                 alias: self.optional_text(alias.as_deref())?,
                 column_aliases: self.texts(column_aliases)?,
                 ordinality: *ordinality,
@@ -122,7 +155,9 @@ impl Copying<'_> {
                 column_aliases,
                 ordinality,
             } => SourcePlan::FunctionGroup {
-                functions: self.map(functions.iter(), Self::table_function)?,
+                functions: self.field("functions", |copying| {
+                    copying.map(functions.iter(), Self::table_function)
+                })?,
                 alias: self.optional_text(alias.as_deref())?,
                 column_aliases: self.texts(column_aliases)?,
                 ordinality: *ordinality,
@@ -136,7 +171,9 @@ impl Copying<'_> {
             } => SourcePlan::Subquery {
                 captured_output: *captured_output,
                 lateral: *lateral,
-                body: self.boxed(|copying| copying.query(body))?,
+                body: self.field("body", |copying| {
+                    copying.boxed(|copying| copying.query(body))
+                })?,
                 alias: self.optional_text(alias.as_deref())?,
                 column_aliases: self.texts(column_aliases)?,
             },
@@ -172,10 +209,17 @@ impl Copying<'_> {
     fn table_function(&mut self, function: &TableFunctionPlan) -> Result<TableFunctionPlan> {
         Ok(TableFunctionPlan {
             name: self.text(&function.name)?,
-            binding: self.function_binding(function.binding.as_ref())?,
-            output_name: self.text(&function.output_name)?,
-            relations: self.join_relations(function.relations.as_ref())?,
-            args: self.map(function.args.iter(), Self::scalar)?,
+            binding: self.field("binding", |copying| {
+                copying.function_binding(function.binding.as_ref())
+            })?,
+            output_name: self
+                .field("output_name", |copying| copying.text(&function.output_name))?,
+            relations: self.field("relations", |copying| {
+                copying.join_relations(function.relations.as_ref())
+            })?,
+            args: self.field("args", |copying| {
+                copying.map(function.args.iter(), Self::scalar)
+            })?,
             column_aliases: self.texts(&function.column_aliases)?,
             column_types: self.texts(&function.column_types)?,
         })

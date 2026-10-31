@@ -165,6 +165,15 @@ impl Engine {
     }
 }
 impl uqa_sql::schema::sequences::implicit_ownership::StoredSequenceNames for Engine {
+    fn stored_sequence_name_with_control(
+        &self,
+        reference: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        uqa_sql::schema::sequences::names::resolve_stored_sequence_reference_with_control(
+            self, reference, control,
+        )
+    }
     fn stored_sequence_name(&self, reference: &str) -> Result<String, String> {
         self.resolve_stored_sequence_reference_from_loaded_registry(reference)
             .map_err(|error| error.to_string())
@@ -205,6 +214,18 @@ impl uqa_sql::schema::sequences::lifecycle::SequenceLifecycleCatalog for Engine 
     }
 }
 impl uqa_sql::schema::sequences::names::StoredSequenceRegistry for Engine {
+    fn visit_sequence_names_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        visit: &mut dyn FnMut(&RelationIdentity) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        for name in self.durable.sequences.read().keys() {
+            control.check()?;
+            visit(name)?;
+        }
+        Ok(())
+    }
     fn contains_sequence(&self, relation: &RelationIdentity) -> bool {
         self.durable.sequences.read().contains_key(relation)
     }

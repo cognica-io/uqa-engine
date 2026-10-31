@@ -18,7 +18,7 @@ fn expression(sql: &str) -> ScalarExpr {
 fn strict_arithmetic_null_preserves_postgresql_result_types_without_effects() {
     let reference: serde_json::Value =
         serde_json::from_str(include_str!("pg18_strict_null.json")).unwrap();
-    let config = crate::optimizer::OptimizerConfig::new(|_| {
+    let config = crate::optimizer::OptimizerConfig::new(|_, _, _| {
         panic!("strict NULL arithmetic evaluated a volatile operand")
     });
     let mut checked = 0;
@@ -52,8 +52,9 @@ fn strict_arithmetic_null_preserves_postgresql_result_types_without_effects() {
 #[test]
 fn strict_arithmetic_null_keeps_postgresql_child_constant_error_order() {
     let mut expression = expression("SELECT NULL::integer + (1 / 0)");
-    let config =
-        crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let config = crate::optimizer::OptimizerConfig::new(
+        uqa_execution::scalar::eval_constant_scalar_with_control,
+    );
     let error =
         crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config).unwrap_err();
     assert_eq!(error.sqlstate(), Some("22012"));
@@ -65,7 +66,7 @@ fn strict_arithmetic_does_not_eliminate_unresolved_parameter_effects() {
     let expression = expression("SELECT $1 + nextval('seq')::integer");
     let original = expression.clone();
     let mut optimized = expression;
-    let config = crate::optimizer::OptimizerConfig::new(|_| panic!("runtime argument"));
+    let config = crate::optimizer::OptimizerConfig::new(|_, _, _| panic!("runtime argument"));
     crate::optimizer::scalar::optimize_scalar_slot(&mut optimized, &config).unwrap();
     assert_eq!(optimized, original);
 }
@@ -80,7 +81,7 @@ fn strict_arithmetic_null_uses_the_analyzed_result_after_losing_row_types() {
         }))
         .unwrap(),
     };
-    let config = crate::optimizer::OptimizerConfig::new(|_| panic!("discarded row access"));
+    let config = crate::optimizer::OptimizerConfig::new(|_, _, _| panic!("discarded row access"));
     crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config).unwrap();
     assert_eq!(
         literal_value(&expression).unwrap().as_deref(),
@@ -95,7 +96,7 @@ fn strict_arithmetic_null_uses_the_analyzed_result_after_losing_row_types() {
 #[test]
 fn strict_arithmetic_does_not_guess_a_result_for_an_unanalyzed_row() {
     let mut expression = expression("SELECT NULL::pg_catalog.interval + d");
-    let config = crate::optimizer::OptimizerConfig::new(|_| panic!("unknown row type"));
+    let config = crate::optimizer::OptimizerConfig::new(|_, _, _| panic!("unknown row type"));
     crate::optimizer::scalar::optimize_scalar_slot(&mut expression, &config).unwrap();
     assert!(matches!(
         expression,

@@ -7,10 +7,13 @@
 //! Table and column ACLs retain role incarnations independently of display names.
 
 use super::{role_bindings, TableAclEntry, TablePrivileges, TableSecurity};
-use crate::catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity, RoleReference};
+use crate::catalog::roles::{RoleDefinition, RoleIdentity, RoleReference};
 use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_role::BoundAclEntry;
+
+mod production;
+pub use production::CapturedTablePrivileges;
 
 pub type BoundTableAclEntry = BoundAclEntry<TablePrivileges>;
 
@@ -68,11 +71,11 @@ impl BoundTableSecurity {
         &self,
         roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<RoleReference, crate::SQLError> {
-        let name = role_bindings::role_name(roles, self.role_owner, "table")
-            .map_err(crate::SQLError::Internal)?;
-        Ok(RoleReference::Bound(std::sync::Arc::new(
-            RoleBinding::from_definition(&roles[name])?,
-        )))
+        owner_reference_with_control(
+            self.role_owner,
+            roles,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
 
     pub fn bind(
@@ -110,33 +113,12 @@ impl BoundTableSecurity {
         &self,
         roles: &BTreeMap<String, RoleDefinition>,
     ) -> Result<TableSecurity, String> {
-        let name = |identity| role_bindings::role_name(roles, identity, "table").map(str::to_owned);
-        let entries = |entries: &[BoundTableAclEntry]| {
-            entries
-                .iter()
-                .map(|entry| {
-                    Ok(TableAclEntry {
-                        role: entry
-                            .role
-                            .map(name)
-                            .transpose()?
-                            .map_or(AclGrantee::Public, AclGrantee::Role),
-                        grantor: Some(name(entry.grantor)?),
-                        privileges: entry.privileges,
-                        grant_options: entry.grant_options,
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()
-        };
-        Ok(TableSecurity {
-            role_owner: name(self.role_owner)?,
-            acl: self.acl.as_deref().map(entries).transpose()?,
-            column_acls: self
-                .column_acls
-                .iter()
-                .map(|(column, acl)| Ok((column.clone(), entries(acl)?)))
-                .collect::<Result<_, String>>()?,
-        })
+        resolve_privileges(
+            self.role_owner,
+            self.acl.as_deref(),
+            self.column_acls.iter(),
+            roles,
+        )
     }
 
     pub fn validate(
@@ -167,3 +149,46 @@ impl BoundTableSecurity {
 
 #[cfg(test)]
 mod tests;
+
+/// Resolve a captured owner incarnation against the selected catalog, retaining its admitted name.
+pub fn owner_reference_with_control(
+    owner: RoleIdentity,
+    roles: &BTreeMap<String, RoleDefinition>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<RoleReference, crate::SQLError> {
+    let role = role_bindings::role_definition_with_control(roles, owner, "table", control)?;
+    RoleReference::from_definition_with_control(role, control)
+}
+
+fn resolve_privileges<'a>(
+    owner: RoleIdentity,
+    acl: Option<&[BoundTableAclEntry]>,
+    columns: impl Iterator<Item = (&'a String, &'a Vec<BoundTableAclEntry>)>,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<TableSecurity, String> {
+    let name = |identity| role_bindings::role_name(roles, identity, "table").map(str::to_owned);
+    let entries = |entries: &[BoundTableAclEntry]| {
+        entries
+            .iter()
+            .map(|entry| {
+                Ok(TableAclEntry {
+                    role: entry
+                        .role
+                        .map(name)
+                        .transpose()?
+                        .map_or(AclGrantee::Public, AclGrantee::Role),
+                    grantor: Some(name(entry.grantor)?),
+                    privileges: entry.privileges,
+                    grant_options: entry.grant_options,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
+    };
+    Ok(TableSecurity {
+        role_owner: name(owner)?,
+        acl: acl.map(entries).transpose()?,
+        column_acls: columns
+            .map(|(column, acl)| Ok((column.clone(), entries(acl)?)))
+            .collect::<Result<_, String>>()?,
+    })
+}

@@ -96,14 +96,13 @@ fn read_array(
         element
     } else {
         resolved = catalog
-            .map(|catalog| catalog.value_type_by_oid(oid))
+            .map(|catalog| catalog.value_type_by_oid_with_control(oid, control))
             .transpose()?
             .flatten()
             .ok_or_else(|| SQLError::Routine {
                 sqlstate: "XX000".into(),
                 message: format!("cache lookup failed for type {oid}"),
-            })?
-            .retain_external_with_control(control)?;
+            })?;
         &resolved
     };
     let mut bounds = ProductionVec::new(*control);

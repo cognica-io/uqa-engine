@@ -70,7 +70,7 @@ pub fn run_single_foreign_select_output<'a, S: Clone + Send + Sync + 'static>(
     execute_query_block_operator_output(
         context.relational,
         source,
-        stmt.r#where.clone(),
+        stmt.r#where.as_ref(),
         stmt,
         block,
         params,

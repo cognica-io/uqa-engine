@@ -7,7 +7,9 @@
 use super::*;
 use std::sync::Arc;
 use uqa_core::Value;
-use uqa_sql::{ast::InternalRelationId, ColumnType, ScalarExpr};
+use uqa_sql::{ast::InternalRelationId, ColumnType, RowSchema, ScalarExpr};
+mod control;
+mod joins;
 
 fn query(sql: &str) -> Box<QueryPlan> {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
@@ -25,12 +27,14 @@ fn hidden_captured_outputs_follow_physical_demand() {
     assert_eq!(schema.len(), 0);
     assert_eq!(schema.physical_width(), 2);
     let mut plan = query("SELECT 7, 1/0");
-    let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     let context = Context {
         config: &config,
         aggregates: &|_: &str| false,
-        ctes: Vec::new(),
+        ctes: None,
     };
+    let mut demand = Demand::new(config.production);
+    demand.extend([0]).unwrap();
     context
         .outputs(
             &mut plan,
@@ -38,7 +42,7 @@ fn hidden_captured_outputs_follow_physical_demand() {
                 schema,
                 children: None,
             },
-            &Demand::from([0]),
+            &demand,
             Some(relation),
         )
         .unwrap();
@@ -95,23 +99,26 @@ fn join_lateral_scope_preserves_captured_input_used_only_by_its_right_child() {
         panic!("right block")
     };
     right.projections[0].expr = ScalarExpr::InternalColumn(relation.column(0));
-    plan.analyzed_source = Some(Arc::new(AnalyzedSource {
-        schema: RowSchema::join(&left_schema, &right_schema, std::iter::empty()),
-        children: Some(Box::new((
-            AnalyzedSource {
-                schema: left_schema,
-                children: None,
-            },
-            AnalyzedSource {
-                schema: right_schema,
-                children: None,
-            },
-        ))),
-    }));
+    plan.analyzed_source = Some(
+        Arc::new(AnalyzedSource {
+            schema: RowSchema::join(&left_schema, &right_schema, std::iter::empty()),
+            children: Some(Box::new((
+                AnalyzedSource {
+                    schema: left_schema,
+                    children: None,
+                },
+                AnalyzedSource {
+                    schema: right_schema,
+                    children: None,
+                },
+            ))),
+        })
+        .into(),
+    );
     let mut plan = UnifiedPlan::Query(plan);
     prune(
         &mut plan,
-        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         &|_: &str| false,
     )
     .unwrap();

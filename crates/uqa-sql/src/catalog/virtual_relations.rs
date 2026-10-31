@@ -96,8 +96,12 @@ impl VirtualRelation {
     }
 
     pub fn from_qualified_name(name: &str) -> Option<Self> {
-        let (schema, local) = uqa_core::RelationIdentity::parse_reference(name).ok()?;
-        Self::at(schema.as_deref()?, &local)
+        let reference = uqa_core::RelationIdentity::borrowed_reference(name)?;
+        let schema = reference.schema?;
+        Self::ALL.iter().copied().find(|relation| {
+            schema == uqa_core::RelationName::decoded(relation.namespace())
+                && reference.name == uqa_core::RelationName::decoded(relation.name())
+        })
     }
 
     pub const fn kind(self) -> &'static str {

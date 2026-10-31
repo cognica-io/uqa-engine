@@ -161,7 +161,9 @@ fn document_field_projection_does_not_copy_unrequested_payload() {
     .unwrap();
     let mut projection = SourceProjection::retaining_all();
     projection.extend(["value".into(), "absent".into()]);
-    let columns = super::requested_document_fields(&projection);
+    let columns = super::requested_document_fields(&projection)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     let schema = projected_scan_schema("d", &columns, &columns, &[], false, None).unwrap();
     let mut scan = LocalTableRowSource::new(LocalTableScanConfig {
         cancellation: uqa_core::CancellationToken::new(),

@@ -36,8 +36,9 @@ fn repeated() -> ScalarExpr {
 }
 
 fn config() -> crate::optimizer::OptimizerConfig<'static> {
-    let mut config =
-        crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let mut config = crate::optimizer::OptimizerConfig::new(
+        uqa_execution::scalar::eval_constant_scalar_with_control,
+    );
     config.constant_storage = Some(Arc::new(uqa_execution::scalar::RetainedConstants::new(
         4096,
     )));
@@ -139,12 +140,13 @@ fn retained_values_preserve_raw_arrays_declared_names_and_parameter_origin() {
 #[test]
 fn retained_constant_storage_follows_values_inputs_in_commands_and_queries() {
     let calls = std::cell::Cell::new(0);
-    let factory = || {
+    let factory = |_: &uqa_core::memory::ProductionControl<'_>| {
         calls.set(calls.get() + 1);
         Ok(None)
     };
-    let mut settings =
-        crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+    let mut settings = crate::optimizer::OptimizerConfig::new(
+        uqa_execution::scalar::eval_constant_scalar_with_control,
+    );
     settings.constant_storage_factory = Some(crate::optimizer::ConstantStorageFactory(&factory));
     for (sql, expected) in [
         ("SELECT 1", 0),
@@ -180,13 +182,14 @@ fn values_queries_bound_folded_payloads_before_cloning_their_native_plans() {
         format!("INSERT INTO target SELECT n FROM (VALUES {values}) AS input(n)"),
     ] {
         let storage = Arc::new(uqa_execution::scalar::RetainedConstants::new(4096));
-        let factory = || {
+        let factory = |_: &uqa_core::memory::ProductionControl<'_>| {
             Ok(Some(
                 storage.clone() as Arc<dyn uqa_sql::ir::ConstantValueStorage>
             ))
         };
-        let mut settings =
-            crate::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
+        let mut settings = crate::optimizer::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
         settings.constant_storage_factory =
             Some(crate::optimizer::ConstantStorageFactory(&factory));
         let mut input =
@@ -203,7 +206,7 @@ fn values_queries_bound_folded_payloads_before_cloning_their_native_plans() {
         });
         assert!(allocation.bytes_max < 8 * 1024 * 1024, "{allocation:?}");
         let (copy, plan) = output.unwrap();
-        for query in [copy, plan] {
+        for query in [&copy, plan.as_ref()] {
             let mut count = 0;
             query.visit_scalar_expressions(&mut |expression| {
                 expression.visit(&mut |scalar| {

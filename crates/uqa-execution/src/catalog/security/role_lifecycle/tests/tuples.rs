@@ -114,7 +114,7 @@ fn deletion_preserves_the_selected_tuple_across_dependency_projection() {
 fn alteration() -> AlterRoleStmt {
     AlterRoleStmt {
         name: "target".into(),
-        attributes: BTreeMap::from([(RoleAttribute::Login, true)]),
+        attributes: [(RoleAttribute::Login, true)].into_iter().collect(),
         connection_limit: None,
         membership_action: None,
         members: Vec::new(),

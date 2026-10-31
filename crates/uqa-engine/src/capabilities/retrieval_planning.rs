@@ -8,69 +8,102 @@
 
 use crate::{Engine, TableState};
 use parking_lot::RwLockReadGuard;
-use std::{collections::BTreeMap, sync::Arc};
-use uqa_core::{catalog_index::CatalogIndexRow, Predicate};
+use std::sync::Arc;
+use uqa_core::{catalog_index::CatalogIndexSnapshot, Predicate};
 use uqa_planner::{
     retrieval_planning::{
         GraphStatisticsSnapshot, RetrievalPlanningCatalog, RetrievalStatisticsTable,
         TextStatisticsRead, VectorStatisticsRead,
     },
-    ColumnStats,
+    ColumnStatistics,
 };
 use uqa_sql::SQLError;
 use uqa_storage::{read_control::StorageReadControl, InvertedIndex};
 
 struct TableStatistics(Arc<TableState>, StorageReadControl);
-struct TextRead<'a>(RwLockReadGuard<'a, Box<dyn InvertedIndex>>);
+struct TextRead<'a>(
+    RwLockReadGuard<'a, Box<dyn InvertedIndex>>,
+    &'a StorageReadControl,
+);
 struct VectorRead<'a>(
     RwLockReadGuard<'a, uqa_storage::vector_index::VectorIndexes>,
     &'a StorageReadControl,
 );
 impl TextStatisticsRead for TextRead<'_> {
-    fn field_names(&self) -> Result<Option<Vec<String>>, String> {
-        self.0
-            .field_names()
-            .map(Some)
-            .map_err(|error| error.to_string())
+    fn query_doc_freq_with_control(
+        &self,
+        field: Option<&str>,
+        query: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<u64, SQLError> {
+        control.check()?;
+        let frequency =
+            uqa_storage::inverted_index::query_document_frequency(&**self.0, field, query, self.1)
+                .map_err(|error| {
+                    crate::search::storage_sql_error("execute analyze optimizer query", error)
+                })?;
+        control.check()?;
+        Ok(frequency)
     }
 
-    fn analyze_utf16(&self, field: &str, query: &str) -> Result<Vec<Vec<u16>>, String> {
+    fn field_names(&self) -> Result<Option<Vec<String>>, SQLError> {
+        self.0.field_names().map(Some).map_err(|error| {
+            crate::search::storage_sql_error("execute read document frequency", error)
+        })
+    }
+
+    fn analyze_utf16(&self, field: &str, query: &str) -> Result<Vec<Vec<u16>>, SQLError> {
         Ok(self
             .0
             .search_analyzer_revision(field)
-            .map_err(|error| error.to_string())?
+            .map_err(|error| {
+                crate::search::storage_sql_error("execute analyze optimizer query", error)
+            })?
             .analyze_tokens(query)
-            .map_err(|error| error.to_string())?
+            .map_err(analysis_error)?
             .tokens()
             .iter()
             .map(|token| token.term().utf16().into_owned())
             .collect())
     }
-    fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> Result<u64, String> {
+    fn doc_freq_utf16(&self, field: &str, term: &[u16]) -> Result<u64, SQLError> {
         let key = uqa_storage::TokenTermKey::from_term(&uqa_analysis::TokenTerm::from_utf16(
             term.to_vec(),
         ));
-        self.0
-            .doc_freq_key(field, &key)
-            .map_err(|error| error.to_string())
+        self.0.doc_freq_key(field, &key).map_err(|error| {
+            crate::search::storage_sql_error("execute read document frequency", error)
+        })
     }
 
-    fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, String> {
+    fn analyze(&self, field: &str, query: &str) -> Result<Vec<String>, SQLError> {
         self.0
             .search_analyzer_revision(field)
-            .map_err(|error| error.to_string())?
+            .map_err(|error| {
+                crate::search::storage_sql_error("execute analyze optimizer query", error)
+            })?
             .analyze(query)
-            .map_err(|error| error.to_string())
+            .map_err(analysis_error)
     }
-    fn doc_freq(&self, field: &str, term: &str) -> Result<u64, String> {
-        self.0
-            .doc_freq(field, term)
-            .map_err(|error| error.to_string())
+    fn doc_freq(&self, field: &str, term: &str) -> Result<u64, SQLError> {
+        self.0.doc_freq(field, term).map_err(|error| {
+            crate::search::storage_sql_error("execute read document frequency", error)
+        })
     }
-    fn doc_freq_any_field(&self, term: &str) -> Result<u64, String> {
-        self.0
-            .doc_freq_any_field(term)
-            .map_err(|error| error.to_string())
+    fn doc_freq_any_field(&self, term: &str) -> Result<u64, SQLError> {
+        self.0.doc_freq_any_field(term).map_err(|error| {
+            crate::search::storage_sql_error("execute read document frequency", error)
+        })
+    }
+}
+fn analysis_error(error: uqa_analysis::AnalysisError) -> SQLError {
+    match error {
+        uqa_analysis::AnalysisError::Memory(error) => {
+            crate::search::storage_sql_error("execute analyze optimizer query", error)
+        }
+        uqa_analysis::AnalysisError::Cancelled => {
+            SQLError::Cancelled(uqa_core::QueryCancelled::USER_REQUEST)
+        }
+        error => SQLError::Internal(format!("execute analyze optimizer query: {error}")),
     }
 }
 impl VectorStatisticsRead for VectorRead<'_> {
@@ -117,13 +150,17 @@ impl VectorStatisticsRead for VectorRead<'_> {
 }
 impl RetrievalStatisticsTable for TableStatistics {
     fn text_index(&self) -> Box<dyn TextStatisticsRead + '_> {
-        Box::new(TextRead(self.0.inverted_index.read()))
+        Box::new(TextRead(self.0.inverted_index.read(), &self.1))
     }
     fn vector_indexes(&self) -> Box<dyn VectorStatisticsRead + '_> {
         Box::new(VectorRead(self.0.vector_indexes.read(), &self.1))
     }
 }
 impl RetrievalPlanningCatalog for Engine {
+    fn production_resources(&self) -> Result<Option<uqa_planner::PlanningResources>, SQLError> {
+        uqa_planner::statement_planning::executable::StatementOptimizationContexts::production_resources(self)
+    }
+
     fn has_table(&self, table: &str) -> Result<bool, String> {
         self.has_table_in_execution(table)
             .map_err(|error| error.to_string())
@@ -132,8 +169,8 @@ impl RetrievalPlanningCatalog for Engine {
         self.resolve_table_name(table)
             .map_err(|error| error.to_string())
     }
-    fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String> {
-        self.catalog_indexes_in_execution()
+    fn list_catalog_indexes(&self) -> Result<CatalogIndexSnapshot, String> {
+        self.catalog_index_snapshot_in_execution()
             .map_err(|error| error.to_string())
     }
     fn value_index_cardinality(
@@ -166,17 +203,16 @@ impl RetrievalPlanningCatalog for Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let index = t.inverted_index.read();
-        let analyzer = index.search_analyzer_revision(field).map_err(|error| {
-            crate::search::storage_sql_error("resolve text analyzer revision", error)
-        })?;
-        let analyzed_terms = analyzer
-            .analyze_tokens(query)
-            .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?
-            .tokens()
-            .len();
-        let indexed_document_count = index.field_doc_count(field).map_err(|error| {
-            crate::search::storage_sql_error("read indexed document count", error)
-        })?;
+        let control = self.query_retention_control()?;
+        let analyzed_terms =
+            uqa_storage::inverted_index::query_term_count(&**index, field, query, &control)
+                .map_err(|error| crate::search::storage_sql_error("analyze text query", error))?;
+        let indexed_document_count = index
+            .field_stats_scalar_budgeted(field, &control)
+            .map_err(|error| {
+                crate::search::storage_sql_error("read indexed document count", error)
+            })?
+            .total_docs;
         Ok(uqa_planner::TextTopKCapabilities {
             analyzed_term_count: analyzed_terms,
             indexed_document_count,
@@ -201,7 +237,7 @@ impl RetrievalPlanningCatalog for Engine {
             .map_err(|error| error.to_string())?;
         Ok(Some(Box::new(TableStatistics(state, control))))
     }
-    fn try_query_column_stats(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
+    fn try_query_column_stats(&self, table: &str) -> Result<ColumnStatistics, String> {
         self.try_query_column_stats(table)
             .map_err(|error| error.to_string())
     }

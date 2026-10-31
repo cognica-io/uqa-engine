@@ -6,11 +6,48 @@
 
 //! Input-value traversal for output liveness, distinct from row-count demand.
 
-use crate::ScalarExpr;
+use crate::{SQLError, ScalarExpr};
+use uqa_core::memory::ProductionControl;
 
 /// Traverse values observed by an expression. COUNT(*) consumes rows, while its FILTER and ORDER BY still consume their own input values.
 pub fn visit_input_values(expression: &ScalarExpr, visitor: &mut impl FnMut(&ScalarExpr)) {
-    let result = expression.try_visit(&mut |node| {
+    try_visit_input_values(expression, &mut |node| {
+        visitor(node);
+        Ok::<_, std::convert::Infallible>(())
+    })
+    .unwrap_or_else(|never| match never {});
+}
+
+/// Lend observed input values in traversal order and stop on the first callback error. COUNT(*) keeps its row demand separate from the values used by its FILTER and ORDER BY.
+pub fn try_visit_input_values<'a, E>(
+    expression: &'a ScalarExpr,
+    visitor: &mut impl FnMut(&'a ScalarExpr) -> Result<(), E>,
+) -> Result<(), E> {
+    visit_inputs(expression, &mut || Ok(()), visitor)
+}
+
+/// Preserve both cancellation owners at every visited node, including COUNT(*) nodes that contribute no input-value callback.
+pub fn try_visit_input_values_with_control<'a>(
+    expression: &'a ScalarExpr,
+    control: &ProductionControl<'_>,
+    visitor: &mut impl FnMut(&'a ScalarExpr) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    visit_inputs(
+        expression,
+        &mut || control.check().map_err(Into::into),
+        visitor,
+    )?;
+    control.check()?;
+    Ok(())
+}
+
+fn visit_inputs<'a, E>(
+    expression: &'a ScalarExpr,
+    checkpoint: &mut impl FnMut() -> Result<(), E>,
+    visitor: &mut impl FnMut(&'a ScalarExpr) -> Result<(), E>,
+) -> Result<(), E> {
+    expression.try_visit(&mut |node| {
+        checkpoint()?;
         if let ScalarExpr::Func {
             name,
             binding,
@@ -35,18 +72,14 @@ pub fn visit_input_values(expression: &ScalarExpr, visitor: &mut impl FnMut(&Sca
                     .map(|order| &order.expr)
                     .chain(filter.as_deref())
                 {
-                    visit_input_values(expression, visitor);
+                    visit_inputs(expression, checkpoint, visitor)?;
                 }
-                return Ok::<_, std::convert::Infallible>(false);
+                return Ok(false);
             }
         }
-        visitor(node);
+        visitor(node)?;
         Ok(true)
-    });
-    match result {
-        Ok(()) => {}
-        Err(never) => match never {},
-    }
+    })
 }
 
 #[cfg(test)]
@@ -123,6 +156,111 @@ mod tests {
                 ));
             });
             assert_eq!(reads, 1, "{sql}");
+        }
+    }
+
+    fn ordered_count() -> ScalarExpr {
+        let mut count = expression("SELECT count(*) FILTER (WHERE keep > 0)");
+        let ScalarExpr::Func { order_by, .. } =
+            expression("SELECT count(value ORDER BY rank DESC)")
+        else {
+            panic!("call");
+        };
+        let ScalarExpr::Func {
+            order_by: target, ..
+        } = &mut count
+        else {
+            panic!("count");
+        };
+        *target = order_by;
+        ScalarExpr::Row(vec![count, ScalarExpr::Column("later".into())])
+    }
+
+    #[test]
+    fn input_value_observation_lends_names_without_copying_or_demanding_count_star() {
+        let expression = ordered_count();
+        let mut names = [None; 3];
+        let mut index = 0;
+        let allocation = allocation_counter::measure(|| {
+            try_visit_input_values(&expression, &mut |node| {
+                assert!(!matches!(node, ScalarExpr::Star));
+                if let ScalarExpr::Column(name) = node {
+                    names[index] = Some(name.as_str());
+                    index += 1;
+                }
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .unwrap();
+        });
+        assert_eq!(names, [Some("rank"), Some("keep"), Some("later")]);
+        assert_eq!(allocation.bytes_total, 0, "{allocation:?}");
+        let ScalarExpr::Row(items) = &expression else {
+            panic!("row");
+        };
+        let ScalarExpr::Column(last) = &items[1] else {
+            panic!("column");
+        };
+        assert_eq!(names[2].unwrap().as_ptr(), last.as_ptr());
+    }
+
+    #[test]
+    fn input_value_observation_stops_at_the_first_callback_failure() {
+        let expression = ordered_count();
+        let mut names = Vec::new();
+        let error = try_visit_input_values(&expression, &mut |node| {
+            if let ScalarExpr::Column(name) = node {
+                names.push(name.as_str());
+                if name == "keep" {
+                    return Err("filter observation failed");
+                }
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(error, "filter observation failed");
+        assert_eq!(names, ["rank", "keep"]);
+    }
+
+    #[test]
+    fn unobserved_row_count_nodes_still_preserve_cancellation_checkpoints() {
+        use uqa_core::{memory::MemoryBudget, CancellationToken};
+        let expression = ScalarExpr::Row(vec![expression("SELECT count(*)"); 4096]);
+        for cancel_original in [false, true] {
+            let budget = MemoryBudget::new(0);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            let mut checkpoints = 0;
+            let mut observed = 0;
+            let error = visit_inputs(
+                &expression,
+                &mut || {
+                    checkpoints += 1;
+                    if checkpoints == 3 {
+                        if cancel_original {
+                            original.cancel();
+                        } else {
+                            invoking.cancel();
+                        }
+                    }
+                    control.check().map_err(SQLError::from)
+                },
+                &mut |node| {
+                    assert!(matches!(node, ScalarExpr::Row(_)));
+                    observed += 1;
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("57014"));
+            assert_eq!(checkpoints, 3);
+            assert_eq!(observed, 1);
+            let error = try_visit_input_values_with_control(&expression, &control, &mut |_| {
+                panic!("cancelled traversal must not observe an input")
+            })
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("57014"));
+            assert_eq!(budget.peak(), 0);
         }
     }
 }

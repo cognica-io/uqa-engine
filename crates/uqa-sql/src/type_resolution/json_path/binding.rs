@@ -36,44 +36,12 @@ pub(in crate::type_resolution) fn bind_call(
     {
         return Ok(());
     }
-    let decoded = crate::ir::scalar_call_arguments_with_control(&call.arguments, control)?;
-    let explicit_variadic = decoded.iter().any(|argument| argument.explicit_variadic);
-    let mut names = ProductionVec::new(*control);
-    let mut original = ProductionVec::new(*control);
-    let mut effective = ProductionVec::new(*control);
-    names.reserve(decoded.len())?;
-    original.reserve(decoded.len())?;
-    effective.reserve(decoded.len())?;
-    for argument in decoded.iter() {
-        let name = argument
-            .name
-            .map(|name| control.copy_text(name))
-            .transpose()?;
-        let (name, extra) = name.map_or((None, control.empty_reservation()), |name| {
-            let (name, extra) = name.into_parts();
-            (Some(name), extra)
-        });
-        names.push_produced(control.finish(name, extra)?)?;
-        let ty = call::infer_with_control(argument.value, infer, control)?;
-        let effective_type =
-            crate::type_resolution::common::effective_overload_argument_type_ref_with_params(
-                argument.value,
-                ty.as_deref(),
-                params,
-            );
-        push_type(
-            &mut effective,
-            effective_type
-                .map(|ty| ty.clone_with_control(control))
-                .transpose()?,
-            control,
-        )?;
-        push_type(&mut original, ty, control)?;
-    }
-    let names = names.finish()?;
-    let original = original.finish()?;
-    let effective = effective.finish()?;
-    drop(decoded);
+    let Signature {
+        names,
+        original,
+        effective,
+        explicit_variadic,
+    } = signature(&call.arguments, params, infer, control)?;
     let selected = match resolve_call(
         &call.name,
         call.binding.as_ref(),
@@ -113,22 +81,78 @@ pub(in crate::type_resolution) fn bind_call(
     Ok(())
 }
 
-fn normalize(
-    binding: &mut FunctionBinding,
-    arguments: &mut Vec<ScalarExpr>,
-    original: &[Option<ColumnType>],
-    explicit_variadic: bool,
-    memory: &mut Option<MemoryReservation>,
+pub(super) struct Signature {
+    pub(super) names: Produced<Vec<Option<String>>>,
+    pub(super) original: Produced<Vec<Option<ColumnType>>>,
+    pub(super) effective: Produced<Vec<Option<ColumnType>>>,
+    pub(super) explicit_variadic: bool,
+}
+
+pub(super) fn signature(
+    arguments: &[ScalarExpr],
+    params: &[SQLParam],
+    infer: &mut InferType<'_>,
     control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    let entry = JsonPathFunction::lookup(&binding.name).expect("selected JSON path declaration");
+) -> Result<Signature, SQLError> {
+    let decoded = crate::ir::scalar_call_arguments_with_control(arguments, control)?;
+    let explicit_variadic = decoded.iter().any(|argument| argument.explicit_variadic);
+    let mut names = ProductionVec::new(*control);
+    let mut original = ProductionVec::new(*control);
+    let mut effective = ProductionVec::new(*control);
+    names.reserve(decoded.len())?;
+    original.reserve(decoded.len())?;
+    effective.reserve(decoded.len())?;
+    for argument in decoded.iter() {
+        let name = argument
+            .name
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        let (name, extra) = name.map_or((None, control.empty_reservation()), |name| {
+            let (name, extra) = name.into_parts();
+            (Some(name), extra)
+        });
+        names.push_produced(control.finish(name, extra)?)?;
+        let ty = call::infer_with_control(argument.value, infer, control)?;
+        let effective_type =
+            crate::type_resolution::common::effective_overload_argument_type_ref_with_params(
+                argument.value,
+                ty.as_deref(),
+                params,
+            );
+        push_type(
+            &mut effective,
+            effective_type
+                .map(|ty| ty.clone_with_control(control))
+                .transpose()?,
+            control,
+        )?;
+        push_type(&mut original, ty, control)?;
+    }
+    let names = names.finish()?;
+    let original = original.finish()?;
+    let effective = effective.finish()?;
+    drop(decoded);
+    Ok(Signature {
+        names,
+        original,
+        effective,
+        explicit_variadic,
+    })
+}
+
+pub(super) fn invocation(
+    binding: &FunctionBinding,
+    argument_count: usize,
+    original_count: usize,
+    explicit_variadic: bool,
+) -> Result<&crate::ast::RoutineInvocationBinding, SQLError> {
     let invocation = binding
         .invocation
         .as_ref()
         .ok_or_else(|| SQLError::Internal("JSON path call lost its variadic contract".into()))?;
-    if original.len() != arguments.len()
-        || invocation.argument_targets.len() != arguments.len()
-        || invocation.argument_positions.len() != arguments.len()
+    if original_count != argument_count
+        || invocation.argument_targets.len() != argument_count
+        || invocation.argument_positions.len() != argument_count
         || invocation
             .argument_positions
             .iter()
@@ -139,13 +163,26 @@ fn normalize(
             .argument_positions
             .iter()
             .any(|&position| position > 1)
-        || arguments.len() < 2
-        || explicit_variadic && arguments.len() != 2
+        || argument_count < 2
+        || explicit_variadic && argument_count != 2
     {
         return Err(SQLError::Internal(
             "invalid selected JSON path invocation".into(),
         ));
     }
+    Ok(invocation)
+}
+
+fn normalize(
+    binding: &mut FunctionBinding,
+    arguments: &mut Vec<ScalarExpr>,
+    original: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    memory: &mut Option<MemoryReservation>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let entry = JsonPathFunction::lookup(&binding.name).expect("selected JSON path declaration");
+    let invocation = invocation(binding, arguments.len(), original.len(), explicit_variadic)?;
     let mut document = None;
     let mut paths = ProductionVec::new(*control);
     paths.reserve(arguments.len().saturating_sub(1))?;
@@ -224,41 +261,15 @@ fn push_type(
 
 /// Input analysis already selected and coerced every child before moving the parent call.
 pub(crate) fn normalize_retained(expression: &mut ScalarExpr) -> Result<(), SQLError> {
-    let ScalarExpr::Func {
-        binding: Some(binding),
-        args,
-        ..
-    } = expression
-    else {
-        return Ok(());
-    };
-    if !binding.builtin
-        || JsonPathFunction::lookup(&binding.name).is_none()
-        || matches!(binding.dispatch, Some(FunctionDispatch::JsonPath { .. }))
-    {
-        return Ok(());
-    }
-    let Some(invocation) = &binding.invocation else {
-        return Ok(());
-    };
-    let original = invocation
-        .argument_sources
-        .iter()
-        .map(|ty| {
-            ty.as_deref()
-                .and_then(|ty| ColumnType::from_sql_name(ty).ok())
-        })
-        .collect::<Vec<_>>();
-    let explicit = matches!(
-        invocation.variadic_mode,
-        crate::ast::RoutineVariadicMode::Explicit { .. }
-    );
-    normalize(
-        binding,
-        args,
-        &original,
-        explicit,
-        &mut None,
-        &ProductionControl::uncontrolled(),
-    )
+    let control = ProductionControl::uncontrolled();
+    let input = std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null));
+    let output = super::owned::normalize_retained_owned(
+        crate::plan::OwnedScalarExpr::uncontrolled(input),
+        &control,
+    )?;
+    *expression = output
+        .finish(&control)?
+        .into_uncontrolled()
+        .expect("ordinary retained JSON path normalization");
+    Ok(())
 }

@@ -31,6 +31,18 @@ impl SourcePlan {
         &self,
         inferred: Option<&RowSchema>,
     ) -> Result<Option<RowSchema>, SQLError> {
+        self.internal_values_schema_with_control(
+            inferred,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+    }
+
+    pub fn internal_values_schema_with_control(
+        &self,
+        inferred: Option<&RowSchema>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<RowSchema>, SQLError> {
+        control.check()?;
         let Self::Values {
             internal_relation: Some(relation),
             internal_column_types: types,
@@ -45,37 +57,19 @@ impl SourcePlan {
                 "internal VALUES collation width does not match its declared attributes".into(),
             ));
         }
-        let metadata = types
-            .iter()
-            .enumerate()
-            .map(|(position, declared)| {
-                let inferred_type = inferred
-                    .and_then(|schema| schema.column_types().get(position))
-                    .cloned()
-                    .flatten();
-                let ty = declared.clone().or(inferred_type);
-                let collation = collations.get(position).copied().flatten().or_else(|| {
-                    declared
-                        .is_none()
-                        .then(|| inferred.and_then(|schema| schema.column_collation(position)))
-                        .flatten()
-                });
-                (ty, collation)
-            })
-            .collect::<Vec<_>>();
-        for (ty, oid) in &metadata {
-            if oid.is_some_and(|oid| oid != 0)
-                && !ty
-                    .as_ref()
-                    .is_some_and(crate::schema::composites::type_is_collatable)
-            {
-                return Err(SQLError::Internal(
-                    "internal VALUES collation requires a collatable attribute type".into(),
-                ));
-            }
-        }
-        Ok(Some(RowSchema::with_internal_relation_metadata(
-            *relation, metadata,
-        )))
+        let metadata = types.iter().enumerate().map(|(position, declared)| {
+            let ty = declared
+                .as_ref()
+                .or_else(|| inferred.and_then(|schema| schema.column_type(position)));
+            let collation = collations.get(position).copied().flatten().or_else(|| {
+                declared
+                    .is_none()
+                    .then(|| inferred.and_then(|schema| schema.column_collation(position)))
+                    .flatten()
+            });
+            (ty, collation)
+        });
+        RowSchema::with_internal_relation_metadata_with_control(*relation, metadata, control)
+            .map(Some)
     }
 }

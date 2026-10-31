@@ -15,11 +15,42 @@ impl Catalog {
         &self,
         records: &[CatalogRecordRef<'_>],
     ) -> Result<Option<Vec<Option<CatalogRecordRevision>>>> {
+        self.native_record_revisions_with_control(
+            records,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .map(|revisions| {
+            revisions.into_uncontrolled().map_err(|_| {
+                crate::SQLiteError::StorageBackend("ordinary catalog revision owner".into())
+            })
+        })
+        .transpose()
+    }
+
+    pub(in crate::catalog) fn native_record_revisions_with_control(
+        &self,
+        records: &[CatalogRecordRef<'_>],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<Option<CatalogRecordRevision>>>>> {
+        control.check_cancellation()?;
         self.read_native(|snapshot| {
-            records
-                .iter()
-                .map(|record| snapshot.catalog_record_revision(*record))
-                .collect()
+            let mut output = uqa_core::memory::ProductionVec::new(*control);
+            output
+                .reserve(records.len())
+                .map_err(uqa_storage::StorageBackendError::from)?;
+            for record in records {
+                control.check_cancellation()?;
+                let value = snapshot.catalog_record_revision(*record, control)?;
+                let value = control
+                    .finish(value, control.empty_reservation())
+                    .map_err(uqa_storage::StorageBackendError::from)?;
+                output
+                    .push_produced(value)
+                    .map_err(uqa_storage::StorageBackendError::from)?;
+            }
+            Ok(output
+                .finish()
+                .map_err(uqa_storage::StorageBackendError::from)?)
         })
     }
 }
@@ -28,6 +59,7 @@ impl NativeSnapshot {
     fn catalog_record_revision(
         &self,
         record: CatalogRecordRef<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<Option<CatalogRecordRevision>> {
         self.control.check()?;
         let database = NativeRecordOwner::Database(self.database);
@@ -37,7 +69,10 @@ impl NativeSnapshot {
                     .encode_key(&[text(name)], &self.control)?
             }
             CatalogRecordRef::Relation(RelationKind::Table, relation) => {
-                let Some((owner, true)) = self.table_binding(&relation.qualified_name())? else {
+                let name = relation
+                    .qualified_name_with_control(control)
+                    .map_err(uqa_storage::StorageBackendError::from)?;
+                let Some((owner, true)) = self.table_binding(&name)? else {
                     return Ok(None);
                 };
                 NativeRecordIdentity::new(Family::Tables, owner)?.encode_key(&[], &self.control)?

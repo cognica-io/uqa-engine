@@ -13,6 +13,7 @@ mod queries;
 impl Interpreter<'_> {
     // Source locations carry diagnostics through a small entry frame.
     pub(super) fn exec_stmt(&mut self, stmt: &PLpgSQLStmt) -> Result<Flow, SQLError> {
+        self.planning.control().check()?;
         self.services.runtime.cancellation_token().check()?;
         match stmt {
             PLpgSQLStmt::Located { line, statement } => {

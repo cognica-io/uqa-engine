@@ -23,16 +23,37 @@ pub fn privilege_allowed(
     superuser: bool,
     has_role: impl Fn(&RoleIdentity) -> bool,
 ) -> bool {
-    if superuser || (grant_option && has_role(owner)) {
-        return true;
-    }
-    acl.map_or(!grant_option, |acl| {
-        acl.iter().any(|entry| {
-            (!grant_option || entry.grant_option)
-                && ((entry.role.is_none() && !grant_option)
-                    || entry.role.as_ref().is_some_and(&has_role))
-        })
+    try_privilege_allowed(owner, acl, grant_option, superuser, |role| {
+        Ok::<_, std::convert::Infallible>(has_role(role))
     })
+    .unwrap_or_else(|impossible| match impossible {})
+}
+
+/// Observe the same ordered ACL through a fallible membership resolver, preserving its first error and short-circuiting permitted entries.
+pub fn try_privilege_allowed<E>(
+    owner: &RoleIdentity,
+    acl: Option<&[ObjectAclEntry]>,
+    grant_option: bool,
+    superuser: bool,
+    mut has_role: impl FnMut(&RoleIdentity) -> Result<bool, E>,
+) -> Result<bool, E> {
+    if superuser || (grant_option && has_role(owner)?) {
+        return Ok(true);
+    }
+    let Some(acl) = acl else {
+        return Ok(!grant_option);
+    };
+    for entry in acl {
+        if grant_option && !entry.grant_option {
+            continue;
+        }
+        match &entry.role {
+            None if !grant_option => return Ok(true),
+            Some(role) if has_role(role)? => return Ok(true),
+            _ => {}
+        }
+    }
+    Ok(false)
 }
 
 /// Roles whose grant option is reachable from the owner through grant-option entries.

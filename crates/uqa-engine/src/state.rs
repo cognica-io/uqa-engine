@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
+use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
@@ -121,8 +121,7 @@ pub(super) struct DurableCatalogState {
         CatalogCell<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
     pub(super) triggers:
         CatalogCell<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
-    pub(super) rules:
-        CatalogCell<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredRule>>>,
+    pub(super) rules: CatalogCell<RuleCatalog>,
 }
 
 #[derive(Clone)]
@@ -167,7 +166,7 @@ pub(super) struct DurableCatalogSnapshot {
         Arc<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
     pub(super) triggers:
         Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
-    pub(super) rules: Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredRule>>>,
+    pub(super) rules: Arc<RuleCatalog>,
 }
 
 impl DurableCatalogState {
@@ -318,7 +317,12 @@ pub(super) struct SessionContext {
     pub(super) closure: crate::transactions::SessionClosure,
     /// Prepared definitions belong to the connection and survive transaction or
     /// savepoint rollback, including definitions created or removed after a boundary.
-    pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
+    pub(super) prepared: RwLock<
+        uqa_core::memory::OwnedMap<
+            uqa_core::memory::Produced<String>,
+            super::PreparedStatementPlan,
+        >,
+    >,
     pub(super) next_prepared_handle: std::sync::atomic::AtomicU64,
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
@@ -371,6 +375,18 @@ pub(super) enum RuntimeParameterValue {
 
 impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
+        Self::with_retention(
+            random_state,
+            uqa_core::memory::MemoryBudget::new(
+                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+            ),
+        )
+    }
+
+    pub(super) fn with_retention(
+        random_state: super::SessionRandomState,
+        query_retention: uqa_core::memory::MemoryBudget,
+    ) -> Self {
         let state = super::SessionStateSnapshot {
             command_overlays: Vec::new(),
             graph_overlay: None,
@@ -395,7 +411,7 @@ impl SessionContext {
             parameters: Mutex::new(crate::session::SessionParameterRegistry::default()),
             query_memory_limit: std::sync::atomic::AtomicUsize::new(0),
             closure: crate::transactions::SessionClosure::default(),
-            prepared: RwLock::new(BTreeMap::new()),
+            prepared: RwLock::new(uqa_core::memory::OwnedMap::new()),
             next_prepared_handle: std::sync::atomic::AtomicU64::new(0),
             sequence_caches: Mutex::new(BTreeMap::new()),
             sequence_snapshot: Mutex::new(None),
@@ -408,9 +424,7 @@ impl SessionContext {
             transactions: Mutex::new(Vec::new()),
             completion_counters: Mutex::new(crate::transactions::CompletionCounters::default()),
             regex_cache: Mutex::new(None),
-            query_retention: uqa_core::memory::MemoryBudget::new(
-                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
-            ),
+            query_retention,
             diskann_temporary: uqa_storage::diskann_index::build::DiskANNTemporaryBudget::new(
                 uqa_storage::diskann_index::DiskANNIndexOptions::DEFAULT_TEMPORARY_BYTES,
             ),

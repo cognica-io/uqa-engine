@@ -7,24 +7,43 @@
 //! Prepare named relational inputs once, before any statement input produces rows.
 
 use super::{ColumnPrune, CteScope, RowSchema, SourceContext};
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, BTreeSet},
-};
+use uqa_core::memory::ProductionVec;
+use uqa_sql::binding::production::{BindingMap, BindingNameSet};
 use uqa_sql::{
     binding::SourceScope,
-    plan::{QueryPlan, RelationalPlan, SourcePlan},
+    plan::{OwnedQueryPlan, QueryPlan, RelationalPlan, SourcePlan},
     SQLError, SQLParam,
 };
 
 mod inspection;
+
+pub(crate) enum PreparedQuery<'a> {
+    Borrowed(&'a QueryPlan),
+    Owned(OwnedQueryPlan),
+}
+
+impl AsRef<QueryPlan> for PreparedQuery<'_> {
+    fn as_ref(&self) -> &QueryPlan {
+        self
+    }
+}
+
+impl std::ops::Deref for PreparedQuery<'_> {
+    type Target = QueryPlan;
+    fn deref(&self) -> &QueryPlan {
+        match self {
+            Self::Borrowed(query) => query,
+            Self::Owned(query) => query,
+        }
+    }
+}
 
 pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     query: &'a QueryPlan,
     params: &[SQLParam],
     scope: &CteScope<S>,
-) -> Result<Cow<'a, QueryPlan>, SQLError> {
+) -> Result<PreparedQuery<'a>, SQLError> {
     let retained = context.ctes.queries.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
         retained.memory(),
@@ -32,17 +51,69 @@ pub(crate) fn prepare<'a, S: Clone + Send + Sync + 'static>(
         context.ctes.runtime.cancellation,
     );
     if !inspection::needed(query, scope, control)? {
-        return Ok(Cow::Borrowed(query));
+        return Ok(PreparedQuery::Borrowed(query));
     }
-    let mut query = query.clone();
-    prepare_query(
+    let query = OwnedQueryPlan::from_produced(query.clone_with_control(&control)?, &control)?;
+    prepare_owned(
         context,
-        &mut query,
+        query,
         params,
         scope,
         scope.row_lock_outer_row().map(|row| &row.schema),
+    )
+    .map(PreparedQuery::Owned)
+}
+
+/// Private preparation keeps the input and every newly attached executable's leases together. It only fills source attachments and shared analysis descriptors; existing scalar and source storage is not removed.
+pub(crate) fn prepare_in_place<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    query: OwnedQueryPlan,
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+) -> Result<OwnedQueryPlan, SQLError> {
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
+    if !inspection::needed(&query, scope, control)? {
+        return Ok(query);
+    }
+    prepare_owned(
+        context,
+        query,
+        params,
+        scope,
+        scope.row_lock_outer_row().map(|row| &row.schema),
+    )
+}
+
+fn prepare_owned<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    query: OwnedQueryPlan,
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+    outer: Option<&RowSchema>,
+) -> Result<OwnedQueryPlan, SQLError> {
+    struct Preparation {
+        query: Box<QueryPlan>,
+        memory: uqa_sql::plan::ExecutableMemory,
+    }
+    let (query, memory) = query.into_parts();
+    let mut preparation = Preparation { query, memory };
+    prepare_query(
+        context,
+        &mut preparation.query,
+        params,
+        scope,
+        outer,
+        &mut preparation.memory,
     )?;
-    Ok(Cow::Owned(query))
+    Ok(OwnedQueryPlan::from_parts(
+        preparation.query,
+        preparation.memory,
+    ))
 }
 
 fn declare_ctes<S: Clone + Send + Sync + 'static>(
@@ -50,10 +121,10 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
     query: &mut QueryPlan,
     params: &[SQLParam],
     scope: &mut CteScope<S>,
-    folded: &BTreeSet<String>,
+    folded: &BindingNameSet,
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
-    let mut restored_outputs = BTreeMap::new();
+    let mut restored_outputs = BindingMap::new();
     let retained = context.ctes.queries.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
         retained.memory(),
@@ -78,16 +149,17 @@ fn declare_ctes<S: Clone + Send + Sync + 'static>(
                     outer,
                 )?;
                 body.analyzed_output = Some(schema.clone());
-                restored_outputs.insert(cte.name.clone(), schema);
+                restored_outputs.insert_with_control(&cte.name, schema, &control)?;
             }
         }
-        scope.insert_preparation_cte(
+        scope.insert_preparation_cte_with_control(
             uqa_sql::plan::RetainedCtePlan::from_produced(
                 control.finish(definition, definition_memory)?,
                 &control,
             )?,
             folded.contains(&cte.name),
-        );
+            &control,
+        )?;
     }
     drop(ordered);
     for cte in &mut query.ctes {
@@ -107,44 +179,52 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     parent: &CteScope<S>,
     outer: Option<&RowSchema>,
+    memory: &mut uqa_sql::plan::ExecutableMemory,
 ) -> Result<(), SQLError> {
-    let mut scope = parent.clone();
-    let mut lookup = scope.enter_query_plan_scope(query)?;
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
+    let mut scope = parent.copy_with_control(&control)?;
+    let mut lookup = scope.enter_query_plan_scope_with_control(query, &resources.control())?;
     let scheduled =
         crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, query)?;
-    let folded = scheduled
-        .iter()
-        .filter(|cte| cte.deferred)
-        .map(|cte| cte.plan.name.clone())
-        .collect::<BTreeSet<_>>();
-    let materialized = scheduled
-        .iter()
-        .filter(|cte| !cte.deferred)
-        .map(|cte| cte.plan.name.clone())
-        .collect::<BTreeSet<_>>();
+    let mut folded = BindingNameSet::new();
+    let mut materialized = BindingNameSet::new();
+    for cte in scheduled.iter() {
+        let names = if cte.deferred {
+            &mut folded
+        } else {
+            &mut materialized
+        };
+        names.insert_with_control(&cte.plan.name, &control)?;
+    }
     drop(scheduled);
     declare_ctes(context, query, params, &mut lookup, &folded, outer)?;
-    let names = query
-        .ctes
-        .iter()
-        .map(|cte| cte.name.clone())
-        .collect::<Vec<_>>();
-    let mut scope = lookup.enter_visible_ctes(names.iter().map(String::as_str));
+    let mut names = ProductionVec::new(control);
+    for cte in &query.ctes {
+        names.push_produced(control.copy_text(&cte.name)?)?;
+    }
+    let names = names.finish()?;
+    let mut scope =
+        lookup.enter_visible_ctes_with_control(names.iter().map(String::as_str), &control)?;
     for cte in &mut query.ctes {
         // Folded inputs are prepared at each selected reference; unused inputs never execute.
         if !materialized.contains(&cte.name) {
             continue;
         }
         let definition_scope = scope
-            .definition_scope_for_name(&cte.name)
+            .definition_scope_for_name_with_control(&cte.name, &control)?
             .expect("declared CTE scope");
         if let Some(body) = cte.body.query_mut() {
-            prepare_query(context, body, params, &definition_scope, outer)?;
+            prepare_query(context, body, params, &definition_scope, outer, memory)?;
         }
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
-            scope.scalar_subqueries = block.subqueries.as_slice().into();
+            let arena_resources = context.ctes.production_resources()?;
+            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &block.subqueries,
+                &arena_resources.control(),
+            )?;
             let mut source_schema = RowSchema::default();
             if let Some(from) = &block.from {
                 source_schema = crate::query::binding::bind_source_plan_schema(
@@ -153,6 +233,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
                     params,
                     &scope,
                     outer,
+                    &control,
                 )?;
                 let prune =
                     context
@@ -165,12 +246,22 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
                     &scope,
                     prune.as_ref(),
                     SourceScope::new(outer),
+                    memory,
                 )?;
             }
-            let expression_schema = uqa_sql::binding::overlay_outer_schema(&source_schema, outer);
-            for query in &mut block.subqueries {
-                prepare_query(context, query, params, &scope, Some(&expression_schema))?;
-            }
+            let expression_schema = uqa_sql::binding::overlay_outer_schema_with_control(
+                &source_schema,
+                outer,
+                &control,
+            )?;
+            prepare_subqueries(
+                context,
+                &mut block.subqueries,
+                params,
+                &scope,
+                Some(&expression_schema),
+                memory,
+            )?;
         }
         RelationalPlan::SetOp {
             left,
@@ -178,17 +269,27 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
             subqueries,
             ..
         } => {
-            prepare_query(context, left, params, &scope, outer)?;
-            prepare_query(context, right, params, &scope, outer)?;
-            for query in subqueries {
-                prepare_query(context, query, params, &scope, outer)?;
-            }
+            prepare_query(context, left, params, &scope, outer, memory)?;
+            prepare_query(context, right, params, &scope, outer, memory)?;
+            prepare_subqueries(context, subqueries, params, &scope, outer, memory)?;
         }
         RelationalPlan::Values { subqueries, .. } => {
-            for query in subqueries {
-                prepare_query(context, query, params, &scope, outer)?;
-            }
+            prepare_subqueries(context, subqueries, params, &scope, outer, memory)?;
         }
+    }
+    Ok(())
+}
+
+fn prepare_subqueries<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    queries: &mut [QueryPlan],
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+    outer: Option<&RowSchema>,
+    memory: &mut uqa_sql::plan::ExecutableMemory,
+) -> Result<(), SQLError> {
+    for query in queries {
+        prepare_query(context, query, params, scope, outer, memory)?;
     }
     Ok(())
 }
@@ -200,14 +301,18 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
     parent: &CteScope<S>,
     prune: Option<&ColumnPrune>,
     names: SourceScope<'_>,
+    memory: &mut uqa_sql::plan::ExecutableMemory,
 ) -> Result<(), SQLError> {
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
     let input = (!matches!(source, SourcePlan::Join { .. }))
-        .then(|| names.input(source))
+        .then(|| names.input_with_control(source, &control))
+        .transpose()?
         .flatten();
     let outer = input.as_ref();
     match source {
         SourcePlan::Table { .. } => {
-            prepare_named_source(context, source, params, parent, prune, outer)?;
+            prepare_named_source(context, source, params, parent, prune, outer, memory)?;
         }
         SourcePlan::Join {
             left,
@@ -216,15 +321,26 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
             kind,
             ..
         } => {
-            prepare_source(context, left, params, parent, prune, names.with_names())?;
-            let left_schema = uqa_sql::binding::bind_source_plan_schema_in_scope(
-                context.ctes.routines,
+            prepare_source(
+                context,
                 left,
                 params,
-                &crate::query::binding::binding_context(parent)?,
+                parent,
+                prune,
                 names.with_names(),
+                memory,
             )?;
-            let preceding = names.right_namespace(left, &left_schema, *kind);
+            let left_schema =
+                uqa_sql::binding::production::bind_source_plan_schema_in_scope_with_control(
+                    context.ctes.routines,
+                    left,
+                    params,
+                    crate::query::binding::binding_context_with_control(parent, &control)?,
+                    names.with_names(),
+                    &control,
+                )?;
+            let preceding =
+                names.right_namespace_with_control(left, &left_schema, *kind, &control)?;
             prepare_source(
                 context,
                 right,
@@ -237,10 +353,11 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
                     inherited_lateral: *lateral,
                     retain_names: true,
                 },
+                memory,
             )?;
         }
         SourcePlan::Subquery { body, .. } => {
-            prepare_query(context, body, params, parent, outer)?;
+            prepare_query(context, body, params, parent, outer, memory)?;
         }
         _ => {}
     }
@@ -254,6 +371,7 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
     parent: &CteScope<S>,
     prune: Option<&ColumnPrune>,
     outer: Option<&RowSchema>,
+    memory: &mut uqa_sql::plan::ExecutableMemory,
 ) -> Result<(), SQLError> {
     let SourcePlan::Table {
         name,
@@ -269,8 +387,14 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
     if executable_query.is_some() {
         return Ok(());
     }
+    let retained = context.ctes.queries.read_control()?;
+    let control = uqa_core::memory::ProductionControl::new(
+        retained.memory(),
+        retained.cancellation(),
+        context.ctes.runtime.cancellation,
+    );
     let qualifier = alias.as_deref().unwrap_or(qualifier);
-    let mut scope = parent.clone();
+    let mut scope = parent.copy_with_control(&control)?;
     let (mut query, aliases, optimize) = if let Some(cte) = parent.deferred_reference(name) {
         if !scope.cte_is_folded(name) {
             return Ok(());
@@ -278,62 +402,94 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
         let Some(query) = cte.body.query() else {
             return Ok(());
         };
-        let query = query.clone();
-        let aliases = super::table_source::output_aliases(&cte.columns, column_aliases);
-        scope = parent.definition_scope(name).expect("declared CTE scope");
+        let query = query.copy_for_rewrite(&control)?;
+        let aliases = super::table_source::production::output_aliases(
+            &cte.columns,
+            column_aliases,
+            &control,
+        )?;
+        scope = parent
+            .definition_scope_with_control(name, &control)?
+            .expect("declared CTE scope");
         (query, aliases, false)
     } else {
         if scope.is_visible_cte(name) {
             return Ok(());
         }
         let catalog = scope.catalog_read_view()?;
-        let Some(view) = catalog
-            .view_resolved(&scope.relation_name_resolution()?, name)?
-            .cloned()
-        else {
+        let resolution = scope.relation_name_resolution_with_control(&control)?;
+        let Some(view) = catalog.view_resolved_with_control(&resolution, name, &control)? else {
             return Ok(());
         };
         if view.kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
             return Ok(());
         }
         let subject = if view.security_invoker() {
-            scope.privilege_subject()?.clone()
+            scope.invoking_role()?.clone_with_control(&control)?
         } else {
-            catalog.view_owner(&view)?
+            control.finish(
+                catalog.view_owner_with_control(view.security.role_owner, &control)?,
+                control.empty_reservation(),
+            )?
         };
         scope = {
-            let scoped = scope.enter_privilege_subject(subject);
-            (*scoped).clone()
+            let scoped = scope.enter_privilege_subject_with_control(subject, &control)?;
+            scoped.copy_with_control(&control)?
         };
         (
-            view.query.clone(),
-            super::table_source::output_aliases(
+            view.query.copy_for_rewrite(&control)?,
+            super::table_source::production::output_aliases(
                 view.output_columns.as_deref().unwrap_or_default(),
                 column_aliases,
-            ),
+                &control,
+            )?,
             true,
         )
     };
     let _stored = optimize
         .then(uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition);
     if optimize {
-        crate::query::binding::restore_query_layouts(
-            context.ctes.routines,
-            &mut query,
-            params,
-            &scope,
-            outer,
+        query = super::table_source::production::restore_layouts(
+            context, query, params, &scope, outer, &control,
         )?;
     }
     if let Some(projection) = prune.and_then(|prune| prune.get(qualifier)) {
-        super::table_source::prune_query_outputs(
-            context, &mut query, &aliases, projection, params, &scope, outer,
+        query = super::table_source::production::prune_outputs(
+            context,
+            query,
+            &aliases,
+            projection,
+            super::table_source::production::QueryBinding {
+                params,
+                scope: &scope,
+                outer,
+            },
+            &control,
         )?;
     }
-    if optimize {
-        query = context.ctes.rewrites.optimize_retained_query(&query)?;
-    }
-    prepare_query(context, &mut query, params, &scope, outer)?;
-    *executable_query = Some(Box::new(query));
+    let query = finish_named_source(context, query, optimize, params, &scope, outer, &control)?;
+    let (query, attached) = query.into_parts();
+    *executable_query = Some(query);
+    memory.absorb(attached);
     Ok(())
+}
+
+fn finish_named_source<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    query: uqa_sql::plan::MutableQueryPlan,
+    optimize: bool,
+    params: &[SQLParam],
+    scope: &CteScope<S>,
+    outer: Option<&RowSchema>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<OwnedQueryPlan, SQLError> {
+    let query = if optimize {
+        context
+            .ctes
+            .rewrites
+            .optimize_retained_query(query, control)?
+    } else {
+        OwnedQueryPlan::from_produced(query.finish(control)?, control)?
+    };
+    prepare_owned(context, query, params, scope, outer)
 }

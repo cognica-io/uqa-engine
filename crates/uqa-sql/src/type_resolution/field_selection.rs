@@ -37,12 +37,19 @@ pub fn relation_column(
     expression: &crate::ScalarExpr,
     schema: &crate::RowSchema,
 ) -> Option<crate::ColumnIdentity> {
+    relation_column_ref(expression, schema).cloned()
+}
+
+/// Borrow the selected retained schema identity without allocating a duplicate name.
+pub fn relation_column_ref<'a>(
+    expression: &crate::ScalarExpr,
+    schema: &'a crate::RowSchema,
+) -> Option<&'a crate::ColumnIdentity> {
     let (base, field) = field_reference(expression)?;
     let qualifier = whole_row_qualifier(base, schema)?;
     schema
         .qualified_position(qualifier, field)
         .and_then(|position| schema.identity(position))
-        .cloned()
 }
 
 /// Whole-row projection resolves directly against the relation namespace, before consulting a named composite descriptor.
@@ -122,23 +129,93 @@ pub fn anonymous_field_position(field: &str, width: usize) -> Option<usize> {
         .filter(|position| *position < width)
 }
 
-/// The type of a field of a value of type `base`, for expressions that are neither whole-row references nor row constructors. `None` is an unresolved type: a dynamic document value, or a catalog that binding cannot consult.
-pub fn value_field_type(
+/// Copy only the selected attribute while its immutable catalog descriptor is borrowed.
+pub(crate) fn value_field_type_with_control(
     base: Option<&ColumnType>,
     field: &str,
     resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<ColumnType>, SQLError> {
-    value_field_metadata(base, field, resolver).map(|selected| selected.map(|(ty, _)| ty))
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    Ok(value_field_metadata_with_control(base, field, resolver, control)?.map(|(ty, _)| ty))
 }
 
-/// Select type and declaration collation together from one catalog generation.
-pub(crate) fn value_field_metadata(
+/// Retain the selected type and observe its collation from the same controlled catalog descriptor.
+pub(crate) fn value_field_metadata_with_control(
     base: Option<&ColumnType>,
     field: &str,
     resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<(ColumnType, u32)>, SQLError> {
-    value_field_selection(base, field, resolver)
-        .map(|selected| selected.map(|selected| (selected.ty, selected.collation)))
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<(uqa_core::memory::Produced<ColumnType>, u32)>, SQLError> {
+    control.check()?;
+    let Some(base) = base else {
+        return Ok(None);
+    };
+    let mut composite = base;
+    while let ColumnType::Domain { base, .. } = composite {
+        composite = base;
+    }
+    match composite {
+        ColumnType::Composite(reference) => {
+            let Some(catalog) = resolver.and_then(FunctionTypeResolver::composite_types) else {
+                return Ok(None);
+            };
+            let descriptor = crate::expr::composites::descriptor_with_control(
+                Some(catalog),
+                reference.oid,
+                control,
+            )?;
+            let (_, attribute) = descriptor
+                .attribute(field)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42703".into(),
+                    message: format!(
+                        "column \"{field}\" not found in data type {}",
+                        base.display_name()
+                    ),
+                })?;
+            Ok(Some((
+                attribute.ty.clone_with_control(control)?,
+                attribute.collation_oid(),
+            )))
+        }
+        ColumnType::Record => Err(undefined_record_field(field)),
+        other => Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!(
+                "column notation .{field} applied to type {}, which is not a composite type",
+                other.display_name()
+            ),
+        }),
+    }
+}
+
+pub(crate) fn constant_field_type_with_control(
+    expression: &crate::ScalarExpr,
+    field: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Option<Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError>> {
+    let value = match expression {
+        crate::ScalarExpr::Literal(value) => value,
+        crate::ScalarExpr::RetainedLiteral(literal) if literal.declaration.is_none() => {
+            literal.value.resident_value()?
+        }
+        _ => return None,
+    };
+    match value {
+        uqa_core::Value::Row(values) => Some((|| {
+            let position = anonymous_field_position(field, values.len())
+                .ok_or_else(|| undefined_record_field(field))?;
+            super::common::value_type_with_control(&values[position], control)
+        })()),
+        uqa_core::Value::Record(fields) => Some((|| {
+            let (_, value) = fields
+                .iter()
+                .find(|(name, _)| name.as_str() == field)
+                .ok_or_else(|| undefined_record_field(field))?;
+            super::common::value_type_with_control(value, control)
+        })()),
+        _ => None,
+    }
 }
 
 pub(crate) struct SelectedValueField {
@@ -194,40 +271,6 @@ pub(crate) fn value_field_selection(
     }
 }
 
-/// The field of a folded row constant: an anonymous row's `fN` field or a named record's field.
-pub fn literal_field_type(
-    value: &uqa_core::Value,
-    field: &str,
-) -> Option<Result<Option<ColumnType>, SQLError>> {
-    match value {
-        uqa_core::Value::Row(values) => Some(row_field_type(
-            &values
-                .iter()
-                .map(super::common::value_type)
-                .collect::<Vec<_>>(),
-            field,
-        )),
-        uqa_core::Value::Record(fields) => Some(
-            fields
-                .iter()
-                .find(|(name, _)| name.as_str() == field)
-                .map(|(_, value)| super::common::value_type(value))
-                .ok_or_else(|| undefined_record_field(field)),
-        ),
-        _ => None,
-    }
-}
-
-/// The type of an anonymous row constructor's field, given the types of its items.
-pub fn row_field_type(
-    items: &[Option<ColumnType>],
-    field: &str,
-) -> Result<Option<ColumnType>, SQLError> {
-    anonymous_field_position(field, items.len())
-        .map(|position| items[position].clone())
-        .ok_or_else(|| undefined_record_field(field))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +278,44 @@ mod tests {
         plan::{RelationalPlan, UnifiedPlan},
         ColumnIdentity, RowSchema,
     };
+
+    #[test]
+    fn retained_anonymous_row_fields_preserve_literal_types_and_missing_field_errors() {
+        use crate::ast::{FunctionBinding, FunctionDispatch, FunctionOrderSyntax};
+        use crate::ir::{RetainedConstantValue, RetainedScalarLiteral};
+        use crate::ScalarExpr;
+        use uqa_core::{memory::ProductionControl, Value};
+
+        let control = ProductionControl::uncontrolled();
+        let value = Value::Row(vec![Value::Int(1), Value::Str("x".repeat(1 << 20))].into());
+        let retained = ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
+            RetainedConstantValue::from_produced(control.copy_value(&value).unwrap(), &control)
+                .unwrap(),
+            Some(ColumnType::Record),
+            None,
+            None,
+        ));
+        let ordinary = ScalarExpr::Literal(value);
+        let binding = FunctionBinding::dispatched(FunctionDispatch::FieldSelect);
+        for field in ["f1", "f2", "f0", "f01", "f3", "missing"] {
+            let call = |base| ScalarExpr::Func {
+                name: binding.name.clone(),
+                binding: Some(binding.clone()),
+                args: vec![base, ScalarExpr::Literal(Value::Str(field.into()))],
+                distinct: false,
+                order_syntax: FunctionOrderSyntax::Ordinary,
+                order_by: Vec::new(),
+                filter: None,
+            };
+            let expected = crate::scalar_type(&call(ordinary.clone()), &RowSchema::default(), &[]);
+            let expression = call(retained.clone());
+            let measured = allocation_counter::measure(|| {
+                let actual = crate::scalar_type(&expression, &RowSchema::default(), &[]);
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+            });
+            assert!(measured.bytes_total < 4096, "{measured:?}");
+        }
+    }
 
     #[test]
     fn relation_field_selection_respects_column_shadowing_and_structural_dispatch() {

@@ -10,6 +10,9 @@ use uqa_storage::{DocumentMetadata, StoredDocument};
 #[path = "../tests/support/native_catalog.rs"]
 pub(crate) mod native_storage;
 
+#[path = "../tests/support/pg18_oracle.rs"]
+mod pg18_oracle;
+
 fn doc<const N: usize>(pairs: [(&str, Value); N]) -> Document {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }

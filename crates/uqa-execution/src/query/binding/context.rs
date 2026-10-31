@@ -27,8 +27,12 @@ pub fn binding_context<S: Clone>(ctes: &CteScope<S>) -> Result<BindingContext<'_
                 (name.clone(), schema)
             })
             .collect(),
-        deferred_ctes: ctes.deferred_ctes().clone(),
-        non_returning_ctes: ctes.non_returning_ctes.clone(),
+        deferred_ctes: ctes
+            .deferred_ctes()
+            .iter()
+            .map(|(name, plan)| (name.clone(), plan.clone()))
+            .collect(),
+        non_returning_ctes: ctes.non_returning_ctes.iter().cloned().collect(),
         scalar_subqueries: &ctes.scalar_subqueries,
     })
 }

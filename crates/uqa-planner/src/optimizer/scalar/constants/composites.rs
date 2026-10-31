@@ -6,45 +6,65 @@
 
 //! Fold named ROW constructors only with the current catalog and admitted constant arguments.
 
-use uqa_core::{memory::ProductionControl, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
+use uqa_sql::ir::{RetainedConstantValue, RetainedScalarLiteral};
+use uqa_sql::routines::declaration::RoutineTypeCatalog;
 use uqa_sql::{ColumnType, SQLError, ScalarExpr};
 
-pub(super) fn constant_field(
+pub(super) mod owned;
+
+struct Field<'a> {
+    type_oid: u32,
+    ty: &'a ColumnType,
+    collation: Option<u32>,
+    binding: Option<&'a uqa_sql::ast::CompositeFieldBinding>,
+}
+
+fn constant_field(
     value: &Value,
     name: &str,
-    field: &uqa_sql::ast::CompositeFieldBinding,
-    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
-) -> Option<Result<Value, SQLError>> {
-    if matches!(value, Value::Null) || field.dropped {
-        return Some(Ok(Value::Null));
+    field: &Field<'_>,
+    types: Option<&dyn RoutineTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Option<Result<Produced<Value>, SQLError>> {
+    if matches!(value, Value::Null) || field.binding.is_some_and(|field| field.dropped) {
+        return Some(
+            control
+                .finish(Value::Null, control.empty_reservation())
+                .map_err(Into::into),
+        );
     }
-    if let Err(error) = uqa_sql::expr::composites::validate_field_result(field) {
-        return Some(Err(error));
+    if let Some(binding) = field.binding {
+        if let Err(error) = uqa_sql::expr::composites::validate_field_result(binding) {
+            return Some(Err(error));
+        }
     }
     if let Value::Datum(datum) = value {
         let selected = match uqa_sql::expr::datums::read_composite_field_with_control(
             datum,
             name,
             types?.composite_types(),
-            &ProductionControl::uncontrolled(),
+            control,
         ) {
             Ok(value) => value,
             Err(error) => return Some(Err(error)),
         };
-        return Some(uqa_sql::expr::datums::copy_constant_field(
-            &selected,
-            &field.result_type,
+        return Some(uqa_sql::expr::datums::copy_constant_field_with_control(
+            &selected, field.ty, control,
         ));
     }
     match value {
-        Value::Null => Some(Ok(Value::Null)),
         Value::Record(fields) => {
             if fields.type_oid().is_some_and(|oid| oid != field.type_oid) {
                 return None;
             }
-            Some(uqa_sql::expr::datums::copy_constant_field(
+            Some(uqa_sql::expr::datums::copy_constant_field_with_control(
                 fields.iter().find(|(key, _)| key.as_str() == name)?.1,
-                &field.result_type,
+                field.ty,
+                control,
             ))
         }
         _ => None,
@@ -53,61 +73,60 @@ pub(super) fn constant_field(
 
 pub(in crate::optimizer::scalar) fn fold_composite_constructor(
     expression: ScalarExpr,
-    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
+    types: Option<&dyn RoutineTypeCatalog>,
+    control: &ProductionControl<'_>,
 ) -> Result<ScalarExpr, SQLError> {
-    let Some(types) = types else {
-        return Ok(expression);
-    };
-    let ScalarExpr::CompositeRow {
-        items,
-        binding,
-        bound_type,
-    } = &expression
-    else {
-        return Ok(expression);
-    };
-    if !items.iter().try_fold(true, |all, item| {
-        Ok::<_, SQLError>(all && super::literal_value(item)?.is_some())
-    })? {
-        return Ok(expression);
+    match owned::fold_constructor(&expression, types, control)? {
+        Some(replacement) => Ok(replacement.finish(control)?.into_parts().0),
+        None => Ok(expression),
     }
-    let ty = match bound_type {
-        Some(ty) => ty.clone(),
-        None => types.resolve_catalog_column_type_name(&binding.ty)?,
+}
+
+struct Composite<'a> {
+    value: &'a Value,
+    type_oid: u32,
+    declaration: Option<&'a str>,
+    original: bool,
+}
+
+fn composite(expression: &ScalarExpr) -> Option<Composite<'_>> {
+    let (value, ty, declaration, original) = match expression {
+        ScalarExpr::TypedLiteral {
+            value,
+            bound_type: Some(ty),
+            ty: declaration,
+            composite_source,
+            ..
+        } => (
+            value,
+            ty,
+            Some(declaration.as_str()),
+            composite_source.is_some(),
+        ),
+        ScalarExpr::RetainedLiteral(literal) => (
+            literal.value.resident_value()?,
+            literal.ty.as_ref()?,
+            literal.declaration.as_deref(),
+            false,
+        ),
+        _ => return None,
     };
-    let ColumnType::Composite(reference) = &ty else {
-        return Ok(expression);
+    let ColumnType::Composite(reference) = ty else {
+        return None;
     };
-    let descriptor = uqa_sql::expr::composites::descriptor(types.composite_types(), reference.oid)?;
-    let control = ProductionControl::uncontrolled();
-    let value = uqa_sql::expr::composites::constructor::construct_with_control(
-        binding,
-        items.len(),
-        &descriptor,
-        &control,
-        |index| {
-            control
-                .copy_value(
-                    super::literal_value(&items[index])?
-                        .as_deref()
-                        .expect("constant argument"),
-                )
-                .map_err(Into::into)
-        },
-    )?;
-    let value = uqa_sql::expr::composites::retain_value_with_control(
+    Some(Composite {
         value,
-        types.composite_types(),
-        &control,
-    )?
-    .into_uncontrolled()
-    .expect("ordinary constant evaluation");
-    Ok(ScalarExpr::TypedLiteral {
-        value,
-        ty: binding.ty.clone(),
-        bound_type: Some(ty),
-        parameter_index: None,
-        collation_oid: None,
-        composite_source: None,
+        type_oid: reference.oid,
+        declaration,
+        original,
     })
+}
+
+pub(super) fn fold_field(
+    expression: &ScalarExpr,
+    types: Option<&dyn RoutineTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Option<Result<ScalarExpr, SQLError>> {
+    owned::fold_field(expression, types, control)
+        .map(|replacement| Ok(replacement?.finish(control)?.into_parts().0))
 }

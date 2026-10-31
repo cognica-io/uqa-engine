@@ -5,7 +5,10 @@
 //
 
 use super::*;
-use crate::{ast::EventEnableMode, catalog::events::StoredRule};
+use crate::{
+    ast::{EventEnableMode, Statement},
+    catalog::events::StoredRule,
+};
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 

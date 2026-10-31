@@ -22,14 +22,39 @@ pub fn optimize_catalog_scalar(
     context: &StatementPlanningContext<'_>,
     expression: &mut uqa_sql::ScalarExpr,
 ) -> Result<(), SQLError> {
-    optimize_scalar_expression(expression, &catalog_config(context))
+    let resources = context.optimization.production_resources()?;
+    optimize_scalar_expression(expression, &catalog_config(context, resources.as_ref())?)
 }
 
-fn catalog_config<'a>(context: &StatementPlanningContext<'a>) -> OptimizerConfig<'a> {
+/// Rewrite a catalog scalar whose input already belongs to the invoking request. Nested domain checks and routine preparation keep the same allowance and both cancellation scopes.
+pub fn optimize_owned_catalog_scalar(
+    context: &StatementPlanningContext<'_>,
+    expression: uqa_sql::plan::OwnedScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
     let mut config = OptimizerConfig::new(context.constant_evaluator);
-    config.builtin_permissions = context.optimization.builtin_permissions();
+    config.production = *control;
+    config.builtin_permissions = context
+        .optimization
+        .builtin_permissions_with_control(control)?;
     config.routine_inlining = context.optimization.routine_inlining();
-    config
+    crate::optimizer::optimize_owned_scalar_expression(expression, &config)
+}
+
+fn catalog_config<'a>(
+    context: &'a StatementPlanningContext<'_>,
+    resources: Option<&'a super::executable::PlanningResources>,
+) -> Result<OptimizerConfig<'a>, SQLError> {
+    let mut config = OptimizerConfig::new(context.constant_evaluator);
+    config.production = resources.map_or_else(
+        uqa_core::memory::ProductionControl::uncontrolled,
+        super::executable::PlanningResources::control,
+    );
+    config.builtin_permissions = context
+        .optimization
+        .builtin_permissions_with_control(&config.production)?;
+    config.routine_inlining = context.optimization.routine_inlining();
+    Ok(config)
 }
 
 /// Plan a rule's WHERE condition as a qualification. UNKNOWN and FALSE both reject a row here; they remain distinct in scalar/default/CHECK contexts.
@@ -37,14 +62,15 @@ pub fn optimize_rule_condition(
     context: &StatementPlanningContext<'_>,
     expression: &mut uqa_sql::plan::ExpressionPlan,
 ) -> Result<(), SQLError> {
-    let mut config = catalog_config(context);
+    let resources = context.optimization.production_resources()?;
+    let mut config = catalog_config(context, resources.as_ref())?;
     // Stored rule analysis has already retained every conditional result coercion.
     config.coerced_conditionals = true;
     optimize_scalar_expression(&mut expression.scalar, &config)?;
     if reject_unknown(&mut expression.scalar) {
         optimize_scalar_expression(&mut expression.scalar, &config)?;
     }
-    uqa_sql::plan::subqueries::prune_expression(expression);
+    uqa_sql::plan::subqueries::prune_expression_with_control(expression, config.production)?;
     Ok(())
 }
 
@@ -90,8 +116,8 @@ pub fn plan_schema_expression(
     let routines = context.optimization.routine_inlining().ok_or_else(|| {
         SQLError::Internal("schema expression planning requires routine metadata".into())
     })?;
-    let mut config = OptimizerConfig::new(context.constant_evaluator);
-    config.builtin_permissions = context.optimization.builtin_permissions();
+    let resources = context.optimization.production_resources()?;
+    let mut config = catalog_config(context, resources.as_ref())?;
     config.routine_inlining = Some(routines);
     config.coerced_conditionals = true;
     optimize_scalar_expression(&mut analyzed.scalar, &config)?;
@@ -99,7 +125,9 @@ pub fn plan_schema_expression(
         == FunctionVolatility::Immutable;
     let constant = matches!(
         analyzed.scalar,
-        uqa_sql::ScalarExpr::Literal(_) | uqa_sql::ScalarExpr::TypedLiteral { .. }
+        uqa_sql::ScalarExpr::Literal(_)
+            | uqa_sql::ScalarExpr::TypedLiteral { .. }
+            | uqa_sql::ScalarExpr::RetainedLiteral(_)
     );
     Ok(PlannedSchemaExpression {
         expression: analyzed.expression,

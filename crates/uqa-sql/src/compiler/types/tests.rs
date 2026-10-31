@@ -32,3 +32,5 @@ fn retained_type_names_stay_bounded() {
     }
     assert!(PARSED_TYPE_NAMES.read().unwrap().len() <= RETAINED_TYPE_NAMES);
 }
+
+mod production;

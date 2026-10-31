@@ -36,6 +36,15 @@ impl PartitionCatalog for Engine {
     fn try_resolve_table_name(&self, name: &str) -> Result<Option<String>, String> {
         Engine::try_resolve_table_name(self, name).map_err(|error| error.to_string())
     }
+    fn try_resolve_table_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
+        self.with_table_state_with_control(name, control, |relation, _| {
+            Ok(relation.qualified_name_with_control(control)?)
+        })
+    }
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }

@@ -73,6 +73,11 @@ impl<T> BudgetedVec<T> {
         self.values.truncate(len);
     }
 
+    /// Remove consecutive duplicate elements without changing the admitted buffer capacity.
+    pub fn dedup_by_key<K: PartialEq>(&mut self, key: impl FnMut(&mut T) -> K) {
+        self.values.dedup_by_key(key);
+    }
+
     /// Request a buffer for the current length, charging the reported capacity of both buffers until the move finishes. A failed reservation or allocation preserves the original values, buffer and reservation.
     pub fn shrink_to_fit(&mut self) -> Result<(), MemoryError> {
         let capacity = self.values.len();

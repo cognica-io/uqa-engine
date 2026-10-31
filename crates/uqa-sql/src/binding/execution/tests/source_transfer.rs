@@ -35,7 +35,12 @@ fn enter_derived_blocks(
         let RelationalPlan::QueryBlock(child) = &body.root else {
             panic!("derived query block");
         };
-        enter_derived_blocks(child, sources.as_deref(), context, retain_sources);
+        enter_derived_blocks(
+            child,
+            sources.as_deref().map(|value| &**value),
+            context,
+            retain_sources,
+        );
     }
 }
 

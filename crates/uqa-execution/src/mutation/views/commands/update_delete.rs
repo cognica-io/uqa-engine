@@ -10,7 +10,7 @@ use super::{
     validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
     with_mutation_snapshot, BTreeSet, CteScope, DeletePlan, DmlReturningShape,
     MutationStatementContext, OwnedPhysicalRow, ReturningValueProjectionRow, SQLError, SQLParam,
-    ScalarExpr, SourceOutputPruning, TriggerViewChecks, UpdatePlan, Value, ViewDmlTarget,
+    ScalarExpr, TriggerViewChecks, UpdatePlan, Value, ViewDmlTarget,
 };
 use crate::mutation::output::MutationOutput;
 use crate::mutation::{
@@ -123,12 +123,11 @@ fn matching_source_context<S: Clone + Send + Sync + 'static>(
 )]
 pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
     context: &MutationStatementContext<'_, S>,
-    prune_source_outputs: SourceOutputPruning,
     stmt: &UpdatePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
-    let target = resolve_view_target(context.mutation.rules.views, &stmt.table)?;
+    let target = resolve_view_target(context, &stmt.table)?;
     let assigned_columns = stmt
         .assignments
         .iter()
@@ -170,7 +169,10 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
         )?
         .is_empty();
     let (statement_commands, _running_statement) =
-        crate::mutation::statement_end::statement_commands(inherited_ctes);
+        crate::mutation::statement_end::statement_commands(
+            context.query.source.ctes,
+            inherited_ctes,
+        )?;
     let view_statement = crate::mutation::triggers::queue::StatementEvent::new(
         &target.canonical_name,
         uqa_sql::ast::TriggerEvent::Update,
@@ -199,7 +201,10 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 stmt.relations_bound,
             )?);
             if let Some(parent) = inherited_ctes {
-                ctes.inherit_cte_bindings(parent);
+                ctes.inherit_cte_bindings_with_control(
+                    parent,
+                    &context.query.source.ctes.production_resources()?.control(),
+                )?;
             }
             ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
@@ -217,8 +222,14 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            ctes.scalar_subqueries = stmt.subqueries.as_slice().into();
-            let mut source_scope = ctes.returning_statement_snapshot_scope();
+            let arena_resources = context.query.source.ctes.production_resources()?;
+            ctes.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &stmt.subqueries,
+                &arena_resources.control(),
+            )?;
+            let mut source_scope = ctes.returning_statement_snapshot_scope_with_control(
+                &context.query.source.ctes.production_resources()?.control(),
+            )?;
             let source_privilege_expressions = stmt
                 .assignments
                 .iter()
@@ -250,16 +261,14 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 &stmt.returning_aliases,
                 source_rows.as_ref().map(crate::SharedSpill::row_schema),
             )?;
-            let mut target_scope = ctes.returning_statement_snapshot_scope();
-            let candidates = materialize_view_rows(
-                &read_context.query,
-                prune_source_outputs,
-                &target,
-                None,
-                params,
-                &mut target_scope,
+            let mut target_scope = ctes.returning_statement_snapshot_scope_with_control(
+                &context.query.source.ctes.production_resources()?.control(),
             )?;
-            let snapshot = ctes.returning_statement_snapshot_scope();
+            let candidates =
+                materialize_view_rows(&read_context.query, &target, params, &mut target_scope)?;
+            let snapshot = ctes.returning_statement_snapshot_scope_with_control(
+                &context.query.source.ctes.production_resources()?.control(),
+            )?;
             let work_mem = context.mutation.rules.rules.memory.work_mem_bytes()?;
             let cancellation = context.mutation.rules.rules.cancellation.clone();
             let mut pending = MutationImageBuffer::new(work_mem, cancellation.clone());

@@ -18,6 +18,8 @@ use crate::{
     RowSchema, SQLError, ScalarExpr,
 };
 use uqa_core::Value;
+mod production;
+pub use production::{OwnedArgumentTypeInference, OwnedProcedureCallAnalysis};
 
 /// Reject forbidden subqueries before the caller captures its statement catalog scope.
 pub fn validate_call_arguments(arguments: &[ExpressionPlan]) -> Result<(), SQLError> {

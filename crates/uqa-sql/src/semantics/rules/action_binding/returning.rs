@@ -6,19 +6,19 @@
 
 //! Rewrite-rule action `RETURNING` namespace binding.
 
-use std::collections::BTreeSet;
-
 use crate::ast::{ColumnType, Expr, Projection, ReturningAliases, RuleEvent, Statement};
-use crate::plpgsql::{ResolvedVariable, VariableResolver};
+use crate::plpgsql::{ResolvedVariable, RewriteReference, VariableResolver};
 use crate::SQLError;
+use uqa_core::memory::{Produced, ProductionControl};
 
 pub(super) fn bind_rule_action_returning(
     returning: &[Projection],
-    action_columns: &BTreeSet<String>,
+    action_columns: &dyn super::ActionColumns,
     aliases: &ReturningAliases,
     action_event: RuleEvent,
     event_resolver: &mut dyn VariableResolver,
     context: &super::RuleBindingContext<'_>,
+    production: &crate::plan::copy::SyntaxProduction<'_>,
 ) -> Result<Vec<Projection>, SQLError> {
     super::bind_projections(
         returning,
@@ -30,6 +30,7 @@ pub(super) fn bind_rule_action_returning(
         },
         &super::RuleBindingScope::default(),
         context,
+        production,
     )
 }
 
@@ -100,11 +101,11 @@ fn is_action_image_alias(
     }
 }
 
-struct RuleActionReturningResolver<'a, 'resolver> {
-    action_columns: &'a BTreeSet<String>,
-    aliases: &'a ReturningAliases,
-    action_event: RuleEvent,
-    event_resolver: &'resolver mut dyn VariableResolver,
+pub(super) struct RuleActionReturningResolver<'a, 'resolver> {
+    pub(super) action_columns: &'a dyn super::names::ActionColumns,
+    pub(super) aliases: &'a ReturningAliases,
+    pub(super) action_event: RuleEvent,
+    pub(super) event_resolver: &'resolver mut dyn VariableResolver,
 }
 
 impl RuleActionReturningResolver<'_, '_> {
@@ -124,6 +125,45 @@ impl RuleActionReturningResolver<'_, '_> {
 }
 
 impl VariableResolver for RuleActionReturningResolver<'_, '_> {
+    fn rewrite_with_control(
+        &mut self,
+        reference: RewriteReference<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Expr>>, SQLError> {
+        control.check()?;
+        match reference {
+            RewriteReference::Name(name) | RewriteReference::WholeRow(name) => {
+                self.reject_inaccessible_insert_event_row(name)?;
+                if self.is_action_image_alias(name) {
+                    return Ok(None);
+                }
+            }
+            RewriteReference::Qualified { qualifier, column } => {
+                self.reject_inaccessible_insert_event_row(qualifier)?;
+                if self.is_action_image_alias(qualifier) {
+                    self.resolve_qualified(qualifier, column)?;
+                    return Ok(None);
+                }
+            }
+            RewriteReference::Parameter(_) | RewriteReference::Internal(_) => {}
+        }
+        self.event_resolver.rewrite_with_control(reference, control)
+    }
+
+    fn expand_with_control(
+        &mut self,
+        qualifier: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Vec<Expr>>>, SQLError> {
+        control.check()?;
+        self.reject_inaccessible_insert_event_row(qualifier)?;
+        if self.is_action_image_alias(qualifier) {
+            Ok(None)
+        } else {
+            self.event_resolver.expand_with_control(qualifier, control)
+        }
+    }
+
     fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         self.reject_inaccessible_insert_event_row(name)?;
         if self.is_action_image_alias(name) {

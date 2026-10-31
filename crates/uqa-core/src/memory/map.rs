@@ -116,6 +116,13 @@ impl<K: Ord, V> BudgetedMap<K, V> {
         tree::get(&self.root, key).map(|node| &node.value)
     }
 
+    pub fn get_key_value<Q: Ord + ?Sized>(&self, key: &Q) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        tree::get(&self.root, key).map(|node| (&node.key, &node.value))
+    }
+
     pub fn get_mut<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
@@ -229,5 +236,27 @@ impl<'a, K, V> IntoIterator for &'a BudgetedMap<K, V> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<K: super::ObserveAllocations, V: super::ObserveAllocations> super::ObserveAllocations
+    for OwnedNode<K, V>
+{
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut super::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        observer.allocation(size_of::<Node<K, V>>(), size_of::<Node<K, V>>())?;
+        let Node {
+            key,
+            value,
+            left,
+            right,
+            height: _,
+        } = self.value.as_ref();
+        observer.child(key)?;
+        observer.child(value)?;
+        observer.child(left)?;
+        observer.child(right)
     }
 }

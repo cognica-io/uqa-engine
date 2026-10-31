@@ -378,7 +378,7 @@ impl Engine {
                 // A private transaction may reuse a durable counter value
                 // after rollback. Never publish its payload to sibling sessions.
                 let stats = if private_snapshot {
-                    std::sync::Arc::new(load()?)
+                    std::sync::Arc::new(load()?.into())
                 } else {
                     self.statistics.statistics_snapshots.load(
                         &name,

@@ -26,6 +26,7 @@ pub(super) struct InsertQueryExecution<'a, S: Clone + 'static> {
     pub identity: InsertSelectIdentity,
     pub conflict_update_columns: Option<&'a [String]>,
     pub statement_commands: &'a Arc<StatementCommands>,
+    pub control: uqa_core::memory::ProductionControl<'a>,
 }
 
 pub(super) fn run<S: Clone + Send + Sync + 'static>(
@@ -41,28 +42,21 @@ pub(super) fn run<S: Clone + Send + Sync + 'static>(
         identity,
         conflict_update_columns,
         statement_commands: _,
+        control,
     } = &request;
-    let InsertSelectIdentity {
-        auto_id_column: auto_id_col,
-        id_column,
-        identity_source,
-    } = identity;
     let mutation = &context.mutation;
     let preparation = mutation.preparation;
-    let snapshot_scope = scope.returning_statement_snapshot_scope();
-    let mut source_scope = snapshot_scope.clone();
+    let snapshot_scope = scope.returning_statement_snapshot_scope_with_control(control)?;
+    let mut source_scope = snapshot_scope.copy_with_control(control)?;
     source_scope.enable_command_progress_streaming();
     let consumer = Rc::new(InsertSelectConsumer::new(
         context.insert_source(),
         stmt,
         params,
         snapshot_scope,
-        InsertSelectIdentity {
-            auto_id_column: auto_id_col.clone(),
-            id_column: id_column.clone(),
-            identity_source: *identity_source,
-        },
-        conflict_update_columns.unwrap_or(&[]).to_vec(),
+        identity,
+        conflict_update_columns.unwrap_or(&[]),
+        control,
     )?);
     let overlay = MutationOverlayScope::new(mutation.state);
     crate::query::statement::execute_query_plan_output(

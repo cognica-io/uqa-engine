@@ -63,11 +63,12 @@ fn definition() -> Result<PreparedDefinition, SQLError> {
     Ok(PreparedDefinition {
         composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
         logical_plan: uqa_sql::plan::UnifiedPlan::lower(uqa_sql::compile("SELECT 1")?.remove(0)),
-        parameter_types: vec![],
+        parameter_types: vec![].into(),
         result_schema: None,
-        effective_search_path: None,
-        dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default(),
-        dependency_snapshot: None,
+        effective_search_path: None.into(),
+        dependencies: uqa_sql::prepared::dependencies::PreparedAnalysisDependencies::default()
+            .into(),
+        dependency_snapshot: None.into(),
     })
 }
 
@@ -152,7 +153,9 @@ fn publication_and_undo_events_invalidate_only_selected_analysis_dependencies() 
     };
     let prepare = || {
         let mut value = definition()?;
-        value.dependencies.relations.insert(42);
+        let mut dependencies = (*value.dependencies).clone();
+        dependencies.relations.insert(42);
+        value.dependencies = dependencies.into();
         Ok(value)
     };
     let original = cache
@@ -186,7 +189,7 @@ fn selected(entry: &PreparedStatementPlan) -> uqa_sql::prepared::planning::Prepa
     let plan = entry
         .plan
         .clone()
-        .unwrap_or_else(|| (*entry.logical_plan).clone());
+        .unwrap_or_else(|| entry.logical_plan.clone());
     uqa_sql::prepared::planning::PreparedPlanSelection {
         plan: plan.clone(),
         update: uqa_sql::prepared::planning::PreparedPlanUpdate {
@@ -200,8 +203,45 @@ fn selected(entry: &PreparedStatementPlan) -> uqa_sql::prepared::planning::Prepa
 }
 
 #[test]
+fn routine_plan_reuse_shares_executable_storage() {
+    let lifetime = allocation_counter::measure(|| {
+        let mut definition = definition().unwrap();
+        definition
+            .logical_plan
+            .rewrite_scalar_expressions(&mut |node| {
+                if matches!(node, uqa_sql::ScalarExpr::Literal(_)) {
+                    *node = uqa_sql::ScalarExpr::Literal(uqa_core::Value::Str(
+                        "x".repeat(4 * 1024 * 1024),
+                    ));
+                }
+            });
+        let statement =
+            SQLRoutineStatement::new(definition.into_shared(), &ProductionControl::uncontrolled())
+                .unwrap();
+        let first = statement.select(|entry| Ok(selected(entry))).unwrap();
+        for _ in 0..32 {
+            let measured = allocation_counter::measure(|| {
+                let next = statement.select(|entry| Ok(selected(entry))).unwrap();
+                assert!(next.ptr_eq(&first));
+            });
+            assert!(measured.bytes_total < 4096, "{measured:?}");
+            assert_eq!(measured.bytes_current, 0, "{measured:?}");
+        }
+        assert_eq!(statement.variants.snapshot().generic_plans, 33);
+        drop(statement);
+        assert!(matches!(&*first, uqa_sql::plan::UnifiedPlan::Query(_)));
+        drop(first);
+    });
+    assert_eq!(lifetime.bytes_current, 0, "{lifetime:?}");
+}
+
+#[test]
 fn successful_plan_selection_is_retained_but_failed_selection_does_not_change_usage() {
-    let statement = SQLRoutineStatement::new(definition().unwrap());
+    let statement = SQLRoutineStatement::new(
+        definition().unwrap().into_shared(),
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
     for used in 0..32 {
         statement
             .select(|entry| {

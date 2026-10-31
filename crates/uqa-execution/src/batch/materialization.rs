@@ -151,7 +151,7 @@ impl<'a> RowMaterializer<'a> {
         plan: &ResultMaterializationPlan,
     ) -> ResultRow {
         // A shared scan fragment cannot donate its values, so read only requested output slots instead of cloning an intermediate positional vector that is immediately dismantled.
-        if row.fragments.len() == 1 && Arc::strong_count(&row.fragments[0].values) > 1 {
+        if row.fragments.len() == 1 && row.fragments[0].can_copy_directly() {
             return self.materialize_remapped_shared_fragment_row(&row.fragments[0], plan);
         }
         debug_assert_eq!(
@@ -211,7 +211,13 @@ impl RowFragment {
         columns: &mut impl Iterator<Item = &'a String>,
         result: &mut ResultRow,
     ) {
-        let Self { values, projection } = self;
+        let (values, projection) = match self {
+            Self::Constant { value, width } => {
+                insert_values(columns, result, std::iter::repeat_n(value.clone(), width));
+                return;
+            }
+            Self::Stored { values, projection } => (values, projection),
+        };
         let Some(projection) = projection else {
             match Arc::try_unwrap(values) {
                 Ok(values) => insert_values(columns, result, values),
@@ -272,7 +278,10 @@ impl RowFragment {
 
     /// Consume this fragment at an explicit row-materialization boundary. Unshared contiguous values, and the common prefix projection emitted by blocking operators, retain their existing allocations instead of being cloned one value at a time.
     fn into_values(self) -> Vec<Value> {
-        let Self { values, projection } = self;
+        let (values, projection) = match self {
+            Self::Constant { value, width } => return vec![value.clone(); width],
+            Self::Stored { values, projection } => (values, projection),
+        };
         let Some(projection) = projection else {
             return Arc::try_unwrap(values).unwrap_or_else(|values| values.as_ref().clone());
         };

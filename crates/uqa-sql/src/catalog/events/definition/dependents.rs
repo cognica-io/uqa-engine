@@ -7,7 +7,7 @@
 //! Bound rule and trigger dependencies observed at each catalog read boundary.
 use super::lookup::EventLookupContext;
 use crate::{
-    catalog::events::{PreparedRuleColumnDrop, RuleColumnDependency, StoredRule},
+    catalog::events::{PreparedRuleColumnDrop, RuleColumnDependency},
     SQLError,
 };
 use std::collections::BTreeMap;
@@ -30,7 +30,7 @@ impl EventLookupContext<'_> {
         let mut rules = self.registry.read_rules().clone();
         let mut rebind = std::collections::BTreeSet::new();
         for (event_relation, entries) in &mut rules {
-            for (name, rule) in entries {
+            for (name, rule) in std::sync::Arc::make_mut(entries) {
                 let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
                     format!(
                         "rule `{}` on `{}` has no bound dependency state",
@@ -104,7 +104,7 @@ impl EventLookupContext<'_> {
 }
 
 fn dependent_rules_for_column(
-    rules: &BTreeMap<RelationIdentity, BTreeMap<String, StoredRule>>,
+    rules: &super::super::RuleCatalog,
     relation: &RelationIdentity,
     column: &str,
 ) -> Result<Vec<(RelationIdentity, String)>, SQLError> {

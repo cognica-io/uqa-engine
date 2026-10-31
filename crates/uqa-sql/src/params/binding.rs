@@ -67,7 +67,7 @@ pub fn bind_parameter_type_with_control(
         SQLParam::TypedScalar { ty, .. } => declared_parameter_type(ty, types, control).map(Some),
         _ => crate::type_resolution::scalar_type_with_control(
             &ScalarExpr::Param(1),
-            &RowSchema::default(),
+            &RowSchema::empty_with_control(control)?,
             std::slice::from_ref(parameter),
             control,
         ),
@@ -94,10 +94,8 @@ fn declared_parameter_type(
         return ty.clone_with_control(control).map_err(Into::into);
     }
     let name = ty.catalog_name_with_control(control)?;
-    match types.resolve_type_name(&name) {
-        Ok(Some(current)) => current
-            .retain_external_with_control(control)
-            .map_err(Into::into),
+    match types.resolve_type_name_with_control(&name, control) {
+        Ok(Some(current)) => Ok(current),
         Ok(None) => Err(missing_parameter_type(ty)),
         Err(error) if error.sqlstate() == Some("42704") => Err(missing_parameter_type(ty)),
         Err(error) => Err(error),

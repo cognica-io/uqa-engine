@@ -63,7 +63,9 @@ impl Analysis<'_> {
                 let Some(query) = cte.body.query() else {
                     return Ok(false);
                 };
-                let parent = ctes.definition_scope(name).expect("declared CTE scope");
+                let parent = ctes
+                    .definition_scope_with_control(name, &self.control)?
+                    .expect("declared CTE scope");
                 self.output(query, column, &cte.columns, column_aliases, &parent)
             }
             Some(SourcePlan::Subquery {
@@ -92,14 +94,22 @@ impl Analysis<'_> {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             return Ok(false);
         };
-        let mut scope = std::borrow::Cow::Borrowed(ctes);
+        let mut owned_scope: Option<CteScope<S>> = None;
         let ordered = uqa_sql::semantics::order_cte_plans_with_control(&query.ctes, self.control)?;
         for cte in ordered.iter() {
-            scope
-                .to_mut()
-                .insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &self.control)?);
+            if owned_scope.is_none() {
+                owned_scope = Some(ctes.copy_with_control(&self.control)?);
+            }
+            owned_scope
+                .as_mut()
+                .expect("private constant scope")
+                .insert_deferred_with_control(
+                    uqa_sql::plan::RetainedCtePlan::capture(cte, &self.control)?,
+                    &self.control,
+                )?;
         }
-        let output = output_expressions(self.routines, block, self.params, &scope)?;
+        let scope = owned_scope.as_ref().unwrap_or(ctes);
+        let output = output_expressions(self.routines, block, self.params, scope, self.control)?;
         let mut found = false;
         for (index, (label, expression)) in output.iter().enumerate() {
             if source_columns
@@ -111,7 +121,7 @@ impl Analysis<'_> {
                 continue;
             }
             found = true;
-            if !self.expression(expression, block.from.as_ref(), &scope)? {
+            if !self.expression(expression, block.from.as_ref(), scope)? {
                 return Ok(false);
             }
         }

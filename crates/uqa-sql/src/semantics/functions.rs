@@ -11,6 +11,11 @@ use crate::{SQLError, ScalarExpr};
 use std::{borrow::Cow, sync::LazyLock};
 use uqa_core::Value;
 
+mod production;
+pub use production::{
+    builtin_function_dispatch_name_with_control, lowercase_function_name_with_control, FunctionName,
+};
+
 /// Executor-only carrier for `PostgreSQL` 18's `merge_action()` value. The attribute has no SQL name and therefore cannot collide with a target or source column named `_merge_action`.
 pub fn merge_action_attribute() -> crate::ast::InternalColumnRef {
     static ATTRIBUTE: LazyLock<crate::ast::InternalColumnRef> =
@@ -390,39 +395,40 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
 }
 
 pub fn retrieval_function(name: &str) -> bool {
-    matches!(
-        lowercase_function_name(name).as_ref(),
-        "text_match"
-            | "bayesian_match"
-            | "fts_match"
-            | "bayesian_match_with_prior"
-            | "calibrated_vector_match"
-            | "knn_match"
-            | "fuse_log_odds"
-            | "pool_positive_evidence"
-            | "fuse_bayesian_evidence"
-            | "multi_field_match"
-            | "staged_retrieval"
-            | "attention"
-            | "fuse_attention"
-            | "fuse_multihead"
-            | "learned_fusion"
-            | "fuse_learned"
-            | "sparse_threshold"
-            | "graph_pagerank"
-            | "pagerank"
-            | "graph_hits"
-            | "hits"
-            | "graph_betweenness"
-            | "betweenness"
-            | "graph_traverse"
-            | "traverse_match"
-            | "graph_neighbors"
-            | "graph_edges"
-            | "temporal_traverse"
-            | "rpq"
-            | "deep_predict"
-    )
+    [
+        "text_match",
+        "bayesian_match",
+        "fts_match",
+        "bayesian_match_with_prior",
+        "calibrated_vector_match",
+        "knn_match",
+        "fuse_log_odds",
+        "pool_positive_evidence",
+        "fuse_bayesian_evidence",
+        "multi_field_match",
+        "staged_retrieval",
+        "attention",
+        "fuse_attention",
+        "fuse_multihead",
+        "learned_fusion",
+        "fuse_learned",
+        "sparse_threshold",
+        "graph_pagerank",
+        "pagerank",
+        "graph_hits",
+        "hits",
+        "graph_betweenness",
+        "betweenness",
+        "graph_traverse",
+        "traverse_match",
+        "graph_neighbors",
+        "graph_edges",
+        "temporal_traverse",
+        "rpq",
+        "deep_predict",
+    ]
+    .iter()
+    .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
 pub fn expect_column_name(expr: &ScalarExpr, label: &str) -> Result<String, SQLError> {

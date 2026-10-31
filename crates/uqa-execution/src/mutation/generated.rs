@@ -6,7 +6,7 @@
 
 //! Recompute stored generated values from a relation's declared row schema.
 
-use uqa_core::Value;
+use uqa_core::memory::ProductionControl;
 use uqa_sql::assignment::{columns::coerce_column_value, AssignmentContext};
 use uqa_sql::{
     ast::{ColumnDef, Expr, GeneratedColumn, GeneratedColumnKind},
@@ -14,7 +14,11 @@ use uqa_sql::{
 };
 
 /// Evaluate a generated expression without discarding its analyzed source type.
-pub type GeneratedColumnEvaluator<'a> = dyn FnMut(&Expr, &ResultRow, &RowSchema) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError>
+pub type GeneratedColumnEvaluator<'a> = dyn FnMut(
+        &Expr,
+        &ResultRow,
+        &RowSchema,
+    ) -> Result<crate::query::catalog_expression::TypedCatalogValue, SQLError>
     + 'a;
 
 /// Recompute the selected stored generated columns (all when no selection is supplied); each value takes its column type through catalog-aware assignment conversion.
@@ -23,6 +27,7 @@ pub fn refresh_stored_generated_columns(
     columns: &[ColumnDef],
     selected: Option<&[String]>,
     document: &mut ResultRow,
+    control: &ProductionControl<'_>,
     evaluate: &mut GeneratedColumnEvaluator<'_>,
 ) -> Result<(), SQLError> {
     for column in columns {
@@ -36,24 +41,27 @@ pub fn refresh_stored_generated_columns(
     if selected.is_some_and(<[String]>::is_empty) {
         return Ok(());
     }
-    let schema = generated_row_schema(columns);
+    let schema = generated_row_schema(columns, control)?;
     for (column, generated) in stored_generation_expressions(columns, selected) {
         let (value, source) = evaluate(&generated.expression, document, &schema)?;
         document.insert(
             column.name.clone(),
-            coerce_column_value(assignment, value, &column.ty, source.as_ref())?,
+            coerce_column_value(assignment, value, &column.ty, source.as_deref())?,
         );
     }
     Ok(())
 }
 
-pub(crate) fn generated_row_schema(columns: &[ColumnDef]) -> RowSchema {
-    RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
+pub(crate) fn generated_row_schema(
+    columns: &[ColumnDef],
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    RowSchema::with_column_metadata_with_control(
+        None,
         columns
             .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
+            .map(|column| (column.name.as_str(), Some(&column.ty), None)),
+        control,
     )
 }
 

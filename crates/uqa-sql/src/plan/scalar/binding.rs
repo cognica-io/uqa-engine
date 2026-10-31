@@ -26,9 +26,30 @@ impl FunctionBinding {
         }
         let mut copying = Lowering {
             control: Some(super::resources::Control::from_production(*control)),
+            owned_children: None,
         };
         let binding = copying.binding(Source::Borrowed(self))?;
         Ok(copying.finish(binding)?.into())
+    }
+    pub(crate) fn with_composite_projection_with_control(
+        &self,
+        dropped: bool,
+        changed_type: Option<&crate::ColumnType>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>> {
+        control.check()?;
+        assert!(
+            self.composite_field().is_some(),
+            "composite projection requires selected field metadata"
+        );
+        let mut copying = Lowering {
+            control: control
+                .budget()
+                .map(|_| super::resources::Control::from_production(*control)),
+            owned_children: None,
+        };
+        let binding = copying.binding_fields(self, Some((dropped, changed_type)))?;
+        Ok(control.finish(binding, copying.control.map(|owner| owner.memory))?)
     }
 }
 
@@ -42,6 +63,14 @@ impl Lowering<'_> {
             Source::Owned(binding) => return Ok(binding),
             Source::Borrowed(binding) => binding,
         };
+        self.binding_fields(binding, None)
+    }
+
+    fn binding_fields(
+        &mut self,
+        binding: &FunctionBinding,
+        field_projection: Option<(bool, Option<&crate::ColumnType>)>,
+    ) -> Result<FunctionBinding> {
         let FunctionBinding {
             object_id,
             name,
@@ -85,9 +114,12 @@ impl Lowering<'_> {
                                         result_type: this
                                             .scalar_type_copy(Some(&field.result_type))?
                                             .expect("field result type"),
-                                        dropped: field.dropped,
-                                        changed_type: this
-                                            .scalar_type_copy(field.changed_type.as_ref())?,
+                                        dropped: field_projection
+                                            .map_or(field.dropped, |(dropped, _)| dropped),
+                                        changed_type: this.scalar_type_copy(
+                                            field_projection
+                                                .map_or(field.changed_type.as_ref(), |(_, ty)| ty),
+                                        )?,
                                     },
                                 )
                             }

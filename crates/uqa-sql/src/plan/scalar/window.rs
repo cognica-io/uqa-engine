@@ -7,7 +7,7 @@
 use super::{
     resources::{Lowering, Result},
     source::{Items, Source},
-    AggregateClassifier, FrameBound, OrderBy, QueryPlan, ScalarFrameBound, ScalarOrder,
+    AggregateClassifier, FrameBound, OrderBy, QueryLowering, ScalarFrameBound, ScalarOrder,
     ScalarWindowFrame, ScalarWindowSpec, WindowSpec,
 };
 use crate::ast::WindowFrame;
@@ -17,7 +17,7 @@ impl Lowering<'_> {
         &mut self,
         source: Source<'_, OrderBy>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<ScalarOrder> {
         let (expression, descending, nulls) = match source {
             Source::Owned(OrderBy {
@@ -42,7 +42,7 @@ impl Lowering<'_> {
         &mut self,
         source: Source<'_, WindowSpec>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<ScalarWindowSpec> {
         self.check()?;
         let (definition, unresolved, partition_by, order_by, frame) = match source {
@@ -97,7 +97,7 @@ impl Lowering<'_> {
         &mut self,
         source: Source<'_, WindowFrame>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<ScalarWindowFrame> {
         let (mode, start, end, between, exclusion) = match source {
             Source::Owned(WindowFrame {
@@ -140,7 +140,7 @@ impl Lowering<'_> {
         &mut self,
         source: Source<'_, FrameBound>,
         aggregates: &dyn AggregateClassifier,
-        subqueries: &mut Vec<QueryPlan>,
+        subqueries: &mut dyn QueryLowering,
     ) -> Result<ScalarFrameBound> {
         self.check()?;
         let (preceding, expression) = match source {

@@ -45,7 +45,7 @@ impl TableAsTransactions<StatementReadSnapshot> for Engine {
         if_not_exists: bool,
         persistence: RelationPersistence,
     ) -> Result<bool, SQLError> {
-        let scope = super::query_scope::new_for_current_routine(self);
+        let scope = super::query_scope::new_for_current_routine(self)?;
         uqa_execution::schema::ctas::explain_existing_target(
             &self.create_table_as_context(&scope),
             name,
@@ -66,7 +66,7 @@ impl TableAsTransactions<StatementReadSnapshot> for Engine {
         &self,
         write: TableAsWrite<'_, StatementReadSnapshot>,
     ) -> Result<SQLResult, SQLError> {
-        let scope = super::query_scope::new_for_current_routine(self);
+        let scope = super::query_scope::new_for_current_routine(self)?;
         write(&self.create_table_as_context(&scope))
     }
 }
@@ -83,8 +83,11 @@ impl TableCreationTransactions for Engine {
     }
 }
 impl TableAsQuerySource for Engine {
-    fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError> {
-        crate::capabilities::statement_planning::optimize_engine_query(self, plan)
+    fn optimize(&self, plan: &QueryPlan) -> Result<uqa_sql::plan::OwnedQueryPlan, SQLError> {
+        crate::capabilities::statement_planning::optimize_engine_query(
+            self,
+            std::borrow::Cow::Borrowed(plan),
+        )
     }
     fn execute(
         &self,
@@ -92,7 +95,7 @@ impl TableAsQuerySource for Engine {
         params: &[SQLParam],
         measurement: Option<&uqa_execution::query::measurement::QueryMeasurement>,
     ) -> Result<SQLResult, SQLError> {
-        let mut scope = super::query_scope::new_for_current_routine(self);
+        let mut scope = super::query_scope::new_for_current_routine(self)?;
         uqa_execution::query::statement::execute_query_plan_measured(
             &self.query_execution_context(),
             plan,

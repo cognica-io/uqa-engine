@@ -100,12 +100,16 @@ fn implicit_action_inputs_preserve_their_enclosing_row_identity() {
             expected,
             "{sql}"
         );
-        let mut enclosing = QueryScope::default();
+        let control = ProductionControl::uncontrolled();
+        let mut enclosing = QueryScope::empty(&control).unwrap();
         enclosing
             .internal_relations
             .insert(crate::semantics::merge_action_attribute().relation());
+        let mut scopes = Buffer::new(&control);
+        scopes.push(enclosing, &control).unwrap();
         assert!(
-            !query_has_external_reference(context, &query, &mut vec![enclosing]).unwrap(),
+            !query_has_external_reference(Analysis { context, control }, &query, &mut scopes,)
+                .unwrap(),
             "{sql}"
         );
     }
@@ -140,9 +144,23 @@ fn table_range_aliases_replace_physical_correlation_names() {
         column_aliases: vec!["key".into(), "value".into()],
         include_descendants: true,
     };
-    let scope = source_scope(context, &source, &BTreeMap::new(), &[]).unwrap();
+    let scope = source_scope(
+        Analysis {
+            context,
+            control: ProductionControl::uncontrolled(),
+        },
+        &source,
+        &Ctes::new(),
+        &[],
+    )
+    .unwrap();
     assert_eq!(
-        scope.columns.names,
+        scope
+            .columns
+            .names
+            .iter()
+            .map(|name| name.to_string())
+            .collect::<BTreeSet<_>>(),
         BTreeSet::from(["key".to_string(), "value".to_string()])
     );
 }
@@ -367,3 +385,5 @@ fn wildcard_sources_preserve_independent_join_inputs() {
         "wildcard_using_partial_alias",
     ]);
 }
+
+mod production;

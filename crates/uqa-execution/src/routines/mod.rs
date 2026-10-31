@@ -99,6 +99,7 @@ pub struct Interpreter<'a> {
     preparations: std::sync::Arc<preparation::PLpgSQLPreparations>,
     descriptions: Option<descriptions::ProceduralDescriptions<'a>>,
     services: RoutineContext<'a>,
+    planning: uqa_core::memory::OwnedProductionControl,
     def: &'a CreateFunction,
     datums: &'a [PLpgSQLDatum],
     values: Vec<Value>,

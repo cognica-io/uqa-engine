@@ -133,7 +133,10 @@ impl RoutineExpressions for Catalog {
     fn evaluate(&self, _: &Expr) -> Result<Value, SQLError> {
         unreachable!()
     }
-    fn evaluate_with_type(&self, _: &Expr) -> Result<(Value, Option<ColumnType>), SQLError> {
+    fn evaluate_with_type(
+        &self,
+        _: &Expr,
+    ) -> Result<crate::query::catalog_expression::TypedCatalogValue, SQLError> {
         unreachable!()
     }
     fn expression_type(

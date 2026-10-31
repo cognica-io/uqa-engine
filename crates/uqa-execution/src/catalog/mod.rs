@@ -11,6 +11,7 @@ pub mod composite_type;
 pub mod domain;
 pub mod enum_type;
 pub mod foreign;
+pub mod hierarchy;
 pub mod identity;
 pub mod range_type;
 pub mod security;
@@ -28,6 +29,7 @@ use security::{
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::RelationIdentity;
 pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use view::StoredView;
@@ -38,6 +40,7 @@ pub mod graph_oids;
 mod graph_reads;
 pub mod namespaces;
 mod prepared_dependencies;
+mod production;
 mod read;
 pub mod relation_names;
 pub mod schema;
@@ -46,15 +49,16 @@ mod snapshot_read;
 /// Immutable catalog inputs with optional query read attribution. This view cannot change definitions, coordinate DDL, publish caches, or recover the enclosing engine.
 #[derive(Clone)]
 pub struct CatalogReadView {
-    snapshot: Arc<CatalogReadSnapshot>,
-    relation_descriptors: Arc<composite_type::relations::RelationDescriptorCache>,
-    range_descriptors: Option<Arc<range_type::RangeDescriptors>>,
-    dependencies: Arc<projection::DependencyCatalogCache>,
-    index_relations: Arc<cache::CatalogDerivation<projection::IndexRelations>>,
-    constraint_definitions: Arc<cache::CatalogDerivation<projection::ConstraintDefinitions>>,
-    event_definitions: Arc<projection::EventDefinitions>,
-    routine_definitions: Arc<projection::RoutineDefinitions>,
-    alias_output: Arc<cache::CatalogDerivation<Arc<projection::RegtypeOutputCatalog>>>,
+    snapshot: Arc<Produced<CatalogReadSnapshot>>,
+    relation_descriptors: Arc<Produced<composite_type::relations::RelationDescriptorCache>>,
+    range_descriptors: Option<Arc<Produced<range_type::RangeDescriptors>>>,
+    dependencies: Arc<Produced<projection::DependencyCatalogCache>>,
+    index_relations: Arc<Produced<cache::CatalogDerivation<projection::IndexRelations>>>,
+    constraint_definitions:
+        Arc<Produced<cache::CatalogDerivation<projection::ConstraintDefinitions>>>,
+    event_definitions: Arc<Produced<projection::EventDefinitions>>,
+    routine_definitions: Arc<Produced<projection::RoutineDefinitions>>,
+    alias_output: Arc<Produced<cache::CatalogDerivation<Arc<projection::RegtypeOutputCatalog>>>>,
     graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
     /// The owning session's catalog records, read only inside its retained statement transaction.
     prepared_catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
@@ -69,10 +73,18 @@ pub struct CatalogReadView {
 /// Immutable catalog names and durable registries captured at one statement boundary.
 #[derive(Clone)]
 pub struct CatalogReadSnapshot {
-    pub tables: BTreeMap<uqa_core::RelationIdentity, CatalogTableSnapshot>,
+    pub tables: uqa_core::memory::OwnedMap<uqa_core::RelationIdentity, CatalogTableSnapshot>,
     pub definitions: CatalogDefinitionSnapshot,
+    /// A private graph namespace shares its immutable names and storage without copying the handle map.
+    pub graph_overlay: Option<GraphCatalogOverlay>,
     /// The session's temporary namespace once its first temporary object created it.
     pub temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespace>,
+}
+
+#[derive(Clone)]
+pub struct GraphCatalogOverlay {
+    pub names: Arc<std::collections::BTreeSet<String>>,
+    pub store: Arc<uqa_graph::PersistentGraphStore>,
 }
 
 /// Immutable table-definition fields used by binding and catalog projection.
@@ -156,33 +168,19 @@ pub struct CatalogDefinitionSnapshot {
             BTreeMap<String, uqa_sql::catalog::events::StoredTrigger>,
         >,
     >,
-    pub rules: Arc<
-        BTreeMap<
-            uqa_storage::RelationIdentity,
-            BTreeMap<String, uqa_sql::catalog::events::StoredRule>,
-        >,
-    >,
+    pub rules: Arc<uqa_sql::catalog::events::RuleCatalog>,
 }
 
 impl CatalogReadView {
     pub fn new(snapshot: CatalogReadSnapshot) -> Self {
-        let range_descriptors = (!snapshot.definitions.ranges.is_empty()).then(Arc::default);
-        Self {
-            snapshot: Arc::new(snapshot),
-            relation_descriptors: Arc::default(),
-            range_descriptors,
-            dependencies: Arc::default(),
-            index_relations: Arc::default(),
-            constraint_definitions: Arc::default(),
-            event_definitions: Arc::default(),
-            routine_definitions: Arc::default(),
-            alias_output: Arc::default(),
-            graph_reads: None,
-            prepared_catalog: None,
-            physical_catalog: None,
-            sequence_positions: None,
-            latest_sequence_values: None,
-        }
+        let control = ProductionControl::uncontrolled();
+        Self::new_with_control(
+            control
+                .finish(snapshot, control.empty_reservation())
+                .expect("ordinary catalog input"),
+            &control,
+        )
+        .expect("ordinary catalog capture")
     }
 
     #[must_use]

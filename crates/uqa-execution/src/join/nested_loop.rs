@@ -6,10 +6,11 @@
 
 //! Nested-loop physical join execution.
 
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::ast::JoinKind;
-use uqa_sql::ResultRow;
+use uqa_sql::{ResultRow, SQLError};
 
-use super::{output_schema, HybridRowStore, MatchFlags, SpillState, DEFAULT_JOIN_WORK_MEM_BYTES};
+use super::{HybridRowStore, MatchFlags, SpillState, DEFAULT_JOIN_WORK_MEM_BYTES};
 
 mod iteration;
 use crate::{
@@ -25,7 +26,7 @@ pub struct NestedLoopJoin<'a> {
     left: Box<dyn PhysicalOperator + 'a>,
     right: Box<dyn PhysicalOperator + 'a>,
     kind: JoinKind,
-    predicate: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
+    predicate: Option<crate::scalar::PreparedExpressions<Produced<ScalarExpr>>>,
     evaluator: SharedExpressionEvaluator<'a>,
     left_nulls: PhysicalRow,
     right_nulls: PhysicalRow,
@@ -44,6 +45,7 @@ pub struct NestedLoopJoin<'a> {
     right_state: RightInputState,
     output_spilled: SpillState,
     right_input_spilled: SpillState,
+    memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -89,21 +91,67 @@ impl<'a> NestedLoopJoin<'a> {
         right_nulls: ResultRow,
         work_mem_bytes: usize,
     ) -> Self {
-        let left = super::presence::input(left, matches!(kind, JoinKind::Right | JoinKind::Full));
-        let right = super::presence::input(right, matches!(kind, JoinKind::Left | JoinKind::Full));
-        let schema = output_schema(
-            left.row_schema(),
-            right.row_schema(),
-            &left_nulls,
-            &right_nulls,
-        );
-        let left_nulls = PhysicalRow::nulls(left.row_schema().physical_width());
-        let right_nulls = PhysicalRow::nulls(right.row_schema().physical_width());
-        Self {
+        let control = ProductionControl::uncontrolled();
+        Self::with_owned_predicate(
             left,
             right,
             kind,
-            predicate: predicate.map(crate::scalar::PreparedExpressions::scalar),
+            predicate.map(|predicate| {
+                control
+                    .finish(predicate, None)
+                    .expect("ordinary join predicate")
+            }),
+            evaluator,
+            left_nulls,
+            right_nulls,
+            work_mem_bytes,
+            &control,
+        )
+        .expect("ordinary nested-loop construction")
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "retains both join inputs and the admitted predicate"
+    )]
+    pub fn with_owned_predicate(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: JoinKind,
+        predicate: Option<Produced<ScalarExpr>>,
+        evaluator: SharedExpressionEvaluator<'a>,
+        left_nulls: ResultRow,
+        right_nulls: ResultRow,
+        work_mem_bytes: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let (left, right, (schema, predicate)) =
+            crate::physical::construction::OperatorBuild::pair(left, right, |left, right| {
+                control.check()?;
+                super::presence::join_inputs(left, right, kind, control)?;
+                let schema = RowSchema::join_borrowed_columns_with_control(
+                    left.row_schema(),
+                    right.row_schema(),
+                    left_nulls
+                        .keys()
+                        .chain(right_nulls.keys())
+                        .map(String::as_str),
+                    control,
+                )?;
+                let predicate = predicate
+                    .map(|predicate| {
+                        crate::scalar::PreparedExpressions::produced_scalar(predicate, control)
+                    })
+                    .transpose()?;
+                Ok((schema, predicate))
+            })?;
+        let left_nulls = PhysicalRow::nulls(left.row_schema().physical_width());
+        let right_nulls = PhysicalRow::nulls(right.row_schema().physical_width());
+        Ok(Self {
+            left,
+            right,
+            kind,
+            predicate,
             evaluator,
             left_nulls,
             right_nulls,
@@ -122,6 +170,32 @@ impl<'a> NestedLoopJoin<'a> {
             right_state: RightInputState::Unopened,
             output_spilled: SpillState::InMemory,
             right_input_spilled: SpillState::InMemory,
+            memory: None,
+        })
+    }
+
+    pub fn into_boxed(mut self, control: &ProductionControl<'_>) -> Result<Box<Self>, SQLError> {
+        match control.reserve(size_of::<Self>()) {
+            Ok(memory) => {
+                self.memory = memory;
+                Ok(Box::new(self))
+            }
+            Err(error) => {
+                let left = self.left.close();
+                let right = self.right.close();
+                let cleanup = crate::physical::with_cleanup(
+                    left,
+                    right,
+                    "close right nested-loop input after construction failure",
+                );
+                Err(match cleanup {
+                    Ok(()) => error.into(),
+                    Err(cleanup) => SQLError::from(error).with_cleanup(
+                        crate::physical::physical_exec_error(cleanup),
+                        "close nested-loop join after wrapper admission failure",
+                    ),
+                })
+            }
         }
     }
 

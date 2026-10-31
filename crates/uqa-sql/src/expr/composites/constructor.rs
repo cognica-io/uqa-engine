@@ -40,11 +40,7 @@ pub fn evaluate_with_state(
     control.check()?;
     let engine =
         engine.ok_or_else(|| SQLError::Internal("composite constructor has no catalog".into()))?;
-    let resolved = engine
-        .resolve_type_name(&binding.ty)
-        .map_err(SQLError::Internal)?
-        .map(|ty| ty.retain_external_with_control(control))
-        .transpose()?;
+    let resolved = engine.resolve_type_name_with_control(&binding.ty, control)?;
     control.check()?;
     let Some(ColumnType::Composite(reference)) = resolved.as_deref() else {
         return Err(SQLError::Internal(

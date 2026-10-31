@@ -21,7 +21,7 @@ pub fn canonical_routine_type_name(type_name: &str) -> String {
         .expect("ordinary routine type normalization has no reservation")
 }
 
-pub(in crate::type_resolution) fn canonical_routine_type_name_with_control(
+pub fn canonical_routine_type_name_with_control(
     type_name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
@@ -191,6 +191,11 @@ pub(in crate::type_resolution) const fn builtin_canonical_type_name(
         ColumnType::Xml => "xml",
         ColumnType::JsonB => "jsonb",
         ColumnType::Oid => "oid",
+        ColumnType::Bit(_) => "bit",
+        ColumnType::Int2Vector => "int2vector",
+        ColumnType::OidVector => "oidvector",
+        ColumnType::Record => "record",
+        ColumnType::Void => "void",
         _ => return None,
     })
 }
@@ -203,11 +208,11 @@ pub(in crate::type_resolution) fn canonical_column_type_name_with_control(
         return control.copy_text(name);
     }
     // User-defined type spellings are neither unique across schemas nor stable across renames, so overload matching identifies them by OID.
-    if let Some(identity) = ty.user_type_identity() {
+    if let Some(identity) = ty.user_type_identity_with_control(control)? {
         if let Some(element) = array_element_spelling(&identity, control)? {
             return control.format(format_args!("{element}[]"));
         }
-        return control.copy_text(&identity);
+        return Ok(identity);
     }
     let name = ty.sql_name_with_control(control)?;
     canonical_routine_type_name_with_control(&name, control)

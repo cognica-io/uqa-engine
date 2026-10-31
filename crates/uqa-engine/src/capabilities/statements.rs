@@ -88,9 +88,16 @@ impl context::PhysicalExplainPlanning for Engine {
 
     fn plan_explained_statement(
         &self,
-        body: &uqa_sql::plan::UnifiedPlan,
-    ) -> Result<uqa_sql::plan::UnifiedPlan, uqa_sql::SQLError> {
-        super::statement_planning::optimize_engine_plan(self, body.clone())
+        body: uqa_sql::plan::PlanRef<'_>,
+    ) -> Result<uqa_sql::plan::OwnedExecutablePlan, uqa_sql::SQLError> {
+        let resources =
+            uqa_execution::query::relational::QueryExpressionFactory::production_resources(self)?;
+        let control = resources.control();
+        uqa_planner::statement_planning::executable::optimize_owned_with_control(
+            &self.statement_planning_context(),
+            body.copy_for_rewrite(&control)?,
+            &control,
+        )
     }
 
     fn physical_explain_plan(
@@ -102,7 +109,7 @@ impl context::PhysicalExplainPlanning for Engine {
     ) -> Result<uqa_core::memory::Produced<uqa_sql::result::ExplainPhysicalPlan>, uqa_sql::SQLError>
     {
         let catalog = self.catalog_read_view();
-        let resolution = self.session_execution_view().relation_name_resolution();
+        let resolution = uqa_execution::catalog::services::CatalogSession::relation_name_resolution_with_control(self, control)?;
         uqa_planner::explain::physical_plan_with_control(
             uqa_planner::explain::PhysicalExplainContext {
                 retrieval: self,
@@ -122,7 +129,13 @@ impl context::PhysicalExplainPlanning for Engine {
                         resolution: &resolution,
                         scoped_relations: None,
                     },
-                    optimizer: &|plan| super::statement_planning::optimize_engine_plan(self, plan),
+                    optimizer: &|plan, control| {
+                        uqa_planner::statement_planning::executable::optimize_retained_query(
+                            &self.statement_planning_context(),
+                            plan,
+                            control,
+                        )
+                    },
                 },
                 evaluate: &uqa_execution::eval_constant_scalar_with_control,
             },

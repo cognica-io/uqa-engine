@@ -122,7 +122,7 @@ fn retained_sources_cannot_escape_into_stored_syntax_or_sql_text() {
 #[test]
 fn retained_sources_share_owned_record_descriptors_and_clone_without_row_values() {
     let relation = InternalRelationId::allocate();
-    let fields: std::sync::Arc<[Option<ColumnType>]> =
+    let fields: crate::schema::RecordFields =
         vec![Some(ColumnType::SmallInteger), Some(ColumnType::Text)].into();
     let visible = RowSchema::with_types(vec!["record".into()], vec![Some(ColumnType::Record)])
         .with_record_fields([(0, fields.clone())]);
@@ -142,7 +142,7 @@ fn retained_sources_share_owned_record_descriptors_and_clone_without_row_values(
         let copies: Vec<_> = (0..128).map(|_| source.clone()).collect();
         for copy in copies {
             assert!(copy.schema().shares_index(source.schema()));
-            assert!(std::sync::Arc::ptr_eq(
+            assert!(crate::schema::RecordFields::shares_storage(
                 copy.schema().physical_record_fields(0).unwrap(),
                 &fields
             ));

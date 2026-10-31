@@ -338,3 +338,16 @@ impl<'de> serde::Deserialize<'de> for RowValue {
 
 #[cfg(test)]
 mod tests;
+
+impl crate::memory::ObserveAllocations for RowValue {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        observer.allocation(size_of::<RowStorage>(), size_of::<RowStorage>())?;
+        let RowStorage { values, descriptor } = self.storage.as_ref();
+        observer.child(values)?;
+        observer.child(descriptor)?;
+        Ok(())
+    }
+}

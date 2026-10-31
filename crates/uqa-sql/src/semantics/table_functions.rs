@@ -14,9 +14,23 @@ use crate::type_resolution::{BuiltinFunctionOverload, FunctionTypeResolver};
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 use std::sync::Arc;
 
+mod columns;
+pub use columns::table_function_empty_schema_with_control;
+mod production;
+mod selection;
+mod types;
+pub use production::{
+    apply_table_function_aliases_with_control, user_function_composite_result_with_control,
+    user_function_declared_columns_with_control, user_function_output_columns_with_control,
+    user_table_function_columns_with_control, validate_table_function_alias_count_with_control,
+};
+pub(crate) use selection::resolve_table_function_binding_for_types_with_control;
+pub use types::table_function_column_types_with_control;
+
 mod column_definitions;
 pub use column_definitions::{
-    validate_table_function_column_definition, ColumnDefinitionRequest,
+    validate_table_function_column_definition,
+    validate_table_function_column_definition_with_control, ColumnDefinitionRequest,
     SETOF_COLUMN_DEFINITION_PREFIX,
 };
 
@@ -54,20 +68,12 @@ pub(crate) fn upgrade_legacy_table_function_binding(
 }
 
 pub fn user_function_output_columns_for(function: &SQLUserFunction) -> Option<Vec<String>> {
-    let outputs = function.def.output_params();
-    outputs.clone().next()?;
-    Some(
-        outputs
-            .enumerate()
-            .map(|(position, parameter)| {
-                if parameter.name.is_empty() {
-                    format!("column{}", position + 1)
-                } else {
-                    parameter.name.clone()
-                }
-            })
-            .collect(),
+    user_function_output_columns_with_control(
+        function,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
     )
+    .expect("ordinary function output columns")
+    .map(|columns| columns.into_uncontrolled().expect("ordinary output names"))
 }
 
 /// A named composite returned by a function expands to its live attributes in FROM, including a single composite OUT parameter.
@@ -76,31 +82,14 @@ pub fn user_function_composite_result(
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Result<Option<Arc<crate::expr::composites::CompositeTypeDescriptor>>, SQLError> {
-    let mut outputs = function.def.output_params();
-    if outputs.clone().nth(1).is_some() {
-        return Ok(None);
-    }
-    let declared = match (&function.def.returns, outputs.next()) {
-        (_, Some(output)) => Some(output.type_name.as_str()),
-        (FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }, None) => {
-            Some(type_name.as_str())
-        }
-        _ => None,
-    };
-    let Some(name) = invocation
-        .and_then(|value| value.return_type.as_deref())
-        .or(declared)
-    else {
-        return Ok(None);
-    };
-    // A polymorphic result without a resolved invocation type names no composite.
-    if crate::type_resolution::routine_polymorphic_type(name).is_some() {
-        return Ok(None);
-    }
-    let Some(ColumnType::Composite(reference)) = routines.resolve_type_name(name)? else {
-        return Ok(None);
-    };
-    crate::expr::composites::descriptor(routines.composite_types(), reference.oid).map(Some)
+    production::composite_result_oid_with_control(
+        routines,
+        function,
+        invocation,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|oid| crate::expr::composites::descriptor(routines.composite_types(), oid))
+    .transpose()
 }
 
 /// The columns a user function in FROM declares, before column aliases: a named composite result's attributes, including those of a single composite OUT parameter, or else the OUT parameters. `None` for a function with neither, whose single column the FROM item names.
@@ -109,17 +98,19 @@ pub fn user_function_declared_columns(
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Result<Option<Vec<String>>, SQLError> {
-    Ok(
-        user_function_composite_result(routines, function, invocation)?
-            .map(|descriptor| {
-                descriptor
-                    .attributes
-                    .iter()
-                    .map(|attribute| attribute.name.clone())
-                    .collect()
-            })
-            .or_else(|| user_function_output_columns_for(function)),
+    user_function_declared_columns_with_control(
+        routines,
+        function,
+        invocation,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
     )
+    .map(|columns| {
+        columns.map(|columns| {
+            columns
+                .into_uncontrolled()
+                .expect("ordinary declared column names")
+        })
+    })
 }
 
 /// Derive a user FROM function's width from its result type before applying aliases. Only an anonymous record takes its shape from the column definition list; aliases never add fields to a scalar result.
@@ -132,21 +123,21 @@ pub fn user_table_function_columns(
     column_aliases: &[String],
     ordinality: bool,
 ) -> Result<Vec<String>, SQLError> {
-    let columns = if column_definitions::user_function_result_class(routines, function, invocation)?
-        == column_definitions::ResultClass::Record
-    {
-        column_aliases.to_vec()
-    } else {
-        user_function_declared_columns(routines, function, invocation)?
-            .unwrap_or_else(|| vec![alias.unwrap_or(output_name).to_string()])
-    };
-    let columns = apply_table_function_aliases(columns, column_aliases, ordinality);
-    validate_table_function_alias_count(
-        alias.unwrap_or(output_name),
-        columns.len(),
-        column_aliases.len(),
-    )?;
-    Ok(columns)
+    user_table_function_columns_with_control(
+        routines,
+        function,
+        invocation,
+        output_name,
+        alias,
+        column_aliases,
+        ordinality,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|columns| {
+        columns
+            .into_uncontrolled()
+            .expect("ordinary table function names")
+    })
 }
 
 pub fn resolve_user_table_function(
@@ -158,14 +149,52 @@ pub fn resolve_user_table_function(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ResolvedUserTableFunction>, SQLError> {
-    let Some(binding) = resolve_table_function_binding(
-        routines,
+    resolve_user_table_function_with_control(
+        TableFunctionAnalysis {
+            routines,
+            types: resolver,
+        },
         name,
         binding,
         args,
         input_schema,
         params,
-        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|resolved| {
+        Ok(ResolvedUserTableFunction {
+            function: resolved.function,
+            binding: resolved
+                .binding
+                .into_uncontrolled()
+                .expect("ordinary table binding"),
+        })
+    })
+    .transpose()
+}
+
+pub struct ControlledUserTableFunction {
+    pub function: Arc<SQLUserFunction>,
+    pub binding: uqa_core::memory::Produced<FunctionBinding>,
+}
+
+pub fn resolve_user_table_function_with_control(
+    context: TableFunctionAnalysis<'_>,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    input: &RowSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<ControlledUserTableFunction>, SQLError> {
+    let Some(binding) = resolve_table_function_binding_with_control(
+        TableFunctionAnalysis { ..context },
+        name,
+        binding,
+        args,
+        input,
+        params,
+        control,
     )?
     else {
         return Ok(None);
@@ -173,22 +202,43 @@ pub fn resolve_user_table_function(
     if binding.builtin {
         return Ok(None);
     }
-    let (argument_names, argument_types, explicit_variadic) =
-        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
-    let Some(matched) = routines.resolve_static_sql_function_match(
-        name,
-        Some(&binding),
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-    )?
+    let signature = crate::function_call_argument_signature_with_control(
+        args,
+        input,
+        params,
+        Some(context.types),
+        control,
+    )?;
+    let (argument_names, argument_types, explicit_variadic) = &*signature;
+    let Some(matched) = context
+        .routines
+        .resolve_static_sql_function_match_with_control(
+            name,
+            Some(&binding),
+            crate::type_resolution::RoutineCallDescriptor {
+                argument_names,
+                argument_types,
+                explicit_variadic: *explicit_variadic,
+            },
+            control,
+        )?
     else {
         return Ok(None);
     };
-    Ok(Some(ResolvedUserTableFunction {
-        binding: matched.binding(),
+    let binding = crate::routines::resolution::selected_binding(
+        &matched.function,
+        matched.invocation,
+        control,
+    )?;
+    Ok(Some(ControlledUserTableFunction {
         function: matched.function,
+        binding,
     }))
+}
+
+pub struct TableFunctionAnalysis<'a> {
+    pub routines: &'a dyn RoutineResolution,
+    pub types: &'a dyn FunctionTypeResolver,
 }
 
 pub fn resolve_table_function_binding(
@@ -200,23 +250,59 @@ pub fn resolve_table_function_binding(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<FunctionBinding>, SQLError> {
+    Ok(resolve_table_function_binding_with_control(
+        TableFunctionAnalysis {
+            routines,
+            types: resolver,
+        },
+        name,
+        binding,
+        args,
+        input_schema,
+        params,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|binding| binding.into_uncontrolled().expect("ordinary table binding")))
+}
+
+pub fn resolve_table_function_binding_with_control(
+    context: TableFunctionAnalysis<'_>,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    input_schema: &RowSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<FunctionBinding>>, SQLError> {
+    control.check()?;
     if let Some(binding) = binding {
-        return Ok(Some(binding.clone()));
+        return Ok(Some(binding.clone_with_control(control)?));
     }
-    let (argument_names, argument_types, explicit_variadic) =
-        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
-    if crate::type_resolution::function_arguments_have_runtime_types(args, &argument_types)? {
+    let signature = crate::function_call_argument_signature_with_control(
+        args,
+        input_schema,
+        params,
+        Some(context.types),
+        control,
+    )?;
+    let (argument_names, argument_types, explicit_variadic) = &*signature;
+    if crate::type_resolution::function_arguments_have_runtime_types_with_control(
+        args,
+        argument_types,
+        control,
+    )? {
         return Ok(None);
     }
-    resolve_table_function_binding_for_types(
-        routines,
+    resolve_table_function_binding_for_types_with_control(
+        context.routines,
         name,
         binding,
         crate::type_resolution::RoutineCallDescriptor {
-            argument_names: &argument_names,
-            argument_types: &argument_types,
-            explicit_variadic,
+            argument_names,
+            argument_types,
+            explicit_variadic: *explicit_variadic,
         },
+        control,
     )
 }
 
@@ -258,47 +344,14 @@ pub(crate) fn resolve_table_function_binding_for_types(
     binding: Option<&FunctionBinding>,
     call: crate::type_resolution::RoutineCallDescriptor<'_>,
 ) -> Result<Option<FunctionBinding>, SQLError> {
-    if let Some(binding) = binding {
-        return Ok(Some(binding.clone()));
-    }
-    let crate::type_resolution::RoutineCallDescriptor {
-        argument_names,
-        argument_types,
-        explicit_variadic,
-    } = call;
-    let identity = name.to_ascii_lowercase();
-    let builtin = crate::semantics::builtin_function_dispatch_name(&identity);
-    let builtins = builtin_table_function_overloads(&builtin, argument_types);
-    if !builtins.is_empty() || has_builtin_table_function_overloads(&builtin) {
-        return routines
-            .resolve_table_function_overload_with_builtins(
-                name,
-                None,
-                argument_names,
-                argument_types,
-                explicit_variadic,
-                &builtins,
-            )
-            .map(|resolved| resolved.map(|resolved| resolved.binding));
-    }
-    let builtin_surface = is_builtin_table_function(&builtin)
-        || crate::registry::is_operator_join_table_function(&builtin)
-        || routines.has_registered_table_function(&identity);
-    if routines.lookup_visible_sql_functions(name)?.is_none() {
-        return Ok(None);
-    }
-    match routines.resolve_static_sql_function_match(
+    Ok(resolve_table_function_binding_for_types_with_control(
+        routines,
         name,
-        None,
-        argument_names,
-        argument_types,
-        explicit_variadic,
-    ) {
-        Ok(Some(function)) => Ok(Some(function.binding())),
-        Ok(None) => Ok(None),
-        Err(error) if builtin_surface && error.sqlstate() == Some("42883") => Ok(None),
-        Err(error) => Err(error),
-    }
+        binding,
+        call,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|binding| binding.into_uncontrolled().expect("ordinary table binding")))
 }
 
 fn has_builtin_table_function_overloads(name: &str) -> bool {
@@ -326,77 +379,19 @@ fn has_builtin_table_function_overloads(name: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn builtin_table_function_overloads(
     name: &str,
     argument_types: &[Option<ColumnType>],
 ) -> Vec<BuiltinFunctionOverload> {
-    let canonical_name = format!("pg_catalog.{name}");
-    let overload = |argument_types: Vec<ColumnType>,
-                    default_arguments: usize,
-                    return_type: ColumnType| BuiltinFunctionOverload {
-        variadic: false,
-        name: canonical_name.clone(),
-        argument_names: vec![None; argument_types.len()],
+    selection::builtin_table_function_overloads_with_control(
+        name,
         argument_types,
-        default_arguments,
-        return_type,
-    };
-    match name {
-        "pg_listening_channels" => vec![overload(Vec::new(), 0, ColumnType::Text)],
-        "generate_series" => crate::type_resolution::fixed_builtin_overloads(name)
-            .expect("generate_series has fixed catalog signatures")
-            .into_iter()
-            .filter(|overload| {
-                matches!(
-                    overload.return_type,
-                    ColumnType::Integer | ColumnType::BigInteger
-                )
-            })
-            .collect(),
-        "unnest" => {
-            let [Some(argument)] = argument_types else {
-                return Vec::new();
-            };
-            let Some(element) = crate::type_resolution::array_element_type(argument) else {
-                return Vec::new();
-            };
-            vec![overload(vec![ColumnType::AnyArray], 0, element.clone())]
-        }
-        // The scalar and FROM positions select from the same catalog signatures.
-        "regexp_matches" | "regexp_split_to_table" => {
-            crate::type_resolution::fixed_builtin_overloads(name)
-                .expect("regular-expression set functions have fixed catalog signatures")
-        }
-        "string_to_table" => vec![overload(
-            vec![ColumnType::Text, ColumnType::Text],
-            0,
-            ColumnType::Text,
-        )],
-        "json_array_elements" => vec![overload(vec![ColumnType::Json], 0, ColumnType::Json)],
-        "jsonb_array_elements" => vec![overload(vec![ColumnType::JsonB], 0, ColumnType::JsonB)],
-        "json_array_elements_text" | "json_object_keys" => {
-            vec![overload(vec![ColumnType::Json], 0, ColumnType::Text)]
-        }
-        "jsonb_array_elements_text" | "jsonb_object_keys" => {
-            vec![overload(vec![ColumnType::JsonB], 0, ColumnType::Text)]
-        }
-        "json_each" | "json_each_text" => {
-            vec![overload(vec![ColumnType::Json], 0, ColumnType::Record)]
-        }
-        "jsonb_each" | "jsonb_each_text" => {
-            vec![overload(vec![ColumnType::JsonB], 0, ColumnType::Record)]
-        }
-        "pg_get_sequence_data" => vec![overload(vec![ColumnType::Regclass], 0, ColumnType::Record)],
-        "pg_sequence_parameters" => {
-            vec![overload(vec![ColumnType::Oid], 0, ColumnType::Record)]
-        }
-        "aclexplode" => vec![overload(
-            vec![ColumnType::Array(Box::new(ColumnType::AclItem))],
-            0,
-            ColumnType::Record,
-        )],
-        _ => Vec::new(),
-    }
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary table declarations cannot be cancelled or limited")
+    .into_uncontrolled()
+    .expect("ordinary table declarations")
 }
 
 pub fn is_builtin_table_function(name: &str) -> bool {
@@ -447,89 +442,18 @@ pub fn table_function_empty_schema(
     output_width: usize,
     ordinality: bool,
 ) -> Vec<String> {
-    let lower = crate::semantics::builtin_function_dispatch_name(name);
-    let columns = if lower == "unnest" {
-        let width = output_width.max(1);
-        let default_column = if width == 1 {
-            alias.unwrap_or(output_name)
-        } else {
-            output_name
-        };
-        vec![default_column.to_string(); width]
-    } else {
-        match lower.as_ref() {
-            "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
-                vec!["key".into(), "value".into()]
-            }
-            "pg_get_sequence_data" => vec!["last_value".into(), "is_called".into()],
-            "aclexplode" => vec![
-                "grantor".into(),
-                "grantee".into(),
-                "privilege_type".into(),
-                "is_grantable".into(),
-            ],
-            "pg_sequence_parameters" => vec![
-                "start_value".into(),
-                "minimum_value".into(),
-                "maximum_value".into(),
-                "increment".into(),
-                "cycle_option".into(),
-                "cache_size".into(),
-                "data_type".into(),
-            ],
-            "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
-            | "graph_betweenness" => vec!["_doc_id".into(), "_score".into()],
-            "rpq" => vec!["vertex_id".into()],
-            "list_analyzers" => vec!["analyzer_name".into()],
-            "analyze_text" => vec!["analysis".into()],
-            "fts_index_stats" => vec![
-                "table_name".into(),
-                "field".into(),
-                "analyzer".into(),
-                "posting_count".into(),
-                "doc_length_count".into(),
-                "indexed_doc_count".into(),
-                "term_count".into(),
-                "total_field_length".into(),
-            ],
-            "text_similarity_join"
-            | "vector_similarity_join"
-            | "graph_join"
-            | "hybrid_join"
-            | "cross_paradigm_join" => {
-                vec!["left_doc_id".into(), "right_doc_id".into(), "_score".into()]
-            }
-            "generate_series"
-            | "pg_listening_channels"
-            | "regexp_matches"
-            | "regexp_split_to_table"
-            | "string_to_table"
-            | "json_array_elements"
-            | "jsonb_array_elements"
-            | "json_array_elements_text"
-            | "jsonb_array_elements_text"
-            | "json_object_keys"
-            | "jsonb_object_keys" => vec![scalar_table_function_default_column(
-                &lower,
-                output_name,
-                alias,
-                &[],
-            )],
-            _ => {
-                let minimum_width = 1;
-                let aliased_value_width = if ordinality && column_aliases.len() > minimum_width {
-                    column_aliases.len() - 1
-                } else {
-                    column_aliases.len()
-                };
-                vec![
-                    scalar_table_function_default_column(&lower, output_name, alias, &[]);
-                    minimum_width.max(aliased_value_width)
-                ]
-            }
-        }
-    };
-    apply_table_function_aliases(columns, column_aliases, ordinality)
+    table_function_empty_schema_with_control(
+        name,
+        output_name,
+        alias,
+        column_aliases,
+        output_width,
+        ordinality,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary table-function names")
+    .into_uncontrolled()
+    .expect("ordinary table-function owner")
 }
 
 pub fn apply_table_function_aliases(
@@ -551,15 +475,12 @@ pub fn validate_table_function_alias_count(
     available: usize,
     specified: usize,
 ) -> Result<(), SQLError> {
-    if specified <= available {
-        return Ok(());
-    }
-    Err(SQLError::Routine {
-        sqlstate: "42P10".into(),
-        message: format!(
-            "table \"{table_alias}\" has {available} columns available but {specified} columns specified"
-        ),
-    })
+    validate_table_function_alias_count_with_control(
+        table_alias,
+        available,
+        specified,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 pub struct TableFunctionTypeRequest<'a> {
@@ -573,10 +494,6 @@ pub struct TableFunctionTypeRequest<'a> {
     pub ordinality: bool,
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
 pub fn table_function_column_types(
     routines: &dyn RoutineResolution,
     request: TableFunctionTypeRequest<'_>,
@@ -584,216 +501,17 @@ pub fn table_function_column_types(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Vec<Option<ColumnType>> {
-    let TableFunctionTypeRequest {
-        name,
-        binding,
-        args,
-        user_function,
-        user_invocation,
-        declared_types,
-        columns,
-        ordinality,
-    } = request;
-    let value_columns = if ordinality {
-        columns
-            .get(..columns.len().saturating_sub(1))
-            .unwrap_or(&[])
-    } else {
-        columns
-    };
-    let align = |types: Vec<Option<ColumnType>>| {
-        if types.len() == value_columns.len() {
-            types
-        } else if let [ty] = types.as_slice() {
-            vec![ty.clone(); value_columns.len()]
-        } else {
-            vec![None; value_columns.len()]
-        }
-    };
-    let mut types = if !declared_types.is_empty() {
-        align(
-            declared_types
-                .iter()
-                .map(|ty| ColumnType::from_sql_name(ty).ok())
-                .collect(),
-        )
-    } else if let Some(function) = user_function {
-        align(user_function_column_types(
-            routines,
-            function,
-            user_invocation,
-        ))
-    } else {
-        let normalized = crate::semantics::builtin_function_dispatch_name(name);
-        align(match normalized.as_ref() {
-            "pg_listening_channels" => vec![Some(ColumnType::Text)],
-            "generate_series" => vec![resolve_table_function_binding(
-                routines,
-                name,
-                binding,
-                args,
-                input_schema,
-                params,
-                resolver,
-            )
-            .ok()
-            .flatten()
-            .as_ref()
-            .and_then(crate::type_resolution::fixed_builtin_return_type)],
-            "analyze_text" => vec![Some(ColumnType::JsonB)],
-            "unnest" => args
-                .iter()
-                .map(|argument| {
-                    crate::scalar_type_with_resolver(argument, input_schema, params, resolver)
-                        .ok()
-                        .flatten()
-                        .and_then(|ty| crate::type_resolution::array_element_type(&ty).cloned())
-                })
-                .collect(),
-            "regexp_matches" => vec![Some(ColumnType::Array(Box::new(ColumnType::Text)))],
-            "regexp_split_to_table"
-            | "string_to_table"
-            | "json_object_keys"
-            | "jsonb_object_keys" => vec![Some(ColumnType::Text)],
-            "json_array_elements" => vec![Some(ColumnType::Json)],
-            "jsonb_array_elements" => vec![Some(ColumnType::JsonB)],
-            "json_array_elements_text" | "jsonb_array_elements_text" => {
-                vec![Some(ColumnType::Text)]
-            }
-            "json_each" => vec![Some(ColumnType::Text), Some(ColumnType::Json)],
-            "jsonb_each" => vec![Some(ColumnType::Text), Some(ColumnType::JsonB)],
-            "json_each_text" | "jsonb_each_text" => {
-                vec![Some(ColumnType::Text), Some(ColumnType::Text)]
-            }
-            "pg_get_sequence_data" => {
-                vec![Some(ColumnType::BigInteger), Some(ColumnType::Boolean)]
-            }
-            "pg_sequence_parameters" => vec![
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::Boolean),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::Oid),
-            ],
-            "aclexplode" => vec![
-                Some(ColumnType::Oid),
-                Some(ColumnType::Oid),
-                Some(ColumnType::Text),
-                Some(ColumnType::Boolean),
-            ],
-            "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
-            | "graph_betweenness" => vec![
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::DoublePrecision),
-            ],
-            "rpq" => vec![Some(ColumnType::BigInteger)],
-            "text_similarity_join"
-            | "vector_similarity_join"
-            | "graph_join"
-            | "hybrid_join"
-            | "cross_paradigm_join" => vec![
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::DoublePrecision),
-            ],
-            _ => user_table_function_column_types(
-                routines,
-                name,
-                args,
-                input_schema,
-                params,
-                resolver,
-            ),
-        })
-    };
-    if ordinality {
-        types.push(Some(ColumnType::BigInteger));
-    }
-    types
-}
-
-fn user_table_function_column_types(
-    routines: &dyn RoutineResolution,
-    name: &str,
-    args: &[ScalarExpr],
-    input_schema: &crate::RowSchema,
-    params: &[SQLParam],
-    resolver: &dyn FunctionTypeResolver,
-) -> Vec<Option<ColumnType>> {
-    let Ok((argument_names, argument_types, explicit_variadic)) =
-        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))
-    else {
-        return Vec::new();
-    };
-    let Ok(Some(matched)) = routines.resolve_static_sql_function_match(
-        name,
-        None,
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-    ) else {
-        return Vec::new();
-    };
-    user_function_column_types(routines, &matched.function, Some(&matched.invocation))
-}
-
-fn user_function_column_types(
-    routines: &dyn RoutineResolution,
-    function: &SQLUserFunction,
-    invocation: Option<&RoutineInvocationBinding>,
-) -> Vec<Option<ColumnType>> {
-    if let Ok(Some(descriptor)) = user_function_composite_result(routines, function, invocation) {
-        return descriptor
-            .attributes
-            .iter()
-            .map(|attribute| Some(attribute.ty.clone()))
-            .collect();
-    }
-    let outputs = function
-        .def
-        .params
-        .iter()
-        .enumerate()
-        .filter(|(_, parameter)| {
-            matches!(
-                parameter.mode,
-                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-            )
-        })
-        .collect::<Vec<_>>();
-    if !outputs.is_empty() {
-        return outputs
-            .into_iter()
-            .map(|(index, parameter)| {
-                let type_name = invocation
-                    .and_then(|binding| binding.parameter_types.get(index))
-                    .unwrap_or(&parameter.type_name);
-                resolve_table_function_column_type(routines, type_name)
-            })
-            .collect();
-    }
-    match &function.def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            let type_name = invocation
-                .and_then(|binding| binding.return_type.as_ref())
-                .unwrap_or(type_name);
-            vec![resolve_table_function_column_type(routines, type_name)]
-        }
-        FunctionReturns::None | FunctionReturns::Table => Vec::new(),
-    }
-}
-
-fn resolve_table_function_column_type(
-    routines: &dyn RoutineResolution,
-    type_name: &str,
-) -> Option<ColumnType> {
-    routines
-        .resolve_type_name(type_name)
-        .ok()
-        .flatten()
-        .or_else(|| ColumnType::from_sql_name(type_name).ok())
+    table_function_column_types_with_control(
+        routines,
+        request,
+        input_schema,
+        params,
+        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary table result types")
+    .into_uncontrolled()
+    .expect("ordinary table type fields")
 }
 
 pub fn is_json_array_table_function(name: &str) -> bool {
@@ -825,27 +543,14 @@ pub fn join_alias_columns(
     alias: &str,
     column_aliases: &[String],
 ) -> Result<Vec<String>, SQLError> {
-    let available = schema.len();
-    let specified = column_aliases.len();
-    if specified > available {
-        return Err(SQLError::Routine {
-            sqlstate: "42P10".into(),
-            message: format!(
-                "join expression \"{alias}\" has {available} columns available but {specified} columns specified"
-            ),
-        });
-    }
-    Ok(schema
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(position, column)| {
-            column_aliases
-                .get(position)
-                .cloned()
-                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
-        })
-        .collect())
+    Ok(join_alias_columns_with_control(
+        schema,
+        alias,
+        column_aliases,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary JOIN alias has no reservation"))
 }
 
 pub fn alias_join_schema(
@@ -853,20 +558,19 @@ pub fn alias_join_schema(
     alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<crate::RowSchema, SQLError> {
-    let Some(alias) = alias else {
-        if column_aliases.is_empty() {
-            return Ok(schema.clone());
-        }
-        return Err(SQLError::Internal(
-            "JOIN column aliases exist without a relation alias".into(),
-        ));
-    };
-    let columns = join_alias_columns(schema, alias, column_aliases)?;
-    Ok(
-        crate::RowSchema::with_qualified_types(alias, columns, schema.column_types().to_vec())
-            .with_column_diagnostic_names_from(schema),
+    alias_join_schema_with_control(
+        schema,
+        alias,
+        column_aliases,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
     )
 }
+
+mod join_aliases;
+pub use join_aliases::{
+    alias_join_physical_schema_with_control, alias_join_schema_with_control,
+    join_alias_columns_with_control,
+};
 
 #[cfg(test)]
 mod tests;

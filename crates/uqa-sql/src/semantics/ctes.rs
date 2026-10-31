@@ -186,14 +186,28 @@ pub fn cte_references_own_name_with_control(
 
 /// Already-visible bindings read by a definition, respecting nested WITH scopes.
 pub fn cte_external_references(body: &CtePlanBody, visible: &BTreeSet<String>) -> BTreeSet<String> {
-    collect_names(visible.iter().map(String::as_str), |external| {
-        references::body(
-            body,
-            external,
-            ProductionControl::uncontrolled(),
-            Selection::Reachable,
-        )
-    })
+    cte_external_references_with_control(
+        body,
+        visible.iter().map(String::as_str),
+        ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary external CTE references")
+    .iter()
+    .map(|name| (*name).to_owned())
+    .collect()
+}
+
+/// Select borrowed enclosing names under the invoking allowance, preserving reachable nested WITH semantics and identifier decoding.
+pub fn cte_external_references_with_control<'p>(
+    body: &CtePlanBody,
+    visible: impl Iterator<Item = &'p str>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<&'p str>>, SQLError> {
+    collect_names_with_control(
+        visible,
+        |external| references::body(body, external, control, Selection::Reachable),
+        control,
+    )
 }
 
 fn collect_names<'a>(

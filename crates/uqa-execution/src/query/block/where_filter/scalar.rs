@@ -119,11 +119,11 @@ pub(super) fn visit<S: Clone + Send + Sync + 'static>(
     // Preserve WHERE's point-projection read contract. A general borrowed scan may populate a database-wide decoded cache, which is a separate owner from this command's candidate work.
     let scan = PhysicalRowIteratorScan::new(schema, Box::new(rows))
         .with_batch_size(std::num::NonZeroUsize::MIN);
-    let mut filtered = Filter::with_evaluator(
-        Box::new(scan),
-        filter.clone(),
-        context.relational.evaluator(params, ctes),
-    );
+    let (scan, evaluator) =
+        crate::physical::construction::OperatorBuild::run(Box::new(scan), |_| {
+            context.relational.evaluator(params, ctes)
+        })?;
+    let mut filtered = Filter::with_evaluator(scan, filter.clone(), evaluator);
     visit_filtered(&mut filtered, visitor)
 }
 

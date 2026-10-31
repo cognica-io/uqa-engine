@@ -216,7 +216,9 @@ fn prepare_type_change<S: Clone + 'static>(
         }
         if let Some(transform) = &mut transform {
             coerce_type_transform(binding, name, ty, transform, using.is_some())?;
-            (context.plan_type_transform)(&mut transform.plan.scalar)?;
+            context
+                .expressions
+                .optimize_catalog_scalar(&mut transform.plan.scalar)?;
             fold_type_transform_assignment(context.columns.rewrite.types, ty, transform)?;
         }
     }

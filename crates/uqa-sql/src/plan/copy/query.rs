@@ -12,24 +12,69 @@ use crate::plan::{
 use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
 
 impl Copying<'_> {
-    pub(super) fn query(&mut self, query: &QueryPlan) -> Result<QueryPlan> {
+    pub(crate) fn query(&mut self, query: &QueryPlan) -> Result<QueryPlan> {
+        self.field("query", |copying| copying.query_fields(query))
+    }
+
+    pub(in crate::plan) fn query_fields(&mut self, query: &QueryPlan) -> Result<QueryPlan> {
+        self.query_fields_using(query, |copying| copying.relational(&query.root))
+    }
+
+    pub(super) fn query_fields_using(
+        &mut self,
+        query: &QueryPlan,
+        root: impl FnOnce(&mut Self) -> Result<RelationalPlan>,
+    ) -> Result<QueryPlan> {
+        self.query_fields_with_ctes(query, &query.ctes, root)
+    }
+
+    pub(super) fn query_fields_with_ctes(
+        &mut self,
+        query: &QueryPlan,
+        ctes: &[CtePlan],
+        root: impl FnOnce(&mut Self) -> Result<RelationalPlan>,
+    ) -> Result<QueryPlan> {
         self.check()?;
         Ok(QueryPlan {
             analyzed_output: query.analyzed_output.clone(),
             analyzed_source: query.analyzed_source.clone(),
-            analyzed_grouping: query
-                .analyzed_grouping
-                .as_ref()
-                .map(|grouping| grouping.copy_with(self))
-                .transpose()?,
+            analyzed_grouping: self.field("analyzed_grouping", |copying| {
+                query
+                    .analyzed_grouping
+                    .as_ref()
+                    .map(|grouping| grouping.copy_with(copying))
+                    .transpose()
+            })?,
             relations_bound: query.relations_bound,
-            relation_privilege_subject: self.role(query.relation_privilege_subject.as_ref())?,
-            ctes: self.map(query.ctes.iter(), Self::cte)?,
-            root: self.relational(&query.root)?,
+            relation_privilege_subject: self.field("relation_privilege_subject", |copying| {
+                copying.role(query.relation_privilege_subject.as_ref())
+            })?,
+            ctes: self.field("ctes", |copying| copying.map(ctes.iter(), Self::cte))?,
+            root: self.field("root", root)?,
         })
     }
 
     pub(super) fn cte(&mut self, cte: &CtePlan) -> Result<CtePlan> {
+        self.cte_using(cte, |copying| {
+            Ok(match &cte.body {
+                CtePlanBody::Query(query) => {
+                    CtePlanBody::Query(copying.boxed(|copying| copying.query(query))?)
+                }
+                CtePlanBody::Command(command) => {
+                    CtePlanBody::Command(copying.boxed(|copying| {
+                        copying.field("command", |copying| copying.command_syntax(command))
+                    })?)
+                }
+            })
+        })
+    }
+
+    pub(super) fn cte_using(
+        &mut self,
+        cte: &CtePlan,
+        body: impl FnOnce(&mut Self) -> Result<CtePlanBody>,
+    ) -> Result<CtePlan> {
+        self.check()?;
         Ok(CtePlan {
             name: self.text(&cte.name)?,
             columns: self.texts(&cte.columns)?,
@@ -46,103 +91,161 @@ impl Copying<'_> {
                     })
                 })
                 .transpose()?,
-            cycle: cte
-                .cycle
-                .as_ref()
-                .map(|cycle| {
-                    Ok::<_, crate::SQLError>(CteCyclePlan {
-                        columns: self.texts(&cycle.columns)?,
-                        mark_column: self.text(&cycle.mark_column)?,
-                        mark_value: self.scalar(&cycle.mark_value)?,
-                        mark_default: self.scalar(&cycle.mark_default)?,
-                        path_column: self.text(&cycle.path_column)?,
+            cycle: self.field("cycle", |copying| {
+                cte.cycle
+                    .as_ref()
+                    .map(|cycle| {
+                        Ok::<_, crate::SQLError>(CteCyclePlan {
+                            columns: copying.texts(&cycle.columns)?,
+                            mark_column: copying.text(&cycle.mark_column)?,
+                            mark_value: copying
+                                .field("mark_value", |copying| copying.scalar(&cycle.mark_value))?,
+                            mark_default: copying.field("mark_default", |copying| {
+                                copying.scalar(&cycle.mark_default)
+                            })?,
+                            path_column: copying.text(&cycle.path_column)?,
+                        })
                     })
-                })
-                .transpose()?,
-            body: match &cte.body {
-                CtePlanBody::Query(query) => {
-                    CtePlanBody::Query(self.boxed(|copying| copying.query(query))?)
-                }
-                CtePlanBody::Command(command) => {
-                    CtePlanBody::Command(self.boxed(|copying| copying.command(command))?)
-                }
-            },
+                    .transpose()
+            })?,
+            body: self.field("body", body)?,
         })
     }
 
-    fn relational(&mut self, root: &RelationalPlan) -> Result<RelationalPlan> {
+    pub(super) fn relational(&mut self, root: &RelationalPlan) -> Result<RelationalPlan> {
         self.check()?;
         Ok(match root {
             RelationalPlan::QueryBlock(block) => {
                 RelationalPlan::QueryBlock(self.boxed(|copying| copying.block(block))?)
             }
             RelationalPlan::Values { rows, subqueries } => RelationalPlan::Values {
-                rows: self.rows(rows)?,
-                subqueries: self.map(subqueries.iter(), Self::query)?,
+                rows: self.field("rows", |copying| copying.rows(rows))?,
+                subqueries: self.field("subqueries", |copying| {
+                    copying.map(subqueries.iter(), Self::query)
+                })?,
             },
-            RelationalPlan::SetOp {
-                kind,
-                all,
-                left,
-                right,
-                order_by,
-                limit,
-                with_ties,
-                offset,
-                subqueries,
-            } => RelationalPlan::SetOp {
-                kind: *kind,
-                all: *all,
-                left: self.boxed(|copying| copying.query(left))?,
-                right: self.boxed(|copying| copying.query(right))?,
-                order_by: self.map(order_by.iter(), Self::order)?,
-                limit: self.optional_scalar_box(limit.as_deref())?,
-                with_ties: *with_ties,
-                offset: self.optional_scalar_box(offset.as_deref())?,
-                subqueries: self.map(subqueries.iter(), Self::query)?,
-            },
+            RelationalPlan::SetOp { left, right, .. } => self.set_operation_using(
+                root,
+                |copying| copying.boxed(|copying| copying.query(left)),
+                |copying| copying.boxed(|copying| copying.query(right)),
+            )?,
         })
     }
 
-    fn block(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
+    pub(super) fn set_operation_using(
+        &mut self,
+        root: &RelationalPlan,
+        left: impl FnOnce(&mut Self) -> Result<Box<QueryPlan>>,
+        right: impl FnOnce(&mut Self) -> Result<Box<QueryPlan>>,
+    ) -> Result<RelationalPlan> {
+        let RelationalPlan::SetOp {
+            kind,
+            all,
+            order_by,
+            limit,
+            with_ties,
+            offset,
+            subqueries,
+            ..
+        } = root
+        else {
+            return Err(crate::SQLError::Internal(
+                "set construction requires a set operation".into(),
+            ));
+        };
+        Ok(RelationalPlan::SetOp {
+            kind: *kind,
+            all: *all,
+            left: self.field("left", left)?,
+            right: self.field("right", right)?,
+            order_by: self.field("order_by", |copying| {
+                copying.map(order_by.iter(), Self::order)
+            })?,
+            limit: self.field("limit", |copying| {
+                copying.optional_scalar_box(limit.as_deref())
+            })?,
+            with_ties: *with_ties,
+            offset: self.field("offset", |copying| {
+                copying.optional_scalar_box(offset.as_deref())
+            })?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(subqueries.iter(), Self::query)
+            })?,
+        })
+    }
+
+    pub(super) fn block(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
+        self.field("block", |copying| copying.block_fields(block))
+    }
+
+    fn block_fields(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
         Ok(QueryBlockPlan {
-            deferred_outer_rewrites: self
-                .map(block.deferred_outer_rewrites.iter(), |copying, rewrite| {
+            deferred_outer_rewrites: self.field("deferred_outer_rewrites", |copying| {
+                copying.map(block.deferred_outer_rewrites.iter(), |copying, rewrite| {
                     rewrite.copy_with(copying)
-                })?,
-            windows: self.map(block.windows.iter(), |copying, window| {
-                Ok(crate::ast::WindowDefinition {
-                    name: copying.optional_text(window.name.as_deref())?,
-                    inherited: window.inherited,
-                    spec: copying.window(&window.spec)?,
                 })
             })?,
-            projections: self.map(block.projections.iter(), Self::projection)?,
-            privilege_columns: self.set(&block.privilege_columns, Self::identity)?,
-            from: block
-                .from
-                .as_ref()
-                .map(|source| self.source(source))
-                .transpose()?,
-            r#where: self.optional_scalar(block.r#where.as_ref())?,
+            windows: self.field("windows", |copying| {
+                copying.map(block.windows.iter(), |copying, window| {
+                    Ok(crate::ast::WindowDefinition {
+                        name: copying.optional_text(window.name.as_deref())?,
+                        inherited: window.inherited,
+                        spec: copying.field("spec", |copying| copying.window(&window.spec))?,
+                    })
+                })
+            })?,
+            projections: self.field("projections", |copying| {
+                copying.map(block.projections.iter(), Self::projection)
+            })?,
+            privilege_columns: self.field("privilege_columns", |copying| {
+                copying.set(&block.privilege_columns, Self::identity)
+            })?,
+            from: self.field("from", |copying| {
+                block
+                    .from
+                    .as_ref()
+                    .map(|source| copying.source(source))
+                    .transpose()
+            })?,
+            r#where: self.field("where", |copying| {
+                copying.optional_scalar(block.r#where.as_ref())
+            })?,
             compute: block.compute.clone(),
-            group_by: self.map(block.group_by.iter(), Self::scalar)?,
-            grouping_sets: self.rows(&block.grouping_sets)?,
+            group_by: self.field("group_by", |copying| {
+                copying.map(block.group_by.iter(), Self::scalar)
+            })?,
+            grouping_sets: self.field("grouping_sets", |copying| {
+                copying.rows(&block.grouping_sets)
+            })?,
             group_distinct: block.group_distinct,
-            having: self.optional_scalar(block.having.as_ref())?,
-            order_by: self.map(block.order_by.iter(), Self::order)?,
-            limit: self.optional_scalar(block.limit.as_ref())?,
+            having: self.field("having", |copying| {
+                copying.optional_scalar(block.having.as_ref())
+            })?,
+            order_by: self.field("order_by", |copying| {
+                copying.map(block.order_by.iter(), Self::order)
+            })?,
+            limit: self.field("limit", |copying| {
+                copying.optional_scalar(block.limit.as_ref())
+            })?,
             with_ties: block.with_ties,
-            offset: self.optional_scalar(block.offset.as_ref())?,
+            offset: self.field("offset", |copying| {
+                copying.optional_scalar(block.offset.as_ref())
+            })?,
             distinct: block.distinct,
-            distinct_on: self.map(block.distinct_on.iter(), Self::scalar)?,
-            subqueries: self.map(block.subqueries.iter(), Self::query)?,
+            distinct_on: self.field("distinct_on", |copying| {
+                copying.map(block.distinct_on.iter(), Self::scalar)
+            })?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(block.subqueries.iter(), Self::query)
+            })?,
             access: block.access.clone(),
-            locking: self.map(block.locking.iter(), |copying, clause| {
-                Ok(crate::ast::LockingClause {
-                    strength: clause.strength,
-                    wait: clause.wait,
-                    relations: copying.texts(&clause.relations)?,
+            locking: self.field("locking", |copying| {
+                copying.map(block.locking.iter(), |copying, clause| {
+                    Ok(crate::ast::LockingClause {
+                        strength: clause.strength,
+                        wait: clause.wait,
+                        relations: copying.texts(&clause.relations)?,
+                    })
                 })
             })?,
         })
@@ -160,11 +263,13 @@ impl Copying<'_> {
     pub(super) fn projection(&mut self, projection: &ProjectionPlan) -> Result<ProjectionPlan> {
         Ok(ProjectionPlan {
             expr: self.scalar(&projection.expr)?,
-            alias: self.optional_text(projection.alias.as_deref())?,
+            alias: self.field("alias", |copying| {
+                copying.optional_text(projection.alias.as_deref())
+            })?,
         })
     }
 
-    fn order(&mut self, order: &OrderPlan) -> Result<OrderPlan> {
+    pub(super) fn order(&mut self, order: &OrderPlan) -> Result<OrderPlan> {
         Ok(OrderPlan {
             expr: self.scalar(&order.expr)?,
             descending: order.descending,
@@ -175,27 +280,33 @@ impl Copying<'_> {
     fn window(&mut self, window: &ScalarWindowSpec) -> Result<ScalarWindowSpec> {
         Ok(ScalarWindowSpec {
             definition: window.definition,
-            partition_by: self.map(window.partition_by.iter(), Self::scalar)?,
-            order_by: self.map(window.order_by.iter(), |copying, order| {
-                Ok(crate::ScalarOrder {
-                    expr: copying.scalar(&order.expr)?,
-                    descending: order.descending,
-                    nulls: order.nulls,
-                })
+            partition_by: self.field("partition_by", |copying| {
+                copying.map(window.partition_by.iter(), Self::scalar)
             })?,
-            frame: window
-                .frame
-                .as_ref()
-                .map(|frame| {
-                    Ok::<_, crate::SQLError>(ScalarWindowFrame {
-                        mode: frame.mode,
-                        start: self.bound(&frame.start)?,
-                        end: self.bound(&frame.end)?,
-                        between: frame.between,
-                        exclusion: frame.exclusion,
+            order_by: self.field("order_by", |copying| {
+                copying.map(window.order_by.iter(), |copying, order| {
+                    Ok(crate::ScalarOrder {
+                        expr: copying.scalar(&order.expr)?,
+                        descending: order.descending,
+                        nulls: order.nulls,
                     })
                 })
-                .transpose()?,
+            })?,
+            frame: self.field("frame", |copying| {
+                window
+                    .frame
+                    .as_ref()
+                    .map(|frame| {
+                        Ok::<_, crate::SQLError>(ScalarWindowFrame {
+                            mode: frame.mode,
+                            start: copying.field("start", |copying| copying.bound(&frame.start))?,
+                            end: copying.field("end", |copying| copying.bound(&frame.end))?,
+                            between: frame.between,
+                            exclusion: frame.exclusion,
+                        })
+                    })
+                    .transpose()
+            })?,
         })
     }
 

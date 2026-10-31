@@ -15,6 +15,8 @@ pub mod context;
 mod depth;
 mod execution;
 mod handlers;
+mod planning;
+pub use planning::evaluate_bound_scalar_for_planning;
 mod projection;
 mod resolution;
 pub mod scopes;

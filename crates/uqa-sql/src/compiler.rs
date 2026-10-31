@@ -48,15 +48,16 @@ mod type_lifecycle;
 mod types;
 
 pub use dispatch::{
-    compile, parse_statements, plan_only_for_test, resolve_deferred_create_table, ParsedStatement,
+    compile, parse_statements, parse_statements_with_control, plan_only_for_test,
+    resolve_deferred_create_table, ParsedStatement,
 };
 pub use foreign_tables::resolve_deferred_create_foreign_table;
 pub(crate) use types::compile_retained_type_declaration;
 pub(crate) use types::compile_retained_type_reference;
-pub(crate) use types::parse_regobject_name_with_control;
+pub use types::parse_regobject_name_with_control;
 pub use types::{
-    parse_regobject_name, parse_regprocedure_name, parse_regtype_name, ParsedRegprocedureName,
-    ParsedRegtypeName,
+    parse_regobject_name, parse_regprocedure_name, parse_regprocedure_name_with_control,
+    parse_regtype_name, parse_regtype_name_with_control, ParsedRegprocedureName, ParsedRegtypeName,
 };
 
 pub(crate) fn compile_pg_expression(node: &Node) -> Result<Expr> {

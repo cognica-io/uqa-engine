@@ -12,6 +12,8 @@ use uqa_sql::expr::composites::CompositeTypeDescriptor;
 
 use super::CompositeRegistry;
 
+mod production;
+
 #[derive(Default)]
 pub struct CompositeDescriptorCache {
     entry: Mutex<Option<IndexedDescriptors>>,

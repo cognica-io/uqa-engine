@@ -12,8 +12,127 @@ use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
 impl FunctionTypeResolver for ScopedEngineHook<'_> {
+    fn resolve_collation_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<u32>, SQLError> {
+        uqa_execution::catalog::projection::resolve_expression_collation_oid_with_control(
+            &self.catalog_context(),
+            name,
+            control,
+        )
+        .map(Some)
+    }
+    fn is_scalar_function_binding_with_control(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.engine
+            .is_scalar_function_binding_with_control(binding, control)
+    }
+
+    fn format_type_name_with_control(
+        &self,
+        ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        uqa_execution::catalog::projection::format_type_name_with_control(
+            &self.catalog_context(),
+            ty,
+            control,
+        )
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        control.check()?;
+        let catalog = self.ctes.catalog_read_view()?;
+        uqa_execution::catalog::projection::resolve_catalog_column_type_name_with_control(
+            &uqa_execution::catalog::context::CatalogContext {
+                catalog: &catalog,
+                ..self.engine.catalog_execution()
+            },
+            name,
+            control,
+        )
+        .map(Some)
+    }
+
+    fn resolve_function_type_with_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        self.engine.resolve_function_type_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        self.engine.resolve_function_overload_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_builtins_and_control(
+        &self,
+        name: &str,
+        binding: Option<&uqa_sql::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<uqa_sql::ColumnType>],
+        explicit_variadic: bool,
+        builtins: &[uqa_sql::BuiltinFunctionOverload],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        self.engine
+            .resolve_function_overload_with_builtins_and_control(
+                name,
+                binding,
+                argument_names,
+                argument_types,
+                explicit_variadic,
+                builtins,
+                control,
+            )
+    }
+
     fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
         uqa_execution::catalog::projection::format_type_name(&self.catalog_context(), ty)
+    }
+
+    fn has_untyped_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.runtime.has_scalar_function_with_control(name, control)
     }
 
     fn has_untyped_function(&self, name: &str) -> bool {

@@ -24,14 +24,10 @@ pub(super) fn expand(
     scope.scalar_binding = ScalarBindingMode::References;
     scope.preserve_syntax_shape = true;
     scope.stored_expression_outer = Some(schema.clone());
-    scope.stored_whole_rows = ["old", "new"]
-        .into_iter()
-        .filter_map(|name| {
-            binding
-                .whole_row_expression(name, table)
-                .map(|expression| (name.to_string(), expression))
-        })
-        .collect();
+    scope.stored_whole_rows = [
+        binding.whole_row_expression_with_control("old", table, &scope.control())?,
+        binding.whole_row_expression_with_control("new", table, &scope.control())?,
+    ];
     for query in &mut plan.subqueries {
         scope.bind_query_routines_for_storage(routines, query, &[], Some(schema))?;
     }
@@ -45,31 +41,40 @@ pub(super) fn expand(
 }
 
 impl SchemaScope {
+    pub(super) fn stored_whole_row<'a>(
+        &'a self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+    ) -> Option<&'a crate::plan::OwnedScalarExpr> {
+        let outer = self.stored_expression_outer.as_ref()?;
+        let boundary = schema
+            .physical_width()
+            .checked_sub(outer.physical_width())?;
+        let name = match expression {
+            ScalarExpr::Column(name) if !schema.has_unqualified_column(name) => name,
+            ScalarExpr::QualifiedStar(name) => name,
+            _ => return None,
+        };
+        if schema.has_qualified_slot_before(name, boundary) {
+            return None;
+        }
+        let index = if name.eq_ignore_ascii_case("old") {
+            0
+        } else if name.eq_ignore_ascii_case("new") {
+            1
+        } else {
+            return None;
+        };
+        self.stored_whole_rows[index].as_ref()
+    }
+
     pub(super) fn expand_stored_whole_rows(&self, expression: &mut ScalarExpr, schema: &RowSchema) {
-        if self.stored_whole_rows.is_empty() {
+        if self.stored_whole_rows.iter().all(Option::is_none) {
             return;
         }
-        let Some(outer) = &self.stored_expression_outer else {
-            return;
-        };
-        let Some(outer_start) = schema.physical_width().checked_sub(outer.physical_width()) else {
-            return;
-        };
         crate::plan::rewrite_scalar_expression(expression, &mut |node| {
-            let name = match node {
-                ScalarExpr::Column(name) if !schema.has_unqualified_column(name) => name,
-                ScalarExpr::QualifiedStar(name) => name,
-                _ => return,
-            };
-            if schema
-                .qualified_star_layout(name)
-                .iter()
-                .any(|(_, slot, _)| *slot < outer_start)
-            {
-                return;
-            }
-            if let Some(input) = self.stored_whole_rows.get(&name.to_ascii_lowercase()) {
-                *node = input.clone();
+            if let Some(input) = self.stored_whole_row(node, schema) {
+                *node = (**input).clone();
             }
         });
     }

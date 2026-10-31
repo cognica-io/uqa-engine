@@ -73,15 +73,20 @@ impl Value {
         budget: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<usize, ValueRetentionError> {
+        self.retained_payload_bytes_with_check(budget, || cancellation.check())
+    }
+
+    /// Count retained payload with caller-owned traversal scratch and cancellation checks. The count does not acquire a payload reservation or change the value's existing owner.
+    pub fn retained_payload_bytes_with_check(
+        &self,
+        budget: &MemoryBudget,
+        check: impl FnMut() -> Result<(), QueryCancelled>,
+    ) -> Result<usize, ValueRetentionError> {
         let mut total = 0_usize;
-        self.visit_retained_payload_with_check(
-            budget,
-            || cancellation.check(),
-            |bytes| {
-                total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
-                Ok(())
-            },
-        )?;
+        self.visit_retained_payload_with_check(budget, check, |bytes| {
+            total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
+            Ok(())
+        })?;
         Ok(total)
     }
 

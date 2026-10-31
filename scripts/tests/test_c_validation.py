@@ -87,7 +87,7 @@ class OwnershipTests(unittest.TestCase):
             for before, after in ((b"cargo test --locked", b"cargo test --release --locked"),
                                   (b"[minimal, default]", b"[minimal, arrow]"),
                                   (b"CARGO_INCREMENTAL: '0'", b"CARGO_INCREMENTAL: '1'"),
-                                  (b"ubuntu-24.04", b"macos-14")):
+                                  (b"ubuntu-24.04", b"macos-15")):
                 with self.subTest(kind=kind, change=after):
                     self.assertNotEqual(expected, SCOPE.execution_definition(kind, original.replace(before, after)))
 

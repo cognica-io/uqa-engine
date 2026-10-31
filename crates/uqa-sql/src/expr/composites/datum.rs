@@ -14,15 +14,23 @@ use crate::{
     ColumnType,
 };
 use uqa_core::Value;
+mod production;
+pub(crate) use production::{decode_bits_with_control, reinterpret_with_control};
 
 /// A descriptor change does not cast a constant already read by `PostgreSQL`. For represented equal-width by-value fields, recover the original datum bits and interpret those bits under the new type. The source constant remains immutable for subsequent changes and rollback.
 pub(crate) fn reinterpret(value: &Value, before: &ColumnType, after: &ColumnType) -> Option<Value> {
-    let before = base(before);
-    let after = base(after);
-    if before == after || pg_type_len(before) != pg_type_len(after) {
-        return None;
-    }
-    decode_bits(encode_bits(value, before)?, after)
+    reinterpret_with_control(
+        value,
+        before,
+        after,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .ok()?
+    .map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary datum reinterpretation")
+    })
 }
 
 pub(crate) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
@@ -47,18 +55,18 @@ pub(crate) fn encode_bits(value: &Value, ty: &ColumnType) -> Option<u64> {
 }
 
 pub(crate) fn decode_bits(bits: u64, ty: &ColumnType) -> Option<Value> {
+    decode_bits_with_control(
+        bits,
+        ty,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .ok()?
+    .map(|value| value.into_uncontrolled().expect("ordinary datum decoding"))
+}
+
+fn decode_inline_bits(bits: u64, ty: &ColumnType) -> Option<Value> {
     match base(ty) {
-        ColumnType::Enum(reference) => Some(Value::Datum(uqa_core::DatumValue::new(
-            reference.oid,
-            0,
-            (bits as u32).to_le_bytes().to_vec(),
-        ))),
         ColumnType::Boolean => Some(Value::Bool(bits as u8 != 0)),
-        ColumnType::InternalChar => Some(Value::Str(if bits as u8 == 0 {
-            String::new()
-        } else {
-            char::from(bits as u8).to_string()
-        })),
         ColumnType::SmallInteger => Some(Value::Int(i64::from(bits as i16))),
         ColumnType::Integer => Some(Value::Int(i64::from(bits as i32))),
         ColumnType::BigInteger => Some(Value::Int(bits as i64)),

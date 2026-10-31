@@ -29,7 +29,9 @@ mod parameters;
 mod search_path;
 mod statement_gate_guard;
 mod terminations;
-pub(crate) use search_path::{default_search_path, effective_search_path, LockedSearchPath};
+pub(crate) use search_path::{
+    default_search_path, effective_search_path, BorrowedSearchPath, LockedSearchPath,
+};
 pub(crate) use terminations::SessionTerminations;
 mod settings;
 pub(crate) use settings::restore_runtime_parameter;

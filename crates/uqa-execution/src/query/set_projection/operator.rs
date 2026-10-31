@@ -110,12 +110,13 @@ impl<'a> SetProjection<'a> {
             plan: crate::scalar::PreparedExpressions::new(plan, |plan, visit| {
                 for call in &plan.calls {
                     for argument in &call.args {
-                        visit(argument);
+                        visit(argument)?;
                     }
                 }
                 for (_, expression) in &plan.projections {
-                    visit(expression);
+                    visit(expression)?;
                 }
+                Ok(())
             }),
             routine_descriptions,
             schema,

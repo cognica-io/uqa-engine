@@ -13,6 +13,8 @@ use crate::{SQLError, SQLParam};
 
 use super::{BindingContext, ScalarExpr, SchemaScope};
 use crate::routines::RoutineResolution;
+mod production;
+pub use production::overlay_outer_schema_with_control;
 
 /// Derive the exact output row type of a query plan without executing it.
 pub fn bind_query_plan_schema(

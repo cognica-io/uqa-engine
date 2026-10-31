@@ -11,6 +11,8 @@ use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
 use super::roles::{identity::RoleSubject, RoleDefinition, RoleReference};
 
+mod production;
+
 pub fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
     u32::try_from(super::oids::stable_object_oid("domain", object_id))
         .expect("catalog OIDs fit in u32")
@@ -148,6 +150,22 @@ pub fn validate_domain_definitions(
 /// Definition lookup for domain inheritance and constraint binding.
 pub trait DomainCatalog {
     fn domain_by_oid(&self, oid: u32) -> Option<StoredDomain>;
+
+    /// Native catalogs copy the selected declaration under the caller's control. Legacy external callbacks retain responsibility for producing their input.
+    fn domain_by_oid_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<StoredDomain>>, crate::SQLError> {
+        control.check()?;
+        self.domain_by_oid(oid)
+            .map(|domain| {
+                domain
+                    .retain_external_with_control(control)
+                    .map_err(Into::into)
+            })
+            .transpose()
+    }
 }
 
 pub fn domain_default_expression(

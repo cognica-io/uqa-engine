@@ -9,18 +9,30 @@
 pub mod invalidation;
 
 use std::sync::Arc;
+use uqa_core::memory::{OwnedProductionControl, Produced, ProductionControl};
 use uqa_sql::{
-    plan::{AggregateClassifier, UnifiedPlan},
+    plan::{AggregateClassifier, MutableExecutablePlan, UnifiedPlan},
     prepared::{definition::PreparedDefinitionContext, entry::PreparedStatementPlan},
     ColumnType, SQLError, Statement,
 };
 
 pub trait PreparedDefinitionWrite {
-    fn insert(&mut self, name: String, definition: PreparedStatementPlan);
+    fn insert(
+        &mut self,
+        name: Produced<String>,
+        definition: PreparedStatementPlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError>;
 }
 
 pub trait PreparedDefinitionRegistry {
-    fn write_definitions(&self) -> Box<dyn PreparedDefinitionWrite + '_>;
+    fn write_definitions(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Box<dyn PreparedDefinitionWrite + '_>, SQLError>;
+    fn production_resources(&self) -> Result<OwnedProductionControl, SQLError> {
+        Ok(ProductionControl::uncontrolled().capture())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -42,8 +54,10 @@ pub fn register_statement(
     name: String,
     statement: Statement,
 ) -> Result<(), SQLError> {
-    let plan = UnifiedPlan::lower_with(statement, context.aggregates);
-    register_plan(context, name, plan, &[], None)
+    let owner = context.registry.production_resources()?;
+    let control = owner.control();
+    let plan = UnifiedPlan::lower_borrowed_for_rewrite(&statement, context.aggregates, &control)?;
+    register_definition(context, name, plan, &[], None, false, &control)
 }
 
 pub fn register_plan(
@@ -53,13 +67,16 @@ pub fn register_plan(
     declared: &[ColumnType],
     source_sql: Option<&str>,
 ) -> Result<(), SQLError> {
+    let owner = context.registry.production_resources()?;
+    let control = owner.control();
     register_definition(
         context,
         name,
-        logical_plan,
+        logical_plan.copy_for_rewrite(&control)?,
         declared,
         source_sql,
         source_sql.is_some(),
+        &control,
     )
 }
 
@@ -99,17 +116,20 @@ pub fn register_host_statement(
     sql: &str,
     declared: &[ColumnType],
 ) -> Result<(), SQLError> {
-    let plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
-    register_definition(context, name, plan, declared, Some(sql), false)
+    let owner = context.registry.production_resources()?;
+    let control = owner.control();
+    let plan = UnifiedPlan::lower_borrowed_for_rewrite(statement, context.aggregates, &control)?;
+    register_definition(context, name, plan, declared, Some(sql), false, &control)
 }
 
 fn register_definition(
     context: &PreparedRegistrationContext<'_>,
     name: String,
-    logical_plan: UnifiedPlan,
+    logical_plan: MutableExecutablePlan,
     declared: &[ColumnType],
     source_sql: Option<&str>,
     from_sql: bool,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     let _statement_thread = super::thread_context::StatementThreadContext {
         retained_rows: crate::query::sources::retained_source::RetainedRowContext::current(),
@@ -129,18 +149,30 @@ fn register_definition(
         cancellation: Some(context.cancellation.clone()),
     }
     .enter();
-    let source_plan = Arc::new(logical_plan.clone());
-    let definition = uqa_sql::prepared::definition::analyze_definition(
+    let source_plan = logical_plan.finish(control)?.into_shared(control)?;
+    let definition = uqa_sql::prepared::definition::analyze_definition_owned(
         &context.analysis,
-        logical_plan,
+        source_plan.copy_for_rewrite(control)?,
         declared,
-    )?;
-    context.registry.write_definitions().insert(
+        control,
+    )?
+    .into_shared_with_control(control)?;
+    let name = control.copy_text(&name)?;
+    let source_sql = source_sql
+        .map(|sql| {
+            uqa_sql::prepared::ownership::SharedPreparedInput::from_produced(
+                control.copy_text(sql)?,
+                control,
+            )
+        })
+        .transpose()?;
+    context.registry.write_definitions(control)?.insert(
         name,
         PreparedStatementPlan {
+            definition_identity: std::sync::Arc::new(()),
             composite_inputs: definition.composite_inputs,
             source_plan,
-            logical_plan: Arc::new(definition.logical_plan),
+            logical_plan: definition.logical_plan,
             needs_analysis: false,
             effective_search_path: definition.effective_search_path,
             dependencies: definition.dependencies,
@@ -148,7 +180,7 @@ fn register_definition(
             plan: None,
             parameter_types: definition.parameter_types,
             result_schema: definition.result_schema,
-            source_sql: source_sql.map(Arc::from),
+            source_sql,
             prepared_at_micros: (context.clock)(),
             from_sql,
             generic_plans: 0,
@@ -156,8 +188,8 @@ fn register_definition(
             generic_cost: None,
             total_custom_cost: 0.0,
         },
-    );
-    Ok(())
+        control,
+    )
 }
 
 #[cfg(test)]

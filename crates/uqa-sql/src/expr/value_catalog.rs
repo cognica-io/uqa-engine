@@ -25,6 +25,19 @@ pub(crate) use types::type_by_oid_with_control;
 pub(crate) struct ValueCompositeCatalog<'a>(pub(crate) Option<&'a dyn SQLValueCatalog>);
 
 impl super::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
+    fn composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<super::composites::OwnedCompositeTypeDescriptor>> {
+        control.check()?;
+        self.0
+            .ok_or_else(|| {
+                crate::SQLError::Internal("composite operator lookup has no catalog".into())
+            })?
+            .value_composite_type_with_control(oid, control)
+    }
+
     fn composite_type(
         &self,
         oid: u32,
@@ -77,6 +90,18 @@ pub trait SQLValueCatalog {
         Ok(None)
     }
 
+    /// Native catalogs project the selected descriptor under the consumer's allowance; external adapters retain their returned metadata.
+    fn value_type_by_oid_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<crate::ColumnType>>> {
+        control.check()?;
+        self.value_type_by_oid(oid)?
+            .map(|ty| ty.retain_external_with_control(control).map_err(Into::into))
+            .transpose()
+    }
+
     /// Whether an admitted physical OID names any current catalog type, including pseudo-types without a value carrier. This lookup does not check input privileges or execute type input.
     fn value_type_exists(&self, oid: u32) -> Result<bool> {
         Ok(self.value_type_by_oid(oid)?.is_some())
@@ -93,6 +118,22 @@ pub trait SQLValueCatalog {
         _oid: u32,
     ) -> Result<Option<Arc<super::composites::CompositeTypeDescriptor>>> {
         Ok(None)
+    }
+
+    fn value_composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<super::composites::OwnedCompositeTypeDescriptor>> {
+        control.check()?;
+        self.value_composite_type(oid)?
+            .map(|descriptor| {
+                super::composites::OwnedCompositeTypeDescriptor::from_produced(
+                    descriptor.clone_with_control(control)?,
+                    control,
+                )
+            })
+            .transpose()
     }
 
     /// The session's comparison support functions, shared by declared type across nested array and record calls. Pure catalog readers do not own runtime state.
@@ -181,6 +222,14 @@ impl SQLValueCatalog for EngineValueCatalog<'_> {
             .map_err(crate::SQLError::Internal)
     }
 
+    fn value_type_by_oid_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<crate::ColumnType>>> {
+        self.0.resolve_type_oid_with_control(oid, control)
+    }
+
     fn value_type_exists(&self, oid: u32) -> Result<bool> {
         self.0
             .type_oid_exists(oid)
@@ -194,6 +243,19 @@ impl SQLValueCatalog for EngineValueCatalog<'_> {
         self.0
             .composite_types()
             .map(|catalog| catalog.composite_type(oid))
+            .transpose()
+            .map(Option::flatten)
+    }
+
+    fn value_composite_type_with_control(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<super::composites::OwnedCompositeTypeDescriptor>> {
+        control.check()?;
+        self.0
+            .composite_types()
+            .map(|catalog| catalog.composite_type_with_control(oid, control))
             .transpose()
             .map(Option::flatten)
     }

@@ -125,3 +125,71 @@ fn shadowed_collatable_and_inner_references_stay_columns() {
         );
     }
 }
+
+#[test]
+fn outer_constant_rewrites_admit_payloads_and_keep_independent_readers() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let schema = lineitem();
+    let row = partsupp_row();
+    let filter = ScalarExpr::And(vec![
+        equal(
+            qualified("partsupp", "ps_partkey"),
+            ScalarExpr::Literal(Value::Int(5)),
+        ),
+        ScalarExpr::Literal(Value::Str("x".repeat(4 << 20))),
+    ]);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let tiny = MemoryBudget::new(32 << 10);
+    let control = ProductionControl::new(&tiny, &original, &invoking);
+    for failure in 0..3 {
+        if failure == 1 {
+            original.cancel();
+        }
+        if failure == 2 {
+            invoking.cancel();
+        }
+        let allocation = allocation_counter::measure(|| {
+            assert_eq!(
+                bind_outer_constants_with_control(&filter, &schema, &row, &control)
+                    .unwrap_err()
+                    .sqlstate(),
+                Some(if failure == 0 { "53200" } else { "57014" })
+            );
+        });
+        assert!(allocation.bytes_total < 128 << 10, "{allocation:?}");
+        assert_eq!(tiny.used(), 0);
+        original.reset();
+        invoking.reset();
+    }
+    let budget = MemoryBudget::new(32 << 20);
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let mut output = None;
+    let allocation = allocation_counter::measure(|| {
+        output = bind_outer_constants_with_control(&filter, &schema, &row, &control).unwrap();
+    });
+    assert_eq!(allocation.bytes_current, budget.used() as i64);
+    let output = output.unwrap();
+    let ScalarExpr::And(parts) = &*output else {
+        panic!("conjunction")
+    };
+    assert_eq!(
+        parts[0],
+        equal(
+            ScalarExpr::TypedLiteral {
+                value: Value::Int(5),
+                ty: r#"pg_catalog."int8""#.into(),
+                bound_type: Some(ColumnType::BigInteger),
+                collation_oid: None,
+                composite_source: None,
+                parameter_index: None
+            },
+            ScalarExpr::Literal(Value::Int(5))
+        )
+    );
+    drop(output);
+    assert_eq!(budget.used(), 0);
+}

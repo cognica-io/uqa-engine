@@ -507,10 +507,13 @@ use lowering_expression::{lower_expr, lower_expr_list, lower_full_statement};
 use lowering_statement::{lower_block, lower_cursor_scroll_options};
 use parsing::{lower_row_fields, normalize_condition};
 
-pub use binding::{bind_expr, bind_select, bind_statement, ResolvedVariable, VariableResolver};
+pub use binding::{
+    bind_expr, bind_select, bind_statement, ResolvedVariable, RewriteReference, VariableResolver,
+};
 pub use conditions::{condition_sqlstate, condition_sqlstates};
 pub use lowering_expression::compile_expression_text;
 pub use options::{compile_options, CompileOptions, VariableConflict};
+pub use parameters::parameter_type_mismatch_with_control;
 pub use parsing::{
     parse_do_block, parse_do_block_with_catalog, parse_function, parse_function_with_catalog,
     parse_function_with_catalog_mode,
@@ -527,15 +530,16 @@ pub mod runtime_diagnostics;
 
 mod fragments;
 pub use fragments::{
-    is_simple_expression_plan, PLpgSQLCompilationIdentity, PLpgSQLCompileMode,
-    PLpgSQLCursorArguments, PLpgSQLExpression, PLpgSQLFragment, PLpgSQLParseMode, PLpgSQLSource,
-    PLpgSQLStatement,
+    is_simple_expression_plan, is_simple_expression_plan_with_control, PLpgSQLCompilationIdentity,
+    PLpgSQLCompileMode, PLpgSQLCursorArguments, PLpgSQLExpression, PLpgSQLFragment,
+    PLpgSQLParseMode, PLpgSQLSource, PLpgSQLStatement,
 };
 
 mod parameters;
 pub use parameters::{
-    parameter_type_mismatch, parameterize_statement_variables, PLpgSQLVariableBindings,
-    PLpgSQLVariableReference,
+    parameter_type_mismatch, parameterize_statement_variables,
+    parameterize_statement_variables_owned, OwnedPLpgSQLVariableBindings,
+    OwnedVariableSiteResolver, PLpgSQLInput, PLpgSQLVariableBindings, PLpgSQLVariableReference,
 };
 
 mod blocks;

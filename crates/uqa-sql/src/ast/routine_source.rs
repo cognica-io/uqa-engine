@@ -14,6 +14,23 @@ pub struct RoutineBodyOrigin {
 }
 
 impl RoutineBodyOrigin {
+    /// Copy diagnostic source positions without reinterpreting the original SQL message.
+    pub(crate) fn clone_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, crate::SQLError> {
+        let mut escaped = uqa_core::memory::ProductionVec::new(*control);
+        escaped.extend_from_slice(&self.escaped_characters)?;
+        let (escaped_characters, memory) = escaped.finish()?.into_parts();
+        Ok(control.finish(
+            Self {
+                prefix_characters: self.prefix_characters,
+                escaped_characters,
+            },
+            memory,
+        )?)
+    }
+
     pub(crate) fn capture(body: &str, message: &str) -> Option<Self> {
         let mut matched = None;
         for (character_index, (offset, delimiter)) in message.char_indices().enumerate() {

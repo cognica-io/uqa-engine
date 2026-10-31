@@ -17,15 +17,35 @@ pub fn table_lock_origin(
     qualifier: &str,
     enabled: bool,
 ) -> Result<Option<SharedLockOrigin>, SQLError> {
+    table_lock_origin_with_control(
+        catalog,
+        resolution,
+        table,
+        qualifier,
+        enabled,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(crate) fn table_lock_origin_with_control(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    table: &str,
+    qualifier: &str,
+    enabled: bool,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<SharedLockOrigin>, SQLError> {
+    control.check()?;
     if !enabled {
         return Ok(None);
     }
-    let storage_name = catalog
-        .table_name_resolved(resolution, table)?
-        .unwrap_or_else(|| table.to_string());
+    let storage_name = match catalog.table_name_resolved_with_control(resolution, table, control)? {
+        Some(name) => name,
+        None => control.copy_text(table)?,
+    };
     Ok(Some((
-        Arc::<str>::from(qualifier),
-        Arc::<str>::from(storage_name),
+        crate::RowLockName::copy_with_control(qualifier, control)?,
+        crate::RowLockName::from_produced(storage_name, control)?,
     )))
 }
 
@@ -328,8 +348,8 @@ impl LocalTableRowSource {
             return Ok(row);
         };
         Ok(row.with_lock_origin(crate::RowLockOrigin::from_shared(
-            std::sync::Arc::clone(qualifier),
-            std::sync::Arc::clone(storage_name),
+            qualifier.clone(),
+            storage_name.clone(),
             doc_id,
         )))
     }

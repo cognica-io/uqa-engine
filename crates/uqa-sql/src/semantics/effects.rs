@@ -7,11 +7,7 @@
 //! Classify SQL plans by database, session, and transaction effects.
 
 use super::builtin_function_dispatch_name;
-use crate::{
-    ast::RelationPersistence,
-    catalog::domain::StoredDomain,
-    plan::{QueryPlan, UnifiedPlan},
-};
+use crate::{ast::RelationPersistence, catalog::domain::StoredDomain, plan::QueryPlan};
 use crate::{expr::EngineHook, routines::RoutineResolution, SQLError};
 use std::collections::BTreeSet;
 
@@ -22,7 +18,7 @@ pub trait QueryEffectCatalog: RoutineResolution + EngineHook {
     fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String>;
     fn table_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String>;
     fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
-    fn lookup_prepared(&self, name: &str) -> Option<UnifiedPlan>;
+    fn lookup_prepared(&self, name: &str) -> Option<crate::plan::SharedExecutablePlan>;
 }
 
 mod domains;

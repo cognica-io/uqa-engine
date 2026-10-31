@@ -11,180 +11,20 @@ use crate::ScalarExpr;
 use uqa_core::Value;
 
 #[cfg(test)]
+mod production_tests;
+#[cfg(test)]
 mod tests;
 
+mod matching;
+pub use matching::exprs_match_with_control;
+
 pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
-    match (lhs, rhs) {
-        (ScalarExpr::RetainedLiteral(left), ScalarExpr::RetainedLiteral(right)) => left == right,
-        (ScalarExpr::RetainedLiteral(literal), other)
-        | (other, ScalarExpr::RetainedLiteral(literal)) => literal
-            .materialize()
-            .is_ok_and(|literal| exprs_match(&literal, other)),
-        (ScalarExpr::Collated { .. }, ScalarExpr::Collated { .. }) => {
-            collated_exprs_match(lhs, rhs)
-        }
-        (ScalarExpr::Star, ScalarExpr::Star) => true,
-        (ScalarExpr::QualifiedStar(a), ScalarExpr::QualifiedStar(b)) => a == b,
-        (ScalarExpr::Column(a), ScalarExpr::Column(b)) => a == b,
-        (
-            ScalarExpr::QualifiedColumn {
-                qualifier: aq,
-                column: ac,
-                ..
-            },
-            ScalarExpr::QualifiedColumn {
-                qualifier: bq,
-                column: bc,
-                ..
-            },
-        ) => aq == bq && ac == bc,
-        (ScalarExpr::Column(c), ScalarExpr::QualifiedColumn { column, .. })
-        | (ScalarExpr::QualifiedColumn { column, .. }, ScalarExpr::Column(c)) => c == column,
-        (ScalarExpr::Literal(a), ScalarExpr::Literal(b)) => literals_equal(a, b),
-        (ScalarExpr::TypedLiteral { .. }, ScalarExpr::TypedLiteral { .. }) => {
-            typed_literals_match(lhs, rhs)
-        }
-        (ScalarExpr::Param(a), ScalarExpr::Param(b)) => a == b,
-        (ScalarExpr::Position(a), ScalarExpr::Position(b)) => a == b,
-        (ScalarExpr::InternalColumn(a), ScalarExpr::InternalColumn(b)) => a == b,
-        (ScalarExpr::Func { .. }, ScalarExpr::Func { .. }) => function_exprs_match(lhs, rhs),
-        (
-            ScalarExpr::Binary {
-                op: ao,
-                lhs: al,
-                rhs: ar,
-            },
-            ScalarExpr::Binary {
-                op: bo,
-                lhs: bl,
-                rhs: br,
-            },
-        ) => ao == bo && exprs_match(al, bl) && exprs_match(ar, br),
-        (ScalarExpr::And(a), ScalarExpr::And(b))
-        | (ScalarExpr::Or(a), ScalarExpr::Or(b))
-        | (ScalarExpr::Array(a), ScalarExpr::Array(b))
-        | (ScalarExpr::Row(a), ScalarExpr::Row(b)) => {
-            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
-        }
-        (ScalarExpr::Not(a), ScalarExpr::Not(b))
-        | (ScalarExpr::UnaryMinus(a), ScalarExpr::UnaryMinus(b)) => exprs_match(a, b),
-        (ScalarExpr::CompositeRow { .. }, ScalarExpr::CompositeRow { .. }) => {
-            composite_rows_match(lhs, rhs)
-        }
-        (
-            ScalarExpr::Cast {
-                expr: a, ty: at, ..
-            },
-            ScalarExpr::Cast {
-                expr: b, ty: bt, ..
-            },
-        ) => at == bt && exprs_match(a, b),
-        _ => false,
-    }
-}
-
-fn function_exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
-    let (
-        ScalarExpr::Func {
-            order_syntax: aos,
-            name: an,
-            binding: ab,
-            args: aa,
-            distinct: ad,
-            order_by: ao,
-            filter: af,
-        },
-        ScalarExpr::Func {
-            order_syntax: bos,
-            name: bn,
-            binding: bb,
-            args: ba,
-            distinct: bd,
-            order_by: bo,
-            filter: bf,
-        },
-    ) = (lhs, rhs)
-    else {
-        return false;
-    };
-    an.eq_ignore_ascii_case(bn)
-        && ab == bb
-        && ad == bd
-        && aos == bos
-        && aa.len() == ba.len()
-        && aa.iter().zip(ba.iter()).all(|(x, y)| exprs_match(x, y))
-        && ao.len() == bo.len()
-        && ao.iter().zip(bo.iter()).all(|(x, y)| {
-            x.descending == y.descending && x.nulls == y.nulls && exprs_match(&x.expr, &y.expr)
-        })
-        && match (af.as_deref(), bf.as_deref()) {
-            (None, None) => true,
-            (Some(x), Some(y)) => exprs_match(x, y),
-            _ => false,
-        }
-}
-
-fn collated_exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
-    let (
-        ScalarExpr::Collated {
-            expr: left,
-            ty: left_type,
-            collation: left_collation,
-        },
-        ScalarExpr::Collated {
-            expr: right,
-            ty: right_type,
-            collation: right_collation,
-        },
-    ) = (lhs, rhs)
-    else {
-        return false;
-    };
-    left_type == right_type && left_collation == right_collation && exprs_match(left, right)
-}
-
-fn composite_rows_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
-    let (
-        ScalarExpr::CompositeRow {
-            items: a,
-            binding: ab,
-            bound_type: at,
-        },
-        ScalarExpr::CompositeRow {
-            items: b,
-            binding: bb,
-            bound_type: bt,
-        },
-    ) = (lhs, rhs)
-    else {
-        return false;
-    };
-    ab == bb && at == bt && a.len() == b.len() && a.iter().zip(b).all(|(a, b)| exprs_match(a, b))
-}
-
-fn typed_literals_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
-    let (
-        ScalarExpr::TypedLiteral {
-            value: av,
-            ty: at,
-            bound_type: ab,
-            parameter_index: ap,
-            composite_source: ac,
-            collation_oid: ao,
-        },
-        ScalarExpr::TypedLiteral {
-            value: bv,
-            ty: bt,
-            bound_type: bb,
-            parameter_index: bp,
-            composite_source: bc,
-            collation_oid: bo,
-        },
-    ) = (lhs, rhs)
-    else {
-        return false;
-    };
-    at == bt && ab == bb && ap == bp && ac == bc && ao == bo && literals_equal(av, bv)
+    exprs_match_with_control(
+        lhs,
+        rhs,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .unwrap_or(false)
 }
 
 pub fn literals_equal(a: &Value, b: &Value) -> bool {
@@ -241,93 +81,24 @@ pub fn aggregate_targets<'a>(
     targets
 }
 
+mod observation;
+pub use observation::{
+    contains_aggregate_with_control, has_aggregate_with_control, is_aggregate_with_control,
+    visit_aggregate_exprs_with_control,
+};
+
 pub fn collect_aggregate_exprs<'a>(
     aggregates: &dyn AggregateClassifier,
     expr: &'a ScalarExpr,
     out: &mut Vec<&'a ScalarExpr>,
 ) {
-    if is_aggregate(aggregates, expr) {
-        out.push(expr);
-        return;
-    }
-    match expr {
-        ScalarExpr::Func { args, filter, .. } => {
-            for arg in args {
-                collect_aggregate_exprs(aggregates, arg, out);
-            }
-            if let Some(filter) = filter.as_deref() {
-                collect_aggregate_exprs(aggregates, filter, out);
-            }
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => {
-            for item in items {
-                collect_aggregate_exprs(aggregates, item, out);
-            }
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            collect_aggregate_exprs(aggregates, lhs, out);
-            collect_aggregate_exprs(aggregates, rhs, out);
-        }
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => {
-            collect_aggregate_exprs(aggregates, inner, out);
-        }
-        ScalarExpr::IsNull { expr, .. } => collect_aggregate_exprs(aggregates, expr, out),
-        ScalarExpr::Between { expr, low, high } => {
-            collect_aggregate_exprs(aggregates, expr, out);
-            collect_aggregate_exprs(aggregates, low, out);
-            collect_aggregate_exprs(aggregates, high, out);
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            collect_aggregate_exprs(aggregates, expr, out);
-            for item in list {
-                collect_aggregate_exprs(aggregates, item, out);
-            }
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base.as_deref() {
-                collect_aggregate_exprs(aggregates, base, out);
-            }
-            for (condition, result) in when {
-                collect_aggregate_exprs(aggregates, condition, out);
-                collect_aggregate_exprs(aggregates, result, out);
-            }
-            if let Some(else_branch) = else_branch.as_deref() {
-                collect_aggregate_exprs(aggregates, else_branch, out);
-            }
-        }
-        ScalarExpr::InSubquery { expr, .. } => collect_aggregate_exprs(aggregates, expr, out),
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::WindowCall { .. }
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => {}
-    }
+    observation::visit_ordinary(aggregates, expr, &mut |expr| out.push(expr));
 }
 
 pub fn contains_aggregate(aggregates: &dyn AggregateClassifier, expr: &ScalarExpr) -> bool {
-    let mut found = Vec::new();
-    collect_aggregate_exprs(aggregates, expr, &mut found);
-    !found.is_empty()
+    let mut found = false;
+    observation::visit_ordinary(aggregates, expr, &mut |_| found = true);
+    found
 }
 
 /// Collect the top-level column names an expression reads. Returns

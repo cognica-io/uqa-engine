@@ -16,7 +16,7 @@ use crate::query::{
 };
 use crate::{ColumnSelection, PhysicalOperator};
 use uqa_sql::{
-    plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
+    plan::{AccessPathPlan, QueryPlan, RelationalPlan},
     semantics::primary_query_cte_references_with_control,
     SQLError, SQLParam,
 };
@@ -30,13 +30,14 @@ pub fn try_build_retained_query_operator<'a, S: Clone + Send + Sync + 'static>(
     if !supports_retained_root(plan) {
         return Ok(None);
     }
-    let mut scope = scope.clone();
-    let mut scope = scope.enter_query_plan_scope(plan)?;
+    let resources = context.source.ctes.production_resources()?;
+    let mut scope = scope.copy_with_control(&resources.control())?;
+    let mut scope = scope.enter_query_plan_scope_with_control(plan, &resources.control())?;
     let prepared =
         crate::query::sources::prepared_queries::prepare(&context.source, plan, params, &scope)?;
     let plan = prepared.as_ref();
     crate::query::privileges::routine_calls::query(&context.source, plan, params, &scope)?;
-    scope.retain_cte_producers(!plan.ctes.is_empty(), |scope| {
+    scope.retain_cte_producers_with_control(!plan.ctes.is_empty(), &resources.control(), |scope| {
         build_retained_root(context, plan, params, scope)
     })
 }
@@ -47,7 +48,11 @@ fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
     params: &'a [SQLParam],
     scope: &mut CteScope<S>,
 ) -> Result<Option<Box<dyn PhysicalOperator + 'a>>, SQLError> {
-    let mut scope = scope.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
+    let resources = context.source.ctes.production_resources()?;
+    let mut scope = scope.enter_visible_ctes_with_control(
+        plan.ctes.iter().map(|cte| cte.name.as_str()),
+        &resources.control(),
+    )?;
     if !plan.ctes.is_empty() {
         let scheduled = schedule_plan_ctes(context.source.ctes, context.source.volatility, plan)?;
         let filters = context.cte_filters.output_filters(plan, &scope)?;
@@ -61,14 +66,18 @@ fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
             &filters,
         )?;
     }
-    let mut root = plan.clone();
-    root.ctes.clear();
+    let primary = (!plan.ctes.is_empty())
+        .then(|| plan.copy_primary_with_control(&resources.control()))
+        .transpose()?;
+    let root = primary.as_deref().unwrap_or(plan);
     match &root.root {
         RelationalPlan::QueryBlock(_) => {
-            try_build_streaming_subquery_operator(&context.source, &root, params, &mut scope)
+            try_build_streaming_subquery_operator(&context.source, root, params, &mut scope)
         }
         RelationalPlan::Values { rows, subqueries } => {
-            let scope = scope.enter_scalar_subqueries(subqueries);
+            let arena_resources = context.source.ctes.production_resources()?;
+            let scope = scope
+                .enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
             let outer = scope.row_lock_outer_row().cloned();
             let schema = crate::query::binding::values_schema_in_scope(
                 context.source.ctes.routines,
@@ -80,7 +89,7 @@ fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
             )?;
             let operator = crate::query::sources::values_source::build_values_scan(
                 context.source.types,
-                context.source.relational.expression_scope((*scope).clone()),
+                context.source.relational.expression_scope(&scope)?,
                 params,
                 rows,
                 schema.column_types(),
@@ -89,7 +98,7 @@ fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
             )?;
             Ok(Some(operator))
         }
-        RelationalPlan::SetOp { .. } => build_set_operator(context, &root, params, &scope),
+        RelationalPlan::SetOp { .. } => build_set_operator(context, root, params, &scope),
     }
 }
 
@@ -106,9 +115,9 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
         right,
         order_by,
         limit,
-        with_ties,
         offset,
         subqueries,
+        ..
     } = &plan.root
     else {
         unreachable!()
@@ -132,12 +141,15 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
             .map_err(crate::physical::physical_exec_error)?;
         return Ok(None);
     };
-    let (left_op, right_op, work_mem) =
+    let (left_op, right_op, (work_mem, evaluator)) =
         OperatorBuild::pair(left_op, right_op, |left_op, right_op| {
             left_op.attach(|input| project_retained_output(context, input, left, params, scope))?;
             right_op
                 .attach(|input| project_retained_output(context, input, right, params, scope))?;
-            context.source.relational.runtime.work_mem_bytes()
+            Ok((
+                context.source.relational.runtime.work_mem_bytes()?,
+                context.source.relational.evaluator(params, scope)?,
+            ))
         })?;
     let operator: Box<dyn PhysicalOperator + 'a> = Box::new(
         crate::ExternalSetOperation::new_with_types_and_evaluator(
@@ -147,49 +159,34 @@ fn build_set_operator<'a, S: Clone + Send + Sync + 'static>(
             *all,
             schema.column_types().to_vec(),
             work_mem,
-            context.source.relational.evaluator(params, scope),
+            evaluator,
         )
         .map_err(crate::physical::physical_exec_error)?,
     );
     if order_by.is_empty() && limit.is_none() && offset.is_none() {
         return Ok(Some(operator));
     }
-    let statement = QueryBlockPlan {
-        deferred_outer_rewrites: Vec::new(),
-        privilege_columns: uqa_core::memory::OwnedSet::new(),
-        projections: Vec::new(),
-        from: None,
-        r#where: None,
-        compute: ComputePlan::Project,
-        group_by: Vec::new(),
-        grouping_sets: Vec::new(),
-        group_distinct: false,
-        having: None,
-        order_by: order_by.clone(),
-        limit: limit.as_deref().cloned(),
-        with_ties: *with_ties,
-        offset: offset.as_deref().cloned(),
-        distinct: false,
-        distinct_on: Vec::new(),
-        subqueries: subqueries.clone(),
-        access: AccessPathPlan::Row,
-        locking: Vec::new(),
-        windows: Vec::new(),
-    };
-    let mut scope = scope.clone();
-    let scope = scope.enter_scalar_subqueries(subqueries);
-    let output = crate::query::ordering::identity_order_columns(schema.columns());
-    crate::query::relational::limit::attach_order_limit(
-        operator,
-        &statement,
-        &output,
-        context.source.relational,
-        params,
-        &scope,
-        context.source.relational.runtime,
-        context.source.relational.evaluator(params, &scope),
-        None,
-    )
+    OperatorBuild::build(operator, |operator| {
+        let resources = context.source.ctes.production_resources()?;
+        let statement = plan.set_ordering_with_control(&resources.control())?;
+        let mut scope = scope.copy_with_control(&resources.control())?;
+        let scope = scope.enter_scalar_subqueries_with_control(subqueries, &resources.control())?;
+        let output = crate::query::ordering::identity_order_columns(schema.columns());
+        let evaluator = context.source.relational.evaluator(params, &scope)?;
+        operator.attach(|input| {
+            crate::query::relational::limit::attach_order_limit(
+                input,
+                &statement,
+                &output,
+                context.source.relational,
+                params,
+                &scope,
+                context.source.relational.runtime,
+                evaluator,
+                None,
+            )
+        })
+    })
     .map(Some)
 }
 

@@ -45,7 +45,7 @@ fn ordinary_predicates_select_inputs_before_unrelated_volatile_and_set_outputs()
                 push_derived_output_filter(fixture.context(), &query, "s", &predicate, None)
                     .unwrap()
                     .expect("pure predicate on independent output");
-            let RelationalPlan::QueryBlock(block) = specialized.root else {
+            let RelationalPlan::QueryBlock(block) = &specialized.root else {
                 panic!("expected query block")
             };
             assert_eq!(
@@ -108,13 +108,13 @@ fn output_substitution_preserves_quoted_identity_and_alias_tails() {
     )
     .unwrap()
     .unwrap();
-    let RelationalPlan::QueryBlock(block) = specialized.root else {
+    let RelationalPlan::QueryBlock(block) = &specialized.root else {
         panic!("expected query block")
     };
-    let ScalarExpr::Binary { lhs, .. } = block.r#where.unwrap() else {
+    let ScalarExpr::Binary { lhs, .. } = block.r#where.as_ref().unwrap() else {
         panic!("expected comparison")
     };
-    assert_eq!(*lhs, ScalarExpr::Column("x".into()));
+    assert_eq!(**lhs, ScalarExpr::Column("x".into()));
     assert!(push_derived_output_filter(
         fixture.context(),
         &original,

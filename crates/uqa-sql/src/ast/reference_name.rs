@@ -161,6 +161,17 @@ impl PartialEq<ReferenceName> for str {
     }
 }
 
+impl uqa_core::memory::ObserveAllocations for ReferenceName {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        let Self { name, position: _ } = self;
+        observer.child(name)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ReferenceName;

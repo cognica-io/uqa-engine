@@ -6,10 +6,8 @@
 
 //! Column definition lists of functions in FROM, checked against the class of each function's result.
 
-use crate::ast::{
-    ColumnType, FunctionBinding, FunctionParamMode, FunctionReturns, RoutineInvocationBinding,
-};
-use crate::routines::{routine_returns_anonymous_record, RoutineResolution, SQLUserFunction};
+use crate::ast::{ColumnType, FunctionBinding, RoutineInvocationBinding};
+use crate::routines::{RoutineResolution, SQLUserFunction};
 use crate::type_resolution::FunctionTypeResolver;
 use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 
@@ -52,12 +50,36 @@ pub fn validate_table_function_column_definition(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
+    validate_table_function_column_definition_with_control(
+        routines,
+        request,
+        input_schema,
+        params,
+        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn validate_table_function_column_definition_with_control(
+    routines: &dyn RoutineResolution,
+    request: ColumnDefinitionRequest<'_>,
+    input_schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     let class = match request.user_function {
-        Some(function) => user_function_result_class(routines, function, request.user_invocation)?,
+        Some(function) => super::production::user_function_result_class_with_control(
+            routines,
+            function,
+            request.user_invocation,
+            control,
+        )?,
         None if request.binding.is_some_and(|binding| !binding.builtin) => {
             ResultClass::Unclassified
         }
-        None => builtin_result_class(&request, input_schema, params, resolver),
+        None => builtin_result_class(&request, input_schema, params, resolver, control)?,
     };
     let syntax_error = |message: &str| SQLError::Routine {
         sqlstate: "42601".into(),
@@ -73,7 +95,7 @@ pub fn validate_table_function_column_definition(
         };
     }
     match class {
-        ResultClass::Record => validate_record_column_definitions(routines, &request),
+        ResultClass::Record => validate_record_column_definitions(routines, &request, control),
         ResultClass::OutParameters => Err(redundant_out_column_definition_error()),
         ResultClass::NamedComposite => Err(syntax_error(
             "a column definition list is redundant for a function returning a named composite type",
@@ -89,6 +111,7 @@ pub fn validate_table_function_column_definition(
 fn validate_record_column_definitions(
     routines: &dyn RoutineResolution,
     request: &ColumnDefinitionRequest<'_>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     if request.declared_types.len() > MAX_COLUMN_DEFINITIONS {
         return Err(SQLError::Routine {
@@ -98,7 +121,7 @@ fn validate_record_column_definitions(
             ),
         });
     }
-    let mut pseudo_types = Vec::new();
+    let mut pseudo_types = uqa_core::memory::ProductionVec::new(*control);
     for (position, declared) in request.declared_types.iter().enumerate() {
         let column = request
             .column_names
@@ -114,29 +137,46 @@ fn validate_record_column_definitions(
             crate::catalog::type_metadata::routine_type_oid(declared),
         );
         if pseudo.is_none() {
-            let ty = routines.resolve_type_name(declared)?.map_or_else(
-                || {
-                    ColumnType::from_sql_name(declared).map_err(|_| SQLError::Routine {
-                        sqlstate: "42704".into(),
-                        message: format!("type \"{declared}\" does not exist"),
-                    })
-                },
-                Ok,
-            )?;
+            let ty = routines
+                .resolve_type_name_with_control(declared, control)?
+                .map_or_else(
+                    || {
+                        ColumnType::from_sql_name_with_control(declared, control).map_err(|error| {
+                            if matches!(error.sqlstate(), Some("53200" | "57014")) {
+                                error
+                            } else {
+                                SQLError::Routine {
+                                    sqlstate: "42704".into(),
+                                    message: format!("type \"{declared}\" does not exist"),
+                                }
+                            }
+                        })
+                    },
+                    Ok,
+                )?;
             routines.require_type_usage(&ty)?;
         }
-        pseudo_types.push(pseudo);
+        pseudo_types.push_copy(pseudo)?;
     }
-    let mut names = std::collections::BTreeSet::new();
+    let mut names = uqa_core::memory::OwnedSet::new();
     for name in request.column_names {
-        if !names.insert(name) {
+        control.check()?;
+        let inserted = match control.budget() {
+            Some(budget) => names.insert_budgeted(name, budget)?,
+            None => names.insert(name),
+        };
+        if !inserted {
             return Err(SQLError::Routine {
                 sqlstate: "42701".into(),
                 message: format!("column name \"{name}\" specified more than once"),
             });
         }
     }
-    for (column, pseudo) in request.column_names.iter().zip(pseudo_types) {
+    for (column, pseudo) in request
+        .column_names
+        .iter()
+        .zip(pseudo_types.iter().copied())
+    {
         // Function result descriptions may contain anonymous records, unlike stored table rows.
         if let Some(pseudo) = pseudo.filter(|pseudo| *pseudo != "record") {
             return Err(SQLError::Routine {
@@ -148,61 +188,16 @@ fn validate_record_column_definitions(
     Ok(())
 }
 
-/// The class of a user function's result for one call; a polymorphic result takes the type the call resolved for it, as `get_expr_result_type` resolves it from the actual arguments.
-pub(super) fn user_function_result_class(
-    routines: &dyn RoutineResolution,
-    function: &SQLUserFunction,
-    invocation: Option<&RoutineInvocationBinding>,
-) -> Result<ResultClass, SQLError> {
-    if routine_returns_anonymous_record(&function.def) {
-        return Ok(ResultClass::Record);
-    }
-    if function.def.output_params().nth(1).is_some() {
-        return Ok(ResultClass::OutParameters);
-    }
-    // A single OUT parameter, such as the one column of RETURNS TABLE, gives the result its type.
-    let output = function
-        .def
-        .params
-        .iter()
-        .enumerate()
-        .find(|(_, parameter)| {
-            matches!(
-                parameter.mode,
-                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-            )
-        });
-    let (declared, concrete) = match (output, &function.def.returns) {
-        (Some((position, output)), _) => (
-            output.type_name.as_str(),
-            invocation
-                .and_then(|invocation| invocation.parameter_types.get(position))
-                .map(String::as_str),
-        ),
-        (None, FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) => (
-            type_name.as_str(),
-            invocation.and_then(|invocation| invocation.return_type.as_deref()),
-        ),
-        _ => return Ok(ResultClass::Scalar),
-    };
-    let type_name = concrete.unwrap_or(declared);
-    if crate::type_resolution::routine_polymorphic_type(type_name).is_some() {
-        return Ok(ResultClass::Unclassified);
-    }
-    Ok(match routines.resolve_type_name(type_name)? {
-        Some(ty) => type_result_class(&ty),
-        None => ResultClass::Scalar,
-    })
-}
-
 fn builtin_result_class(
     request: &ColumnDefinitionRequest<'_>,
     input_schema: &RowSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
-) -> ResultClass {
-    let builtin = crate::semantics::builtin_function_dispatch_name(request.name);
-    match builtin.as_ref() {
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<ResultClass, SQLError> {
+    let builtin =
+        crate::semantics::builtin_function_dispatch_name_with_control(request.name, control)?;
+    Ok(match builtin.as_str() {
         "json_each"
         | "jsonb_each"
         | "json_each_text"
@@ -224,10 +219,7 @@ fn builtin_result_class(
         // `unnest` returns its array's element type; an array of anonymous records produces one record column, which this check leaves unclassified.
         "unnest" => match request.args {
             [argument] => {
-                crate::scalar_type_with_resolver(argument, input_schema, params, resolver)
-                    .ok()
-                    .flatten()
-                    .and_then(|ty| crate::type_resolution::array_element_type(&ty).cloned())
+                super::types::element_type(argument, input_schema, params, resolver, control)?
                     .map_or(
                         ResultClass::Unclassified,
                         |element| match type_result_class(&element) {
@@ -239,11 +231,11 @@ fn builtin_result_class(
             _ => ResultClass::Unclassified,
         },
         _ => ResultClass::Unclassified,
-    }
+    })
 }
 
 /// The class of a result of type `ty`; a domain takes its base type's class, as a domain over a composite type does.
-fn type_result_class(ty: &ColumnType) -> ResultClass {
+pub(super) fn type_result_class(ty: &ColumnType) -> ResultClass {
     match ty {
         ColumnType::Domain { base, .. } => type_result_class(base),
         ColumnType::Composite(_) => ResultClass::NamedComposite,

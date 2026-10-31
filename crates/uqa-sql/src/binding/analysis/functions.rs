@@ -101,16 +101,6 @@ pub(super) fn validate_qualified_column(
     })
 }
 
-pub(super) fn single_pseudo_column_qualifier(schema: &RowSchema) -> Option<String> {
-    let mut qualifiers = schema_qualifiers(schema).into_iter().filter(|qualifier| {
-        schema.has_qualified_column(qualifier, "_doc_id")
-            && schema.has_qualified_column(qualifier, "_score")
-            && schema.has_qualified_column(qualifier, "tableoid")
-    });
-    let qualifier = qualifiers.next()?;
-    qualifiers.next().is_none().then_some(qualifier)
-}
-
 fn pseudo_column_qualifiers(schema: &RowSchema, column: &str) -> BTreeSet<String> {
     schema_qualifiers(schema)
         .into_iter()
@@ -581,29 +571,37 @@ fn window_call_kind(
 }
 
 pub(super) fn validate_table_function(
-    routines: &dyn RoutineResolution,
+    context: crate::semantics::TableFunctionAnalysis<'_>,
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     input: &RowSchema,
     params: &[SQLParam],
-    resolver: &dyn FunctionTypeResolver,
-) -> Result<Option<crate::semantics::ResolvedUserTableFunction>, SQLError> {
-    if let Some(resolved) = crate::semantics::resolve_user_table_function(
-        routines, name, binding, args, input, params, resolver,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<crate::semantics::ControlledUserTableFunction>, SQLError> {
+    if let Some(resolved) = crate::semantics::resolve_user_table_function_with_control(
+        crate::semantics::TableFunctionAnalysis { ..context },
+        name,
+        binding,
+        args,
+        input,
+        params,
+        control,
     )? {
         return Ok(Some(resolved));
     }
-    let identity = name.to_ascii_lowercase();
-    let lower = crate::semantics::builtin_function_dispatch_name(&identity);
+    let identity = crate::semantics::lowercase_function_name_with_control(name, control)?;
+    let lower = crate::semantics::builtin_function_dispatch_name_with_control(&identity, control)?;
     if binding.is_none_or(|binding| binding.builtin)
         && (crate::semantics::is_builtin_table_function(&lower)
             || crate::registry::is_operator_join_table_function(&lower)
-            || routines.has_registered_table_function(&identity))
+            || context
+                .routines
+                .has_registered_table_function_with_control(&identity, control)?)
     {
         return Ok(None);
     }
-    Err(undefined_function(name, args, input, params, resolver))
+    Err(undefined_function(name, args, input, params, context.types))
 }
 
 fn resolve_sql_function(

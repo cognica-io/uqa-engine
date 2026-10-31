@@ -14,14 +14,13 @@ use crate::{
 
 type Rewrite<'a> = &'a mut dyn FnMut(&mut ScalarExpr, &mut Vec<QueryPlan>) -> Result<(), SQLError>;
 
+type CompleteQuery<'a> = &'a mut dyn FnMut(&mut QueryPlan) -> Result<(), SQLError>;
+
 pub(crate) fn rewrite_with_arenas(
     plan: &mut UnifiedPlan,
     rewrite: Rewrite<'_>,
 ) -> Result<(), SQLError> {
-    match plan {
-        UnifiedPlan::Query(query) => query_nodes(query, rewrite),
-        UnifiedPlan::Command(command) => command_nodes(command, rewrite),
-    }
+    rewrite_with_arenas_and_metadata(plan, rewrite, &mut |_| Ok(()))
 }
 
 pub(crate) fn rewrite_expression_with_arena(
@@ -29,8 +28,35 @@ pub(crate) fn rewrite_expression_with_arena(
     arena: &mut Vec<QueryPlan>,
     rewrite: Rewrite<'_>,
 ) -> Result<(), SQLError> {
+    rewrite_expression_with_arena_and_metadata(expression, arena, rewrite, &mut |_| Ok(()))
+}
+
+pub(crate) fn rewrite_query_with_arenas(
+    query: &mut QueryPlan,
+    rewrite: Rewrite<'_>,
+) -> Result<(), SQLError> {
+    query_nodes(query, rewrite, &mut |_| Ok(()))
+}
+
+pub(crate) fn rewrite_with_arenas_and_metadata(
+    plan: &mut UnifiedPlan,
+    rewrite: Rewrite<'_>,
+    complete: CompleteQuery<'_>,
+) -> Result<(), SQLError> {
+    match plan {
+        UnifiedPlan::Query(query) => query_nodes(query, rewrite, complete),
+        UnifiedPlan::Command(command) => command_nodes(command, rewrite, complete),
+    }
+}
+
+pub(crate) fn rewrite_expression_with_arena_and_metadata(
+    expression: &mut ScalarExpr,
+    arena: &mut Vec<QueryPlan>,
+    rewrite: Rewrite<'_>,
+    complete: CompleteQuery<'_>,
+) -> Result<(), SQLError> {
     for query in arena.iter_mut() {
-        query_nodes(query, rewrite)?;
+        query_nodes(query, rewrite, complete)?;
     }
     let mut result = Ok(());
     crate::plan::rewrite_scalar_expression(expression, &mut |node| {
@@ -41,22 +67,26 @@ pub(crate) fn rewrite_expression_with_arena(
     result
 }
 
-pub(crate) fn query_nodes(query: &mut QueryPlan, rewrite: Rewrite<'_>) -> Result<(), SQLError> {
-    cte_nodes(&mut query.ctes, rewrite)?;
+fn query_nodes(
+    query: &mut QueryPlan,
+    rewrite: Rewrite<'_>,
+    complete: CompleteQuery<'_>,
+) -> Result<(), SQLError> {
+    cte_nodes(&mut query.ctes, rewrite, complete)?;
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
             if let Some(source) = &mut block.from {
-                source_nodes(source, rewrite)?;
+                source_nodes(source, rewrite, complete)?;
             }
         }
         RelationalPlan::SetOp { left, right, .. } => {
-            query_nodes(left, rewrite)?;
-            query_nodes(right, rewrite)?;
+            query_nodes(left, rewrite, complete)?;
+            query_nodes(right, rewrite, complete)?;
         }
         RelationalPlan::Values { .. } => {}
     }
     for child in query_arena(&mut query.root).iter_mut() {
-        query_nodes(child, rewrite)?;
+        query_nodes(child, rewrite, complete)?;
     }
     let mut arena = std::mem::take(query_arena(&mut query.root));
     let mut result = Ok(());
@@ -66,18 +96,23 @@ pub(crate) fn query_nodes(query: &mut QueryPlan, rewrite: Rewrite<'_>) -> Result
         }
     });
     *query_arena(&mut query.root) = arena;
-    result
+    result?;
+    complete(query)
 }
 
-fn command_nodes(command: &mut CommandPlan, rewrite: Rewrite<'_>) -> Result<(), SQLError> {
+fn command_nodes(
+    command: &mut CommandPlan,
+    rewrite: Rewrite<'_>,
+    complete: CompleteQuery<'_>,
+) -> Result<(), SQLError> {
     if let Some(ctes) = command.ctes_mut() {
-        cte_nodes(ctes, rewrite)?;
+        cte_nodes(ctes, rewrite, complete)?;
     }
     if let Some(source) = command.source_input_mut() {
-        source_nodes(source, rewrite)?;
+        source_nodes(source, rewrite, complete)?;
     }
     for query in command.query_inputs_mut() {
-        query_nodes(query, rewrite)?;
+        query_nodes(query, rewrite, complete)?;
     }
     if let Some(arena) = command_arena(command) {
         let mut arena = std::mem::take(arena);
@@ -100,16 +135,17 @@ fn command_nodes(command: &mut CommandPlan, rewrite: Rewrite<'_>) -> Result<(), 
         CommandPlan::CreateView { query, .. }
         | CommandPlan::CreateMaterializedView { query, .. }
         | CommandPlan::CreateTableAs { query, .. }
-        | CommandPlan::DeclareCursor { query, .. } => query_nodes(query, rewrite),
+        | CommandPlan::DeclareCursor { query, .. } => query_nodes(query, rewrite, complete),
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
-            rewrite_with_arenas(body, rewrite)
+            rewrite_with_arenas_and_metadata(body, rewrite, complete)
         }
         CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
             for expression in params {
-                rewrite_expression_with_arena(
+                rewrite_expression_with_arena_and_metadata(
                     &mut expression.scalar,
                     &mut expression.subqueries,
                     rewrite,
+                    complete,
                 )?;
             }
             Ok(())
@@ -118,27 +154,45 @@ fn command_nodes(command: &mut CommandPlan, rewrite: Rewrite<'_>) -> Result<(), 
     }
 }
 
-fn cte_nodes(ctes: &mut [CtePlan], rewrite: Rewrite<'_>) -> Result<(), SQLError> {
+fn cte_nodes(
+    ctes: &mut [CtePlan],
+    rewrite: Rewrite<'_>,
+    complete: CompleteQuery<'_>,
+) -> Result<(), SQLError> {
     for cte in ctes {
         match &mut cte.body {
-            CtePlanBody::Query(query) => query_nodes(query, rewrite)?,
-            CtePlanBody::Command(command) => command_nodes(command, rewrite)?,
+            CtePlanBody::Query(query) => query_nodes(query, rewrite, complete)?,
+            CtePlanBody::Command(command) => command_nodes(command, rewrite, complete)?,
         }
         if let Some(cycle) = &mut cte.cycle {
-            rewrite_expression_with_arena(&mut cycle.mark_value, &mut Vec::new(), rewrite)?;
-            rewrite_expression_with_arena(&mut cycle.mark_default, &mut Vec::new(), rewrite)?;
+            rewrite_expression_with_arena_and_metadata(
+                &mut cycle.mark_value,
+                &mut Vec::new(),
+                rewrite,
+                complete,
+            )?;
+            rewrite_expression_with_arena_and_metadata(
+                &mut cycle.mark_default,
+                &mut Vec::new(),
+                rewrite,
+                complete,
+            )?;
         }
     }
     Ok(())
 }
 
-fn source_nodes(source: &mut SourcePlan, rewrite: Rewrite<'_>) -> Result<(), SQLError> {
+fn source_nodes(
+    source: &mut SourcePlan,
+    rewrite: Rewrite<'_>,
+    complete: CompleteQuery<'_>,
+) -> Result<(), SQLError> {
     match source {
         SourcePlan::Join { left, right, .. } => {
-            source_nodes(left, rewrite)?;
-            source_nodes(right, rewrite)
+            source_nodes(left, rewrite, complete)?;
+            source_nodes(right, rewrite, complete)
         }
-        SourcePlan::Subquery { body, .. } => query_nodes(body, rewrite),
+        SourcePlan::Subquery { body, .. } => query_nodes(body, rewrite, complete),
         _ => Ok(()),
     }
 }

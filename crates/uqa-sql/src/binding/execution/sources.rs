@@ -6,17 +6,23 @@
 
 //! Transfer freshly bound derived-source metadata along its borrowed execution tree.
 
-use std::{collections::BTreeMap, ptr::NonNull, sync::Arc};
-
 use crate::{
     plan::{QueryBlockPlan, RelationalPlan, SourcePlan},
-    RowSchema,
+    RowSchema, SQLError,
 };
+use std::{ptr::NonNull, sync::Arc};
+use uqa_core::memory::{OwnedMap, Produced, ProductionControl};
+
+pub type SharedExecutionSourceBindings<'a> = Arc<Produced<ExecutionSourceBindings<'a>>>;
+type SourceChildren<'a> = (
+    SharedExecutionSourceBindings<'a>,
+    SharedExecutionSourceBindings<'a>,
+);
 
 /// Metadata from one successful execution-source binding. The owner must keep the catalog, CTE definitions, routines and parameters unchanged while constructing the corresponding physical source. This is not a prepared-plan cache or pre-optimization annotation.
 pub struct ExecutionSourceBindings<'a> {
     source: &'a SourcePlan,
-    children: Option<Box<(Arc<Self>, Arc<Self>)>>,
+    children: Option<Produced<Box<SourceChildren<'a>>>>,
     query: Option<QuerySourceBinding<'a>>,
 }
 
@@ -24,16 +30,16 @@ struct QuerySourceBinding<'a> {
     block: &'a QueryBlockPlan,
     schema: RowSchema,
     outer: Option<RowSchema>,
-    sources: Option<Arc<ExecutionSourceBindings<'a>>>,
+    sources: Option<SharedExecutionSourceBindings<'a>>,
 }
 
-impl ExecutionSourceBindings<'_> {
+impl<'a> ExecutionSourceBindings<'a> {
     /// A rewritten or copied source must obtain its own binding.
     pub fn matches_source(&self, source: &SourcePlan) -> bool {
         std::ptr::eq(self.source, source)
     }
 
-    pub fn join_child(&self, right: bool) -> Option<Arc<Self>> {
+    pub fn join_child(&self, right: bool) -> Option<SharedExecutionSourceBindings<'a>> {
         self.children.as_ref().map(|children| {
             if right {
                 children.1.clone()
@@ -49,7 +55,7 @@ impl ExecutionSourceBindings<'_> {
         block: &QueryBlockPlan,
         outer: Option<&RowSchema>,
         defer_distinct_limit: bool,
-    ) -> Option<(RowSchema, Option<Arc<Self>>)> {
+    ) -> Option<(RowSchema, Option<SharedExecutionSourceBindings<'a>>)> {
         let query = self.query.as_ref()?;
         if defer_distinct_limit
             || !std::ptr::eq(query.block, block)
@@ -64,25 +70,33 @@ impl ExecutionSourceBindings<'_> {
 /// Addresses exist only while collecting metadata from the original borrowed tree. Temporary view, CTE and function-member syntax cannot replace an original node, and extraction returns borrowed structural owners rather than address keys.
 #[derive(Default)]
 pub(in crate::binding) struct CapturedSources {
-    blocks: BTreeMap<NonNull<QueryBlockPlan>, Option<(RowSchema, Option<RowSchema>)>>,
+    blocks: OwnedMap<NonNull<QueryBlockPlan>, Option<(RowSchema, Option<RowSchema>)>>,
 }
 
 impl CapturedSources {
-    pub(super) fn for_source(source: &SourcePlan) -> Self {
+    pub(super) fn for_source(
+        source: &SourcePlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
         let mut result = Self::default();
-        result.collect(source);
-        result
+        result.collect(source, control)?;
+        Ok(result)
     }
 
     pub(super) fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
 
-    fn collect(&mut self, source: &SourcePlan) {
+    fn collect(
+        &mut self,
+        source: &SourcePlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
         match source {
             SourcePlan::Join { left, right, .. } => {
-                self.collect(left);
-                self.collect(right);
+                self.collect(left, control)?;
+                self.collect(right, control)?;
             }
             SourcePlan::Subquery { body, .. } if body.ctes.is_empty() => {
                 if let RelationalPlan::QueryBlock(block) = &body.root {
@@ -91,15 +105,24 @@ impl CapturedSources {
                         .as_ref()
                         .is_some_and(super::source_binds_routines)
                     {
-                        self.blocks.insert(NonNull::from(block.as_ref()), None);
+                        let key = NonNull::from(block.as_ref());
+                        match control.budget() {
+                            Some(budget) => {
+                                self.blocks.insert_budgeted(key, None, budget)?;
+                            }
+                            None => {
+                                self.blocks.insert(key, None);
+                            }
+                        }
                         if let Some(source) = &block.from {
-                            self.collect(source);
+                            self.collect(source, control)?;
                         }
                     }
                 }
             }
             _ => {}
         }
+        Ok(())
     }
 
     pub(in crate::binding) fn record(
@@ -115,10 +138,18 @@ impl CapturedSources {
         }
     }
 
-    pub(super) fn take<'a>(&mut self, source: &'a SourcePlan) -> Arc<ExecutionSourceBindings<'a>> {
+    pub(super) fn take<'a>(
+        &mut self,
+        source: &'a SourcePlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExecutionSourceBindings<'a>, SQLError> {
+        control.check()?;
         let children = match source {
             SourcePlan::Join { left, right, .. } => {
-                Some(Box::new((self.take(left), self.take(right))))
+                let left = self.take(left, control)?;
+                let right = self.take(right, control)?;
+                let memory = control.reserve(size_of::<SourceChildren<'a>>())?;
+                Some(control.finish(Box::new((left, right)), memory)?)
             }
             _ => None,
         };
@@ -128,20 +159,32 @@ impl CapturedSources {
                     .blocks
                     .remove(&NonNull::from(block.as_ref()))
                     .flatten()
-                    .map(|(schema, outer)| QuerySourceBinding {
-                        block,
-                        schema,
-                        outer,
-                        sources: block.from.as_ref().map(|source| self.take(source)),
-                    }),
+                    .map(|(schema, outer)| {
+                        Ok::<_, SQLError>(QuerySourceBinding {
+                            block,
+                            schema,
+                            outer,
+                            sources: block
+                                .from
+                                .as_ref()
+                                .map(|source| self.take(source, control))
+                                .transpose()?,
+                        })
+                    })
+                    .transpose()?,
                 _ => None,
             },
             _ => None,
         };
-        Arc::new(ExecutionSourceBindings {
-            source,
-            children,
-            query,
-        })
+        Ok(control
+            .finish(
+                ExecutionSourceBindings {
+                    source,
+                    children,
+                    query,
+                },
+                control.empty_reservation(),
+            )?
+            .into_shared(control)?)
     }
 }

@@ -17,6 +17,8 @@ use super::roles::{identity::RoleSubject, RoleDefinition};
 use crate::ast::{ColumnType, CompositeTypeReference, ObjectAclEntry};
 use crate::expr::composites::{CompositeAttribute, CompositeTypeDescriptor};
 
+mod production;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StoredCompositeAttribute {

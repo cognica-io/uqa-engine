@@ -239,3 +239,5 @@ fn retained_field_type_errors_follow_record_nullness_and_release_argument_memory
         }
     }
 }
+
+mod sequences;

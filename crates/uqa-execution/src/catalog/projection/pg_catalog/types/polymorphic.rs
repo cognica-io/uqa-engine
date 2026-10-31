@@ -45,7 +45,8 @@ pub(super) fn metadata() -> impl Iterator<Item = PgTypeCatalogMetadata<'static>>
     .map(
         |(name, len, by_value, input, output, receive, send, align, storage)| {
             PgTypeCatalogMetadata {
-                oid: uqa_sql::catalog::type_metadata::routine_type_oid(name),
+                oid: uqa_sql::catalog::type_metadata::routine_pseudo_type_oid(name)
+                    .expect("catalog pseudo-type identity"),
                 name: name.into(),
                 namespace_oid: schema_oid("pg_catalog"),
                 len,

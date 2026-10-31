@@ -85,8 +85,14 @@ fn hash_full_join_preserves_unmatched_rows() {
         row(&[("l.id", Value::Null)]),
         row(&[("r.id", Value::Null)]),
     );
-    assert_eq!(join.left_key_positions, Some(vec![0]));
-    assert_eq!(join.right_key_positions, Some(vec![0]));
+    assert_eq!(
+        join.left_key_positions.as_deref().map(Vec::as_slice),
+        Some([0].as_slice())
+    );
+    assert_eq!(
+        join.right_key_positions.as_deref().map(Vec::as_slice),
+        Some([0].as_slice())
+    );
     let (_, rows) = run_to_rows(&mut join).unwrap();
     assert_eq!(rows.len(), 3);
     assert!(rows

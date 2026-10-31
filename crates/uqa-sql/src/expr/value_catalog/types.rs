@@ -84,14 +84,18 @@ pub(crate) fn type_by_oid_with_control(
             control,
         )?);
     }
-    catalog
-        .map(|catalog| catalog.value_type_by_oid(oid))
+    if let Some(ty) = catalog
+        .map(|catalog| catalog.value_type_by_oid_with_control(oid, control))
         .transpose()?
         .flatten()
-        .ok_or_else(|| SQLError::Routine {
-            sqlstate: "XX000".into(),
-            message: format!("cache lookup failed for type {oid}"),
-        })?
-        .retain_external_with_control(control)
-        .map_err(Into::into)
+    {
+        return Ok(ty);
+    }
+    let (message, _memory) = control
+        .format(format_args!("cache lookup failed for type {oid}"))?
+        .into_parts();
+    Err(SQLError::Routine {
+        sqlstate: "XX000".into(),
+        message,
+    })
 }

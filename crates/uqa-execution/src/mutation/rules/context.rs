@@ -14,8 +14,18 @@ use uqa_sql::{
 };
 pub trait RuleSecurity {
     fn privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError>;
+
+    fn privilege_subject_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<RoleReference>, SQLError> {
+        control.check()?;
+        self.privilege_subject(table)?.clone_with_control(control)
+    }
 }
 pub trait RuleStatements<S: Clone + 'static> {
+    fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
     fn execute(
         &self,
         action: uqa_sql::semantics::rules::binding::RuleAction,
@@ -64,10 +74,80 @@ pub struct ViewRuleContext<'a, S: Clone + 'static> {
 impl<S: Clone + 'static> Copy for ViewRuleContext<'_, S> {}
 
 impl<S: Clone + 'static> RuleContext<'_, S> {
-    pub(super) fn execute_action(
+    pub(crate) fn bind_insert_queries(
         &self,
-        statement: uqa_sql::ast::Statement,
-        input: Option<uqa_sql::semantics::rules::binding::RuleQueryInput>,
+        insert: &uqa_sql::plan::InsertPlan,
+        subject: &RoleReference,
+    ) -> Result<uqa_sql::semantics::rules::binding::OwnedInsertRuleQueries, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        uqa_sql::semantics::rules::binding::OwnedInsertRuleQueries::bind(
+            self.analysis,
+            insert,
+            &|table| self.security.privilege_subject(table),
+            subject,
+            &control,
+        )
+    }
+
+    pub(super) fn returning_columns(
+        &self,
+        table: &str,
+    ) -> Result<uqa_core::memory::Produced<Vec<uqa_sql::ast::ColumnDef>>, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        uqa_sql::semantics::rules::analysis::rule_returning_columns_with_control(
+            self.analysis,
+            table,
+            &control,
+        )
+    }
+
+    pub(crate) fn capture_rules(
+        &self,
+        table: &str,
+        event: uqa_sql::ast::RuleEvent,
+    ) -> Result<uqa_sql::catalog::events::selection::CapturedRules, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        self.analysis
+            .rules
+            .capture_rules_with_control(table, event, &control)
+    }
+
+    pub(super) fn returning_request(
+        &self,
+        returning: &[uqa_sql::plan::ProjectionPlan],
+        aliases: &uqa_sql::ast::ReturningAliases,
+        subqueries: &[uqa_sql::plan::QueryPlan],
+    ) -> Result<super::RuleReturningRequest, SQLError> {
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        super::RuleReturningRequest::from_plan_with_control(
+            returning, aliases, subqueries, &control,
+        )
+    }
+
+    pub(super) fn execute_bound_action(
+        &self,
+        statement: &uqa_sql::semantics::rules::action_binding::BoundRuleStatement,
+        input: Option<uqa_sql::semantics::rules::binding::OwnedRuleQueryInput>,
         params: &[uqa_sql::SQLParam],
         scope: &crate::query::CteScope<S>,
         subject: &RoleReference,
@@ -75,12 +155,19 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
     ) -> Result<StatementOutput, SQLError> {
         let _stored =
             uqa_sql::semantics::sets::placement_scope::SetPlacementScope::stored_definition();
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
         self.statements.execute(
-            uqa_sql::semantics::rules::binding::RuleAction::bind(
+            uqa_sql::semantics::rules::binding::RuleAction::bind_with_control(
                 self.analysis,
                 self.returning.aggregates,
                 statement,
                 input,
+                &control,
             )?,
             params,
             Some(scope),
@@ -95,16 +182,23 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
         params: &[uqa_sql::SQLParam],
         scope: &crate::query::CteScope<S>,
     ) -> Result<Option<crate::RowSchema>, SQLError> {
-        let binding = crate::query::binding::binding_context(scope)?;
+        let retained = self.statements.read_control()?;
+        let control = uqa_core::memory::ProductionControl::new(
+            retained.memory(),
+            retained.cancellation(),
+            self.cancellation,
+        );
+        let binding = crate::query::binding::binding_context_with_control(scope, &control)?;
         input
             .source()
             .map(|source| {
-                uqa_sql::binding::analyze_source_plan_schema(
+                uqa_sql::binding::production::analyze_source_plan_schema_with_control(
                     self.returning.routines,
                     source,
                     params,
-                    &binding,
+                    binding,
                     None,
+                    &control,
                 )
             })
             .transpose()
@@ -114,19 +208,21 @@ impl<S: Clone + 'static> RuleContext<'_, S> {
         &self,
         input: uqa_sql::semantics::rules::binding::RuleMutation<'_>,
         params: &[uqa_sql::SQLParam],
-        binding: &uqa_sql::binding::BindingContext<'_>,
+        binding: &uqa_sql::binding::production::ControlledBindingContext<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<(crate::RowSchema, Option<crate::RowSchema>), SQLError> {
         let analyze = |source: &uqa_sql::plan::SourcePlan| {
-            uqa_sql::binding::analyze_source_plan_schema(
+            uqa_sql::binding::production::analyze_source_plan_schema_with_control(
                 self.returning.routines,
                 source,
                 params,
-                binding,
+                binding.copy_with_control(control)?,
                 None,
+                control,
             )
         };
         Ok((
-            analyze(&input.target_source())?,
+            analyze(&*input.target_source_with_control(control)?)?,
             input.source().map(analyze).transpose()?,
         ))
     }

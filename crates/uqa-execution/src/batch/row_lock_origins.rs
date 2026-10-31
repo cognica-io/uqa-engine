@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use super::PhysicalRow;
+use super::{PhysicalRow, RowLockName};
 
 /// Base-table identity carried on a composite physical row for `FOR UPDATE`.
 ///
@@ -16,10 +16,10 @@ use super::PhysicalRow;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowLockOrigin {
     /// Visible qualifier of the row source that currently owns the origin. Views, CTEs, and derived tables rebind it to their own alias.
-    pub qualifier: Arc<str>,
+    pub qualifier: RowLockName,
     /// Qualifier of the base scan that produced the origin. Rebinding at a derived-table boundary leaves it untouched, so a tuple recheck can pin each base scan inside a view or subquery to its own tuples.
-    pub scan_qualifier: Arc<str>,
-    pub storage_name: Arc<str>,
+    pub scan_qualifier: RowLockName,
+    pub storage_name: RowLockName,
     pub doc_id: uqa_core::DocId,
 }
 
@@ -40,12 +40,14 @@ impl RowLockOrigin {
     /// Build an origin from source names shared by every row in one scan.
     #[must_use]
     pub fn from_shared(
-        qualifier: Arc<str>,
-        storage_name: Arc<str>,
+        qualifier: impl Into<RowLockName>,
+        storage_name: impl Into<RowLockName>,
         doc_id: uqa_core::DocId,
     ) -> Self {
+        let qualifier = qualifier.into();
+        let storage_name = storage_name.into();
         Self {
-            scan_qualifier: Arc::clone(&qualifier),
+            scan_qualifier: qualifier.clone(),
             qualifier,
             storage_name,
             doc_id,
@@ -123,17 +125,18 @@ impl PhysicalRow {
 
     /// Point every lock origin at the visible source qualifier. Views, CTEs, and subqueries keep inner storage names so `FOR UPDATE OF` that alias locks only those origins after a join.
     #[must_use]
-    pub fn rebind_lock_origin_qualifiers(mut self, qualifier: impl Into<Arc<str>>) -> Self {
-        self.rebind_lock_origin_qualifiers_mut(qualifier.into());
+    pub fn rebind_lock_origin_qualifiers(mut self, qualifier: impl Into<RowLockName>) -> Self {
+        self.rebind_lock_origin_qualifiers_mut(qualifier);
         self
     }
 
-    pub fn rebind_lock_origin_qualifiers_mut(&mut self, qualifier: Arc<str>) {
+    pub fn rebind_lock_origin_qualifiers_mut(&mut self, qualifier: impl Into<RowLockName>) {
+        let qualifier = qualifier.into();
         let Some(origins) = self.lock_origins.as_mut() else {
             return;
         };
         for origin in Arc::make_mut(origins) {
-            origin.qualifier = Arc::clone(&qualifier);
+            origin.qualifier = qualifier.clone();
         }
     }
 }

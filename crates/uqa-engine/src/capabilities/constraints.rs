@@ -286,6 +286,15 @@ impl uqa_sql::semantics::conflict::ConflictCatalog for Engine {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
+    fn with_column_metadata_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        self.with_table_column_metadata_with_control(table, control, read)
+    }
+
     fn enforced_keys(&self, table: &str) -> Result<Vec<EnforcedKey>, String> {
         Engine::enforced_keys(self, table).map_err(|error| error.to_string())
     }
@@ -297,8 +306,15 @@ impl uqa_sql::semantics::conflict::ConflictCatalog for Engine {
     }
 }
 impl uqa_sql::semantics::conflict::InferenceBindingScope for Engine {
+    fn binding_scope_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::ControlledBindingSnapshot, SQLError> {
+        let scope = super::query_scope::new_for_catalog_binding_with_control(self, control)?;
+        uqa_execution::query::binding::binding_snapshot_with_control(&scope, control)
+    }
     fn binding_scope(&self) -> Result<uqa_sql::binding::snapshot::BindingSnapshot, SQLError> {
-        let scope = super::query_scope::new_for_catalog_binding(self);
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
         uqa_execution::query::binding::binding_context(&scope)
             .map(uqa_sql::binding::snapshot::BindingSnapshot::from)
     }

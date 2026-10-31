@@ -40,6 +40,14 @@ pub struct SubqueryServices<'a, S: Clone + 'static> {
 
 impl<S: Clone + 'static> Copy for SubqueryServices<'_, S> {}
 
+impl<S: Clone + 'static> SubqueryServices<'_, S> {
+    pub(super) fn production_resources(
+        &self,
+    ) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        self.queries.source_context().ctes.production_resources()
+    }
+}
+
 pub struct SubqueryContext<'a, S: Clone + 'static> {
     pub services: SubqueryServices<'a, S>,
     pub memory: &'a dyn QueryMemorySettings,

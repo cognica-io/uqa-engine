@@ -209,13 +209,20 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
         .scopes
         .command_scope(inputs.subject, inputs.relations_bound)?;
     if let Some(parent) = inherited {
-        scope.inherit_cte_bindings(parent);
+        scope.inherit_cte_bindings_with_control(parent, &control)?;
     }
     for cte in inputs.ctes {
-        scope.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
+        scope.insert_deferred_with_control(
+            uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?,
+            &control,
+        )?;
     }
-    scope.scalar_subqueries = inputs.subqueries.into();
-    let mut visible = scope.enter_visible_ctes(inputs.ctes.iter().map(|cte| cte.name.as_str()));
+    scope.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(inputs.subqueries, &control)?;
+    let mut visible = scope.enter_visible_ctes_with_control(
+        inputs.ctes.iter().map(|cte| cte.name.as_str()),
+        &control,
+    )?;
     let scope = &mut *visible;
     if let Some(source) = inputs.source {
         crate::query::privileges::ensure_select_privileges_for_source_expressions(
@@ -294,6 +301,7 @@ fn expression_schemas<S: Clone + Send + Sync + 'static>(
                 params,
                 scope,
                 None,
+                &context.query.source.ctes.production_resources()?.control(),
             )
         })
         .transpose()?;
@@ -313,7 +321,7 @@ fn expression_schemas<S: Clone + Send + Sync + 'static>(
 fn generated_columns<S: Clone>(
     inputs: &Inputs<'_>,
     scope: &CteScope<S>,
-) -> Result<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>, SQLError> {
+) -> Result<uqa_sql::semantics::privileges::columns::ColumnDependencies, SQLError> {
     crate::query::privileges::with_scope(scope, |scope| {
         let mut qualifiers = std::collections::BTreeSet::from([
             inputs.table.to_string(),
@@ -331,15 +339,12 @@ fn generated_columns<S: Clone>(
             scope,
         )?;
         if let Some(source) = inputs.source {
-            for (table, required) in
-                uqa_sql::semantics::privileges::columns::for_source_expressions(
-                    source,
-                    &inputs.expressions,
-                    scope,
-                )?
-            {
-                columns.entry(table).or_default().extend(required);
-            }
+            let additional = uqa_sql::semantics::privileges::columns::for_source_expressions(
+                source,
+                &inputs.expressions,
+                scope,
+            )?;
+            uqa_sql::semantics::privileges::columns::merge(&mut columns, additional, scope)?;
         }
         Ok(columns)
     })

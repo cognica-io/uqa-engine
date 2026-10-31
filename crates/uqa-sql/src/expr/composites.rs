@@ -25,10 +25,12 @@ mod descriptor;
 pub(super) mod fields;
 mod input;
 pub mod literal;
+mod ownership;
 pub(crate) mod retained;
 mod retention;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};
 pub use input::parse_record_fields;
+pub use ownership::{descriptor_with_control, OwnedCompositeTypeDescriptor};
 pub use retained::CompositeConstantSource;
 pub use retention::{flatten_value_with_control, retain_value_with_control};
 
@@ -37,13 +39,24 @@ pub fn datum_is_composite(
     datum: &uqa_core::DatumValue,
     engine: &dyn super::EngineHook,
 ) -> Result<bool> {
+    datum_is_composite_with_control(
+        datum,
+        engine,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn datum_is_composite_with_control(
+    datum: &uqa_core::DatumValue,
+    engine: &dyn super::EngineHook,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool> {
+    control.check()?;
     if datum.record_fields().is_some() {
         return Ok(true);
     }
-    let ty = engine
-        .resolve_type_oid(datum.type_oid())
-        .map_err(SQLError::Internal)?;
-    let mut ty = ty.as_ref();
+    let ty = engine.resolve_type_oid_with_control(datum.type_oid(), control)?;
+    let mut ty = ty.as_deref();
     while let Some(ColumnType::Domain { base, .. }) = ty {
         ty = Some(base);
     }
@@ -129,6 +142,23 @@ impl CompositeTypeDescriptor {
 pub trait CompositeTypeCatalog {
     /// The attributes of one composite type, or `None` when the catalog has no such type.
     fn composite_type(&self, type_oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>>;
+
+    /// External catalogs own their callback construction; the default copies exposed metadata under the consumer's control. Native catalogs select existing retained descriptors or admit each selected field before construction.
+    fn composite_type_with_control(
+        &self,
+        type_oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<OwnedCompositeTypeDescriptor>> {
+        control.check()?;
+        self.composite_type(type_oid)?
+            .map(|descriptor| {
+                OwnedCompositeTypeDescriptor::from_produced(
+                    descriptor.clone_with_control(control)?,
+                    control,
+                )
+            })
+            .transpose()
+    }
 }
 
 /// The attributes of a composite type the statement's catalog must contain.

@@ -11,6 +11,7 @@ use crate::spill::BufferedIndexedSpill;
 use crate::{Batch, ExecError, ExecResult, PhysicalOperator, RowSchema, SharedSpill};
 use parking_lot::Mutex;
 use std::{num::NonZeroUsize, sync::Arc};
+use uqa_core::memory::{MemoryReservation, ProductionControl};
 use uqa_sql::SQLError;
 
 #[derive(Clone)]
@@ -26,22 +27,50 @@ impl CteRows {
         }
     }
     pub fn into_operator(self) -> Box<dyn PhysicalOperator> {
+        self.into_operator_with_control(&ProductionControl::uncontrolled())
+            .expect("ordinary CTE reader")
+    }
+    pub fn into_operator_with_control(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Box<dyn PhysicalOperator>, SQLError> {
         match self {
-            Self::Complete(rows) => Box::new(crate::SharedSpillScan::new(rows)),
-            Self::Prefix(rows) => Box::new(PrefixScan { rows, position: 0 }),
+            Self::Complete(rows) => Ok(crate::SharedSpillScan::boxed_with_control(rows, control)?),
+            Self::Prefix(rows) => {
+                let memory = control.reserve(size_of::<PrefixScan>())?;
+                Ok(Box::new(PrefixScan {
+                    rows,
+                    position: 0,
+                    _memory: memory,
+                }))
+            }
         }
     }
+    #[cfg(test)]
     pub(crate) fn from_producer(input: Box<dyn PhysicalOperator>, budget: usize) -> Self {
+        Self::from_producer_with_control(input, budget, &ProductionControl::uncontrolled())
+            .expect("ordinary CTE producer")
+    }
+
+    pub(crate) fn from_producer_with_control(
+        input: Box<dyn PhysicalOperator>,
+        budget: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let (input, memory) = crate::physical::construction::OperatorBuild::run(input, |_| {
+            Ok(control.reserve(size_of::<Mutex<PrefixState>>())?)
+        })?;
         let schema = input.row_schema().clone();
-        Self::Prefix(SharedPrefix {
+        Ok(Self::Prefix(SharedPrefix {
             schema: schema.clone(),
             state: Arc::new(Mutex::new(PrefixState {
                 rows: BufferedIndexedSpill::new(schema, budget),
                 input: Some(input),
                 opened: false,
                 failure: None,
+                _memory: memory,
             })),
-        })
+        }))
     }
 }
 
@@ -55,6 +84,7 @@ struct PrefixState {
     input: Option<Box<dyn PhysicalOperator>>,
     opened: bool,
     failure: Option<SQLError>,
+    _memory: Option<MemoryReservation>,
 }
 impl PrefixState {
     fn finish(&mut self) -> ExecResult<()> {
@@ -118,6 +148,7 @@ impl Drop for PrefixState {
 struct PrefixScan {
     rows: SharedPrefix,
     position: u64,
+    _memory: Option<MemoryReservation>,
 }
 impl PrefixScan {
     fn pull(&mut self, demand: NonZeroUsize) -> ExecResult<Option<Batch>> {

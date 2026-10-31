@@ -271,8 +271,9 @@ fn common_type_selection_keeps_native_deferred_outputs_distinct_from_unknown() {
                     crate::type_resolution::CommonTypeContext::Coalesce,
                     &mut inputs
                 )
-                .unwrap(),
-            expected
+                .unwrap()
+                .as_deref(),
+            expected.as_ref()
         );
         assert!(inputs.iter().any(ExpressionType::is_deferred));
     }

@@ -31,6 +31,23 @@ impl AssignmentColumnCatalog for Engine {
             .map(|table| table.is_some_and(|table| *table.columns_declared.read()))
             .map_err(|error| Box::new(error) as uqa_sql::assignment::columns::ColumnCatalogError)
     }
+    fn with_column_metadata_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&[ColumnDef]) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        self.with_table_column_metadata_with_control(table, control, read)
+    }
+    fn columns_declared_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        Ok(self
+            .table_state_snapshot_with_control(table, control)?
+            .is_some_and(|table| *table.columns_declared.read()))
+    }
     fn try_column_insert_default_expr(
         &self,
         table: &str,

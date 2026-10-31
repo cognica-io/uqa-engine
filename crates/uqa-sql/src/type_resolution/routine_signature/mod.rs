@@ -6,9 +6,7 @@
 
 //! `PostgreSQL`-compatible routine signature matching, including polymorphic and variadic parameters.
 
-use super::overload_resolution::{
-    canonical_column_type_name, canonical_routine_type_name, RankedFunctionMatch,
-};
+use super::overload_resolution::RankedFunctionMatch;
 use crate::ast::{
     ColumnType, RoutineDefaultType, RoutineInvocationBinding,
     RoutineVariadicMode as InvocationVariadicMode,
@@ -82,7 +80,24 @@ impl RoutinePolymorphicType {
 /// Parse a routine pseudo-type after applying the same spelling normalization as routine identity matching.
 #[must_use]
 pub fn routine_polymorphic_type(type_name: &str) -> Option<RoutinePolymorphicType> {
-    Some(match canonical_routine_type_name(type_name).as_str() {
+    routine_polymorphic_type_with_control(
+        type_name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary polymorphic type classification")
+}
+
+pub(crate) fn routine_polymorphic_type_with_control(
+    type_name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<RoutinePolymorphicType>, uqa_core::ValueRetentionError> {
+    let name =
+        super::overload_resolution::canonical_routine_type_name_with_control(type_name, control)?;
+    Ok(polymorphic_type_from_canonical(&name))
+}
+
+fn polymorphic_type_from_canonical(name: &str) -> Option<RoutinePolymorphicType> {
+    Some(match name {
         "anyelement" => RoutinePolymorphicType::AnyElement,
         "anyarray" => RoutinePolymorphicType::AnyArray,
         "anynonarray" => RoutinePolymorphicType::AnyNonArray,
@@ -211,19 +226,16 @@ pub struct RoutineTypeSubstitutions {
 impl RoutineTypeSubstitutions {
     #[must_use]
     pub fn substitute(&self, polymorphic: RoutinePolymorphicType) -> Option<ColumnType> {
-        match polymorphic {
-            RoutinePolymorphicType::AnyElement
-            | RoutinePolymorphicType::AnyNonArray
-            | RoutinePolymorphicType::AnyEnum => self.simple_element.clone(),
-            RoutinePolymorphicType::AnyArray => self.simple_array.clone(),
-            RoutinePolymorphicType::AnyRange => self.simple_range.clone(),
-            RoutinePolymorphicType::AnyMultirange => self.simple_multirange.clone(),
-            RoutinePolymorphicType::AnyCompatible
-            | RoutinePolymorphicType::AnyCompatibleNonArray => self.compatible_element.clone(),
-            RoutinePolymorphicType::AnyCompatibleArray => self.compatible_array.clone(),
-            RoutinePolymorphicType::AnyCompatibleRange => self.compatible_range.clone(),
-            RoutinePolymorphicType::AnyCompatibleMultirange => self.compatible_multirange.clone(),
-        }
+        self.substitute_with_control(
+            polymorphic,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary type substitution")
+        .map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary substituted type")
+        })
     }
 }
 
@@ -257,29 +269,31 @@ impl MatchedRoutineSignature {
     /// Resolve a declared return or output type through this call's polymorphic substitutions.
     #[must_use]
     pub fn substitute_type(&self, declared_type_name: &str) -> Option<ColumnType> {
-        if let Some(polymorphic) = routine_polymorphic_type(declared_type_name) {
-            return self.substitutions.substitute(polymorphic);
-        }
-        let canonical = canonical_routine_type_name(declared_type_name);
-        ColumnType::from_sql_name(&canonical).ok().or_else(|| {
-            self.declared_identity
-                .iter()
-                .zip(&self.parameter_type_values)
-                .find_map(|(declared, resolved)| {
-                    (declared == &canonical).then(|| resolved.clone()).flatten()
-                })
+        self.substitute_type_with_control(
+            declared_type_name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary result type substitution")
+        .map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary substituted type")
         })
     }
 
-    /// Resolve a declared return or output type to its canonical binding name even when no [`ColumnType`] carrier exists for a named catalog type.
+    /// Resolve a return or output declaration to its canonical binding name.
     #[must_use]
     pub fn substitute_type_name(&self, declared_type_name: &str) -> Option<String> {
-        if routine_polymorphic_type(declared_type_name).is_some() {
-            return self
-                .substitute_type(declared_type_name)
-                .map(|ty| canonical_column_type_name(&ty));
-        }
-        Some(canonical_routine_type_name(declared_type_name))
+        self.substitute_type_name_with_control(
+            declared_type_name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary result type name")
+        .map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary substituted name")
+        })
     }
 
     #[must_use]
@@ -293,62 +307,13 @@ impl MatchedRoutineSignature {
         &self,
         declared_return_type: Option<&str>,
     ) -> RoutineInvocationBinding {
-        let variadic_mode = match (&self.variadic_plan, self.variadic_mode) {
-            (
-                RoutineVariadicPlan::Pack {
-                    parameter_index, ..
-                },
-                RoutineVariadicMode::Pack,
-            ) => InvocationVariadicMode::Expanded {
-                parameter_index: *parameter_index,
-            },
-            (
-                RoutineVariadicPlan::PassThrough {
-                    parameter_index, ..
-                },
-                RoutineVariadicMode::PassThrough,
-            ) => InvocationVariadicMode::Explicit {
-                parameter_index: *parameter_index,
-            },
-            _ => InvocationVariadicMode::None,
-        };
-        RoutineInvocationBinding {
-            argument_positions: self.argument_positions.clone(),
-            argument_targets: self
-                .coercion_targets
-                .iter()
-                .map(|target| {
-                    target
-                        .column_type
-                        .as_ref()
-                        .map_or_else(|| target.type_name.clone(), ColumnType::catalog_name)
-                })
-                .collect(),
-            argument_sources: self
-                .argument_sources
-                .iter()
-                .map(|source| {
-                    source.as_ref().map(|name| {
-                        ColumnType::from_sql_name(name)
-                            .map_or_else(|_| name.clone(), |ty| ty.catalog_name())
-                    })
-                })
-                .collect(),
-            parameter_types: self
-                .parameter_types
-                .iter()
-                .zip(&self.parameter_type_values)
-                .map(|(name, ty)| {
-                    ty.as_ref()
-                        .map_or_else(|| name.clone(), ColumnType::catalog_name)
-                })
-                .collect(),
-            return_type: declared_return_type.map(|type_name| {
-                self.substitute_type(type_name)
-                    .map_or_else(|| type_name.to_owned(), |ty| ty.catalog_name())
-            }),
-            variadic_mode,
-        }
+        self.invocation_binding_with_control(
+            declared_return_type,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary invocation binding")
+        .into_uncontrolled()
+        .expect("ordinary invocation owner")
     }
 }
 
@@ -374,9 +339,15 @@ impl RankedFunctionMatch for MatchedRoutineSignature {
     }
 }
 
-mod mapping;
 mod matching;
-mod polymorphic;
+#[expect(
+    clippy::result_large_err,
+    reason = "owned diagnostics stay inline so failure propagation does not allocate another box after admission fails"
+)]
+mod production;
+pub(crate) use production::{
+    match_routine_candidate_with_control, RoutineInvocationParts, RoutineSignatureProductionError,
+};
 
 pub(crate) use matching::match_routine_candidate;
 pub use matching::match_routine_signature;

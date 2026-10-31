@@ -166,3 +166,95 @@ fn field_assignments_walk_composite_fields_and_subscript_groups() {
         "subfield \"x\" is of type integer but expression is of type boolean"
     );
 }
+
+#[test]
+fn admitted_assignment_types_retain_only_the_selected_destination_storage() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let target = AssignmentTarget {
+        column: "p".into(),
+        indirection: vec![
+            AssignmentStep::Index(Box::new(ScalarExpr::Literal(Value::Int(1)))),
+            AssignmentStep::Field("tags".into()),
+            AssignmentStep::Slice {
+                lower: None,
+                upper: None,
+            },
+        ],
+    };
+    let declared = ColumnType::Array(Box::new(pair_type()));
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut output = None;
+    let measured = allocation_counter::measure(|| {
+        output = Some(
+            field_assignment_types_with_control(&target, &declared, Some(&PairCatalog), &control)
+                .unwrap(),
+        );
+    });
+    let output = output.unwrap();
+    assert_eq!(
+        &*output,
+        &[
+            declared.clone(),
+            pair_type(),
+            ColumnType::Array(Box::new(ColumnType::Text)),
+            ColumnType::Array(Box::new(ColumnType::Text))
+        ]
+    );
+    assert_eq!(output.reserved_bytes(), measured.bytes_current as usize);
+    assert_eq!(budget.used(), output.reserved_bytes());
+    drop(output);
+    let mut selected = None;
+    let measured = allocation_counter::measure(|| {
+        selected = Some(
+            assignment_input_type_with_control(&target, &declared, Some(&PairCatalog), &control)
+                .unwrap(),
+        );
+    });
+    let selected = selected.unwrap();
+    assert_eq!(*selected, ColumnType::Array(Box::new(ColumnType::Text)));
+    assert_eq!(selected.reserved_bytes(), size_of::<ColumnType>());
+    assert_eq!(selected.reserved_bytes(), measured.bytes_current as usize);
+    drop(selected);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn assignment_type_admission_rejects_large_declarations_and_cancellation_before_copying() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let target = AssignmentTarget::<ScalarExpr>::from("value".to_string());
+    let declared = ColumnType::Named("x".repeat(4 << 20));
+    let budget = MemoryBudget::new(512);
+    let sibling = budget.reserve(37).unwrap();
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    for selected_only in [false, true] {
+        let call = || -> Result<(), SQLError> {
+            if selected_only {
+                assignment_input_type_with_control(&target, &declared, None, &control)?;
+            } else {
+                field_assignment_types_with_control(&target, &declared, None, &control)?;
+            }
+            Ok(())
+        };
+        let measured = allocation_counter::measure(|| {
+            assert_eq!(call().unwrap_err().sqlstate(), Some("53200"));
+        });
+        assert!(measured.bytes_total < 4096, "{measured:?}");
+        assert_eq!(budget.used(), sibling.bytes());
+        for token in [&original, &invoking] {
+            token.cancel();
+            assert_eq!(call().unwrap_err().sqlstate(), Some("57014"));
+            assert_eq!(budget.used(), sibling.bytes());
+            token.reset();
+        }
+    }
+}

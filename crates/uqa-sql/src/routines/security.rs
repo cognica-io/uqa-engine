@@ -12,6 +12,7 @@ use crate::catalog::roles::{RoleIdentity, RoleReference};
 
 pub mod binding;
 pub mod grants;
+mod production;
 use crate::{
     ast::{
         AlterRoutineOwnerStmt, AlterRoutineStmt, CreateFunction, GrantRoutineStmt, RoutineAclEntry,
@@ -19,6 +20,10 @@ use crate::{
     catalog::roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
     catalog::security::object_acl,
     SQLError,
+};
+pub use production::{
+    ensure_routine_execute_privilege_named_with_control,
+    ensure_routine_execute_privilege_with_control,
 };
 use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
@@ -29,6 +34,18 @@ pub trait RoutineExecutionAuthority: RoutineSupportAuthority {
         &self,
         role: crate::catalog::roles::RoleIdentity,
     ) -> bool;
+
+    /// External authorities keep their own membership implementation. Native authorities admit their membership traversal with the invoking planner's control.
+    fn current_user_has_role_identity_privileges_with_control(
+        &self,
+        role: RoleIdentity,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let allowed = self.current_user_has_role_identity_privileges(role);
+        control.check()?;
+        Ok(allowed)
+    }
 }
 
 pub fn routine_owner_identity(stmt: &AlterRoutineOwnerStmt) -> AlterRoutineStmt {
@@ -54,10 +71,10 @@ pub fn ensure_routine_execute_privilege(
     authority: &dyn RoutineExecutionAuthority,
     definition: &CreateFunction,
 ) -> Result<(), SQLError> {
-    ensure_routine_execute_privilege_named(
+    ensure_routine_execute_privilege_with_control(
         authority,
         definition,
-        &routine_local_name(&definition.name)?,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
     )
 }
 
@@ -66,25 +83,12 @@ pub fn ensure_routine_execute_privilege_named(
     definition: &CreateFunction,
     display_name: &str,
 ) -> Result<(), SQLError> {
-    let allowed = routine_privilege_allowed(
-        &bound_routine_owner(definition)?,
-        definition.execute_acl.as_deref(),
-        false,
-        authority.current_user_is_superuser(),
-        |role| authority.current_user_has_role_identity_privileges(*role),
-    );
-    if allowed {
-        Ok(())
-    } else {
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!(
-                "permission denied for {} {}",
-                routine_kind(definition),
-                display_name
-            ),
-        })
-    }
+    ensure_routine_execute_privilege_named_with_control(
+        authority,
+        definition,
+        display_name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// Ownership retains grant options even when the owner's explicit EXECUTE was revoked.

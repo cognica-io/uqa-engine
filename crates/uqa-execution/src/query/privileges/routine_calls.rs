@@ -47,19 +47,23 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
-    let mut scope = ctes.clone();
-    let mut lookup = scope.enter_query_plan_scope(plan)?;
     let retained = context.ctes.queries.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
         retained.memory(),
         retained.cancellation(),
         context.ctes.runtime.cancellation,
     );
+    let mut scope = ctes.copy_with_control(&control)?;
+    let mut lookup = scope.enter_query_plan_scope_with_control(plan, &control)?;
     let ordered = uqa_sql::semantics::order_cte_plans_with_control(&plan.ctes, control)?;
     for cte in ordered.iter() {
-        lookup.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
+        lookup.insert_deferred_with_control(
+            uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?,
+            &control,
+        )?;
     }
-    let mut visible = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
+    let mut visible = lookup
+        .enter_visible_ctes_with_control(plan.ctes.iter().map(|cte| cte.name.as_str()), &control)?;
     let scope = &mut *visible;
     let scheduled =
         crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, plan)?;
@@ -67,7 +71,7 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
         if !scheduled.deferred {
             if let Some(query) = scheduled.plan.body.query() {
                 let definition = scope
-                    .definition_scope_for_name(&scheduled.plan.name)
+                    .definition_scope_for_name_with_control(&scheduled.plan.name, &control)?
                     .expect("declared CTE scope");
                 initialize(context, permissions, query, params, &definition, outer)?;
             }
@@ -89,11 +93,22 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
             let schema = block.from.as_ref().map_or_else(
                 || Ok(RowSchema::default()),
                 |source| {
-                    bind_source_plan_schema(context.ctes.routines, source, params, scope, outer)
+                    bind_source_plan_schema(
+                        context.ctes.routines,
+                        source,
+                        params,
+                        scope,
+                        outer,
+                        &context.ctes.production_resources()?.control(),
+                    )
                 },
             )?;
             let schema = uqa_sql::binding::overlay_outer_schema(&schema, outer);
-            scope.scalar_subqueries = block.subqueries.as_slice().into();
+            let arena_resources = context.ctes.production_resources()?;
+            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
+                &block.subqueries,
+                &arena_resources.control(),
+            )?;
             if let Some(from) = &block.from {
                 super::ensure_select_privileges_for_query_block(block, from, scope)?;
             }
@@ -192,7 +207,7 @@ pub(crate) fn expression_calls<S: Clone + Send + Sync + 'static>(
                 ..
             }
             | ScalarExpr::WindowCall { name, args, .. } => {
-                let resolver = context.relational.expression_scope(ctes.clone());
+                let resolver = context.relational.expression_scope(ctes)?;
                 let arguments = args
                     .iter()
                     .filter(|arg| !matches!(arg, ScalarExpr::Star))
@@ -242,20 +257,28 @@ pub(crate) fn source_calls<S: Clone + Send + Sync + 'static>(
             ..
         } => {
             let catalog = ctes.catalog_read_view()?;
-            let resolution = ctes.relation_name_resolution()?;
-            let view = if ctes.is_visible_cte(name) {
+            let resources = context.ctes.production_resources()?;
+            let control = resources.control();
+            let resolution = ctes.relation_name_resolution_with_control(&control)?;
+            let view = if ctes.is_visible_cte_with_control(name, &control)? {
                 None
             } else {
-                catalog.view_resolved(&resolution, name)?.cloned()
+                catalog.view_resolved_with_control(&resolution, name, &control)?
             };
-            let mut scope = ctes.definition_scope(name).unwrap_or_else(|| ctes.clone());
+            let mut scope = match ctes.definition_scope_with_control(name, &control)? {
+                Some(scope) => scope,
+                None => ctes.copy_with_control(&control)?,
+            };
             if let Some(view) = view {
                 let subject = if view.security_invoker() {
-                    scope.privilege_subject()?.clone()
+                    scope.invoking_role()?.clone_with_control(&control)?
                 } else {
-                    catalog.view_owner(&view)?
+                    control.finish(
+                        catalog.view_owner_with_control(view.security.role_owner, &control)?,
+                        control.empty_reservation(),
+                    )?
                 };
-                let scope = scope.enter_privilege_subject(subject);
+                let scope = scope.enter_privilege_subject_with_control(subject, &control)?;
                 initialize(context, permissions, query, params, &scope, outer)?;
             } else {
                 initialize(context, permissions, query, params, &scope, outer)?;
@@ -304,7 +327,7 @@ fn generated_calls<S: Clone + Send + Sync + 'static>(
 pub(crate) fn generated_relation_calls<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     permissions: &BuiltinRoutinePermissions,
-    columns: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    columns: uqa_sql::semantics::privileges::columns::ColumnDependencies,
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {

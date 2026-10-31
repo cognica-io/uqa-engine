@@ -7,7 +7,7 @@
 use super::*;
 use crate::query::{
     expression::ScalarExpressionContext,
-    recheck_source::LockRowsRecheckSource,
+    recheck_source::LockRowsRecheckInput,
     relational::{QueryExpressionFactory, RowLockOperatorFactory},
     routine_invocation::SQLRoutineInvoker,
     set_projection::SetFunctionRuntime,
@@ -89,7 +89,10 @@ impl PhysicalSubqueryRunner for Services {
     }
 }
 impl QueryExpressionContext for Services {
-    fn expression_evaluator<'a>(&'a self, _: &'a [SQLParam]) -> SharedExpressionEvaluator<'a> {
+    fn expression_evaluator<'a>(
+        &'a self,
+        _: &'a [SQLParam],
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
         panic!("unexpected nested evaluator")
     }
     fn subquery_plans(&self) -> &[QueryPlan] {
@@ -156,10 +159,21 @@ impl SetFunctionRuntime for Services {
     }
 }
 impl QueryExpressionFactory<()> for Services {
-    fn bind_scope(&self, scope: CteScope) -> Arc<dyn SetFunctionRuntime + '_> {
-        assert!(scope.scalar_subqueries.is_empty());
-        Arc::new(Self)
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
     }
+    fn bind_scope(&self, scope: &CteScope) -> Result<Arc<dyn SetFunctionRuntime + '_>, SQLError> {
+        assert!(scope.scalar_subqueries.is_empty());
+        Ok(Arc::new(Self))
+    }
+    fn optimize_owned_catalog_scalar(
+        &self,
+        _expression: uqa_sql::plan::OwnedScalarExpr,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        panic!("unexpected optimization")
+    }
+
     fn optimize_catalog_scalar(&self, _: &mut ScalarExpr) -> Result<(), SQLError> {
         panic!("unexpected optimization")
     }
@@ -180,7 +194,7 @@ impl RowLockOperatorFactory<()> for Services {
         _: &'a [SQLParam],
         _: &CteScope,
         _: Option<u64>,
-        _: Option<LockRowsRecheckSource<()>>,
+        _: Option<LockRowsRecheckInput<'_, ()>>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
         panic!("unexpected row locking")
     }

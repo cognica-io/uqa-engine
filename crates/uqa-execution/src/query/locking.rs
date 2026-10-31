@@ -6,20 +6,15 @@
 
 //! Row-lock target resolution and the physical `LockRows` operator.
 
-use super::recheck_source::LockRowsRecheckSource;
-use crate::catalog::schema::virtual_relation_accepts_row_lock as virtual_row_lockable;
-use crate::catalog::{CatalogReadView, RelationNameResolution};
+use super::recheck_source::{LockRowsRecheckInput, LockRowsRecheckSource};
 use crate::query::{binding::bind_source_plan_schema, CteScope};
 use crate::row_locks::{
-    binding::{bind_relation, lock_descendants, RelationBinding},
-    recheck::recheck_storage_names_match,
-    retry_cache::RowLockRetryCache,
-    LockAcquire,
+    recheck::recheck_storage_names_match, retry_cache::RowLockRetryCache, LockAcquire,
 };
 use crate::{Batch, ExecResult, PhysicalOperator, PhysicalRow, RowProjectionValue, RowSchema};
 use uqa_sql::ast::{LockStrength, LockWait, LockingClause, RelationPersistence};
 use uqa_sql::{
-    plan::{CommandPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan},
+    plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan},
     SQLError, SQLParam, ScalarExpr,
 };
 pub mod context;
@@ -31,169 +26,9 @@ pub fn query_has_row_locks(query: &QueryPlan) -> bool {
     query_plan_has_row_locks(query)
 }
 
-/// Acquire `PostgreSQL` `AccessShareLock` equivalents for every concrete table referenced by a query. The locks are transaction-scoped, so a cursor declaration keeps its bound relations alive until commit while ordinary persistent statements keep DDL from changing a source during execution.
-pub fn lock_query_relations<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    query: &QueryPlan,
-) -> Result<(), SQLError> {
-    let mut locked = std::collections::BTreeSet::new();
-    let mut visiting_views = std::collections::BTreeSet::new();
-    let transition_relations = context.scopes.transition_relation_names();
-    lock_query_plan_relations(
-        context,
-        query,
-        &transition_relations,
-        &mut locked,
-        &mut visiting_views,
-    )
-}
-
-/// Hold the explained statement's relation identities before collecting physical metadata or executing ANALYZE.
-pub fn lock_explained_relations<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    plan: &UnifiedPlan,
-) -> Result<(), SQLError> {
-    match plan {
-        UnifiedPlan::Query(query) => lock_query_relations(context, query),
-        UnifiedPlan::Command(command) => match command.as_ref() {
-            CommandPlan::Explain { body, .. } => lock_explained_relations(context, body),
-            CommandPlan::CreateTableAs { query, .. }
-            | CommandPlan::CreateMaterializedView { query, .. }
-            | CommandPlan::DeclareCursor { query, .. } => lock_query_relations(context, query),
-            _ => lock_command_plan_relations(
-                context,
-                command,
-                &context.scopes.transition_relation_names(),
-                &mut std::collections::BTreeSet::new(),
-                &mut std::collections::BTreeSet::new(),
-            ),
-        },
-    }
-}
-
-fn lock_query_plan_relations<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    query: &QueryPlan,
-    inherited_ctes: &std::collections::BTreeSet<String>,
-    locked: &mut std::collections::BTreeSet<String>,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    let mut visible_ctes = inherited_ctes.clone();
-    for cte in &query.ctes {
-        let mut definition_scope = visible_ctes.clone();
-        if cte.recursive {
-            definition_scope.insert(cte.name.clone());
-        }
-        lock_cte_plan_relations(
-            context,
-            &cte.body,
-            &definition_scope,
-            locked,
-            visiting_views,
-        )?;
-        visible_ctes.insert(cte.name.clone());
-    }
-    lock_relational_plan_relations(
-        context,
-        &query.root,
-        &visible_ctes,
-        query.relations_bound,
-        locked,
-        visiting_views,
-    )
-}
-
-fn lock_cte_plan_relations<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    body: &uqa_sql::plan::CtePlanBody,
-    inherited: &std::collections::BTreeSet<String>,
-    locked: &mut std::collections::BTreeSet<String>,
-    visiting: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    match body {
-        uqa_sql::plan::CtePlanBody::Query(query) => {
-            lock_query_plan_relations(context, query, inherited, locked, visiting)
-        }
-        uqa_sql::plan::CtePlanBody::Command(command) => {
-            lock_command_plan_relations(context, command, inherited, locked, visiting)
-        }
-    }
-}
-
-fn lock_command_plan_relations<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    command: &CommandPlan,
-    inherited: &std::collections::BTreeSet<String>,
-    locked: &mut std::collections::BTreeSet<String>,
-    visiting: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    let (bound, target_bound, descendants) = match command {
-        CommandPlan::Insert(plan) => (plan.relations_bound, plan.target_relation_bound, false),
-        CommandPlan::Update(plan) => (
-            plan.relations_bound,
-            plan.target_relation_bound,
-            plan.include_descendants,
-        ),
-        CommandPlan::Delete(plan) => (
-            plan.relations_bound,
-            plan.target_relation_bound,
-            plan.include_descendants,
-        ),
-        CommandPlan::Merge(plan) => (false, false, plan.include_descendants),
-        _ => (false, false, false),
-    };
-    if let Some(target) = command.mutation_target() {
-        let mode = crate::row_locks::RelationLockMode::RowExclusive;
-        if let Some(binding) = bind_relation(
-            context.session,
-            mode,
-            false,
-            || {
-                context
-                    .catalog
-                    .resolve_relation(target, target_bound)?
-                    .map(|(name, kind)| {
-                        Ok(RelationBinding {
-                            object_id: context.catalog.relation_object_id(&name)?,
-                            name,
-                            value: kind,
-                        })
-                    })
-                    .transpose()
-            },
-            |_| Ok(()),
-        )? {
-            if binding.value == "table" {
-                lock_descendants(
-                    context.catalog,
-                    context.session,
-                    context
-                        .catalog
-                        .hierarchy_scan_tables(&binding.name, descendants)?
-                        .into_iter()
-                        .filter(|name| name != &binding.name),
-                    mode,
-                    false,
-                )?;
-            }
-        }
-    }
-    let mut visible = inherited.clone();
-    if command.ctes().iter().any(|cte| cte.recursive) {
-        visible.extend(command.ctes().iter().map(|cte| cte.name.clone()));
-    }
-    for cte in command.ctes() {
-        lock_cte_plan_relations(context, &cte.body, &visible, locked, visiting)?;
-        visible.insert(cte.name.clone());
-    }
-    for query in command.query_inputs() {
-        lock_query_plan_relations(context, query, &visible, locked, visiting)?;
-    }
-    if let Some(source) = command.source_input() {
-        lock_source_plan_relations(context, source, &visible, bound, locked, visiting)?;
-    }
-    Ok(())
-}
+mod relations;
+mod targets;
+pub use relations::{lock_explained_relations, lock_query_relations};
 
 fn validate_cte_row_locks<S: Clone + Send + Sync + 'static>(
     context: RowLockContext<'_, S>,
@@ -220,211 +55,13 @@ fn validate_cte_row_locks<S: Clone + Send + Sync + 'static>(
     }
 }
 
-fn lock_relational_plan_relations<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    plan: &RelationalPlan,
-    visible_ctes: &std::collections::BTreeSet<String>,
-    relations_bound: bool,
-    locked: &mut std::collections::BTreeSet<String>,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    match plan {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = block.from.as_ref() {
-                lock_source_plan_relations(
-                    context,
-                    source,
-                    visible_ctes,
-                    relations_bound,
-                    locked,
-                    visiting_views,
-                )?;
-            }
-            for subquery in &block.subqueries {
-                lock_query_plan_relations(context, subquery, visible_ctes, locked, visiting_views)?;
-            }
-            Ok(())
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            lock_query_plan_relations(context, left, visible_ctes, locked, visiting_views)?;
-            lock_query_plan_relations(context, right, visible_ctes, locked, visiting_views)?;
-            for subquery in subqueries {
-                lock_query_plan_relations(context, subquery, visible_ctes, locked, visiting_views)?;
-            }
-            Ok(())
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for subquery in subqueries {
-                lock_query_plan_relations(context, subquery, visible_ctes, locked, visiting_views)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn lock_source_plan_relations<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    source: &SourcePlan,
-    visible_ctes: &std::collections::BTreeSet<String>,
-    relations_bound: bool,
-    locked: &mut std::collections::BTreeSet<String>,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    match source {
-        SourcePlan::Table {
-            name,
-            include_descendants,
-            ..
-        } => {
-            if uqa_sql::semantics::cte_reference_name(name)
-                .is_some_and(|name| visible_ctes.contains(&name))
-            {
-                return Ok(());
-            }
-            lock_named_query_relation(
-                context,
-                name,
-                relations_bound,
-                *include_descendants,
-                locked,
-                visiting_views,
-            )
-        }
-        SourcePlan::Join { left, right, .. } => {
-            lock_source_plan_relations(
-                context,
-                left,
-                visible_ctes,
-                relations_bound,
-                locked,
-                visiting_views,
-            )?;
-            lock_source_plan_relations(
-                context,
-                right,
-                visible_ctes,
-                relations_bound,
-                locked,
-                visiting_views,
-            )
-        }
-        SourcePlan::Subquery { body, .. } => {
-            lock_query_plan_relations(context, body, visible_ctes, locked, visiting_views)
-        }
-        SourcePlan::Function { relations, .. } => {
-            lock_table_function_relations(context, relations.as_ref(), relations_bound, locked)
-        }
-        SourcePlan::FunctionGroup { functions, .. } => {
-            for function in functions {
-                lock_table_function_relations(
-                    context,
-                    function.relations.as_ref(),
-                    relations_bound,
-                    locked,
-                )?;
-            }
-            Ok(())
-        }
-        SourcePlan::RetainedRows(_) | SourcePlan::Values { .. } => Ok(()),
-    }
-}
-
-fn lock_named_query_relation<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    name: &str,
-    relations_bound: bool,
-    include_descendants: bool,
-    locked: &mut std::collections::BTreeSet<String>,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    let Some(binding) = bind_relation(
-        context.session,
-        crate::row_locks::RelationLockMode::AccessShare,
-        false,
-        || {
-            context
-                .catalog
-                .resolve_relation(name, relations_bound)?
-                .map(|(canonical, kind)| {
-                    let object_id = context.catalog.relation_object_id(&canonical)?;
-                    Ok(RelationBinding {
-                        name: canonical,
-                        object_id,
-                        value: kind,
-                    })
-                })
-                .transpose()
-        },
-        |_| Ok(()),
-    )?
-    else {
-        return Ok(());
-    };
-    let canonical = binding.name;
-    locked.insert(canonical.clone());
-    if let Some(relation) = uqa_sql::catalog::SystemRelation::from_qualified_name(&canonical) {
-        for source in relation.view_sources() {
-            lock_named_query_relation(
-                context,
-                &source.qualified_name(),
-                true,
-                false,
-                locked,
-                visiting_views,
-            )?;
-        }
-        return Ok(());
-    }
-    match binding.value {
-        "table" => lock_descendants(
-            context.catalog,
-            context.session,
-            context
-                .catalog
-                .hierarchy_scan_tables(&canonical, include_descendants)?
-                .into_iter()
-                .filter(|child| child != &canonical),
-            crate::row_locks::RelationLockMode::AccessShare,
-            false,
-        ),
-        "view" => {
-            let view_name = canonical;
-            let view = context.catalog.view_plan(&view_name)?.ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved query view `{view_name}` disappeared before locking"
-                ))
-            })?;
-            if !visiting_views.insert(view_name.clone()) {
-                return Err(SQLError::Internal(format!(
-                    "view `{view_name}` has a recursive relation dependency"
-                )));
-            }
-            let result = lock_query_plan_relations(
-                context,
-                &view,
-                &std::collections::BTreeSet::new(),
-                locked,
-                visiting_views,
-            );
-            visiting_views.remove(&view_name);
-            result
-        }
-        _ => Ok(()),
-    }
-}
-
 /// Resolve cursor row-lock targets without opening or pulling the query. `PostgreSQL` performs these declaration-time checks even though expression evaluation and tuple locking wait until FETCH.
 pub fn validate_query_row_locks<S: Clone + Send + Sync + 'static>(
     context: RowLockContext<'_, S>,
     query: &QueryPlan,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    let ctes = context.scopes.current_routine_scope();
+    let ctes = context.scopes.current_routine_scope()?;
     validate_query_plan_row_locks(context, query, params, &ctes)
 }
 
@@ -491,105 +128,8 @@ fn validate_source_row_locks<S: Clone + Send + Sync + 'static>(
 
 use uqa_sql::semantics::locking::query_plan_has_row_locks;
 
-pub fn resolve_row_locks<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    from: &SourcePlan,
-    locking: &[LockingClause],
-    predicate: Option<&ScalarExpr>,
-    params: &[SQLParam],
-    ctes: &CteScope<S>,
-) -> Result<Vec<ResolvedRowLock>, SQLError> {
-    if locking.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut effective_from = from.clone();
-    reduce_null_rejected_outer_joins_to_fixpoint(
-        context,
-        &mut effective_from,
-        predicate,
-        params,
-        ctes,
-    )?;
-    validate_lock_relation_aliases(&effective_from, locking)?;
-    let sources = collect_source_leaves(&effective_from, false, ctes)?;
-    let mut assigned: Vec<Option<(LockStrength, LockWait)>> = vec![None; sources.len()];
-    for clause in locking {
-        let selected = if clause.relations.is_empty() {
-            sources
-                .iter()
-                .enumerate()
-                .filter_map(|(index, source)| source.kind.implicitly_lockable().then_some(index))
-                .collect::<Vec<_>>()
-        } else {
-            let mut selected = vec![false; sources.len()];
-            for relation in &clause.relations {
-                let matches = sources
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, source)| {
-                        source
-                            .names
-                            .iter()
-                            .any(|name| name == relation)
-                            .then_some(index)
-                    })
-                    .collect::<Vec<_>>();
-                if matches.is_empty() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42P01".into(),
-                        message: format!(
-                            "relation \"{relation}\" in FOR UPDATE/SHARE clause not found in FROM clause"
-                        ),
-                    });
-                }
-                for source_index in matches {
-                    selected[source_index] = true;
-                }
-            }
-            selected
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, selected)| selected.then_some(index))
-                .collect()
-        };
-        for source_index in selected {
-            assigned[source_index] = Some(match assigned[source_index] {
-                Some((strength, wait)) => (
-                    strength.max(clause.strength),
-                    merge_lock_wait(wait, clause.wait),
-                ),
-                None => (clause.strength, clause.wait),
-            });
-        }
-    }
-    let mut resolved = Vec::new();
-    for (source, assignment) in sources.iter().zip(assigned) {
-        let Some((strength, wait)) = assignment else {
-            continue;
-        };
-        reject_unusable_lock_leaf(context, source, strength)?;
-        if !source.kind.carries_row_identity() {
-            continue;
-        }
-        resolved.push(ResolvedRowLock {
-            qualifier: source.qualifier.clone(),
-            storage_name: source.storage_name.clone(),
-            display_name: source.display_name.clone(),
-            strength,
-            wait,
-            identity_source: source.kind.is_identity_source(),
-        });
-    }
-    if context.session.current_transaction_is_read_only()
-        && locks_non_temporary_relation(context, &resolved)?
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "25006".into(),
-            message: "cannot execute SELECT in a read-only transaction".into(),
-        });
-    }
-    Ok(resolved)
-}
+mod resolution;
+pub use resolution::resolve_row_locks;
 
 fn locks_non_temporary_relation<S: Clone + Send + Sync + 'static>(
     context: RowLockContext<'_, S>,
@@ -632,9 +172,6 @@ fn source_contains_join_alias(source: &SourcePlan, target: &str) -> bool {
 
 mod execution;
 mod null_rejection;
-mod targets;
-use null_rejection::reduce_null_rejected_outer_joins_to_fixpoint;
-use targets::lock_table_function_relations;
 
 fn merge_lock_wait(left: LockWait, right: LockWait) -> LockWait {
     match (left, right) {
@@ -649,14 +186,14 @@ pub use uqa_sql::semantics::locking::apply_propagated_view_lock;
 mod leaf_validation;
 use leaf_validation::{
     collect_source_leaf_plans, collect_source_leaves, copy_recheck_source_row,
-    reject_unusable_lock_leaf, validate_locking_block_shape,
+    validate_locking_block_shape,
 };
 
 pub struct LockRows<'a, S: Clone> {
     input: Box<dyn PhysicalOperator + 'a>,
     context: RowLockContext<'a, S>,
     params: &'a [SQLParam],
-    targets: Vec<ResolvedRowLock>,
+    targets: uqa_core::memory::Produced<Vec<ResolvedRowLock>>,
     max_rows: Option<u64>,
     emitted: u64,
     pending_rows: std::vec::IntoIter<PhysicalRow>,
@@ -665,7 +202,7 @@ pub struct LockRows<'a, S: Clone> {
     recheck_source: Option<LockRowsRecheckSource<S>>,
     schema: RowSchema,
     /// Base relations that already hold this statement's `RowShare` lock. A view or derived-table target reveals its base relations only through row origins, so the relation lock is taken on first sight of each.
-    relation_locked: std::collections::BTreeSet<std::sync::Arc<str>>,
+    relation_locked: std::collections::BTreeSet<crate::RowLockName>,
 }
 
 impl<'a, S: Clone> LockRows<'a, S> {
@@ -677,7 +214,7 @@ impl<'a, S: Clone> LockRows<'a, S> {
         input: Box<dyn PhysicalOperator + 'a>,
         context: RowLockContext<'a, S>,
         params: &'a [SQLParam],
-        targets: Vec<ResolvedRowLock>,
+        targets: uqa_core::memory::Produced<Vec<ResolvedRowLock>>,
         max_rows: Option<u64>,
         discard_lock_origins: bool,
         retry_cache: Option<std::sync::Arc<RowLockRetryCache>>,
@@ -767,7 +304,7 @@ pub fn attach_lock_rows<'a, S: Clone + Send + Sync + 'static>(
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
     max_rows: Option<u64>,
-    recheck_source: Option<LockRowsRecheckSource<S>>,
+    recheck_source: Option<LockRowsRecheckInput<'_, S>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     crate::physical::construction::OperatorBuild::build(operator, |operator| {
         let Some(first_clause) = statement.locking.first() else {
@@ -803,6 +340,9 @@ pub fn attach_lock_rows<'a, S: Clone + Send + Sync + 'static>(
         }
         // The recheck context is shared per SQL statement through the context session, so every locking scope reaches it: top-level queries, DML sources, DML CTEs, CREATE TABLE AS, prepared execution, and EXPLAIN ANALYZE bodies.
         let retry_cache = context.session.statement_row_lock_cache()?;
+        let recheck_source = recheck_source
+            .map(LockRowsRecheckInput::retain)
+            .transpose()?;
         operator.wrap(|input| {
             Box::new(LockRows::new(
                 input,

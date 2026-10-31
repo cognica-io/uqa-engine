@@ -141,16 +141,8 @@ fn restored_role_oids_preserve_stored_identity_and_reject_invalid_or_duplicate_v
 
 fn bound_membership() -> RoleMembership {
     let mut membership = membership(31).bind(&roles()).unwrap();
-    membership.role = RoleBinding {
-        name: "target".into(),
-        oid: 20_001,
-        object_id: [1; 16],
-    };
-    membership.member = RoleBinding {
-        name: "member".into(),
-        oid: 20_002,
-        object_id: [2; 16],
-    };
+    membership.role = RoleBinding::new("target".into(), 20_001, [1; 16]);
+    membership.member = RoleBinding::new("member".into(), 20_002, [2; 16]);
     membership
 }
 

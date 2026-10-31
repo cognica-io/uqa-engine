@@ -9,6 +9,7 @@
 use crate::{ast::PatternOperator, SQLError};
 mod escape;
 pub(super) use escape::evaluate as escape;
+pub(super) use escape::evaluate_similar as escape_similar;
 pub(super) use escape::normalize_text as normalize_escape;
 use uqa_core::{
     memory::{Produced, ProductionControl},

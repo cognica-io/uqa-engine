@@ -5,10 +5,10 @@
 //
 
 //! Stored-rule lineage, column requirements, and event row types.
-use super::{action_binding::RuleSourceCatalog, binding::RuleColumnMetadata, RuleCatalog};
+use super::{action_binding::RuleSourceCatalog, RuleCatalog};
 use crate::semantics::returning::ReturningCatalog;
 use crate::{ast::RuleEvent, SQLError};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 #[derive(Clone, Copy)]
 pub struct RuleAnalysisContext<'a> {
     pub rules: &'a dyn RuleCatalog,
@@ -29,11 +29,13 @@ pub fn relation_suppresses_original_query(
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    Ok(context
-        .rules
-        .rules_for(table, event)?
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
+        if rule.definition.instead && rule.definition.condition.is_none() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn relation_rules_reference_row(
@@ -41,9 +43,10 @@ pub fn relation_rules_reference_row(
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    for rule in context.rules.rules_for(table, event)? {
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
         let condition_references_row = if rule.bound_condition_plan().is_some() {
-            rule_condition_plan_references_row(&rule)
+            rule_condition_plan_references_row(rule)
         } else {
             rule.definition
                 .condition
@@ -73,11 +76,13 @@ pub fn relation_rules_require_event_rows(
     table: &str,
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
-    Ok(context
-        .rules
-        .rules_for(table, event)?
-        .iter()
-        .any(|rule| rule.definition.condition.is_some() || !rule.definition.actions.is_empty()))
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
+        if rule.definition.condition.is_some() || !rule.definition.actions.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn surviving_view_rules_reference_row(
@@ -116,7 +121,8 @@ pub fn relation_condition_row_columns(
     event: RuleEvent,
 ) -> Result<BTreeSet<String>, SQLError> {
     let mut columns = BTreeSet::new();
-    for rule in context.rules.rules_for(table, event)? {
+    for rule in context.rules.capture_rules(table, event)?.iter() {
+        let rule = rule?;
         if let Some((plan, binding)) = rule.bound_condition_plan() {
             columns.extend(super::action_binding::rule_condition_plan_row_columns(
                 plan, binding,
@@ -135,95 +141,22 @@ pub fn relation_rule_row_columns(
     table: &str,
     event: RuleEvent,
 ) -> Result<Option<BTreeSet<String>>, SQLError> {
-    let mut columns = BTreeSet::new();
-    let mut references_row = false;
-    let mut references_whole_row = false;
-    for rule in context.rules.rules_for(table, event)? {
-        if let Some((plan, binding)) = rule.bound_condition_plan() {
-            let plan_references_row = rule_condition_plan_references_row(&rule);
-            references_row |= plan_references_row;
-            references_whole_row |=
-                super::action_binding::rule_condition_plan_references_whole_row(plan);
-            columns.extend(super::action_binding::rule_condition_plan_row_columns(
-                plan, binding,
-            ));
-        } else if let Some(condition) = rule.definition.condition.as_ref() {
-            references_row |= super::action_binding::rule_expr_references_row(condition);
-            references_whole_row |=
-                super::action_binding::rule_expr_references_whole_row(condition);
-            columns.extend(super::action_binding::rule_expr_row_columns(condition));
-        }
-        for action in &rule.definition.actions {
-            let action_columns =
-                super::action_binding::rule_action_target_columns(context.sources, action)?;
-            references_row |= super::action_binding::rule_statement_references_row(
-                context.sources,
-                action,
-                &action_columns,
-            )?;
-            references_whole_row |= super::action_binding::rule_statement_references_whole_row(
-                context.sources,
-                action,
-                &action_columns,
-            )?;
-            columns.extend(super::action_binding::rule_statement_row_columns(
-                context.sources,
-                action,
-                &action_columns,
-            )?);
-        }
-    }
-    if references_whole_row || references_row && columns.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(columns))
-    }
+    Ok(relation_rule_row_columns_with_control(
+        context,
+        table,
+        event,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|columns| {
+        columns
+            .into_uncontrolled()
+            .expect("ordinary rule row columns")
+            .into_iter()
+            .collect()
+    }))
 }
 
-pub fn rule_columns(
-    context: RuleAnalysisContext<'_>,
-    table: &str,
-) -> Result<BTreeMap<String, RuleColumnMetadata>, SQLError> {
-    let columns = context
-        .returning
-        .try_describe_table_row_type(table)
-        .map_err(|error| SQLError::Internal(format!("read rule row type: {error}")))?;
-    if let Some(columns) = columns {
-        return Ok(columns
-            .into_iter()
-            .enumerate()
-            .map(|(position, column)| {
-                let uses_document_id = column.primary_key && column.ty.is_integer();
-                (
-                    column.name,
-                    RuleColumnMetadata {
-                        ty: column.ty,
-                        collation_oid: column.collation_oid,
-                        uses_document_id,
-                        position,
-                    },
-                )
-            })
-            .collect());
-    }
-    Ok(context
-        .sources
-        .rule_relation_definitions(table)?
-        .into_iter()
-        .enumerate()
-        .map(|(position, column)| {
-            (
-                column.name,
-                RuleColumnMetadata {
-                    ty: column.ty,
-                    collation_oid: column.collation_oid,
-                    uses_document_id: false,
-                    position,
-                },
-            )
-        })
-        .collect())
-}
+pub use super::action_binding::relation_rule_row_columns_with_control;
 
 pub fn rule_returning_columns(
     context: RuleAnalysisContext<'_>,
@@ -237,4 +170,38 @@ pub fn rule_returning_columns(
         return Ok(columns);
     }
     context.sources.rule_relation_definitions(table)
+}
+
+pub fn rule_returning_columns_with_control(
+    context: RuleAnalysisContext<'_>,
+    table: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<Vec<crate::ast::ColumnDef>>, SQLError> {
+    control.check()?;
+    let mut output = uqa_core::memory::ProductionVec::new(*control);
+    let found = context
+        .returning
+        .with_table_row_type_with_control(table, control, &mut |columns| {
+            for column in columns {
+                output.push_produced(crate::plan::copy::copy_syntax_with_control(
+                    column, control,
+                )?)?;
+            }
+            Ok(())
+        })
+        .map_err(|error| match error {
+            SQLError::Internal(message) => {
+                match control.format(format_args!("read rule RETURNING row type: {message}")) {
+                    Ok(message) => SQLError::Internal(message.into_parts().0),
+                    Err(error) => error.into(),
+                }
+            }
+            other => other,
+        })?;
+    if found {
+        return Ok(output.finish()?);
+    }
+    context
+        .sources
+        .rule_relation_definitions_with_control(table, control)
 }

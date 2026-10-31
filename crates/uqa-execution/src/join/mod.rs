@@ -12,11 +12,15 @@ mod direct_index;
 mod iteration;
 mod nested_loop;
 pub(crate) mod presence;
+mod production;
 mod row_store;
 use iteration::HashJoinState;
 
 use smallvec::SmallVec;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
 use uqa_sql::ast::JoinKind;
 use uqa_sql::expr::truthy;
 use uqa_sql::ResultRow;
@@ -56,34 +60,8 @@ fn next_nonempty_batch(
     Ok(None)
 }
 
-fn output_schema(
-    left: &RowSchema,
-    right: &RowSchema,
-    left_nulls: &ResultRow,
-    right_nulls: &ResultRow,
-) -> RowSchema {
-    RowSchema::join(
-        left,
-        right,
-        left_nulls.keys().chain(right_nulls.keys()).cloned(),
-    )
-}
-
 fn join_io_error(operation: &str, error: impl std::fmt::Display) -> ExecError {
     ExecError::Other(format!("join spill {operation}: {error}"))
-}
-
-fn simple_key_positions(schema: &RowSchema, expressions: &[ScalarExpr]) -> Option<Vec<usize>> {
-    expressions
-        .iter()
-        .map(|expression| match expression {
-            ScalarExpr::Column(column) => schema.position(column),
-            ScalarExpr::QualifiedColumn { qualifier, column } => {
-                schema.qualified_position(qualifier, column)
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 /// Equality join backed by a canonical SQL-key hash table. SQL NULL keys never
@@ -94,13 +72,13 @@ pub struct HashJoin<'a> {
     left: Box<dyn PhysicalOperator + 'a>,
     right: Box<dyn PhysicalOperator + 'a>,
     kind: JoinKind,
-    left_keys: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
-    right_keys: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+    left_keys: crate::scalar::PreparedExpressions<Produced<Vec<ScalarExpr>>>,
+    right_keys: crate::scalar::PreparedExpressions<Produced<Vec<ScalarExpr>>>,
     left_key_types: Vec<Option<uqa_sql::ColumnType>>,
     right_key_types: Vec<Option<uqa_sql::ColumnType>>,
-    left_key_positions: Option<Vec<usize>>,
-    right_key_positions: Option<Vec<usize>>,
-    predicate: Option<crate::scalar::PreparedExpressions<ScalarExpr>>,
+    left_key_positions: Option<Produced<Vec<usize>>>,
+    right_key_positions: Option<Produced<Vec<usize>>>,
+    predicate: Option<crate::scalar::PreparedExpressions<Produced<ScalarExpr>>>,
     prepared_predicate: Option<ProjectedPredicate>,
     evaluator: SharedExpressionEvaluator<'a>,
     left_nulls: PhysicalRow,
@@ -118,6 +96,7 @@ pub struct HashJoin<'a> {
     output_spilled: SpillState,
     right_input_spilled: SpillState,
     hash_index_spilled: SpillState,
+    memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
@@ -233,67 +212,30 @@ impl<'a> HashJoin<'a> {
         right_nulls: ResultRow,
         work_mem_bytes: usize,
     ) -> Self {
-        let left = presence::input(left, matches!(kind, JoinKind::Right | JoinKind::Full));
-        let right = presence::input(right, matches!(kind, JoinKind::Left | JoinKind::Full));
-        let left_key_positions = simple_key_positions(left.row_schema(), &left_keys);
-        let right_key_positions = simple_key_positions(right.row_schema(), &right_keys);
-        let schema = output_schema(
-            left.row_schema(),
-            right.row_schema(),
-            &left_nulls,
-            &right_nulls,
-        );
-        let left_nulls = PhysicalRow::nulls(left.row_schema().physical_width());
-        let right_nulls = PhysicalRow::nulls(right.row_schema().physical_width());
-        let left_cardinality = left.estimated_cardinality();
-        let right_cardinality = right.estimated_cardinality();
-        let build_left = matches!(kind, JoinKind::Inner)
-            && left_cardinality
-                .zip(right_cardinality)
-                .is_some_and(|(left, right)| left < right);
-        let estimated_cardinality = left_cardinality
-            .zip(right_cardinality)
-            .map(|(left, right)| match kind {
-                JoinKind::Inner => left.max(right),
-                JoinKind::Left => left,
-                JoinKind::Right => right,
-                JoinKind::Full => left.saturating_add(right),
-                JoinKind::Cross => left.saturating_mul(right),
-            });
-        let prepared_predicate = predicate.as_ref().and_then(|predicate| {
-            ProjectedPredicate::compile_with_schema(predicate, &schema, &[])
-                .ok()
-                .flatten()
-        });
-        Self {
+        let control = ProductionControl::uncontrolled();
+        Self::build_with_owned_expressions(
             left,
             right,
             kind,
-            left_keys: crate::scalar::PreparedExpressions::scalars(left_keys),
-            right_keys: crate::scalar::PreparedExpressions::scalars(right_keys),
-            left_key_types: Vec::new(),
-            right_key_types: Vec::new(),
-            left_key_positions,
-            right_key_positions,
-            predicate: predicate.map(crate::scalar::PreparedExpressions::scalar),
-            prepared_predicate,
+            control
+                .finish(left_keys, None)
+                .expect("ordinary left join keys"),
+            control
+                .finish(right_keys, None)
+                .expect("ordinary right join keys"),
+            predicate.map(|predicate| {
+                control
+                    .finish(predicate, None)
+                    .expect("ordinary join predicate")
+            }),
             evaluator,
             left_nulls,
             right_nulls,
-            schema,
-            estimated_cardinality,
-            build_left,
             work_mem_bytes,
-            output: None,
-            streaming_unique: None,
-            streaming: None,
-            probe_pending: crate::physical::demand::PendingRows::default(),
-            initialized: false,
-            prefetched_left: None,
-            output_spilled: SpillState::InMemory,
-            right_input_spilled: SpillState::InMemory,
-            hash_index_spilled: SpillState::InMemory,
-        }
+            None,
+            &control,
+        )
+        .expect("ordinary hash join construction")
     }
 
     /// Construct a hash join while preparing supported residual predicates
@@ -316,36 +258,30 @@ impl<'a> HashJoin<'a> {
         work_mem_bytes: usize,
         params: &[uqa_sql::SQLParam],
     ) -> ExecResult<Self> {
-        let mut join = Self::new_with_work_mem_and_predicate(
+        let control = ProductionControl::uncontrolled();
+        Self::build_with_owned_expressions(
             left,
             right,
             kind,
-            left_keys,
-            right_keys,
-            predicate,
+            control
+                .finish(left_keys, None)
+                .expect("ordinary left join keys"),
+            control
+                .finish(right_keys, None)
+                .expect("ordinary right join keys"),
+            predicate.map(|predicate| {
+                control
+                    .finish(predicate, None)
+                    .expect("ordinary join predicate")
+            }),
             evaluator,
             left_nulls,
             right_nulls,
             work_mem_bytes,
-        );
-        let prepared = join
-            .predicate
-            .as_ref()
-            .map(|predicate| {
-                ProjectedPredicate::compile_with_schema(predicate, &join.schema, params)
-            })
-            .transpose();
-        join.prepared_predicate = match prepared {
-            Ok(prepared) => prepared.flatten(),
-            Err(error) => {
-                return crate::physical::with_cleanup(
-                    Err(error.into()),
-                    join.close(),
-                    "close hash join after predicate construction failure",
-                );
-            }
-        };
-        Ok(join)
+            Some(params),
+            &control,
+        )
+        .map_err(Into::into)
     }
 
     pub fn output_has_spilled(&self) -> bool {
@@ -377,7 +313,7 @@ impl<'a> HashJoin<'a> {
     fn rebuild_encoded_index(
         &self,
         rows: &mut HybridRowStore,
-        expressions: &crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+        expressions: &crate::scalar::PreparedExpressions<Produced<Vec<ScalarExpr>>>,
         types: &[Option<uqa_sql::ColumnType>],
         positions: &[usize],
         budget_bytes: usize,
@@ -409,8 +345,8 @@ impl<'a> HashJoin<'a> {
             .predicate
             .is_none()
             .then_some(())
-            .and(self.left_key_positions.as_deref())
-            .zip(self.right_key_positions.as_deref());
+            .and(self.left_key_positions.as_deref().map(Vec::as_slice))
+            .zip(self.right_key_positions.as_deref().map(Vec::as_slice));
         let mut direct_index = direct_positions.map(|_| DirectHashIndex::new(hash_budget));
         let mut encoded_index = direct_index
             .is_none()
@@ -434,7 +370,7 @@ impl<'a> HashJoin<'a> {
                 } else if let Some(key) = self.key(
                     &self.left_keys,
                     &self.left_key_types,
-                    self.left_key_positions.as_deref(),
+                    self.left_key_positions.as_deref().map(Vec::as_slice),
                     &row,
                     &batch.schema,
                 )? {
@@ -512,7 +448,7 @@ impl<'a> HashJoin<'a> {
 
     fn key(
         &self,
-        expressions: &crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
+        expressions: &crate::scalar::PreparedExpressions<Produced<Vec<ScalarExpr>>>,
         types: &[Option<uqa_sql::ColumnType>],
         positions: Option<&[usize]>,
         row: &PhysicalRow,
@@ -588,13 +524,13 @@ impl<'a> HashJoin<'a> {
                     UniqueHashIndex::Direct(index) => {
                         let (build_positions, probe_positions) = if state.build_left {
                             (
-                                self.left_key_positions.as_deref(),
-                                self.right_key_positions.as_deref(),
+                                self.left_key_positions.as_deref().map(Vec::as_slice),
+                                self.right_key_positions.as_deref().map(Vec::as_slice),
                             )
                         } else {
                             (
-                                self.right_key_positions.as_deref(),
-                                self.left_key_positions.as_deref(),
+                                self.right_key_positions.as_deref().map(Vec::as_slice),
+                                self.left_key_positions.as_deref().map(Vec::as_slice),
                             )
                         };
                         let (Some(build_positions), Some(probe_positions)) =
@@ -626,9 +562,9 @@ impl<'a> HashJoin<'a> {
                             &self.left_key_types
                         };
                         let positions = if state.build_left {
-                            self.right_key_positions.as_deref()
+                            self.right_key_positions.as_deref().map(Vec::as_slice)
                         } else {
-                            self.left_key_positions.as_deref()
+                            self.left_key_positions.as_deref().map(Vec::as_slice)
                         };
                         let Some(key) =
                             self.key(expressions, types, positions, &probe_row, &batch.schema)?
@@ -702,8 +638,8 @@ impl HashJoin<'_> {
         let mut right = HybridRowStore::new(right_schema, right_budget);
         let direct_positions = (matches!(self.kind, JoinKind::Inner) && self.predicate.is_none())
             .then_some(())
-            .and(self.right_key_positions.as_deref())
-            .zip(self.left_key_positions.as_deref());
+            .and(self.right_key_positions.as_deref().map(Vec::as_slice))
+            .zip(self.left_key_positions.as_deref().map(Vec::as_slice));
         let mut direct_index = direct_positions.map(|_| DirectHashIndex::new(hash_budget));
         let mut encoded_index = direct_index
             .is_none()
@@ -727,7 +663,7 @@ impl HashJoin<'_> {
                 } else if let Some(key) = self.key(
                     &self.right_keys,
                     &self.right_key_types,
-                    self.right_key_positions.as_deref(),
+                    self.right_key_positions.as_deref().map(Vec::as_slice),
                     &row,
                     &batch.schema,
                 )? {

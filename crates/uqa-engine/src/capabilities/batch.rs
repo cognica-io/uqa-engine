@@ -12,7 +12,7 @@ use uqa_execution::statement::{
     batch::context::{BatchExecutionContext, CachedStatement, StatementCache},
     context::StatementRuntime,
 };
-use uqa_sql::{plan::UnifiedPlan, Statement};
+use uqa_sql::{SQLError, Statement};
 
 impl Engine {
     pub(crate) fn batch_execution_context(
@@ -39,15 +39,16 @@ impl StatementCache for Engine {
     fn cached_sql_analysis(
         &self,
         sql: &str,
-    ) -> Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>> {
+    ) -> Option<uqa_sql::binding::statements::AnalyzedStatement> {
         Engine::cached_sql_analysis(self, sql)
     }
     fn cache_sql_analysis(
         &self,
         sql: &str,
-        analysis: Option<Arc<uqa_sql::binding::statements::AnalyzedStatement>>,
-    ) {
-        Engine::cache_sql_analysis(self, sql, analysis);
+        analysis: Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        Engine::cache_sql_analysis(self, sql, analysis, control)
     }
 
     fn cached_sql_statement(&self, sql: &str) -> Option<CachedStatement> {
@@ -60,14 +61,20 @@ impl StatementCache for Engine {
     }
     fn cache_sql_statement(
         &self,
-        sql: String,
+        sql: &str,
         statement: Arc<Statement>,
-        logical_plan: Arc<UnifiedPlan>,
+        logical_plan: uqa_sql::plan::SharedExecutablePlan,
         parser: uqa_sql::parser::ParserMetadata,
-    ) {
-        Engine::cache_sql_statement(self, sql, statement, logical_plan, parser);
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        Engine::cache_sql_statement(self, sql, statement, logical_plan, parser, control)
     }
-    fn cache_optimized_sql_plan(&self, sql: &str, optimized_plan: Arc<UnifiedPlan>) {
-        Engine::cache_optimized_sql_plan(self, sql, optimized_plan);
+    fn cache_optimized_sql_plan(
+        &self,
+        sql: &str,
+        optimized_plan: uqa_sql::plan::SharedExecutablePlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        Engine::cache_optimized_sql_plan(self, sql, optimized_plan, control)
     }
 }

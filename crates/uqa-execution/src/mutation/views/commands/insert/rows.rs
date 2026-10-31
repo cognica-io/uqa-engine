@@ -36,7 +36,7 @@ pub(super) struct ViewInsertRows<'a, S: Clone + 'static> {
     stmt: &'a InsertPlan,
     params: &'a [SQLParam],
     scope: &'a CteScope<S>,
-    supplied: Vec<String>,
+    supplied: uqa_core::memory::Produced<Vec<String>>,
     affected: Cell<u64>,
     returning: RefCell<Option<ReturningRows>>,
 }
@@ -50,6 +50,7 @@ impl<'a, S: Clone + 'static> ViewInsertRows<'a, S> {
         params: &'a [SQLParam],
         scope: &'a CteScope<S>,
     ) -> Result<Self, SQLError> {
+        let resources = context.query.source.ctes.production_resources()?;
         Ok(Self {
             live: context.mutation.preparation,
             read: read.mutation.preparation.referential.assignment,
@@ -59,10 +60,17 @@ impl<'a, S: Clone + 'static> ViewInsertRows<'a, S> {
             stmt,
             params,
             scope,
-            supplied: uqa_sql::semantics::mutation_privileges::insert_supplied_columns(
-                stmt,
-                || Ok(target.columns.clone()),
-            )?,
+            supplied:
+                uqa_sql::semantics::mutation_privileges::insert_supplied_columns_with_control(
+                    stmt,
+                    |read| {
+                        for name in &target.columns {
+                            read(name)?;
+                        }
+                        Ok(())
+                    },
+                    &resources.control(),
+                )?,
             affected: Cell::new(0),
             returning: RefCell::new(None),
         })
@@ -113,12 +121,15 @@ impl<'a, S: Clone + 'static> ViewInsertRows<'a, S> {
         positions: &[usize],
         rows: &[Vec<ScalarExpr>],
     ) -> Result<(), SQLError> {
-        let snapshot = self.scope.returning_statement_snapshot_scope();
-        let hook = self
-            .read
-            .expressions
-            .expressions
-            .bind_scope(snapshot.clone());
+        let snapshot = self.scope.returning_statement_snapshot_scope_with_control(
+            &self
+                .read
+                .expressions
+                .expressions
+                .production_resources()?
+                .control(),
+        )?;
+        let hook = self.read.expressions.expressions.bind_scope(&snapshot)?;
         let schema = RowSchema::default();
         for expressions in rows {
             let input = expressions.iter().map(|expression| {

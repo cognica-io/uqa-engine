@@ -71,18 +71,27 @@ impl Drop for Write<'_> {
     }
 }
 impl PreparedDefinitionWrite for Write<'_> {
-    fn insert(&mut self, name: String, definition: PreparedStatementPlan) {
+    fn insert(
+        &mut self,
+        name: Produced<String>,
+        definition: PreparedStatementPlan,
+        _: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         assert!(LOCKED.with(Cell::get));
-        assert_eq!(name, "saved");
+        assert_eq!(name.as_str(), "saved");
         record("insert");
         *self.0.entry.borrow_mut() = Some(definition);
+        Ok(())
     }
 }
 impl PreparedDefinitionRegistry for Registry {
-    fn write_definitions(&self) -> Box<dyn PreparedDefinitionWrite + '_> {
+    fn write_definitions(
+        &self,
+        _: &ProductionControl<'_>,
+    ) -> Result<Box<dyn PreparedDefinitionWrite + '_>, SQLError> {
         assert!(!LOCKED.with(|locked| locked.replace(true)));
         record("write");
-        Box::new(Write(self))
+        Ok(Box::new(Write(self)))
     }
 }
 fn register(registry: &Registry) -> Result<(), SQLError> {
@@ -131,10 +140,13 @@ fn registration_samples_clock_and_publishes_under_the_retained_write_guard() {
     assert_eq!(entry.prepared_at_micros, 42);
     assert!(entry.from_sql);
     assert_eq!(
-        entry.source_sql.as_deref(),
+        entry.source_sql.as_ref().map(|sql| sql.as_str()),
         Some("SELECT $1::integer AS value")
     );
-    assert_eq!(entry.parameter_types, [Some(ColumnType::Integer)]);
+    assert_eq!(
+        entry.parameter_types.as_slice(),
+        [Some(ColumnType::Integer)]
+    );
     assert!(entry.plan.is_none());
     assert!(entry.effective_search_path.is_none());
     assert_eq!(entry.generic_plans, 0);

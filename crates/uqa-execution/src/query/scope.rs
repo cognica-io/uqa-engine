@@ -10,53 +10,62 @@ use crate::catalog::CatalogReadView;
 use crate::row_locks::recheck::{
     recheck_storage_names_match, RecheckDoc, RecheckSourceRow, RowLockRecheckPins,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{atomic::AtomicU64, Arc};
+use uqa_core::memory::{Produced, ProductionControl};
+use uqa_sql::binding::production::{BindingMap, BindingNameSet};
 use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::plan::QueryPlan;
 use uqa_sql::SQLError;
 
 pub(crate) mod binding;
 mod cte;
 mod definitions;
 mod producers;
+mod production;
+mod recursive;
+pub use production::{CteRowsIter, CteRowsMap};
+#[cfg(test)]
+mod query_arenas;
 #[cfg(test)]
 mod retained_plans;
 mod row_locks;
 mod statement_commands;
 pub mod subqueries;
 use row_locks::RowLockScopeState;
-pub use row_locks::{LockIdentityOptions, ResolvedRowLock};
+pub use row_locks::{LockIdentityOptions, ResolvedRowLock, SelectedRowLock};
 pub use statement_commands::StatementCommands;
 use subqueries::ScalarSubqueryCacheEntry;
+
+type SourceOuterRewrites =
+    Arc<uqa_core::memory::Produced<Vec<uqa_sql::semantics::view_rewrite::DeferredOuterRewrite>>>;
+
+type ScalarSubqueryCache = parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>;
 
 #[derive(Clone)]
 pub struct CteScope<S: Clone = ()> {
     producers: producers::CteProducers,
-    pub rows: BTreeMap<String, crate::query::cte::rows::CteRows>,
-    deferred_ctes: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
-    definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
-    folded_ctes: BTreeSet<String>,
-    pub non_returning_ctes: BTreeSet<String>,
-    pub scalar_subqueries: Arc<[QueryPlan]>,
-    pub(crate) source_outer_rewrites:
-        Option<Arc<[uqa_sql::semantics::view_rewrite::DeferredOuterRewrite]>>,
+    pub rows: CteRowsMap,
+    deferred_ctes: BindingMap<uqa_sql::plan::RetainedCtePlan>,
+    definition_scopes: BindingMap<Arc<definitions::DefinitionBindings>>,
+    folded_ctes: BindingNameSet,
+    pub non_returning_ctes: BindingNameSet,
+    pub scalar_subqueries: uqa_sql::plan::RetainedQueryArena,
+    pub(crate) source_outer_rewrites: Option<SourceOuterRewrites>,
     pub lock_identities: LockIdentityOptions,
-    row_lock: Option<Box<RowLockScopeState>>,
-    visible_cte_names: BTreeSet<String>,
-    recursive_control_widths: BTreeMap<String, usize>,
+    row_lock: Option<RowLockScopeState>,
+    visible_cte_names: BindingNameSet,
+    recursive_control_widths: BindingMap<usize>,
     scalar_subquery_arena: u64,
     read_command_overlay: bool,
     stream_command_progress: bool,
     scan_backwards: bool,
-    next_scalar_subquery_arena: Arc<AtomicU64>,
-    scalar_subquery_cache:
-        Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
+    next_scalar_subquery_arena: Arc<Produced<AtomicU64>>,
+    scalar_subquery_cache: Arc<Produced<ScalarSubqueryCache>>,
     catalog: Option<CatalogReadView>,
     catalog_revision: Option<(u64, u64)>,
-    catalog_resolution: Option<RelationNameResolution>,
-    privilege_subject: Option<RoleReference>,
+    catalog_resolution: Option<production::resolution::ScopeResolution>,
+    privilege_subject: Option<production::subject::ScopeSubject>,
     command_cte_snapshot: Option<Arc<S>>,
     /// The commands of the statement this scope belongs to, shared by every scope of the statement.
     statement_commands: Option<Arc<StatementCommands>>,
@@ -64,32 +73,8 @@ pub struct CteScope<S: Clone = ()> {
 
 impl<S: Clone> Default for CteScope<S> {
     fn default() -> Self {
-        Self {
-            producers: producers::CteProducers::default(),
-            rows: BTreeMap::new(),
-            deferred_ctes: BTreeMap::new(),
-            definition_scopes: BTreeMap::new(),
-            folded_ctes: BTreeSet::new(),
-            non_returning_ctes: BTreeSet::new(),
-            scalar_subqueries: Arc::default(),
-            source_outer_rewrites: None,
-            lock_identities: LockIdentityOptions::default(),
-            row_lock: None,
-            visible_cte_names: BTreeSet::new(),
-            recursive_control_widths: BTreeMap::new(),
-            scalar_subquery_arena: 0,
-            read_command_overlay: true,
-            stream_command_progress: false,
-            scan_backwards: false,
-            next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
-            scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
-            catalog: None,
-            catalog_revision: None,
-            catalog_resolution: None,
-            privilege_subject: None,
-            command_cte_snapshot: None,
-            statement_commands: None,
-        }
+        Self::empty_with_control(&ProductionControl::uncontrolled())
+            .expect("uncontrolled query scope construction")
     }
 }
 
@@ -102,8 +87,8 @@ impl<S: Clone> CteScope<S> {
     ) -> Self {
         Self {
             catalog: Some(catalog),
-            catalog_resolution: Some(resolution),
-            privilege_subject,
+            catalog_resolution: Some(resolution.into()),
+            privilege_subject: privilege_subject.map(Into::into),
             ..Self::default()
         }
     }
@@ -157,7 +142,11 @@ impl<S: Clone> CteScope<S> {
     }
 
     pub fn relation_name_resolution(&self) -> Result<RelationNameResolution, SQLError> {
-        self.catalog_resolution.clone().ok_or_else(|| {
+        Ok(self.name_resolution()?.snapshot())
+    }
+
+    fn name_resolution(&self) -> Result<&production::resolution::ScopeResolution, SQLError> {
+        self.catalog_resolution.as_ref().ok_or_else(|| {
             SQLError::Internal(
                 "query execution scope has no statement name-resolution snapshot".into(),
             )
@@ -169,16 +158,21 @@ impl<S: Clone> CteScope<S> {
     ) -> Option<uqa_sql::catalog::resolution::RelationLookupMode> {
         self.catalog_resolution
             .as_ref()
-            .map(|resolution| resolution.lookup_mode)
+            .map(production::resolution::ScopeResolution::lookup_mode)
     }
 
     pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
         if let Some(subject) = self.privilege_subject.as_ref() {
             return Ok(subject);
         }
+        self.invoking_role()
+    }
+
+    /// The statement's invoking identity is independent of relation-owner overrides in enclosing views.
+    pub fn invoking_role(&self) -> Result<&RoleReference, SQLError> {
         self.catalog_resolution
             .as_ref()
-            .map(RelationNameResolution::current_user)
+            .map(|resolution| resolution.current_user())
             .ok_or_else(|| {
                 SQLError::Internal(
                     "query execution scope has no statement authorization subject".into(),
@@ -207,13 +201,16 @@ mod tests {
         query.relation_privilege_subject = Some("caller".into());
         let mut scope = CteScope::<()>::new();
         scope.privilege_subject = Some("action_owner".into());
-        scope.catalog_resolution = Some(RelationNameResolution {
-            search_path: vec!["public".into()],
-            temporary_schema: "pg_temp_1".into(),
-            temporary_namespace_allocated: false,
-            current_user: "caller".into(),
-            lookup_mode: RelationLookupMode::Bound,
-        });
+        scope.catalog_resolution = Some(
+            RelationNameResolution {
+                search_path: vec!["public".into()],
+                temporary_schema: "pg_temp_1".into(),
+                temporary_namespace_allocated: false,
+                current_user: "caller".into(),
+                lookup_mode: RelationLookupMode::Bound,
+            }
+            .into(),
+        );
         let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let current = scope.enter_query_plan_scope(&query).unwrap();
             assert_eq!(current.privilege_subject().unwrap(), &"caller".into());

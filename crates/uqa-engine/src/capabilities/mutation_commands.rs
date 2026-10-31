@@ -71,6 +71,46 @@ impl Engine {
 }
 
 impl uqa_sql::semantics::mutation_privileges::MutationPrivilegeCatalog for Engine {
+    fn visit_bound_table_column_names_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.table_authorization_context()
+            .visit_bound_table_column_names_with_control(table, control, read)
+    }
+    fn ensure_table_privilege_for_with_control(
+        &self,
+        table: &str,
+        subject: &RoleReference,
+        privilege: uqa_sql::catalog::security::table::TableAclPrivilege,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.table_authorization_context()
+            .ensure_table_privilege_for_with_control(table, subject, privilege, control)
+    }
+    fn ensure_column_privilege_for_with_control(
+        &self,
+        table: &str,
+        column: &str,
+        subject: &RoleReference,
+        privilege: uqa_sql::catalog::security::table::TableAclPrivilege,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.table_authorization_context()
+            .ensure_column_privilege_for_with_control(table, column, subject, privilege, control)
+    }
+    fn ensure_any_column_privilege_for_with_control(
+        &self,
+        table: &str,
+        subject: &RoleReference,
+        privilege: uqa_sql::catalog::security::table::TableAclPrivilege,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.table_authorization_context()
+            .ensure_any_column_privilege_for_with_control(table, subject, privilege, control)
+    }
     fn bound_table_column_names(&self, table: &str) -> Result<Vec<String>, SQLError> {
         Engine::bound_table_column_names(self, table)
     }
@@ -133,6 +173,14 @@ impl uqa_execution::mutation::statement::context::MutationSnapshots<StatementRea
 }
 
 impl uqa_execution::mutation::entry::MutationTargetResolution for Engine {
+    fn resolve_target_with_control(
+        &self,
+        name: &str,
+        bound: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.resolve_mutation_target_name_with_control(name, bound, control)
+    }
     fn resolve_target(&self, name: &str, bound: bool) -> Result<String, SQLError> {
         self.resolve_mutation_target_name(name, bound)
     }
@@ -147,7 +195,8 @@ impl uqa_execution::mutation::entry::MutationCommandBoundary<StatementReadSnapsh
                 statement: engine.mutation_statement_context(),
                 inference: engine.inference_context(),
                 returning: engine.returning_analysis_context(),
-                prune_source_outputs: uqa_planner::mutation_outputs::prune_unused_query_outputs,
+                prune_source_outputs:
+                    uqa_planner::mutation_outputs::prune_unused_query_outputs_owned,
             })
         })
     }

@@ -8,7 +8,7 @@ use super::*;
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{ast::RoleAttribute, catalog::roles::RoleDefinition};
 
-fn binding(name: &str, types: &[&str]) -> FunctionBinding {
+pub(super) fn binding(name: &str, types: &[&str]) -> FunctionBinding {
     FunctionBinding {
         name: name.into(),
         argument_types: types.iter().map(|ty| (*ty).into()).collect(),
@@ -22,7 +22,7 @@ fn binding(name: &str, types: &[&str]) -> FunctionBinding {
     }
 }
 
-fn permissions() -> BuiltinRoutinePermissions {
+pub(super) fn permissions() -> BuiltinRoutinePermissions {
     let mut snapshot = crate::catalog::test_support::empty_catalog()
         .snapshot()
         .clone();

@@ -12,6 +12,21 @@ use crate::{ast::ColumnDef, ColumnType, RowSchema, SQLError};
 pub trait MutationRowCatalog: Sync {
     fn column_definitions(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     fn column_names(&self, table: &str) -> Result<Vec<String>, String>;
+    /// Visit declared names without resolving DEFAULT or generated expressions. Native catalogs lend an immutable declaration generation without copying its payloads.
+    fn visit_column_names_with_control(
+        &self,
+        table: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        read: &mut dyn FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let names = self.column_names(table).map_err(SQLError::Internal)?;
+        for name in &names {
+            control.check()?;
+            read(name)?;
+        }
+        Ok(())
+    }
     fn view_schema(&self, name: &str) -> Result<RowSchema, SQLError>;
 }
 

@@ -171,3 +171,5 @@ fn named_public_and_public_paths_bind_and_resolve_independently() {
     bound.validate(Some(&["id".into()]), &roles).unwrap();
     assert_eq!(BoundTableSecurity::bind(&restored, &roles).unwrap(), bound);
 }
+
+mod production;

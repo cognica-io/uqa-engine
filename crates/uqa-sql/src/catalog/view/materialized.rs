@@ -13,6 +13,20 @@ pub fn materialized_view_schema(
     types: &[Option<ColumnType>],
     collations: Option<&[u32]>,
 ) -> Result<RowSchema, SQLError> {
+    super::materialized_view_schema_with_control(
+        columns,
+        types,
+        collations,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(super) fn validate_metadata<'a>(
+    columns: &[String],
+    types: &[Option<ColumnType>],
+    collations: Option<&'a [u32]>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<&'a [u32], SQLError> {
     let collations = collations.ok_or_else(|| {
         SQLError::Internal("stored materialized view has no durable collation metadata".into())
     })?;
@@ -22,6 +36,7 @@ pub fn materialized_view_schema(
         ));
     }
     for (ty, oid) in types.iter().zip(collations) {
+        control.check()?;
         if ty
             .as_ref()
             .is_some_and(crate::schema::composites::type_is_collatable)
@@ -32,6 +47,5 @@ pub fn materialized_view_schema(
             ));
         }
     }
-    Ok(RowSchema::with_types(columns.to_vec(), types.to_vec())
-        .with_column_collations(collations.iter().copied().map(Some)))
+    Ok(collations)
 }

@@ -32,7 +32,7 @@ pub(super) fn has_effective_ordering<S: Clone>(
     ctes: &CteScope<S>,
     control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    let output = output_expressions(routines, block, params, ctes)?;
+    let output = output_expressions(routines, block, params, ctes, control)?;
     for order in &block.order_by {
         let expression = resolve_order_expression(&order.expr, &output)?;
         if !constants::constant_expression(
@@ -74,6 +74,7 @@ fn output_expressions<S: Clone>(
     block: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Vec<OutputColumnMapping>, SQLError> {
     if !block.projections.iter().any(|projection| {
         matches!(
@@ -93,7 +94,7 @@ fn output_expressions<S: Clone>(
     }
     let schema = block.from.as_ref().map_or_else(
         || Ok(crate::RowSchema::default()),
-        |source| bind_source_plan_schema(routines, source, params, ctes, None),
+        |source| bind_source_plan_schema(routines, source, params, ctes, None, &control),
     )?;
     let (projections, mut output) = order_projection(&block.projections, &schema)?;
     for (_, expression) in &mut output {
@@ -120,8 +121,9 @@ pub(super) fn ordered_set_projection<S: Clone>(
     block: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    let output = output_expressions(routines, block, params, ctes)?;
+    let output = output_expressions(routines, block, params, ctes, control)?;
     for order in &block.order_by {
         if expression_returns_set(routines, &resolve_order_expression(&order.expr, &output)?) {
             // All target SRFs stay at the same level when any is a sorting key.
@@ -136,8 +138,9 @@ pub(super) fn window_preserves_order<S: Clone>(
     block: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    let output = output_expressions(routines, block, params, ctes)?;
+    let output = output_expressions(routines, block, params, ctes, control)?;
     let required = block
         .order_by
         .iter()

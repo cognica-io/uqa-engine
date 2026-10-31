@@ -349,3 +349,13 @@ fn midpoint(lower: &[u8], upper: Option<&[u8]>) -> Result<Vec<u8>, EnumLabelKeyE
 
 #[cfg(test)]
 mod tests;
+
+impl crate::memory::ObserveAllocations for EnumValue {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        let bytes = self.retained_bytes();
+        observer.allocation(bytes, bytes)
+    }
+}

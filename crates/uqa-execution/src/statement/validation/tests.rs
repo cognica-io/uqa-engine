@@ -152,7 +152,7 @@ impl QueryEffectCatalog for Inputs {
     fn view_plan(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
         Ok(None)
     }
-    fn lookup_prepared(&self, _: &str) -> Option<UnifiedPlan> {
+    fn lookup_prepared(&self, _: &str) -> Option<uqa_sql::plan::SharedExecutablePlan> {
         None
     }
 }

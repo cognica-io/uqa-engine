@@ -6,120 +6,35 @@
 
 //! Traverse stored expressions and recognize their column dependencies.
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "one traversal covers every stored expression child"
-)]
+mod walk;
+
+const SUBQUERY_DEPENDENCY_ERROR: &str =
+    "schema expression contains a subquery whose dependencies cannot be rewritten safely";
+
 pub fn walk_schema_expr_mut(
     expression: &mut crate::ast::Expr,
     visit: &mut impl FnMut(&mut crate::ast::Expr) -> Result<(), String>,
 ) -> Result<(), String> {
-    use crate::ast::{Expr, FrameBound};
+    walk::walk_mut(expression, visit, &mut || SUBQUERY_DEPENDENCY_ERROR.into())
+}
 
-    visit(expression)?;
-    match expression {
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for argument in args {
-                walk_schema_expr_mut(argument, visit)?;
-            }
-            for order in order_by {
-                walk_schema_expr_mut(&mut order.expr, visit)?;
-            }
-            if let Some(filter) = filter {
-                walk_schema_expr_mut(filter, visit)?;
-            }
-        }
-        Expr::Array(items)
-        | Expr::Row(items)
-        | Expr::CompositeRow { items, .. }
-        | Expr::And(items)
-        | Expr::Or(items) => {
-            for item in items {
-                walk_schema_expr_mut(item, visit)?;
-            }
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            walk_schema_expr_mut(lhs, visit)?;
-            walk_schema_expr_mut(rhs, visit)?;
-        }
-        Expr::Not(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::IsNull { expr: inner, .. }
-        | Expr::Cast { expr: inner, .. } => {
-            walk_schema_expr_mut(inner, visit)?;
-        }
-        Expr::Between { expr, low, high } => {
-            walk_schema_expr_mut(expr, visit)?;
-            walk_schema_expr_mut(low, visit)?;
-            walk_schema_expr_mut(high, visit)?;
-        }
-        Expr::InList { expr, list, .. } => {
-            walk_schema_expr_mut(expr, visit)?;
-            for item in list {
-                walk_schema_expr_mut(item, visit)?;
-            }
-        }
-        Expr::WindowCall {
-            args, spec, filter, ..
-        } => {
-            for expression in args
-                .iter_mut()
-                .chain(filter.as_deref_mut())
-                .chain(&mut spec.partition_by)
-                .chain(spec.order_by.iter_mut().map(|order| &mut order.expr))
-            {
-                walk_schema_expr_mut(expression, visit)?;
-            }
-            for bound in spec
-                .frame
-                .iter_mut()
-                .flat_map(|frame| [&mut frame.start, &mut frame.end])
-            {
-                if let FrameBound::Preceding(expression) | FrameBound::Following(expression) = bound
-                {
-                    walk_schema_expr_mut(expression, visit)?;
-                }
-            }
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base {
-                walk_schema_expr_mut(base, visit)?;
-            }
-            for (condition, result) in when {
-                walk_schema_expr_mut(condition, visit)?;
-                walk_schema_expr_mut(result, visit)?;
-            }
-            if let Some(else_branch) = else_branch {
-                walk_schema_expr_mut(else_branch, visit)?;
-            }
-        }
-        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
-            return Err(
-                "schema expression contains a subquery whose dependencies cannot be rewritten safely"
-                    .into(),
-            );
-        }
-        Expr::Default
-        | Expr::Star
-        | Expr::QualifiedStar(_)
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::InternalColumn(_)
-        | Expr::Literal(_)
-        | Expr::TypedLiteral { .. }
-        | Expr::RetainedLiteral(_)
-        | Expr::Param(_) => {}
-    }
-    Ok(())
+/// Observe the same stored-expression children without copying syntax. Each callback and the subquery diagnostic use the invoking request.
+pub fn walk_schema_expr_with_control(
+    expression: &crate::ast::Expr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    visit: &mut impl FnMut(&crate::ast::Expr) -> Result<(), crate::SQLError>,
+) -> Result<(), crate::SQLError> {
+    walk::walk(
+        expression,
+        &mut |node| {
+            control.check()?;
+            visit(node)
+        },
+        &mut || match control.copy_text(SUBQUERY_DEPENDENCY_ERROR) {
+            Ok(message) => crate::SQLError::Internal(message.into_parts().0),
+            Err(error) => error.into(),
+        },
+    )
 }
 
 pub fn schema_expr_references_column(expression: &crate::ast::Expr, column: &str) -> bool {

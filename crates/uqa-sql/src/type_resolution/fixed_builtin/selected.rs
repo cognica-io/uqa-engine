@@ -197,7 +197,12 @@ pub(super) fn bind_call_in_place_with_control(
     Ok(true)
 }
 
-fn valid_positions(positions: &[usize], count: usize, parameters: usize, name: &str) -> bool {
+pub(super) fn valid_positions(
+    positions: &[usize],
+    count: usize,
+    parameters: usize,
+    name: &str,
+) -> bool {
     positions.len() == count
         && positions.iter().enumerate().all(|(index, position)| {
             *position < parameters && !positions[..index].contains(position)
@@ -207,7 +212,7 @@ fn valid_positions(positions: &[usize], count: usize, parameters: usize, name: &
         })
 }
 
-fn requires_cast(
+pub(super) fn requires_cast(
     argument: &ScalarExpr,
     actual: Option<&ColumnType>,
     declared: &ColumnType,

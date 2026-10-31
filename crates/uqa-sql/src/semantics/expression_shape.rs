@@ -6,6 +6,9 @@
 
 //! Expression traversal, qualifier analysis, and safe qualification.
 
+mod qualification;
+pub use qualification::qualify_unqualified_columns_with_control;
+
 use super::collect_from_qualifiers;
 use crate::plan::SourcePlan;
 use crate::ScalarExpr;
@@ -243,6 +246,24 @@ pub fn expr_is_null_free(expr: &ScalarExpr) -> bool {
         ScalarExpr::And(parts) | ScalarExpr::Or(parts) => parts.iter().all(expr_is_null_free),
         ScalarExpr::Not(inner) => expr_is_null_free(inner),
         _ => false,
+    }
+}
+
+/// Visit the existing conjunction partitions in source order without allocating a flattened vector.
+pub fn visit_filter_parts_with_control<'a>(
+    expression: &'a ScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), crate::SQLError>,
+) -> Result<(), crate::SQLError> {
+    control.check()?;
+    match expression {
+        ScalarExpr::And(items) => {
+            for item in items {
+                visit_filter_parts_with_control(item, control, visit)?;
+            }
+            Ok(())
+        }
+        expression => visit(expression),
     }
 }
 

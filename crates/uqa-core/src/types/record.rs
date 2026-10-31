@@ -325,3 +325,16 @@ impl<'de> serde::Deserialize<'de> for RecordValue {
 }
 #[cfg(test)]
 mod tests;
+
+impl crate::memory::ObserveAllocations for RecordValue {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut crate::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), crate::ValueRetentionError> {
+        observer.allocation(size_of::<RecordStorage>(), size_of::<RecordStorage>())?;
+        let RecordStorage { values, descriptor } = self.storage.as_ref();
+        observer.child(values)?;
+        observer.child(descriptor)?;
+        Ok(())
+    }
+}

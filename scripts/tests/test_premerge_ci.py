@@ -68,13 +68,13 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "      - .config/nextest.toml\n"
         )
         push_trigger = self.workflow.split("on:\n", 1)[1].split(
-            "  workflow_dispatch:\n", 1
+            "  pull_request:\n", 1
         )[0]
 
         self.assertEqual(push_trigger, expected_trigger)
 
     def test_pull_request_validation_runs_only_for_completed_batches(self) -> None:
-        expected = {"pr-checks.yml", "performance-checks.yml", "dependency-checks.yml",
+        expected = {"ci.yml", "pr-checks.yml", "performance-checks.yml", "dependency-checks.yml",
                     "regular-expression-checks.yml", "http-carrier-parity.yml",
                     "fdw-features.yml", "wasm-build-checks.yml", "usql-release-checks.yml",
                     "c-bindings.yml", "c-packages.yml"}
@@ -94,9 +94,9 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
                     self.assertNotIn(update, events)
         self.assertEqual(actual, expected)
 
-    def test_rust_jobs_run_for_main_push_or_selected_dispatch(self) -> None:
+    def test_rust_jobs_run_for_ready_pr_main_push_or_selected_dispatch(self) -> None:
         condition = (
-            "if: ${{ github.event_name == 'push' || "
+            "if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || "
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 

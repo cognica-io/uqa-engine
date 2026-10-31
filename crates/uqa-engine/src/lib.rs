@@ -581,7 +581,7 @@ struct TableDataSnapshot {
     /// available final id and can never wrap or issue a duplicate.
     next_id: u128,
     analyzer: Analyzer,
-    column_stats: BTreeMap<String, uqa_planner::ColumnStats>,
+    column_stats: uqa_planner::ColumnStatistics,
     column_stats_loaded: bool,
     column_stats_dirty: bool,
     statistics_maintenance: statistics::MaintenanceState,
@@ -619,7 +619,7 @@ pub(crate) struct TableState {
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.
-    column_stats: state::CatalogCell<BTreeMap<String, uqa_planner::ColumnStats>>,
+    column_stats: state::CatalogCell<uqa_planner::ColumnStatistics>,
     column_stats_loaded: AtomicBool,
     column_stats_dirty: AtomicBool,
     /// Changes since the last analysis of a table that no catalog tracks: tables of a memory-only engine and temporary tables. Their lazy analysis follows the maintenance policy of durable tables instead of re-analyzing after every write.

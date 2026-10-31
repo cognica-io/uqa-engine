@@ -12,18 +12,124 @@ use crate::{
     FunctionTypeResolver, ResolvedFunctionOverload, SQLError, SQLParam,
 };
 
-pub struct BindingTypeResolver<'a> {
+mod scope;
+pub use scope::BindingTypeScope;
+
+pub struct BindingTypeResolver<'a, Scope = BindingSnapshot> {
     pub routines: &'a dyn RoutineResolution,
-    pub scope: &'a BindingSnapshot,
+    pub scope: &'a Scope,
 }
 
-impl FunctionTypeResolver for BindingTypeResolver<'_> {
+impl<Scope: BindingTypeScope> FunctionTypeResolver for BindingTypeResolver<'_, Scope> {
+    fn resolve_collation_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<u32>, SQLError> {
+        self.routines
+            .resolve_collation_name_with_control(name, control)
+    }
+
+    fn is_scalar_function_binding_with_control(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.routines
+            .is_scalar_function_binding_with_control(binding, control)
+    }
+
+    fn format_type_name_with_control(
+        &self,
+        ty: &crate::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        self.routines.format_type_name_with_control(ty, control)
+    }
+
+    fn resolve_type_name_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ColumnType>>, SQLError> {
+        self.routines.resolve_type_name_with_control(name, control)
+    }
+
+    fn resolve_function_type_with_control(
+        &self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<crate::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ColumnType>>, SQLError> {
+        self.routines.resolve_function_type_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_control(
+        &self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<crate::ColumnType>],
+        explicit_variadic: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        self.routines.resolve_function_overload_with_control(
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            control,
+        )
+    }
+
+    fn resolve_function_overload_with_builtins_and_control(
+        &self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<crate::ColumnType>],
+        explicit_variadic: bool,
+        builtins: &[crate::BuiltinFunctionOverload],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ResolvedFunctionOverload>>, SQLError> {
+        self.routines
+            .resolve_function_overload_with_builtins_and_control(
+                name,
+                binding,
+                argument_names,
+                argument_types,
+                explicit_variadic,
+                builtins,
+                control,
+            )
+    }
+
     fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
         self.routines.format_type_name(ty)
     }
 
     fn has_untyped_function(&self, name: &str) -> bool {
         self.routines.has_untyped_function(name)
+    }
+
+    fn has_untyped_function_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.routines
+            .has_untyped_function_with_control(name, control)
     }
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
@@ -105,18 +211,43 @@ impl FunctionTypeResolver for BindingTypeResolver<'_> {
         outer_schema: &crate::RowSchema,
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
-        let plan = self.scope.scalar_subqueries.get(subquery).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "physical scalar subquery slot {subquery} is out of bounds"
-            ))
-        })?;
-        let output = crate::binding::bind_query_plan_schema(
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        Ok(self
+            .resolve_scalar_subquery_type_with_control(subquery, outer_schema, params, &control)?
+            .map(|ty| {
+                ty.into_uncontrolled()
+                    .unwrap_or_else(|_| panic!("ordinary scoped type"))
+            }))
+    }
+
+    fn resolve_scalar_subquery_type_with_control(
+        &self,
+        subquery: crate::SubqueryId,
+        outer_schema: &crate::RowSchema,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        control.check()?;
+        let plan = self
+            .scope
+            .scalar_subqueries()
+            .get(subquery)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "physical scalar subquery slot {subquery} is out of bounds"
+                ))
+            })?;
+        let output = crate::binding::bind_query_plan_schema_with_control(
             self.routines,
             plan,
             params,
-            &self.scope.context(),
+            self.scope.type_context(control)?,
             Some(outer_schema),
+            control,
         )?;
-        Ok(output.column_type(0).cloned())
+        output
+            .column_type(0)
+            .map(|ty| ty.clone_with_control(control).map_err(Into::into))
+            .transpose()
     }
 }

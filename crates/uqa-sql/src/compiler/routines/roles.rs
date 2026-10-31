@@ -667,7 +667,7 @@ pub(in crate::compiler) fn compile_create_role(
 ) -> Result<Statement> {
     use crate::ast::{CreateRoleStmt, RoleAttribute};
     use pg_query::protobuf::RoleStmtType;
-    let mut attributes = std::collections::BTreeSet::from([RoleAttribute::Inherit]);
+    let mut attributes = uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]);
     if statement.stmt_type() == RoleStmtType::RolestmtUser {
         attributes.insert(RoleAttribute::Login);
     }
@@ -740,7 +740,7 @@ pub(in crate::compiler) fn compile_alter_role(
         .ok_or_else(|| SQLError::Internal("ALTER ROLE has no target".into()))?;
     let mut alter = AlterRoleStmt {
         name: compile_role_specification(role, "ALTER ROLE")?,
-        attributes: std::collections::BTreeMap::new(),
+        attributes: uqa_core::memory::OwnedMap::new(),
         connection_limit: None,
         membership_action: None,
         members: Vec::new(),

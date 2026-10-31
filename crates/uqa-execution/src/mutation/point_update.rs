@@ -203,7 +203,7 @@ fn evaluate_point_assignments<S: Clone + 'static>(
         .assignment
         .expressions
         .expressions
-        .bind_scope(ctes.clone());
+        .bind_scope(&ctes)?;
     for assignment in assignments {
         let source = uqa_sql::type_resolution::assignment_source_type(
             assignment.value,

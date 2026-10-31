@@ -348,7 +348,13 @@ impl Interpreter<'_> {
         query: PLpgSQLStatement,
         fields: &[PLpgSQLRowField],
         arguments: &PLpgSQLCursorArguments,
-    ) -> Result<(UnifiedPlan, Vec<SQLParam>), SQLError> {
+    ) -> Result<
+        (
+            uqa_sql::plan::SharedExecutablePlan,
+            uqa_core::memory::Produced<Vec<SQLParam>>,
+        ),
+        SQLError,
+    > {
         let values = self.evaluate_cursor_arguments(cursor_name, fields, arguments)?;
         let saved_values = fields
             .iter()
@@ -378,11 +384,17 @@ impl Interpreter<'_> {
         query
     }
 
-    fn lower_cursor_plan(&self, statement: Statement) -> Result<UnifiedPlan, SQLError> {
-        let plan = UnifiedPlan::lower_with(statement, &|name: &str| {
-            self.services.runtime.has_aggregate_function(name)
-        });
-        self.services.statements.optimize_plan(plan)
+    fn lower_cursor_plan(
+        &self,
+        statement: Statement,
+    ) -> Result<uqa_sql::plan::SharedExecutablePlan, SQLError> {
+        let control = self.planning.control();
+        let plan = UnifiedPlan::lower_borrowed_for_rewrite(
+            &statement,
+            &|name: &str| self.services.runtime.has_aggregate_function(name),
+            &control,
+        )?;
+        self.services.statements.optimize_owned_plan(plan, &control)
     }
 
     fn eval_cursor_count(&self, count: &PLpgSQLCursorCount) -> Result<i64, SQLError> {
@@ -415,7 +427,7 @@ impl Interpreter<'_> {
             return Ok(Vec::new());
         }
         let prepared = self.prepare_cursor_arguments(arguments)?;
-        let Statement::Select(query) = &prepared.syntax else {
+        let Statement::Select(query) = prepared.syntax.as_ref() else {
             return Err(SQLError::Internal("cursor arguments have no SELECT".into()));
         };
         let arguments = &query.projections;

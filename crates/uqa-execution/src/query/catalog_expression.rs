@@ -6,19 +6,29 @@
 
 //! Evaluate declared catalog and procedural expressions through physical scalar plans.
 
-use crate::scalar::plan::{eval_physical, PhysicalEvalContext};
+use crate::scalar::plan::{eval_physical_scalar, PhysicalEvalContext};
 use crate::{
     query::{relational::QueryExpressionFactory, CteScope},
     RowSchema,
 };
 use std::sync::Arc;
-use uqa_core::Value;
-use uqa_sql::expr::RowLookup;
-use uqa_sql::{plan::ExpressionPlan, ResultRow, SQLError, SQLParam};
+use uqa_core::{
+    memory::{OwnedProductionControl, Produced},
+    Value,
+};
+use uqa_sql::{
+    expr::RowLookup,
+    plan::{ExpressionPlan, MutableExpressionPlan, OwnedScalarExpr, RetainedQueryArena},
+    ColumnType, ResultRow, SQLError, SQLParam,
+};
 
-/// Lower an AST expression that belongs to a schema or procedural boundary,
-/// then execute the resulting physical scalar IR. Runtime consumers never
-/// invoke the AST evaluator or dispatch an AST subquery directly.
+mod production;
+pub use production::evaluate_catalog_scalar_with_control;
+
+/// Keep inferred source metadata alive through the receiving assignment or routine coercion.
+pub type TypedCatalogValue = (Value, Option<Produced<ColumnType>>);
+
+/// Lower a borrowed schema or procedural expression into the physical scalar IR.
 pub fn eval_lowered_expression<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
     scope: CteScope<S>,
@@ -30,43 +40,29 @@ pub fn eval_lowered_expression<S: Clone + 'static>(
         .map(|(value, _)| value)
 }
 
-/// Evaluate a standalone expression while retaining its declared SQL type.
-/// Procedural statements such as `FOREACH` need the type because domains and
-/// true arrays can share the same runtime value carrier.
+/// Preserve the declared source type independently of the runtime value carrier.
 pub fn eval_lowered_expression_with_type<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
-    mut scope: CteScope<S>,
+    scope: CteScope<S>,
     expression: &uqa_sql::ast::Expr,
     row: Option<&ResultRow>,
     params: &[SQLParam],
-) -> Result<(Value, Option<uqa_sql::ast::ColumnType>), SQLError> {
-    let mut expression = ExpressionPlan::lower(expression.clone());
-    scope.scalar_subqueries = expression.subqueries.as_slice().into();
-    let hook = factory.bind_scope(scope);
-    let declared_type = crate::scalar_type_with_resolver(
-        &expression.scalar,
-        &RowSchema::default(),
-        params,
-        hook.as_ref(),
+) -> Result<TypedCatalogValue, SQLError> {
+    let resources = factory.production_resources()?;
+    let expression = ExpressionPlan::lower_borrowed_for_rewrite(expression, &resources.control())?;
+    let schema = RowSchema::empty_with_control(&resources.control())?;
+    let prepared = PreparedCatalogExpression::prepare(
+        factory, scope, expression, &schema, params, true, resources,
     )?;
-    expression.scalar = crate::bind_type_introspection_with_resolver(
-        expression.scalar,
-        &RowSchema::default(),
-        params,
-        hook.as_ref(),
-    );
-    factory.optimize_catalog_scalar(&mut expression.scalar)?;
+    prepared.resources.control().check()?;
     let context = PhysicalEvalContext::new(row, params)
-        .with_function_hook(hook.as_ref())
-        .with_subquery_runner(hook.as_ref());
-    let value = eval_physical(&expression, &context)?;
-    Ok((value, declared_type))
+        .with_function_hook(prepared.hook.as_ref())
+        .with_subquery_runner(prepared.hook.as_ref());
+    let value = eval_physical_scalar(&prepared.expression, &prepared.subqueries, &context)?;
+    Ok((value, prepared.source))
 }
 
-/// Evaluate a catalog expression against a row while preserving the declared
-/// SQL types of its columns. Values alone cannot distinguish, for example,
-/// `smallint` from `integer`, so schema-owned expressions must bind before
-/// they cross into the physical evaluator.
+/// Evaluate with the analyzed column identities and types of a borrowed row.
 pub fn eval_lowered_expression_with_schema<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
     scope: CteScope<S>,
@@ -79,7 +75,7 @@ pub fn eval_lowered_expression_with_schema<S: Clone + 'static>(
         .map(|(value, _)| value)
 }
 
-/// Keep the analyzed source type with a schema expression's value for assignment into a generated column.
+/// Keep the generated expression's source type through its receiving column assignment.
 pub fn eval_lowered_expression_with_schema_and_type<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
     scope: CteScope<S>,
@@ -87,39 +83,55 @@ pub fn eval_lowered_expression_with_schema_and_type<S: Clone + 'static>(
     row: &dyn RowLookup,
     schema: &RowSchema,
     params: &[SQLParam],
-) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
-    eval_catalog_expression_with_schema(
-        factory,
-        scope,
-        ExpressionPlan::lower(expression.clone()),
-        row,
-        schema,
-        params,
-        true,
-    )
+) -> Result<TypedCatalogValue, SQLError> {
+    PreparedCatalogExpression::lower(factory, scope, expression, schema, params)?
+        .into_evaluated(row)
 }
 
-/// Evaluate an analyzed catalog expression with its original column types, without resolving its written routine names again.
+/// Admit an analyzed catalog expression without resolving its written routine names again.
 pub fn eval_expression_plan_with_schema<S: Clone + 'static>(
     factory: &dyn QueryExpressionFactory<S>,
     scope: CteScope<S>,
-    expression: ExpressionPlan,
+    expression: &ExpressionPlan,
     row: &ResultRow,
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    // Planner-proven constant routines enter here: planning again would recurse into the same constant evaluator.
-    eval_catalog_expression_with_schema(factory, scope, expression, row, schema, params, false)
-        .map(|(value, _)| value)
+    let resources = factory.production_resources()?;
+    let expression = expression.copy_for_rewrite(&resources.control())?;
+    // Planner-proven constant routines enter here: another optimization would recurse into the same evaluator.
+    PreparedCatalogExpression::prepare(
+        factory, scope, expression, schema, params, false, resources,
+    )?
+    .evaluate_value(row)
 }
 
-/// A typed expression bound to one schema-rewrite command. Its retained scope and parameters must remain the same for every row.
+/// Evaluate a borrowed planned scalar without constructing an ordinary temporary expression tree.
+pub fn eval_scalar_plan_with_schema<S: Clone + 'static>(
+    factory: &dyn QueryExpressionFactory<S>,
+    scope: CteScope<S>,
+    expression: &uqa_sql::ScalarExpr,
+    row: &ResultRow,
+    schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    let resources = factory.production_resources()?;
+    let expression = MutableExpressionPlan::copy_from(expression, &[], &resources.control())?;
+    PreparedCatalogExpression::prepare(
+        factory, scope, expression, schema, params, false, resources,
+    )?
+    .evaluate_value(row)
+}
+
+/// A typed expression bound once for a schema rewrite. Query slots and declarations share the same admitted namespace in every row evaluation.
 pub(crate) struct PreparedCatalogExpression<'a> {
-    expression: ExpressionPlan,
-    source: Option<uqa_sql::ColumnType>,
+    expression: OwnedScalarExpr,
+    subqueries: RetainedQueryArena,
+    source: Option<Produced<ColumnType>>,
     schema: RowSchema,
     params: &'a [SQLParam],
     hook: Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    resources: OwnedProductionControl,
 }
 
 impl<'a> PreparedCatalogExpression<'a> {
@@ -130,50 +142,56 @@ impl<'a> PreparedCatalogExpression<'a> {
         schema: &RowSchema,
         params: &'a [SQLParam],
     ) -> Result<Self, SQLError> {
-        Self::prepare(
-            factory,
-            scope,
-            ExpressionPlan::lower(expression.clone()),
-            schema,
-            params,
-            true,
-        )
+        let resources = factory.production_resources()?;
+        let expression =
+            ExpressionPlan::lower_borrowed_for_rewrite(expression, &resources.control())?;
+        Self::prepare(factory, scope, expression, schema, params, true, resources)
     }
 
     fn prepare<S: Clone + 'static>(
         factory: &'a dyn QueryExpressionFactory<S>,
         mut scope: CteScope<S>,
-        mut expression: ExpressionPlan,
+        expression: MutableExpressionPlan,
         schema: &RowSchema,
         params: &'a [SQLParam],
         optimize: bool,
+        resources: OwnedProductionControl,
     ) -> Result<Self, SQLError> {
-        scope.scalar_subqueries = expression.subqueries.as_slice().into();
-        let hook = factory.bind_scope(scope);
-        let source =
-            crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
-        expression.scalar = crate::bind_type_introspection_with_resolver(
-            expression.scalar,
+        let control = resources.control();
+        let (expression, subqueries) = expression.into_parts(&control)?;
+        let subqueries = subqueries.into_shared(&control)?;
+        scope.scalar_subqueries = subqueries.clone();
+        let hook = factory.bind_scope(&scope)?;
+        let source = uqa_sql::type_resolution::scalar_type_with_resolver_and_control(
+            &expression,
             schema,
             params,
-            hook.as_ref(),
-        );
+            Some(hook.as_ref()),
+            &control,
+        )?;
+        let mut expression = uqa_sql::type_resolution::bind_type_introspection_owned(
+            expression,
+            schema,
+            params,
+            Some(hook.as_ref()),
+            &control,
+        )?;
         if optimize {
-            factory.optimize_catalog_scalar(&mut expression.scalar)?;
+            expression = factory.optimize_owned_catalog_scalar(expression, &control)?;
         }
         Ok(Self {
             expression,
+            subqueries,
             source,
             schema: schema.clone(),
             params,
             hook,
+            resources,
         })
     }
 
-    pub(crate) fn evaluate(
-        &self,
-        row: &dyn RowLookup,
-    ) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
+    pub(crate) fn evaluate_value(&self, row: &dyn RowLookup) -> Result<Value, SQLError> {
+        self.resources.control().check()?;
         let row = CatalogRowView {
             schema: &self.schema,
             row,
@@ -182,21 +200,23 @@ impl<'a> PreparedCatalogExpression<'a> {
             .with_row_schema(&self.schema)
             .with_function_hook(self.hook.as_ref())
             .with_subquery_runner(self.hook.as_ref());
-        eval_physical(&self.expression, &context).map(|value| (value, self.source.clone()))
+        eval_physical_scalar(&self.expression, &self.subqueries, &context)
     }
-}
 
-fn eval_catalog_expression_with_schema<S: Clone + 'static>(
-    factory: &dyn QueryExpressionFactory<S>,
-    scope: CteScope<S>,
-    expression: ExpressionPlan,
-    row: &dyn RowLookup,
-    schema: &RowSchema,
-    params: &[SQLParam],
-    optimize: bool,
-) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
-    PreparedCatalogExpression::prepare(factory, scope, expression, schema, params, optimize)?
-        .evaluate(row)
+    pub(crate) fn evaluate(&self, row: &dyn RowLookup) -> Result<TypedCatalogValue, SQLError> {
+        let value = self.evaluate_value(row)?;
+        let source = self
+            .source
+            .as_ref()
+            .map(|ty| ty.clone_with_control(&self.resources.control()))
+            .transpose()?;
+        Ok((value, source))
+    }
+
+    fn into_evaluated(self, row: &dyn RowLookup) -> Result<TypedCatalogValue, SQLError> {
+        let value = self.evaluate_value(row)?;
+        Ok((value, self.source))
+    }
 }
 
 /// Borrow named document fields through the analyzed schema's identities, without copying a row or inventing qualified map keys.
@@ -277,15 +297,33 @@ mod tests {
     }
 
     impl QueryExpressionFactory<()> for PreparationCounter {
+        fn production_resources(
+            &self,
+        ) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+            Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
+        }
         fn bind_scope(
             &self,
-            scope: CteScope,
-        ) -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_> {
+            scope: &CteScope,
+        ) -> Result<Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_>, SQLError>
+        {
             assert!(scope.scalar_subqueries.is_empty());
             self.binds
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Arc::new(crate::query::relational::values::test_support::Services)
+            Ok(Arc::new(
+                crate::query::relational::values::test_support::Services,
+            ))
         }
+        fn optimize_owned_catalog_scalar(
+            &self,
+            expression: uqa_sql::plan::OwnedScalarExpr,
+            _control: &uqa_core::memory::ProductionControl<'_>,
+        ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+            self.optimizations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(expression)
+        }
+
         fn optimize_catalog_scalar(&self, _: &mut crate::ScalarExpr) -> Result<(), SQLError> {
             self.optimizations
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -318,10 +356,9 @@ mod tests {
         .unwrap();
         for input in 0..100 {
             let row = ResultRow::from([("source".into(), Value::Int(input))]);
-            assert_eq!(
-                expression.evaluate(&row).unwrap(),
-                (Value::Int(input), Some(uqa_sql::ColumnType::SmallInteger))
-            );
+            let (value, source) = expression.evaluate(&row).unwrap();
+            assert_eq!(value, Value::Int(input));
+            assert_eq!(source.as_deref(), Some(&uqa_sql::ColumnType::SmallInteger));
         }
         assert_eq!(factory.binds.load(std::sync::atomic::Ordering::Relaxed), 1);
         assert_eq!(

@@ -6,16 +6,24 @@
 
 //! Select physical join keys from the statement's declared SQL operators.
 
-use super::{bind_join_sides, join_conjuncts, JoinKind, RowSchema, SQLError, SQLParam, ScalarExpr};
-use uqa_sql::type_resolution::ComparisonKeySupport;
+use super::{JoinKind, RowSchema, SQLError, SQLParam, ScalarExpr};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+use uqa_sql::semantics::join_predicates::visit_join_conjuncts_with_control;
 use uqa_sql::{ast::BinaryOp, FunctionTypeResolver};
 
+mod binding;
+use binding::KeyBinding;
+
 pub(super) struct HashJoinKeys {
-    pub left: Vec<ScalarExpr>,
-    pub right: Vec<ScalarExpr>,
-    pub residual: Option<ScalarExpr>,
+    pub left: Produced<Vec<ScalarExpr>>,
+    pub right: Produced<Vec<ScalarExpr>>,
+    pub residual: Option<Produced<ScalarExpr>>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "join selection shares the original SQL and resource contexts"
+)]
 pub(super) fn join_keys(
     kind: JoinKind,
     predicate: Option<&ScalarExpr>,
@@ -24,95 +32,72 @@ pub(super) fn join_keys(
     params: &[SQLParam],
     types: &dyn FunctionTypeResolver,
     volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    control: &ProductionControl<'_>,
 ) -> Result<Option<HashJoinKeys>, SQLError> {
+    control.check()?;
     let Some(predicate) = predicate.filter(|_| kind != JoinKind::Cross) else {
         return Ok(None);
     };
-    let mut keys = HashJoinKeys {
-        left: Vec::new(),
-        right: Vec::new(),
-        residual: None,
+    let binding = KeyBinding {
+        left,
+        right,
+        params,
+        types,
+        volatility,
+        control: *control,
+        schema: RowSchema::join_with_control(left, right, [], control)?,
     };
-    let mut residual = Vec::new();
+    let mut left_keys = ProductionVec::new(*control);
+    let mut right_keys = ProductionVec::new(*control);
+    let mut residual = ProductionVec::new(*control);
     let mut merge_supported = true;
-    let schema = RowSchema::join(left, right, []);
-    for conjunct in join_conjuncts(predicate) {
-        // ROW equality selects an operator for each field before either side is assigned to a join input. One field can use the reverse orientation or retain a volatile predicate while another supplies a hash key.
-        let pairs = match conjunct {
-            ScalarExpr::Binary {
-                op: BinaryOp::Equal,
-                lhs,
-                rhs,
-            } => match (lhs.as_ref(), rhs.as_ref()) {
-                (ScalarExpr::Row(left), ScalarExpr::Row(right)) if left.len() == right.len() => {
-                    Some(left.iter().zip(right).collect::<Vec<_>>())
-                }
-                _ => Some(vec![(lhs.as_ref(), rhs.as_ref())]),
-            },
-            _ => None,
-        };
-        if let Some(pairs) = pairs {
-            let mut all_hashed = !pairs.is_empty();
-            for (left_key, right_key) in pairs {
-                let bound = uqa_sql::bind_type_introspection_with_resolver(
-                    ScalarExpr::Binary {
-                        op: BinaryOp::Equal,
-                        lhs: Box::new(left_key.clone()),
-                        rhs: Box::new(right_key.clone()),
-                    },
-                    &schema,
-                    params,
-                    types,
-                );
-                if uqa_sql::semantics::volatility::expr_contains_volatile_function(
-                    volatility, &bound,
-                ) {
-                    merge_supported = false;
-                    all_hashed = false;
-                    continue;
-                }
-                let ScalarExpr::Binary { lhs, rhs, .. } = bound else {
-                    unreachable!("binding preserves a comparison operator")
-                };
-                let Some((left_key, right_key)) = bind_join_sides(left, right, &lhs, &rhs) else {
-                    // Constants remain predicates; they cannot make a non-joinable record clause into a hash join.
-                    merge_supported &= uqa_sql::type_resolution::comparison_key_is_constant(&lhs)
-                        && uqa_sql::type_resolution::comparison_key_is_constant(&rhs);
-                    all_hashed = false;
-                    continue;
-                };
-                let mut support = ComparisonKeySupport::default();
-                let left_type = crate::scalar_type_with_resolver(&left_key, left, params, types)?;
-                let right_type =
-                    crate::scalar_type_with_resolver(&right_key, right, params, types)?;
-                if let (Some(left), Some(right)) = (&left_type, &right_type) {
-                    support.include_equality_operands(left, right, types)?;
-                } else {
-                    // Schemaless UQA inputs require runtime comparison; absent type metadata is not a declared lack of operators.
-                    for ty in [&left_type, &right_type].into_iter().flatten() {
-                        support.include(ty, types)?;
-                    }
-                    support.hashing = false;
-                }
-                merge_supported &= support.ordering;
-                all_hashed &= support.hashing;
-                if support.hashing {
-                    keys.left.push(left_key.into_owned());
-                    keys.right.push(right_key.into_owned());
-                }
+    visit_join_conjuncts_with_control(predicate, control, &mut |conjunct| {
+        // ROW equality selects each field's SQL operator before assigning either operand to a physical input.
+        let mut pair = |lhs: &ScalarExpr, rhs: &ScalarExpr| -> Result<bool, SQLError> {
+            let selected = binding.select(lhs, rhs)?;
+            merge_supported &= selected.merge_supported;
+            if let Some([left, right]) = selected.keys {
+                left_keys.push_produced(left)?;
+                right_keys.push_produced(right)?;
+                Ok(true)
+            } else {
+                Ok(false)
             }
-            if all_hashed {
-                continue;
+        };
+        let all_hashed = if let ScalarExpr::Binary {
+            op: BinaryOp::Equal,
+            lhs,
+            rhs,
+        } = conjunct
+        {
+            if let (ScalarExpr::Row(left_items), ScalarExpr::Row(right_items)) =
+                (lhs.as_ref(), rhs.as_ref())
+            {
+                if left_items.len() == right_items.len() {
+                    let mut all = !left_items.is_empty();
+                    for (lhs, rhs) in left_items.iter().zip(right_items) {
+                        all &= pair(lhs, rhs)?;
+                    }
+                    all
+                } else {
+                    pair(lhs, rhs)?
+                }
+            } else {
+                pair(lhs, rhs)?
             }
         } else {
             merge_supported &= matches!(
                 conjunct,
                 ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
             );
+            false
+        };
+        if !all_hashed {
+            residual.push_produced(control.finish(conjunct, control.empty_reservation())?)?;
         }
-        residual.push(conjunct.clone());
-    }
-    if keys.left.is_empty() {
+        Ok(())
+    })?;
+    if left_keys.is_empty() {
         if kind == JoinKind::Full && !merge_supported {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -121,12 +106,24 @@ pub(super) fn join_keys(
         }
         return Ok(None);
     }
-    keys.residual = match residual.len() {
-        0 => None,
-        1 => residual.pop(),
-        _ => Some(ScalarExpr::And(residual)),
+    let residual = match &*residual {
+        [] => None,
+        [only] => Some(only.clone_with_control(control)?),
+        conjuncts => {
+            let mut owned = ProductionVec::new(*control);
+            owned.reserve(conjuncts.len())?;
+            for conjunct in conjuncts {
+                owned.push_produced(conjunct.clone_with_control(control)?)?;
+            }
+            let (items, memory) = owned.finish()?.into_parts();
+            Some(control.finish(ScalarExpr::And(items), memory)?)
+        }
     };
-    Ok(Some(keys))
+    Ok(Some(HashJoinKeys {
+        left: left_keys.finish()?,
+        right: right_keys.finish()?,
+        residual,
+    }))
 }
 
 #[cfg(test)]
@@ -202,6 +199,7 @@ mod tests {
                 &[],
                 &Types,
                 &Types,
+                &ProductionControl::uncontrolled(),
             )
             .unwrap();
             assert_eq!(selected.is_some(), hashing);
@@ -232,7 +230,8 @@ mod tests {
                         &right,
                         &[],
                         &Types,
-                        &Types
+                        &Types,
+                        &ProductionControl::uncontrolled(),
                     )
                     .unwrap()
                     .is_none());
@@ -268,12 +267,19 @@ mod tests {
             &[],
             &Types,
             &Types,
+            &ProductionControl::uncontrolled(),
         )
         .unwrap()
         .unwrap();
-        assert_eq!(keys.left, vec![ScalarExpr::qualified_column("l", "id")]);
-        assert_eq!(keys.right, vec![ScalarExpr::qualified_column("r", "id")]);
-        assert_eq!(keys.residual, Some(equality(false)));
+        assert_eq!(
+            keys.left.as_slice(),
+            vec![ScalarExpr::qualified_column("l", "id")]
+        );
+        assert_eq!(
+            keys.right.as_slice(),
+            vec![ScalarExpr::qualified_column("r", "id")]
+        );
+        assert_eq!(keys.residual.as_deref(), Some(&equality(false)));
     }
 
     #[test]
@@ -306,9 +312,18 @@ mod tests {
             JoinKind::Right,
             JoinKind::Full,
         ] {
-            let keys = join_keys(kind, Some(&predicate), &left, &right, &[], &Types, &Types)
-                .unwrap()
-                .expect("USING equality remains hash-joinable");
+            let keys = join_keys(
+                kind,
+                Some(&predicate),
+                &left,
+                &right,
+                &[],
+                &Types,
+                &Types,
+                &ProductionControl::uncontrolled(),
+            )
+            .unwrap()
+            .expect("USING equality remains hash-joinable");
             assert_eq!(keys.left.len(), 1);
             assert_eq!(keys.right.len(), 1);
             assert!(keys.residual.is_none());
@@ -335,11 +350,18 @@ mod tests {
             &[],
             &Types,
             &Types,
+            &ProductionControl::uncontrolled(),
         )
         .unwrap()
         .unwrap();
-        assert_eq!(selected.left, [ScalarExpr::qualified_column("l", "v")]);
-        assert_eq!(selected.right, [ScalarExpr::qualified_column("r", "v")]);
+        assert_eq!(
+            selected.left.as_slice(),
+            [ScalarExpr::qualified_column("l", "v")]
+        );
+        assert_eq!(
+            selected.right.as_slice(),
+            [ScalarExpr::qualified_column("r", "v")]
+        );
         assert!(selected.residual.is_none());
         let left = schema("l", Some(ColumnType::Json));
         let right = schema("r", Some(ColumnType::Json));
@@ -351,9 +373,89 @@ mod tests {
             &[],
             &Types,
             &Types,
+            &ProductionControl::uncontrolled(),
         )
         .err()
         .unwrap();
         assert_eq!(error.sqlstate(), Some("0A000"));
+    }
+    #[test]
+    fn hash_key_binding_admits_each_operand_and_releases_rejected_candidates() {
+        use uqa_core::{memory::MemoryBudget, CancellationToken};
+        let payload = "x".repeat(4 << 20);
+        let uqa_sql::Statement::Select(mut select) =
+            uqa_sql::compile(&format!("SELECT ('{payload}'::text || l.v)=r.v"))
+                .unwrap()
+                .remove(0)
+        else {
+            panic!("scalar SELECT")
+        };
+        let predicate =
+            uqa_sql::plan::ExpressionPlan::lower(select.projections.remove(0).expr).scalar;
+        let left = schema("l", Some(ColumnType::Text));
+        let right = schema("r", Some(ColumnType::Text));
+        let memory = MemoryBudget::new(64 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let select = || {
+            join_keys(
+                JoinKind::Inner,
+                Some(&predicate),
+                &left,
+                &right,
+                &[],
+                &Types,
+                &Types,
+                &control,
+            )
+        };
+        let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| result = Some(select()));
+        assert!(allocation.bytes_total < 256 << 10, "{allocation:?}");
+        assert_eq!(result.unwrap().err().unwrap().sqlstate(), Some("53200"));
+        assert_eq!(memory.used(), occupied.bytes());
+        drop(occupied);
+        for token in [&original, &invoking] {
+            token.cancel();
+            assert_eq!(select().err().unwrap().sqlstate(), Some("57014"));
+            assert_eq!(memory.used(), 0);
+            token.reset();
+        }
+        let keys = select().unwrap().unwrap();
+        assert_eq!(keys.left.len(), 1);
+        assert_eq!(keys.right.len(), 1);
+        assert!(keys.residual.is_none());
+        assert!(memory.used() >= payload.len());
+        assert_eq!(
+            memory.used(),
+            keys.left.reserved_bytes() + keys.right.reserved_bytes()
+        );
+        drop(keys);
+        assert_eq!(memory.used(), 0);
+        let non_hashable = ScalarExpr::Binary {
+            op: BinaryOp::NotEqual,
+            lhs: Box::new(ScalarExpr::qualified_column("l", "v")),
+            rhs: Box::new(ScalarExpr::Literal(uqa_core::Value::Str(payload))),
+        };
+        let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+        let allocation = allocation_counter::measure(|| {
+            assert!(join_keys(
+                JoinKind::Inner,
+                Some(&non_hashable),
+                &left,
+                &right,
+                &[],
+                &Types,
+                &Types,
+                &control,
+            )
+            .unwrap()
+            .is_none());
+        });
+        assert!(allocation.bytes_total < 256 << 10, "{allocation:?}");
+        assert_eq!(allocation.bytes_current, 0);
+        assert_eq!(memory.used(), occupied.bytes());
     }
 }

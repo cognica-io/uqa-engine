@@ -488,10 +488,27 @@ fn planned_assignment_constants_check_ranges_and_typmods() {
             "value too long for type character varying(2)",
         ),
     ] {
-        let mut transform = planned_constant(value, source);
-        let error = fold_type_transform_assignment(&Catalog, &target, &mut transform).unwrap_err();
-        assert_eq!(error.sqlstate(), Some(state));
-        assert_eq!(error.to_string(), message);
+        for shared in [false, true] {
+            let mut transform = planned_constant(value.clone(), source.clone());
+            if shared {
+                let control = uqa_core::memory::ProductionControl::uncontrolled();
+                transform.plan.scalar =
+                    ScalarExpr::RetainedLiteral(crate::ir::RetainedScalarLiteral::new(
+                        crate::ir::RetainedConstantValue::from_produced(
+                            control.copy_value(&value).unwrap(),
+                            &control,
+                        )
+                        .unwrap(),
+                        Some(source.clone()),
+                        Some(source.sql_name()),
+                        None,
+                    ));
+            }
+            let error =
+                fold_type_transform_assignment(&Catalog, &target, &mut transform).unwrap_err();
+            assert_eq!(error.sqlstate(), Some(state));
+            assert_eq!(error.to_string(), message);
+        }
     }
 }
 

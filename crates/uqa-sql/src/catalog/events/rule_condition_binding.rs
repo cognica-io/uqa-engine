@@ -187,6 +187,8 @@ impl RuleConditionBinding {
     }
 }
 
+mod production;
+
 #[cfg(test)]
 mod tests {
     use super::*;

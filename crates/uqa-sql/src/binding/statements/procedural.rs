@@ -6,6 +6,9 @@
 
 //! Retained procedural input analysis and its selected catalog dependencies.
 
+mod owned;
+pub use owned::{analyze_procedural_plan_owned, OwnedProceduralPlanAnalysis};
+
 use super::{AnalyzedResult, BindingContext, StatementAnalysisContext};
 use crate::{
     catalog::resolution::EffectiveSearchPath,
@@ -51,11 +54,11 @@ impl ProceduralPlanAnalysis {
         Ok(crate::prepared::definition::PreparedDefinition {
             composite_inputs: self.composite_inputs.clone(),
             logical_plan: plan.clone(),
-            parameter_types,
+            parameter_types: parameter_types.into(),
             result_schema,
-            effective_search_path: self.effective_search_path.clone(),
-            dependencies: self.dependencies.clone(),
-            dependency_snapshot: self.dependency_snapshot.clone(),
+            effective_search_path: self.effective_search_path.clone().into(),
+            dependencies: self.dependencies.clone().into(),
+            dependency_snapshot: self.dependency_snapshot.clone().into(),
         })
     }
 }

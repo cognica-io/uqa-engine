@@ -4,6 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod production;
+
 use uqa_execution::query::document_changes::DocumentChanges;
 
 use super::{
@@ -155,16 +157,6 @@ impl Engine {
         let tables = self.storage.tables.read();
         uqa_execution::catalog::relation_names::RelationNameCatalog::new(&*tables, &definitions)
             .relation_kind_resolution(resolution, name)
-    }
-
-    pub(crate) fn try_resolve_relation_kind_for_query(
-        &self,
-        name: &str,
-        relations_bound: bool,
-    ) -> Result<Option<(String, &'static str)>, SQLError> {
-        Ok(self
-            .resolve_relation_kind_for_query(name, relations_bound)?
-            .into_found())
     }
 
     /// Resolve one name through the shared relation namespace, retaining its

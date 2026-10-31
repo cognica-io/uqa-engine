@@ -5,11 +5,46 @@
 //
 
 use super::*;
+
+mod index_ownership;
 use uqa_operators::{DeepFusionLayer, ProgressiveFusionEntry};
 
 mod fusion_order;
 mod intersection_order;
 mod vector_thresholds;
+
+#[test]
+fn optimizer_statistics_attachment_keeps_one_payload_owner() {
+    let stats = std::collections::BTreeMap::from([(
+        "payload".to_string(),
+        crate::ColumnStats {
+            row_count: 2,
+            distinct_count: 2,
+            mcv_values: vec![uqa_core::Value::Str("x".repeat(4 * 1024 * 1024))],
+            mcv_frequencies: vec![0.5],
+            ..Default::default()
+        },
+    )]);
+    let pointer = stats["payload"].mcv_values.as_ptr();
+    let mut optimizer = None;
+    let allocation = allocation_counter::measure(|| {
+        optimizer = Some(QueryOptimizer::new().with_column_stats(stats));
+    });
+    assert!(allocation.bytes_total < 4096, "{allocation:?}");
+    let optimizer = optimizer.unwrap();
+    assert_eq!(
+        optimizer.cost_model.column_stats["payload"]
+            .mcv_values
+            .as_ptr(),
+        pointer
+    );
+    assert_eq!(
+        optimizer.estimator.column_stats["payload"]
+            .mcv_values
+            .as_ptr(),
+        pointer
+    );
+}
 
 fn term(field: &str) -> OperatorTree {
     OperatorTree::Term {

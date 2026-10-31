@@ -36,7 +36,7 @@ pub fn estimate_plan_with_control(
     plan: &UnifiedPlan,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<crate::plan_cost::PlanCost, SQLError> {
-    let estimate = with_statistics(context, |statistics| {
+    let estimate = with_statistics(context, *control, |statistics| {
         crate::plan_cost::PlanCostEstimator::new(statistics).estimate_with_control(plan, control)
     })?;
     validate_cost(estimate)?;
@@ -48,7 +48,7 @@ pub fn estimate_plan_nodes_with_control<'p>(
     plan: &'p UnifiedPlan,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<crate::plan_cost::nodes::PlanCostTree<'p>, SQLError> {
-    let tree = with_statistics(context, |statistics| {
+    let tree = with_statistics(context, *control, |statistics| {
         crate::plan_cost::PlanCostEstimator::new(statistics)
             .estimate_nodes_with_control(plan, control)
     })?;
@@ -61,12 +61,14 @@ pub fn estimate_plan_nodes_with_control<'p>(
 
 fn with_statistics<T>(
     context: StatementStatisticsContext<'_>,
-    estimate: impl FnOnce(&CatalogSourceStatistics<'_>) -> Result<T, SQLError>,
+    production: uqa_core::memory::ProductionControl<'_>,
+    estimate: impl FnOnce(&CatalogSourceStatistics<'_, '_>) -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
     let error = std::cell::RefCell::new(None);
     let statistics = CatalogSourceStatistics {
         context,
         error: &error,
+        production,
     };
     let estimate = estimate(&statistics);
     if let Some(error) = error.into_inner() {
@@ -97,7 +99,7 @@ pub fn optimize_plan(
     aggregates: &dyn crate::AggregateClassifier,
     constant_evaluator: crate::ConstantEvaluator,
     plan: UnifiedPlan,
-) -> Result<UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     optimize_plan_authorized(
         context,
         rules,
@@ -113,12 +115,13 @@ pub(super) fn optimize_plan_authorized(
     aggregates: &dyn crate::AggregateClassifier,
     optimizer_config: crate::optimizer::OptimizerConfig<'_>,
     mut plan: UnifiedPlan,
-) -> Result<UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     rule_inputs::rewrite_plan(rules, &mut plan, &optimizer_config)?;
     let callback_error = std::cell::RefCell::new(None);
     let statistics = CatalogSourceStatistics {
         context,
         error: &callback_error,
+        production: optimizer_config.production,
     };
     let optimized = optimize_plan_with_statistics(
         context.volatility,
@@ -132,13 +135,60 @@ pub(super) fn optimize_plan_authorized(
     }
     optimized
 }
+
+pub(super) fn optimize_owned_plan_authorized(
+    context: StatementStatisticsContext<'_>,
+    rules: &rule_inputs::RuleInputPlanningContext<'_>,
+    aggregates: &dyn crate::AggregateClassifier,
+    mut config: crate::optimizer::OptimizerConfig<'_>,
+    plan: uqa_sql::plan::MutableExecutablePlan,
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
+    let plan = rule_inputs::rewrite_plan_owned(rules, plan, &config)?;
+    let callback_error = std::cell::RefCell::new(None);
+    let statistics = CatalogSourceStatistics {
+        context,
+        error: &callback_error,
+        production: config.production,
+    };
+    let mut volatile = Ok(false);
+    plan.as_plan_ref()
+        .visit_scalar_expressions(&mut |expression| {
+            if matches!(volatile, Ok(false)) {
+                volatile = uqa_sql::semantics::volatility::scalar_calls_are_volatile_with_control(
+                    context.volatility,
+                    expression,
+                    &config.production,
+                );
+            }
+        });
+    if volatile? {
+        config.enable_filter_pushdown = false;
+        config.enable_join_reordering = false;
+    }
+    let optimized = crate::optimizer::optimize_owned_with_aggregates_and_statistics(
+        plan,
+        &config,
+        aggregates,
+        &statistics,
+    );
+    if let Some(error) = callback_error.into_inner() {
+        return Err(error);
+    }
+    let optimized = optimized.map_err(|error| match error {
+        crate::optimizer::OptimizerError::Expression(error) => error,
+        crate::optimizer::OptimizerError::JoinGraph(error) => {
+            SQLError::Internal(format!("optimize SQL join order: {error}"))
+        }
+    })?;
+    optimized.finish(&config.production)
+}
 fn optimize_plan_with_statistics(
     volatility_catalog: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
     aggregates: &dyn crate::AggregateClassifier,
     mut optimizer_config: crate::optimizer::OptimizerConfig<'_>,
     plan: crate::UnifiedPlan,
     statistics: &dyn crate::SourceStatistics,
-) -> Result<crate::UnifiedPlan, SQLError> {
+) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     if uqa_sql::semantics::volatility::unified_plan_contains_volatile_function(
         volatility_catalog,
         &plan,

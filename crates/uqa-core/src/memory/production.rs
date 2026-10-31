@@ -9,15 +9,19 @@
 use super::{Budgeted, MemoryBudget, MemoryReservation};
 use crate::{CancellationToken, Value, ValueRetentionError};
 
+mod map;
+mod owned;
 mod small_vec;
 mod string;
 mod vec;
+pub use map::ProductionMap;
+pub use owned::OwnedProductionControl;
 pub use small_vec::ProductionSmallVec;
 pub use string::ProductionString;
 pub use vec::ProductionVec;
 
 /// Allocation and cancellation inputs borrowed for one production call. An ordinary call has no allowance or cancellation scope; a controlled call preserves both the original retained owner and the invoking reader.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProductionControl<'a> {
     budget: Option<&'a MemoryBudget>,
     original: Option<&'a CancellationToken>,
@@ -208,6 +212,19 @@ impl<T> Produced<T> {
         self.memory.as_ref().map_or(0, MemoryReservation::bytes)
     }
 
+    /// Share an immutable result and its existing lease. The shared payload is admitted before allocation; reference-count bookkeeping is outside the payload allowance.
+    pub fn into_shared(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<std::sync::Arc<Self>, ValueRetentionError> {
+        control.assert_owner(self.memory.as_ref());
+        let header = control.reserve(size_of::<Self>())?;
+        let (value, memory) = self.into_parts();
+        Ok(std::sync::Arc::new(
+            control.finish(value, control.combine(memory, header))?,
+        ))
+    }
+
     /// Transfer the explicit value/lease pair to its next allocation owner. The caller must retain the lease until those allocations are freed or handed off under a documented legacy API boundary.
     pub fn into_parts(self) -> (T, Option<MemoryReservation>) {
         (self.value, self.memory)
@@ -250,6 +267,34 @@ impl<T> From<Budgeted<T>> for Produced<T> {
 impl<T> std::ops::Deref for Produced<T> {
     type Target = T;
     fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T: PartialEq> PartialEq for Produced<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<T: Eq> Eq for Produced<T> {}
+impl<T: Ord> PartialOrd for Produced<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<T: Ord> Ord for Produced<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+impl std::borrow::Borrow<str> for Produced<String> {
+    fn borrow(&self) -> &str {
+        &self.value
+    }
+}
+impl std::borrow::Borrow<String> for Produced<String> {
+    fn borrow(&self) -> &String {
         &self.value
     }
 }

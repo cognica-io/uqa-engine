@@ -4,41 +4,40 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Declared output namespaces used by correlation analysis, without executing sources.
+//! Declared correlation namespaces retain admitted names without evaluating their sources.
 
 use super::{
-    Arc, BTreeMap, BTreeSet, CorrelationContext, QueryPlan, QueryScope, RelationColumns,
-    RelationalPlan, SQLError, ScalarExpr, SourcePlan,
+    memory::{
+        copy_ctes, copy_names, copy_scopes, extend_scopes, insert, insert_set, Analysis, Columns,
+        Ctes, QueryScope, RelationColumns,
+    },
+    QueryPlan, RelationalPlan, SQLError, ScalarExpr, SourcePlan,
 };
+use std::sync::Arc;
+use uqa_core::memory::{ProductionControl, ProductionVec};
+mod functions;
 
 impl QueryScope {
-    fn relation(qualifier: Option<&str>, columns: RelationColumns) -> Self {
-        let columns = Arc::new(columns);
-        Self {
-            qualifiers: qualifier
-                .map(|name| (name.to_owned(), Arc::clone(&columns)))
-                .into_iter()
-                .collect(),
-            internal_relations: BTreeSet::new(),
-            columns,
-            enclosing: None,
-        }
-    }
-
-    fn qualified_columns(&self, qualifier: &str) -> Option<Arc<RelationColumns>> {
-        let columns = self.qualifiers.get(qualifier)?;
-        Some(self.enclosing.as_ref().map_or_else(
-            || Arc::clone(columns),
-            |input| {
-                Arc::new(RelationColumns::known(
-                    input
-                        .qualified_star_layout(qualifier)
-                        .into_iter()
-                        .filter(|(_, slot, _)| !input.slot_is_local(*slot))
-                        .map(|(name, _, _)| name)
-                        .collect(),
-                ))
-            },
+    fn qualified_columns(
+        &self,
+        qualifier: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Columns>, SQLError> {
+        let Some(columns) = self.qualifiers.get(qualifier) else {
+            return Ok(None);
+        };
+        let Some(input) = &self.enclosing else {
+            return Ok(Some(Arc::clone(columns)));
+        };
+        let mut names = ProductionVec::new(*control);
+        input.visit_qualified_star_positions(qualifier, control, |name, _, slot, _| {
+            if !input.slot_is_local(slot) {
+                names.push_produced(control.copy_text(name)?)?;
+            }
+            Ok(())
+        })?;
+        Ok(Some(
+            RelationColumns::known(names.finish()?, control)?.share(control)?,
         ))
     }
 }
@@ -55,9 +54,9 @@ pub(super) fn admits_preceding(source: &SourcePlan, inherited_lateral: bool) -> 
 }
 
 pub(super) fn source_scope(
-    context: CorrelationContext<'_>,
+    context: Analysis<'_, '_>,
     source: &SourcePlan,
-    ctes: &BTreeMap<String, RelationColumns>,
+    ctes: &Ctes,
     scopes: &[QueryScope],
 ) -> Result<QueryScope, SQLError> {
     source_scope_in_namespace(context, source, ctes, scopes, &[], false)
@@ -65,21 +64,20 @@ pub(super) fn source_scope(
 
 #[expect(
     clippy::too_many_lines,
-    reason = "preserves each source's declared namespace"
+    reason = "preserves source-specific namespace and lateral lookup order"
 )]
 pub(super) fn source_scope_in_namespace(
-    context: CorrelationContext<'_>,
+    context: Analysis<'_, '_>,
     source: &SourcePlan,
-    ctes: &BTreeMap<String, RelationColumns>,
+    ctes: &Ctes,
     scopes: &[QueryScope],
     preceding: &[QueryScope],
     inherited_lateral: bool,
 ) -> Result<QueryScope, SQLError> {
+    let control = &context.control;
+    control.check()?;
     match source {
-        SourcePlan::RetainedRows(source) => Ok(QueryScope {
-            internal_relations: [source.relation()].into_iter().collect(),
-            ..QueryScope::relation(None, RelationColumns::empty_known())
-        }),
+        SourcePlan::RetainedRows(source) => captured_scope(source.relation(), control),
         SourcePlan::Table {
             bound_columns,
             name,
@@ -88,15 +86,19 @@ pub(super) fn source_scope_in_namespace(
             column_aliases,
             ..
         } => {
-            let mut columns = match bound_columns {
-                Some(columns) => RelationColumns::known(columns.clone()),
+            let columns = match bound_columns {
+                Some(columns) => RelationColumns::known(
+                    copy_names(columns.iter().map(String::as_str), control)?,
+                    control,
+                )?,
                 None => relation_columns(context, name, ctes)?,
-            };
-            columns.apply_positional_aliases(column_aliases);
-            Ok(QueryScope::relation(
-                Some(alias.as_ref().unwrap_or(qualifier)),
+            }
+            .apply_positional_aliases(column_aliases, control)?;
+            QueryScope::relation(
+                Some(alias.as_deref().unwrap_or(qualifier)),
                 columns,
-            ))
+                control,
+            )
         }
         SourcePlan::Join {
             left,
@@ -110,8 +112,8 @@ pub(super) fn source_scope_in_namespace(
             ..
         } => {
             let left = source_scope_in_namespace(context, left, ctes, scopes, preceding, false)?;
-            let mut right_preceding = preceding.to_vec();
-            right_preceding.push(left.clone());
+            let mut right_preceding = copy_scopes(preceding, control)?;
+            right_preceding.push(left.copy_with_control(control)?, control)?;
             let right = source_scope_in_namespace(
                 context,
                 right,
@@ -121,62 +123,78 @@ pub(super) fn source_scope_in_namespace(
                 *lateral,
             )?;
             let mut internal_relations = left.internal_relations;
-            internal_relations.extend(right.internal_relations);
-            let mut columns =
+            for relation in right.internal_relations {
+                insert_set(&mut internal_relations, relation, control)?;
+            }
+            let columns =
                 if (using.is_some() || *natural) && left.columns.complete && right.columns.complete
                 {
-                    let left_schema = crate::RowSchema::new(left.columns.ordered.clone());
-                    let right_schema = crate::RowSchema::new(right.columns.ordered.clone());
-                    let resolved = crate::semantics::resolve_join_using(
+                    let left_schema = crate::RowSchema::new_with_control(
+                        copy_names(left.columns.ordered.iter().map(String::as_str), control)?,
+                        control,
+                    )?;
+                    let right_schema = crate::RowSchema::new_with_control(
+                        copy_names(right.columns.ordered.iter().map(String::as_str), control)?,
+                        control,
+                    )?;
+                    let resolved = crate::semantics::resolve_join_using_with_control(
                         using.as_ref(),
                         *natural,
                         &left_schema,
                         &right_schema,
+                        control,
                     )?
-                    .expect("qualified join has a resolved output");
+                    .expect("qualified join output");
                     RelationColumns::known(
-                        crate::semantics::join_using_output_schema(
+                        crate::semantics::join_using_column_names_with_control(
                             *kind,
                             &left_schema,
                             &right_schema,
                             &resolved,
-                        )?
-                        .columns()
-                        .to_vec(),
-                    )
+                            control,
+                        )?,
+                        control,
+                    )?
                 } else {
                     let mut columns = RelationColumns::known(
-                        left.columns
-                            .ordered
-                            .iter()
-                            .chain(&right.columns.ordered)
-                            .cloned()
-                            .collect(),
-                    );
+                        copy_names(
+                            left.columns
+                                .ordered
+                                .iter()
+                                .chain(right.columns.ordered.iter())
+                                .map(String::as_str),
+                            control,
+                        )?,
+                        control,
+                    )?;
                     columns.complete = left.columns.complete && right.columns.complete;
                     columns
-                };
-            columns.apply_positional_aliases(column_aliases);
+                }
+                .apply_positional_aliases(column_aliases, control)?;
             if let Some(alias) = alias {
                 return Ok(QueryScope {
                     internal_relations,
-                    ..QueryScope::relation(Some(alias), columns)
+                    ..QueryScope::relation(Some(alias), columns, control)?
                 });
             }
             let mut qualifiers = left.qualifiers;
-            qualifiers.extend(right.qualifiers);
+            for (name, columns) in right.qualifiers {
+                insert(&mut qualifiers, name, columns, control)?;
+            }
             if let Some(using) = using {
                 if let Some(alias) = &using.alias {
-                    qualifiers.insert(
-                        alias.clone(),
-                        Arc::new(RelationColumns::known(using.columns.clone())),
-                    );
+                    let columns = RelationColumns::known(
+                        copy_names(using.columns.iter().map(String::as_str), control)?,
+                        control,
+                    )?
+                    .share(control)?;
+                    insert(&mut qualifiers, control.copy_text(alias)?, columns, control)?;
                 }
             }
             Ok(QueryScope {
                 qualifiers,
                 internal_relations,
-                columns: Arc::new(columns),
+                columns: columns.share(control)?,
                 enclosing: None,
             })
         }
@@ -187,15 +205,12 @@ pub(super) fn source_scope_in_namespace(
             internal_relation,
             ..
         } => {
-            if let Some(internal_relation) = internal_relation {
-                return Ok(QueryScope {
-                    internal_relations: [*internal_relation].into_iter().collect(),
-                    ..QueryScope::relation(None, RelationColumns::empty_known())
-                });
+            if let Some(relation) = internal_relation {
+                return captured_scope(*relation, control);
             }
-            let mut columns = values_columns(rows.first().map_or(0, Vec::len));
-            columns.apply_positional_aliases(column_aliases);
-            Ok(QueryScope::relation(alias.as_deref(), columns))
+            let columns = values_columns(rows.first().map_or(0, Vec::len), control)?
+                .apply_positional_aliases(column_aliases, control)?;
+            QueryScope::relation(alias.as_deref(), columns, control)
         }
         SourcePlan::Function {
             name,
@@ -208,183 +223,211 @@ pub(super) fn source_scope_in_namespace(
             ordinality,
             ..
         } => {
-            let qualifier = Some(alias.as_deref().unwrap_or(output_name));
-            if let Some((binding, function)) = binding.as_ref().and_then(|binding| {
-                crate::routines::selected_bound_function(context.routines, binding)
-                    .map(|function| (binding, function))
-            }) {
-                let columns = crate::semantics::user_table_function_columns(
-                    context.routines,
-                    &function,
-                    binding.invocation.as_deref(),
-                    output_name,
-                    alias.as_deref(),
-                    column_aliases,
-                    *ordinality,
-                )?;
-                return Ok(QueryScope::relation(
-                    qualifier,
-                    RelationColumns::known(columns),
-                ));
-            }
-            let builtin = binding.as_ref().is_none_or(|binding| binding.builtin)
-                && crate::semantics::is_builtin_table_function(
-                    &crate::semantics::builtin_function_dispatch_name(name),
-                );
-            let ordered = if builtin {
-                crate::semantics::table_function_empty_schema(
-                    name,
-                    output_name,
-                    alias.as_deref(),
-                    column_aliases,
-                    args.len(),
-                    *ordinality,
-                )
-            } else {
-                crate::semantics::apply_table_function_aliases(
-                    column_aliases.clone(),
-                    &[],
-                    *ordinality,
-                )
-            };
-            let mut columns = RelationColumns::known(ordered);
-            columns.complete = builtin || !column_types.is_empty();
-            Ok(QueryScope::relation(qualifier, columns))
+            let columns = functions::columns(
+                context,
+                name,
+                binding.as_ref(),
+                args.len(),
+                output_name,
+                alias.as_deref(),
+                column_aliases,
+                !column_types.is_empty(),
+                *ordinality,
+            )?;
+            QueryScope::relation(
+                Some(alias.as_deref().unwrap_or(output_name)),
+                columns,
+                control,
+            )
         }
         SourcePlan::FunctionGroup {
-            functions,
+            functions: members,
             alias,
             column_aliases,
             ordinality,
         } => {
-            let qualifier = alias.as_deref().or_else(|| {
-                functions
-                    .first()
-                    .map(|function| function.output_name.as_str())
-            });
-            let mut ordered = Vec::new();
+            let qualifier = alias
+                .as_deref()
+                .or_else(|| members.first().map(|member| member.output_name.as_str()));
+            let mut ordered = ProductionVec::new(*control);
             let mut complete = true;
-            for function in functions {
-                let member = crate::binding::sources::table_function_member_source(function);
-                let columns = source_scope(context, &member, ctes, scopes)?.columns;
+            for member in members {
+                let columns = functions::columns(
+                    context,
+                    &member.name,
+                    member.binding.as_ref(),
+                    member.args.len(),
+                    &member.output_name,
+                    None,
+                    &member.column_aliases,
+                    !member.column_types.is_empty(),
+                    false,
+                )?;
                 complete &= columns.complete;
-                ordered.extend(columns.ordered.iter().cloned());
+                for name in columns.ordered.iter() {
+                    ordered.push_produced(control.copy_text(name)?)?;
+                }
             }
-            let mut columns =
-                RelationColumns::known(crate::semantics::apply_table_function_aliases(
-                    ordered,
+            let mut columns = RelationColumns::known(
+                crate::semantics::apply_table_function_aliases_with_control(
+                    &ordered,
                     column_aliases,
                     *ordinality,
-                ));
+                    control,
+                )?,
+                control,
+            )?;
             columns.complete = complete;
-            Ok(QueryScope::relation(qualifier, columns))
+            QueryScope::relation(qualifier, columns, control)
         }
         SourcePlan::Subquery {
             body,
             alias,
             column_aliases,
+            captured_output,
             ..
         } => {
-            let mut outer = scopes.to_vec();
+            let mut outer = copy_scopes(scopes, control)?;
             if admits_preceding(source, inherited_lateral) {
-                outer.extend_from_slice(preceding);
+                extend_scopes(&mut outer, preceding, control)?;
             }
-            let mut columns = query_output_columns(context, body, ctes, &outer)?;
-            columns.apply_positional_aliases(column_aliases);
-            if let SourcePlan::Subquery {
-                captured_output: Some(relation),
-                ..
-            } = source
-            {
-                let mut scope = QueryScope::relation(None, RelationColumns::empty_known());
-                scope.internal_relations.insert(*relation);
-                Ok(scope)
-            } else {
-                Ok(QueryScope::relation(alias.as_deref(), columns))
+            let columns = query_output_columns(context, body, ctes, &outer)?
+                .apply_positional_aliases(column_aliases, control)?;
+            match captured_output {
+                Some(relation) => captured_scope(*relation, control),
+                None => QueryScope::relation(alias.as_deref(), columns, control),
             }
         }
     }
 }
 
+fn captured_scope(
+    relation: crate::ast::InternalRelationId,
+    control: &ProductionControl<'_>,
+) -> Result<QueryScope, SQLError> {
+    let mut scope = QueryScope::empty(control)?;
+    insert_set(&mut scope.internal_relations, relation, control)?;
+    Ok(scope)
+}
+
 fn relation_columns(
-    context: CorrelationContext<'_>,
+    context: Analysis<'_, '_>,
     name: &str,
-    ctes: &BTreeMap<String, RelationColumns>,
+    ctes: &Ctes,
 ) -> Result<RelationColumns, SQLError> {
-    if let Some(columns) = crate::semantics::cte_reference_name(name)
-        .as_ref()
-        .and_then(|name| ctes.get(name))
+    let control = &context.control;
+    if let Some(reference) = crate::RelationIdentity::borrowed_reference(name)
+        .filter(|reference| reference.schema.is_none())
     {
-        return Ok(columns.clone());
+        let decoded = control.format(format_args!("{}", reference.name))?;
+        if let Some(columns) = ctes.get(decoded.as_str()) {
+            return columns.copy_with_control(control);
+        }
     }
     if let Some(columns) = context
         .scoped_relations
         .and_then(|relations| relations.columns(name))
     {
-        return Ok(RelationColumns::known(columns.to_vec()));
+        return RelationColumns::known(
+            copy_names(columns.iter().map(String::as_str), control)?,
+            control,
+        );
     }
-    let catalog = context.catalog;
-    let resolution = context.resolution;
-    if let Some(columns) = catalog.virtual_relation_schema(resolution, name)? {
-        return Ok(RelationColumns::known(
-            columns.into_iter().map(|(name, _)| name).collect(),
-        ));
+    if let Some(columns) =
+        context
+            .catalog
+            .virtual_relation_columns_with_control(context.resolution, name, control)?
+    {
+        return RelationColumns::known(columns, control);
     }
-    if let Ok(Some(table)) = catalog.table_resolved(resolution, name) {
-        return Ok(RelationColumns::known(
-            table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect(),
-        ));
+    match context
+        .catalog
+        .table_resolved_with_control(context.resolution, name, control)
+    {
+        Ok(Some(table)) => {
+            return RelationColumns::known(
+                copy_names(
+                    table.columns.iter().map(|column| column.name.as_str()),
+                    control,
+                )?,
+                control,
+            )
+        }
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        _ => {}
     }
-    if let Some(view) = catalog.view_resolved(resolution, name)? {
-        return match view.output_columns {
-            Some(columns) => Ok(RelationColumns::known(columns)),
-            None => query_output_columns(context, &view.query, &BTreeMap::new(), &[]),
-        };
+    let mut selected = None;
+    context.catalog.with_view_definition_with_control(
+        context.resolution,
+        name,
+        control,
+        &mut |view| {
+            selected = Some(match view.output_columns {
+                Some(columns) => RelationColumns::known(
+                    copy_names(columns.iter().map(String::as_str), control)?,
+                    control,
+                )?,
+                None => query_output_columns(context, view.query, &Ctes::new(), &[])?,
+            });
+            Ok(())
+        },
+    )?;
+    if let Some(columns) = selected {
+        return Ok(columns);
     }
-    if let Ok(Some(table)) = catalog.foreign_table_resolved(resolution, name) {
-        return Ok(RelationColumns::known(
-            table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect(),
-        ));
+    match context.catalog.with_foreign_table_columns_with_control(
+        context.resolution,
+        name,
+        control,
+        &mut |columns| {
+            selected = Some(RelationColumns::known(
+                copy_names(columns.iter().map(|column| column.name.as_str()), control)?,
+                control,
+            )?);
+            Ok(())
+        },
+    ) {
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        _ => {}
     }
-    Ok(RelationColumns::default())
+    match selected {
+        Some(columns) => Ok(columns),
+        None => RelationColumns::empty(false, control),
+    }
 }
 
-fn values_columns(width: usize) -> RelationColumns {
-    RelationColumns::known(
-        (0..width)
-            .map(|index| format!("column{}", index + 1))
-            .collect(),
-    )
+fn values_columns(
+    width: usize,
+    control: &ProductionControl<'_>,
+) -> Result<RelationColumns, SQLError> {
+    let mut names = ProductionVec::new(*control);
+    for index in 0..width {
+        names.push_produced(control.format(format_args!("column{}", index + 1))?)?;
+    }
+    RelationColumns::known(names.finish()?, control)
 }
 
 pub(super) fn cte_output_columns(
-    context: CorrelationContext<'_>,
+    context: Analysis<'_, '_>,
     cte: &crate::plan::CtePlan,
-    ctes: &BTreeMap<String, RelationColumns>,
+    ctes: &Ctes,
     scopes: &[QueryScope],
 ) -> Result<RelationColumns, SQLError> {
-    let mut columns = match cte.body.query() {
+    let columns = match cte.body.query() {
         Some(query) => query_output_columns(context, query, ctes, scopes)?,
-        None => RelationColumns::default(),
+        None => RelationColumns::empty(false, &context.control)?,
     };
-    columns.apply_positional_aliases(&cte.columns);
-    Ok(columns)
+    columns.apply_positional_aliases(&cte.columns, &context.control)
 }
 
 pub(super) fn query_output_columns(
-    context: CorrelationContext<'_>,
+    context: Analysis<'_, '_>,
     plan: &QueryPlan,
-    parent_ctes: &BTreeMap<String, RelationColumns>,
+    parent_ctes: &Ctes,
     scopes: &[QueryScope],
 ) -> Result<RelationColumns, SQLError> {
+    let control = &context.control;
+    control.check()?;
     match &plan.root {
         RelationalPlan::QueryBlock(block)
             if !block.projections.iter().any(|projection| {
@@ -394,63 +437,80 @@ pub(super) fn query_output_columns(
                 )
             }) =>
         {
-            return Ok(RelationColumns::known(
-                crate::semantics::projection_columns(&block.projections),
-            ));
+            let labels =
+                crate::semantics::projection_labels_with_control(&block.projections, &[], control)?;
+            return RelationColumns::known(copy_names(labels.iter(), control)?, control);
         }
         RelationalPlan::Values { rows, .. } => {
-            return Ok(values_columns(rows.first().map_or(0, Vec::len)));
+            return values_columns(rows.first().map_or(0, Vec::len), control)
         }
         _ => {}
     }
-    let mut ctes = parent_ctes.clone();
+    let mut ctes = copy_ctes(parent_ctes, control)?;
     for cte in plan.ctes.iter().filter(|cte| cte.recursive) {
-        let mut columns = RelationColumns::known(cte.columns.clone());
+        let mut columns = RelationColumns::known(
+            copy_names(cte.columns.iter().map(String::as_str), control)?,
+            control,
+        )?;
         columns.complete = false;
-        ctes.insert(cte.name.clone(), columns);
+        insert(
+            &mut ctes,
+            control.copy_text(&cte.name)?,
+            columns.share(control)?,
+            control,
+        )?;
     }
     for cte in &plan.ctes {
-        let columns = cte_output_columns(context, cte, &ctes, scopes)?;
-        ctes.insert(cte.name.clone(), columns);
+        let columns = cte_output_columns(context, cte, &ctes, scopes)?.share(control)?;
+        insert(&mut ctes, control.copy_text(&cte.name)?, columns, control)?;
     }
     match &plan.root {
         RelationalPlan::QueryBlock(block) => {
             let local = match &block.from {
                 Some(source) => source_scope(context, source, &ctes, scopes)?,
-                None => QueryScope::relation(None, RelationColumns::empty_known()),
+                None => QueryScope::empty(control)?,
             };
-            let mut ordered = Vec::new();
+            let mut ordered = ProductionVec::new(*control);
             let mut complete = true;
             for projection in &block.projections {
                 let expanded = match &projection.expr {
                     ScalarExpr::Star => Some(Arc::clone(&local.columns)),
                     ScalarExpr::QualifiedStar(qualifier) => {
-                        local.qualified_columns(qualifier).or_else(|| {
-                            scopes
-                                .iter()
-                                .rev()
-                                .find_map(|scope| scope.qualified_columns(qualifier))
-                        })
+                        let mut columns = local.qualified_columns(qualifier, control)?;
+                        if columns.is_none() {
+                            for scope in scopes.iter().rev() {
+                                columns = scope.qualified_columns(qualifier, control)?;
+                                if columns.is_some() {
+                                    break;
+                                }
+                            }
+                        }
+                        columns
                     }
                     _ => {
-                        ordered.extend(crate::semantics::projection_columns(std::slice::from_ref(
-                            projection,
-                        )));
+                        crate::semantics::with_projection_label(projection, control, |name| {
+                            ordered.push_produced(control.copy_text(name)?)?;
+                            Ok(())
+                        })?;
                         continue;
                     }
                 };
                 if let Some(columns) = expanded {
-                    ordered.extend(columns.ordered.iter().cloned());
+                    for name in columns.ordered.iter() {
+                        ordered.push_produced(control.copy_text(name)?)?;
+                    }
                     complete &= columns.complete;
                 } else {
                     complete = false;
                 }
             }
-            let mut columns = RelationColumns::known(ordered);
+            let mut columns = RelationColumns::known(ordered.finish()?, control)?;
             columns.complete = complete;
             Ok(columns)
         }
         RelationalPlan::SetOp { left, .. } => query_output_columns(context, left, &ctes, scopes),
-        RelationalPlan::Values { rows, .. } => Ok(values_columns(rows.first().map_or(0, Vec::len))),
+        RelationalPlan::Values { rows, .. } => {
+            values_columns(rows.first().map_or(0, Vec::len), control)
+        }
     }
 }
