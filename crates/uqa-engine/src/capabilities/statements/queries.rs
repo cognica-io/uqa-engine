@@ -21,7 +21,10 @@ use uqa_execution::{
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 impl StatementQueryContexts<StatementReadSnapshot> for Engine {
-    fn statement_scope(&self, privilege_subject: Option<&RoleReference>) -> CteScope {
+    fn statement_scope(
+        &self,
+        privilege_subject: Option<&RoleReference>,
+    ) -> Result<CteScope, SQLError> {
         query_scope::new_for_statement(self, privilege_subject)
     }
     fn query_context(

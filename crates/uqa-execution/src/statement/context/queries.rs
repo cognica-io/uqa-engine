@@ -15,7 +15,10 @@ use uqa_sql::{SQLError, SQLParam, SQLResult};
 pub type StatementExpressionOperation<'a> =
     dyn FnMut(&PhysicalEvalContext<'_>) -> Result<SQLResult, SQLError> + 'a;
 pub trait StatementQueryContexts<S: Clone + 'static> {
-    fn statement_scope(&self, privilege_subject: Option<&RoleReference>) -> CteScope<S>;
+    fn statement_scope(
+        &self,
+        privilege_subject: Option<&RoleReference>,
+    ) -> Result<CteScope<S>, SQLError>;
     fn query_context(&self) -> QueryContext<'_, S>;
     fn row_lock_context(&self) -> RowLockContext<'_, S>;
     fn with_expression_context(

@@ -67,7 +67,8 @@ fn execute_lateral_query_scope<S: Clone + Send + Sync + 'static>(
     scoped_ctes: &mut CteScope<S>,
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
-    let mut lookup = scoped_ctes.enter_query_plan_scope(plan)?;
+    let resources = context.ctes.production_resources()?;
+    let mut lookup = scoped_ctes.enter_query_plan_scope_with_control(plan, &resources.control())?;
     let mut scoped_ctes = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     // Keep folded occurrences selected during initialization instead of materializing their original, unpruned definitions for each outer row.
     let scheduled =

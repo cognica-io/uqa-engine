@@ -31,7 +31,8 @@ pub fn try_build_retained_query_operator<'a, S: Clone + Send + Sync + 'static>(
         return Ok(None);
     }
     let mut scope = scope.clone();
-    let mut scope = scope.enter_query_plan_scope(plan)?;
+    let resources = context.source.ctes.production_resources()?;
+    let mut scope = scope.enter_query_plan_scope_with_control(plan, &resources.control())?;
     let prepared =
         crate::query::sources::prepared_queries::prepare(&context.source, plan, params, &scope)?;
     let plan = prepared.as_ref();

@@ -148,7 +148,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 let ctes = self
                     .context
                     .queries
-                    .statement_scope(self.privilege_subject.as_ref());
+                    .statement_scope(self.privilege_subject.as_ref())?;
                 crate::query::sources::prepared_queries::prepare_in_place(
                     &self.context.queries.query_context().source,
                     query,
@@ -185,7 +185,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             let ctes = self
                 .context
                 .queries
-                .statement_scope(self.privilege_subject.as_ref());
+                .statement_scope(self.privilege_subject.as_ref())?;
             if let crate::query::sources::prepared_queries::PreparedQuery::Owned(prepared) =
                 crate::query::sources::prepared_queries::prepare(
                     &self.context.queries.query_context().source,
@@ -222,7 +222,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             let ctes = self
                 .context
                 .queries
-                .statement_scope(self.privilege_subject.as_ref());
+                .statement_scope(self.privilege_subject.as_ref())?;
             crate::query::privileges::routine_calls::query(
                 &self.context.queries.query_context().source,
                 query,
@@ -357,7 +357,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
             let scope = self
                 .context
                 .queries
-                .statement_scope(self.privilege_subject.as_ref());
+                .statement_scope(self.privilege_subject.as_ref())?;
             let hook = self
                 .context
                 .queries

@@ -48,13 +48,13 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
     let mut scope = ctes.clone();
-    let mut lookup = scope.enter_query_plan_scope(plan)?;
     let retained = context.ctes.queries.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
         retained.memory(),
         retained.cancellation(),
         context.ctes.runtime.cancellation,
     );
+    let mut lookup = scope.enter_query_plan_scope_with_control(plan, &control)?;
     let ordered = uqa_sql::semantics::order_cte_plans_with_control(&plan.ctes, control)?;
     for cte in ordered.iter() {
         lookup.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);

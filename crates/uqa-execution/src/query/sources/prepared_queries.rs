@@ -180,7 +180,8 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     memory: &mut uqa_sql::plan::ExecutableMemory,
 ) -> Result<(), SQLError> {
     let mut scope = parent.clone();
-    let mut lookup = scope.enter_query_plan_scope(query)?;
+    let resources = context.ctes.production_resources()?;
+    let mut lookup = scope.enter_query_plan_scope_with_control(query, &resources.control())?;
     let scheduled =
         crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, query)?;
     let folded = scheduled

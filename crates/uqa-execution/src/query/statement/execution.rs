@@ -101,7 +101,9 @@ fn execute_prepared_query_output<S: Clone + Send + Sync + 'static>(
     ctes: &mut CteScope<S>,
     output_mode: QueryOutputMode<S>,
 ) -> Result<QueryOutput, SQLError> {
-    let mut relation_lookup = ctes.enter_query_plan_scope(plan)?;
+    let resources = context.source.ctes.production_resources()?;
+    let mut relation_lookup =
+        ctes.enter_query_plan_scope_with_control(plan, &resources.control())?;
     let mut visible_ctes =
         relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let ctes = &mut *visible_ctes;

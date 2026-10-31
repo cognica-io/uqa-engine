@@ -18,6 +18,7 @@ use uqa_sql::{catalog::resolution::RelationNameResolution, SQLError};
 mod ctes;
 pub(super) mod resolution;
 mod rows;
+pub(super) mod subject;
 pub use rows::{CteRowsIter, CteRowsMap};
 
 pub(in crate::query::scope) fn shared<T>(
@@ -72,6 +73,20 @@ impl<S: Clone> CteScope<S> {
         scope.catalog = Some(catalog);
         scope.catalog_resolution = Some(resolution);
         Ok(scope)
+    }
+
+    /// Replace relation authority only after its complete private reference has been admitted. SQL-visible `current_user` and namespace stay in their original owner.
+    pub fn set_privilege_subject_with_control(
+        &mut self,
+        subject: Option<&uqa_sql::catalog::roles::RoleReference>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let subject = subject
+            .map(|subject| subject::ScopeSubject::capture(subject, control))
+            .transpose()?;
+        self.privilege_subject = subject;
+        Ok(())
     }
 
     pub fn relation_name_resolution_with_control(

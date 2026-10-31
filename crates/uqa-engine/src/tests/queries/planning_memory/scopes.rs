@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::ProductionControl, CancellationToken, RelationIdentity};
 
+mod commands;
+
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]
 #[case::sqlite_native(Provider::SQLiteNative)]

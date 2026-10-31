@@ -59,7 +59,6 @@ fn native_mutation_query_arenas_admit_before_copying_and_retain_their_original_a
     let scope = uqa_execution::mutation::merge::analysis::merge_analysis_scope(&engine, plan, None)
         .unwrap();
     assert!(memory.used() >= before + (4 << 20));
-    let allocated = memory.used();
     let mut sibling = None;
     let observed = allocation_counter::measure(|| {
         sibling = Some(scope.clone());
@@ -73,9 +72,11 @@ fn native_mutation_query_arenas_admit_before_copying_and_retain_their_original_a
         scope.scalar_subqueries.as_ptr(),
         sibling.scalar_subqueries.as_ptr()
     );
+    let arena = sibling.scalar_subqueries.clone();
     drop(scope);
-    assert_eq!(memory.used(), allocated);
     drop(sibling);
+    assert_eq!(memory.used(), before + arena.reserved_bytes());
+    drop(arena);
     assert_eq!(memory.used(), before);
     engine
         .sql("INSERT INTO items VALUES(1); SELECT id FROM items", &[])

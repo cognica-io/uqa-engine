@@ -124,7 +124,7 @@ fn validate_explain_cursor_body<S: Clone + Send + Sync + 'static>(
     match body {
         UnifiedPlan::Query(query) => {
             lock_query_relations(inputs.queries.row_lock_context(), query)?;
-            let ctes = inputs.queries.statement_scope(None);
+            let ctes = inputs.queries.statement_scope(None)?;
             analyze_query_plan_schema(inputs.routines, query, params, &ctes, None)?;
             Ok(())
         }
@@ -181,7 +181,7 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
     let has_row_locks = query_has_row_locks(query);
     validate_query_options(context, has_row_locks, hold, scroll)?;
     lock_query_relations(inputs.queries.row_lock_context(), query)?;
-    let ctes = inputs.queries.statement_scope(None);
+    let ctes = inputs.queries.statement_scope(None)?;
     let schema = analyze_query_plan_schema(inputs.routines, query, params, &ctes, None)?;
     validate_query_row_locks(inputs.queries.row_lock_context(), query, params)?;
     let query_context = inputs.queries.query_context();
@@ -258,7 +258,7 @@ fn analyze_call_result_schema<S: Clone + 'static>(
     params: &[uqa_sql::SQLParam],
 ) -> Result<Option<uqa_sql::RowSchema>, SQLError> {
     let analysis = uqa_sql::routines::call::ProcedureCallAnalysis::new(arguments)?;
-    let scope = inputs.queries.statement_scope(None);
+    let scope = inputs.queries.statement_scope(None)?;
     analysis.result_schema(
         name,
         &RoutineOverloadContext {

@@ -79,7 +79,7 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         subject: RoleReference,
     ) -> PrivilegeSubjectScope<'_, S> {
-        let previous = self.privilege_subject.replace(subject);
+        let previous = self.privilege_subject.replace(subject.into());
         PrivilegeSubjectScope {
             ctes: self,
             previous,
@@ -113,10 +113,22 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         plan: &QueryPlan,
     ) -> Result<QueryPlanScope<'_, S>, SQLError> {
+        self.enter_query_plan_scope_with_control(
+            plan,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+    }
+
+    pub fn enter_query_plan_scope_with_control(
+        &mut self,
+        plan: &QueryPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<QueryPlanScope<'_, S>, SQLError> {
         let mut lookup = self.enter_relation_lookup_mode(plan.relations_bound)?;
         let previous_subject = match &plan.relation_privilege_subject {
             Some(subject) => {
-                QueryPrivilege::Restore(lookup.privilege_subject.replace(subject.clone()))
+                let subject = super::production::subject::ScopeSubject::capture(subject, control)?;
+                QueryPrivilege::Restore(lookup.privilege_subject.replace(subject))
             }
             None => QueryPrivilege::Unchanged,
         };
@@ -333,7 +345,7 @@ impl<S: Clone> CteScope<S> {
 
 pub struct PrivilegeSubjectScope<'a, S: Clone> {
     ctes: &'a mut CteScope<S>,
-    previous: Option<RoleReference>,
+    previous: Option<super::production::subject::ScopeSubject>,
 }
 
 impl<S: Clone> std::ops::Deref for PrivilegeSubjectScope<'_, S> {
@@ -393,7 +405,7 @@ pub struct QueryPlanScope<'a, S: Clone> {
 
 enum QueryPrivilege {
     Unchanged,
-    Restore(Option<RoleReference>),
+    Restore(Option<super::production::subject::ScopeSubject>),
 }
 
 impl<S: Clone> std::ops::Deref for QueryPlanScope<'_, S> {

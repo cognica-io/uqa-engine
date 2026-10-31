@@ -63,7 +63,7 @@ pub struct CteScope<S: Clone = ()> {
     catalog: Option<CatalogReadView>,
     catalog_revision: Option<(u64, u64)>,
     catalog_resolution: Option<production::resolution::ScopeResolution>,
-    privilege_subject: Option<RoleReference>,
+    privilege_subject: Option<production::subject::ScopeSubject>,
     command_cte_snapshot: Option<Arc<S>>,
     /// The commands of the statement this scope belongs to, shared by every scope of the statement.
     statement_commands: Option<Arc<StatementCommands>>,
@@ -86,7 +86,7 @@ impl<S: Clone> CteScope<S> {
         Self {
             catalog: Some(catalog),
             catalog_resolution: Some(resolution.into()),
-            privilege_subject,
+            privilege_subject: privilege_subject.map(Into::into),
             ..Self::default()
         }
     }

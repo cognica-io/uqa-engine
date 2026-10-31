@@ -32133,6 +32133,80 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "query_authority_admission_restores_namespace_and_subject_on_every_exit",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/subject/tests.rs",
+      "capability": "Native statement scope ownership",
+      "workload": "Enter a query with a four-MiB authority name with 64 KiB remaining, cancel either request owner, recover, clone, unwind and reject a missing namespace.",
+      "invariant": "Admit authority before copying, retain the original shared lease, preserve namespace-before-authority diagnostics and restore parent authority and lookup mode on every exit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scope_capture_failure_is_the_portals_only_response_after_its_first_step",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
+      "capability": "Native statement scope ownership",
+      "workload": "Fail statement scope capture with memory exhaustion or cancellation after the portal receives its first step.",
+      "invariant": "Return exactly the original failure without opening query context, publishing a descriptor or signaling end of rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_command_scope_admits_authority_before_copy",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/commands.rs",
+      "capability": "Native statement scope ownership",
+      "workload": "Capture native command authority with a four-MiB name and 64 KiB available across all four providers.",
+      "invariant": "Reject before copying, preserve both cancellation owners and bound relation mode, share captured identity without allocations and retire its original allowance at the final scope release.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_statement_scope_admits_authority_before_copy",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/commands.rs",
+      "capability": "Native statement scope ownership",
+      "workload": "Capture native statement authority with a four-MiB name and 64 KiB available across all four providers.",
+      "invariant": "Reject before copying, preserve both cancellation owners and dynamic relation mode, share captured identity without allocations and retire its original allowance at the final scope release.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_statement_scope_preserves_view_authority_current_user_portals_and_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/commands.rs",
+      "capability": "Native statement scope ownership",
+      "workload": "Replay view-owner permissions, caller current_user, generic/custom prepared execution, portal traversal, permission failure and savepoint recovery across four providers.",
+      "invariant": "Match PostgreSQL rows and SQLSTATEs while preserving no-effect EXPLAIN, session retirement and persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }
