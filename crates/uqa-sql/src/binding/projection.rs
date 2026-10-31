@@ -11,10 +11,10 @@ use crate::plan::{ProjectionPlan, QueryBlockPlan, QueryPlan};
 use crate::RowSchema;
 use crate::{SQLError, SQLParam};
 
-use super::{
-    bind_query_plan_schema, BindingContext, QueryFunctionTypeResolver, ScalarExpr, SchemaScope,
-};
+use super::production::ControlledBindingContext;
+use super::{BindingContext, QueryFunctionTypeResolver, ScalarExpr, SchemaScope};
 use crate::routines::RoutineResolution;
+use uqa_core::memory::ProductionControl;
 
 #[cfg(test)]
 mod tests;
@@ -28,6 +28,13 @@ pub(super) struct ProjectionMetadata {
     pub record: Option<crate::schema::RecordMetadata>,
 }
 
+/// The declared scalar-expression scope and the local relation expanded by a bare wildcard.
+#[derive(Clone, Copy)]
+pub struct ProjectionSchemas<'a> {
+    pub expressions: &'a RowSchema,
+    pub star: &'a RowSchema,
+}
+
 /// Bind a projection against an already-declared input schema. `star_schema` identifies the relation expanded by bare `*`; `expression_schema` may also contain joined sources and hidden lookup aliases used by scalar expressions.
 pub fn bind_projection_output_schema(
     routines: &dyn RoutineResolution,
@@ -38,12 +45,37 @@ pub fn bind_projection_output_schema(
     params: &[SQLParam],
     ctes: &BindingContext,
 ) -> Result<RowSchema, SQLError> {
-    projection_output_schema(
-        SchemaScope::from_context(ctes)?,
+    let control = ProductionControl::uncontrolled();
+    bind_projection_output_schema_with_control(
         routines,
         projections,
-        expression_schema,
-        star_schema,
+        ProjectionSchemas {
+            expressions: expression_schema,
+            star: star_schema,
+        },
+        subqueries,
+        params,
+        ctes.copy_with_control(&control)?,
+        &control,
+    )
+}
+
+/// Bind projection metadata under the invoking request's allowance.
+pub fn bind_projection_output_schema_with_control(
+    routines: &dyn RoutineResolution,
+    projections: &[ProjectionPlan],
+    schemas: ProjectionSchemas<'_>,
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+    ctes: ControlledBindingContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    projection_output_schema(
+        SchemaScope::from_context_with_control(ctes, control)?,
+        routines,
+        projections,
+        schemas.expressions,
+        schemas.star,
         subqueries,
         params,
     )
@@ -59,12 +91,37 @@ pub fn analyze_projection_output_schema(
     params: &[SQLParam],
     ctes: &BindingContext,
 ) -> Result<RowSchema, SQLError> {
-    projection_output_schema(
-        SchemaScope::for_analysis(ctes)?,
+    let control = ProductionControl::uncontrolled();
+    analyze_projection_output_schema_with_control(
         routines,
         projections,
-        expression_schema,
-        star_schema,
+        ProjectionSchemas {
+            expressions: expression_schema,
+            star: star_schema,
+        },
+        subqueries,
+        params,
+        ctes.copy_with_control(&control)?,
+        &control,
+    )
+}
+
+/// Analyze projection metadata with admission before allocating expressions and row descriptors.
+pub fn analyze_projection_output_schema_with_control(
+    routines: &dyn RoutineResolution,
+    projections: &[ProjectionPlan],
+    schemas: ProjectionSchemas<'_>,
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+    ctes: ControlledBindingContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    projection_output_schema(
+        SchemaScope::for_analysis_with_control(ctes, control)?,
+        routines,
+        projections,
+        schemas.expressions,
+        schemas.star,
         subqueries,
         params,
     )
@@ -114,18 +171,39 @@ pub fn validate_query_block_expression_types(
     params: &[SQLParam],
     ctes: &BindingContext,
 ) -> Result<(), SQLError> {
-    let control = uqa_core::memory::ProductionControl::uncontrolled();
-    let mut scalar_subquery_schemas = crate::production::Buffer::new(&control);
+    let control = ProductionControl::uncontrolled();
+    validate_query_block_expression_types_with_control(
+        routines,
+        statement,
+        schema,
+        params,
+        ctes.copy_with_control(&control)?,
+        &control,
+    )
+}
+
+/// Preserve expression and comparison-check order while every inferred type retains its allocation owner.
+pub fn validate_query_block_expression_types_with_control(
+    routines: &dyn RoutineResolution,
+    statement: &QueryBlockPlan,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    ctes: ControlledBindingContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    let mut scalar_subquery_schemas = crate::production::Buffer::new(control);
     for plan in &statement.subqueries {
         scalar_subquery_schemas.push(
-            Some(bind_query_plan_schema(
+            Some(super::production::bind_query_plan_schema_with_control(
                 routines,
                 plan,
                 params,
-                ctes,
+                ctes.copy_with_control(control)?,
                 Some(schema),
+                control,
             )?),
-            &control,
+            control,
         )?;
     }
     let resolver = QueryFunctionTypeResolver {
@@ -133,24 +211,32 @@ pub fn validate_query_block_expression_types(
         scalar_subquery_schemas: Some(scalar_subquery_schemas),
         defer_routine_namespace_errors: true,
     };
-    let resolve =
-        |expression| crate::scalar_type_with_resolver(expression, schema, params, &resolver);
+    let resolve = |expression| {
+        crate::scalar_type_with_resolver_and_control(
+            expression,
+            schema,
+            params,
+            Some(&resolver),
+            control,
+        )
+    };
     for projection in &statement.projections {
         resolve(&projection.expr)?;
     }
-    let mut equality_types = statement
+    let mut equality_types = crate::production::Buffer::new(control);
+    for expression in statement
         .group_by
         .iter()
         .chain(statement.grouping_sets.iter().flatten())
-        .map(resolve)
-        .collect::<Result<Vec<_>, _>>()?;
-    let ordering_types = statement
-        .order_by
-        .iter()
-        .map(|order| resolve(&order.expr))
-        .collect::<Result<Vec<_>, _>>()?;
+    {
+        equality_types.push(resolve(expression)?, control)?;
+    }
+    let mut ordering_types = crate::production::Buffer::new(control);
+    for order in &statement.order_by {
+        ordering_types.push(resolve(&order.expr)?, control)?;
+    }
     for expression in &statement.distinct_on {
-        equality_types.push(resolve(expression)?);
+        equality_types.push(resolve(expression)?, control)?;
     }
     for expression in statement
         .r#where
@@ -180,21 +266,46 @@ pub fn validate_query_block_references(
     ctes: &BindingContext,
     outer: Option<&RowSchema>,
 ) -> Result<(), SQLError> {
-    let output = analyze_projection_output_schema(
+    let control = ProductionControl::uncontrolled();
+    validate_query_block_references_with_control(
+        routines,
+        statement,
+        schema,
+        params,
+        ctes.copy_with_control(&control)?,
+        outer,
+        &control,
+    )
+}
+
+/// Validate references with the authoritative source schema and the request's production control.
+pub fn validate_query_block_references_with_control(
+    routines: &dyn RoutineResolution,
+    statement: &QueryBlockPlan,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    ctes: ControlledBindingContext<'_>,
+    outer: Option<&RowSchema>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let output = analyze_projection_output_schema_with_control(
         routines,
         &statement.projections,
-        schema,
-        schema,
+        ProjectionSchemas {
+            expressions: schema,
+            star: schema,
+        },
         &statement.subqueries,
         params,
-        ctes,
+        ctes.copy_with_control(control)?,
+        control,
     )?;
     if statement.distinct && statement.distinct_on.is_empty() {
         for ty in output.column_types().iter().flatten() {
             crate::type_resolution::ComparisonSupport::Equality.require_in_catalog(ty, routines)?;
         }
     }
-    SchemaScope::for_analysis(ctes)?
+    SchemaScope::for_analysis_with_control(ctes, control)?
         .validate_query_block_clauses(routines, statement, schema, &output, params, outer)
 }
 

@@ -30,36 +30,6 @@ fn table_source_aliases(
     aliases
 }
 
-pub(super) fn output_aliases(catalog_aliases: &[String], range_aliases: &[String]) -> Vec<String> {
-    let mut aliases = range_aliases.to_vec();
-    aliases.extend(catalog_aliases.iter().skip(aliases.len()).cloned());
-    aliases
-}
-
-pub(super) fn prune_query_outputs<S: Clone + Send + Sync + 'static>(
-    context: &SourceContext<'_, S>,
-    query: &mut uqa_sql::plan::QueryPlan,
-    aliases: &[String],
-    projection: &uqa_sql::plan::source_projection::SourceProjection,
-    params: &[SQLParam],
-    scope: &CteScope<S>,
-    outer: Option<&crate::RowSchema>,
-) -> Result<(), SQLError> {
-    let schema = crate::query::binding::bind_query_plan_schema(
-        context.ctes.routines,
-        query,
-        params,
-        scope,
-        outer,
-    )?;
-    context
-        .ctes
-        .rewrites
-        .prune_query_outputs(query, aliases, projection, &schema, &|name| {
-            scope.contains_cte_name(name)
-        })
-}
-
 /// Build the physical operator for a table source.
 #[expect(
     clippy::too_many_lines,
@@ -121,54 +91,58 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 ));
             }
 
-            if let Some((plan, mut definition_scope)) = ctes.take_deferred_input(name) {
-                // Drop the rewritten CTE body before the leases transferred by specialization.
-                let mut specialized_memory = uqa_sql::plan::ExecutableMemory::default();
-                let mut plan = plan;
-                if let (Some(query), Some(prepared)) =
-                    (plan.body.query_mut(), executable_query.as_deref())
-                {
-                    *query = prepared.clone();
-                } else if let (Some(query), Some(projection)) = (
-                    plan.body.query_mut(),
-                    prune.and_then(|prune| prune.get(&qualifier)),
-                ) {
-                    let aliases = output_aliases(&plan.columns, column_aliases);
-                    prune_query_outputs(
-                        context,
-                        query,
-                        &aliases,
-                        projection,
-                        params,
-                        &definition_scope,
-                        definition_scope.row_lock_outer_row().map(|row| &row.schema),
-                    )?;
-                }
-                let specialized = plan
+            if let Some((plan, mut definition_scope)) = ctes.deferred_input(name) {
+                let resources = context.ctes.production_resources()?;
+                let control = resources.control();
+                control.check()?;
+                let selected = plan
                     .body
                     .query()
-                    .map(|query| {
+                    .map(|query| executable_query.as_deref().unwrap_or(query));
+                let mut rewritten = None;
+                if let (Some(query), Some(projection)) = (
+                    selected.filter(|_| executable_query.is_none()),
+                    prune.and_then(|prune| prune.get(&qualifier)),
+                ) {
+                    let aliases =
+                        production::output_aliases(&plan.columns, column_aliases, &control)?;
+                    let query = production::prune_outputs(
+                        context,
+                        query.copy_for_rewrite(&control)?,
+                        &aliases,
+                        projection,
+                        production::QueryBinding {
+                            params,
+                            scope: &definition_scope,
+                            outer: definition_scope.row_lock_outer_row().map(|row| &row.schema),
+                        },
+                        &control,
+                    )?;
+                    rewritten = Some(uqa_sql::plan::OwnedQueryPlan::from_produced(
+                        query.finish(&control)?,
+                        &control,
+                    )?);
+                }
+                let specialized = match rewritten.as_deref().or(selected) {
+                    Some(query) => {
+                        let aliases =
+                            production::output_aliases(&plan.columns, column_aliases, &control)?;
                         super::output_filter::specialize_source_filter(
-                            context,
-                            query,
-                            &qualifier,
-                            &output_aliases(&plan.columns, column_aliases),
-                            filters,
-                        )
-                    })
-                    .transpose()?
-                    .flatten();
+                            context, query, &qualifier, &aliases, filters,
+                        )?
+                    }
+                    None => None,
+                };
                 let filters = if let Some(specialized) = specialized {
-                    let (query, memory) = specialized.into_unboxed();
-                    *plan.body.query_mut().expect("query specialization") = query;
-                    specialized_memory.absorb(memory);
+                    rewritten = Some(specialized);
                     None
                 } else {
                     filters
                 };
+                let query = rewritten.as_deref().or(selected);
                 let streamed = {
                     let mut scoped_ctes = definition_scope.enter_lock_identity_emission(false);
-                    match plan.body.query() {
+                    match query {
                         Some(query)
                             if scoped_ctes.streams_command_progress()
                                 || !uqa_sql::semantics::volatility::query_contains_volatile_function(
@@ -207,7 +181,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     let output = {
                         let mut scoped_ctes = definition_scope.enter_lock_identity_emission(false);
                         context.ctes.queries.execute_query(
-                            plan.body.query().ok_or_else(|| {
+                            query.ok_or_else(|| {
                                 SQLError::Internal(
                                     "data-modifying CTE entered the folded query path".into(),
                                 )
@@ -223,9 +197,25 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     )
                     .map(crate::query::cte::rows::CteRows::Complete)?
                 } else {
+                    let replacement = if rewritten.is_some()
+                        || (selected.is_some() && executable_query.is_some())
+                    {
+                        let body = match rewritten.take() {
+                            Some(query) => query,
+                            None => uqa_sql::plan::OwnedQueryPlan::from_produced(
+                                selected
+                                    .expect("selected CTE query")
+                                    .clone_with_control(&control)?,
+                                &control,
+                            )?,
+                        };
+                        Some(plan.copy_with_query(body, &control)?)
+                    } else {
+                        None
+                    };
                     crate::query::cte::materialize_plan_ctes(
                         context.ctes,
-                        std::slice::from_ref(&plan),
+                        std::slice::from_ref(replacement.as_deref().unwrap_or(&plan)),
                         params,
                         &mut definition_scope,
                     )?;

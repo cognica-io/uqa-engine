@@ -125,6 +125,7 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
         &source_schema,
         params,
         ctes,
+        &context.ctes.production_resources()?.control(),
     )?;
     crate::query::binding::validate_query_block_references(
         context.ctes.routines,
@@ -133,6 +134,7 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
         params,
         ctes,
         outer_row.as_ref().map(|row| &row.schema),
+        &context.ctes.production_resources()?.control(),
     )?;
     let resolver = context.relational.expression_scope(ctes.clone());
     uqa_sql::semantics::sets::validation::validate_query_set_contexts(

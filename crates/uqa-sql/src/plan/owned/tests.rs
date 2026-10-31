@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod ctes;
 use crate::{plan::RelationalPlan, ScalarExpr};
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 

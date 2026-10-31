@@ -8,6 +8,7 @@ use super::*;
 use uqa_core::{memory::ProductionControl, CancellationToken, RelationIdentity};
 
 mod commands;
+mod ctes;
 mod views;
 
 #[rstest::rstest]

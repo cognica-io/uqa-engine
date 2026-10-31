@@ -19,6 +19,7 @@ mod indexes;
 mod internal_aliases;
 pub(super) mod lease;
 mod parts;
+mod projection;
 mod rebinding;
 mod renaming;
 mod virtual_names;

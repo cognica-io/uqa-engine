@@ -81,7 +81,21 @@ pub fn append_distinct_set_projections(
     projections: &mut Vec<PhysicalProjection>,
 ) -> Result<Vec<(usize, InternalColumnRef)>, SQLError> {
     let mut columns = Vec::new();
+    visit_distinct_set_projections(statement, output_columns, |index, column, expression| {
+        projections.push((ProjectionTarget::Internal(column), expression.clone()));
+        columns.push((index, column));
+        Ok(())
+    })?;
+    Ok(columns)
+}
+
+pub(super) fn visit_distinct_set_projections<'a>(
+    statement: &'a QueryBlockPlan,
+    output_columns: &'a [OutputColumnMapping],
+    mut observe: impl FnMut(usize, InternalColumnRef, &'a ScalarExpr) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     let relation = uqa_sql::ast::InternalRelationId::allocate();
+    let mut count = 0;
     for (index, expression) in statement.distinct_on.iter().enumerate() {
         if prior_distinct_key_index(statement, index, expression, output_columns)?.is_some() {
             continue;
@@ -89,12 +103,12 @@ pub fn append_distinct_set_projections(
         if distinct_output_target_position(statement, expression, output_columns)?.is_some() {
             continue;
         }
-        let expression = resolve_order_expression(expression, output_columns)?;
-        let column = relation.column(columns.len());
-        projections.push((ProjectionTarget::Internal(column), expression));
-        columns.push((index, column));
+        let expression =
+            crate::query::ordering::resolve_order_expression_ref(expression, output_columns)?;
+        observe(index, relation.column(count), expression)?;
+        count += 1;
     }
-    Ok(columns)
+    Ok(())
 }
 
 pub struct AggregateKeyStatement {

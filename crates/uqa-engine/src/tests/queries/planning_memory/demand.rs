@@ -34,12 +34,25 @@ fn native_output_demand_shares_request_allowance_and_recovers(#[case] provider: 
     let projection = SourceProjection::retaining_all();
     let retention = engine.query_retention_control().unwrap();
     let memory = retention.memory();
+    let runtime = engine.query_runtime_view();
+    let control = uqa_core::memory::ProductionControl::new(
+        memory,
+        retention.cancellation(),
+        runtime.cancellation,
+    );
     let baseline = memory.used();
+    let input = query.copy_for_rewrite(&control).unwrap();
     let occupied = memory.reserve(memory.available() - 128).unwrap();
     let mut result = None;
     let allocation = allocation_counter::measure(|| {
-        result =
-            Some(engine.prune_query_outputs(&mut query, &[], &projection, &schema, &|_| false));
+        result = Some(engine.prune_owned_query_outputs(
+            input,
+            &[],
+            &projection,
+            &schema,
+            &|_| false,
+            &control,
+        ));
     });
     assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("53200"));
     assert!(
@@ -50,25 +63,31 @@ fn native_output_demand_shares_request_allowance_and_recovers(#[case] provider: 
     assert_eq!(serde_json::to_value(&query).unwrap(), before);
     drop(occupied);
 
+    let input = query.copy_for_rewrite(&control).unwrap();
     engine.cancel();
     let error = engine
-        .prune_query_outputs(&mut query, &[], &projection, &schema, &|_| false)
+        .prune_owned_query_outputs(input, &[], &projection, &schema, &|_| false, &control)
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("57014"));
     assert_eq!(serde_json::to_value(&query).unwrap(), before);
     assert_eq!(memory.used(), baseline);
     engine.reset_cancellation();
 
+    let input = query.copy_for_rewrite(&control).unwrap();
     let occupied = memory.reserve(memory.available() - 1024).unwrap();
-    engine
-        .prune_query_outputs(&mut query, &[], &projection, &schema, &|_| false)
+    let output = engine
+        .prune_owned_query_outputs(input, &[], &projection, &schema, &|_| false, &control)
         .unwrap();
-    assert_eq!(memory.used(), baseline + occupied.bytes());
     assert_eq!(
-        query.analyzed_output.as_ref().unwrap().columns(),
+        memory.used(),
+        baseline + occupied.bytes() + output.reserved_bytes()
+    );
+    assert_eq!(
+        output.analyzed_output.as_ref().unwrap().columns(),
         schema.columns()
     );
-    assert_eq!(serde_json::to_value(&query.root).unwrap(), before["root"]);
+    assert_eq!(serde_json::to_value(&output.root).unwrap(), before["root"]);
+    drop(output);
     drop(occupied);
     drop(query);
     assert_eq!(memory.used(), baseline);

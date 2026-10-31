@@ -45,6 +45,34 @@ fn execution_scope_copies_do_not_duplicate_immutable_plan_payloads() {
 }
 
 #[test]
+fn repeated_deferred_scan_inputs_share_the_retained_definition_and_its_lease() {
+    use uqa_core::{memory::MemoryBudget, memory::ProductionControl, CancellationToken};
+    let payload = "x".repeat(4 << 20);
+    let mut input = query(&format!(
+        "WITH source AS NOT MATERIALIZED (SELECT '{payload}'::text AS value) SELECT value FROM source"
+    ));
+    let budget = MemoryBudget::new(16 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let definition =
+        uqa_sql::plan::RetainedCtePlan::capture(&input.ctes.remove(0), &control).unwrap();
+    let mut scope = CteScope::<()>::new();
+    scope.insert_deferred(definition);
+    let baseline = budget.used();
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        retained = Some(scope.deferred_for_scan("source").unwrap());
+        assert!(scope.deferred_for_scan("source").is_some());
+    });
+    assert!(allocation.bytes_total < 4096, "{allocation:?}");
+    assert_eq!(budget.used(), baseline);
+    drop(scope);
+    assert_eq!(budget.used(), baseline);
+    drop(retained);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn deferred_definitions_keep_only_their_original_lexical_inputs() {
     let mut scope = CteScope::<()>::new();
     let outer = query("WITH q AS (SELECT 7 AS id), unused AS (SELECT 11 AS id) SELECT * FROM q");
@@ -104,7 +132,7 @@ fn restored_definition_keeps_shared_inputs_and_invoking_scalar_arena() {
     restore_cte_names(&mut scope, saved);
     scope.scalar_subqueries = vec![query("SELECT 11")].into();
     for _ in 0..3 {
-        let (_, input) = scope.take_deferred_input("r").unwrap();
+        let (_, input) = scope.deferred_input("r").unwrap();
         assert!(std::ptr::eq(
             input.deferred_ctes["q"].as_ref(),
             original.as_ref()

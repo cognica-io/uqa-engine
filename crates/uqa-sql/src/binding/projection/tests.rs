@@ -138,3 +138,123 @@ fn clause_type_reuse_preserves_postgresql_error_order_and_operator_diagnostics()
         assert_eq!(error.to_string(), message, "{sql}");
     }
 }
+
+#[test]
+fn physical_reference_validation_admits_literal_scratch_before_copying() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let statement = block(&format!(
+        "SELECT '{}'::text AS payload",
+        "x".repeat(4 << 20)
+    ));
+    let routines = Routines {
+        calls: Mutex::new(Vec::new()),
+        key_type: ColumnType::Integer,
+    };
+    let schema = RowSchema::new(Vec::new());
+    let context = crate::binding::fixture::empty_binding_context();
+    let budget = MemoryBudget::new(32 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let occupied = budget.reserve(budget.available() - (64 << 10)).unwrap();
+    let mut error = None;
+    let allocation = allocation_counter::measure(|| {
+        error = Some(
+            validate_query_block_references_with_control(
+                &routines,
+                &statement,
+                &schema,
+                &[],
+                context.copy_with_control(&control).unwrap(),
+                None,
+                &control,
+            )
+            .unwrap_err(),
+        );
+    });
+    assert!(allocation.bytes_total < 256 << 10, "{allocation:?}");
+    assert_eq!(error.unwrap().sqlstate(), Some("53200"));
+    assert_eq!(budget.used(), occupied.bytes());
+    drop(occupied);
+    for token in [&original, &invoking] {
+        let scope = context.copy_with_control(&control).unwrap();
+        token.cancel();
+        assert_eq!(
+            validate_query_block_references_with_control(
+                &routines,
+                &statement,
+                &schema,
+                &[],
+                scope,
+                None,
+                &control
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(budget.used(), 0);
+        token.reset();
+    }
+    validate_query_block_references_with_control(
+        &routines,
+        &statement,
+        &schema,
+        &[],
+        context.copy_with_control(&control).unwrap(),
+        None,
+        &control,
+    )
+    .unwrap();
+    assert_eq!(budget.used(), 0);
+    let output = analyze_projection_output_schema_with_control(
+        &routines,
+        &statement.projections,
+        ProjectionSchemas {
+            expressions: &schema,
+            star: &schema,
+        },
+        &[],
+        &[],
+        context.copy_with_control(&control).unwrap(),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(output.columns(), &["payload"]);
+    assert_eq!(output.column_type(0), Some(&ColumnType::Text));
+    assert!(budget.used() > 0 && budget.used() < 64 << 10);
+    drop(output);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn controlled_clause_type_validation_preserves_callback_and_error_order() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let statement = block("SELECT key_type(x) FROM s GROUP BY key_type(x) ORDER BY bad_type(x)");
+    let routines = Routines {
+        calls: Mutex::new(Vec::new()),
+        key_type: ColumnType::Json,
+    };
+    let schema =
+        RowSchema::with_qualified_types("s", vec!["x".into()], vec![Some(ColumnType::Integer)]);
+    let context = crate::binding::fixture::empty_binding_context();
+    let budget = MemoryBudget::new(1 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let error = validate_query_block_expression_types_with_control(
+        &routines,
+        &statement,
+        &schema,
+        &[],
+        context.copy_with_control(&control).unwrap(),
+        &control,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(
+        *routines.calls.lock().unwrap(),
+        ["key_type", "key_type", "bad_type"]
+    );
+    assert_eq!(budget.used(), 0);
+}

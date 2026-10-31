@@ -63,6 +63,25 @@ pub trait ExpressionEvaluator: Send + Sync {
         crate::bind_type_introspection(expression, schema, self.parameters())
     }
 
+    /// Preserve independent scalar constructor owners while binding executable type introspection.
+    fn bind_type_introspection_owned(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        schema: &RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        uqa_sql::bind_type_introspection_owned(expression, schema, self.parameters(), None, control)
+    }
+
+    fn expression_type_with_control(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        uqa_sql::scalar_type_with_control(expression, schema, self.parameters(), control)
+    }
+
     fn star_column_visible(&self, _column: &str) -> bool {
         true
     }

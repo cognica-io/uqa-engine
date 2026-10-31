@@ -54,16 +54,6 @@ pub trait CteBodyExecutor<S: Clone>: Sync {
 }
 
 pub trait QueryOutputRewriter: Sync {
-    /// Remove scalar output expressions the containing query does not need, preserving the stored row descriptor and side effects.
-    fn prune_query_outputs(
-        &self,
-        query: &mut QueryPlan,
-        aliases: &[String],
-        projection: &uqa_sql::plan::source_projection::SourceProjection,
-        schema: &crate::RowSchema,
-        visible_ctes: &dyn Fn(&str) -> bool,
-    ) -> Result<(), SQLError>;
-
     /// Consume the private catalog-query destination before assembling its streaming or materialized execution path. The caller has already restored layouts and applied its output demand.
     fn optimize_retained_query(
         &self,

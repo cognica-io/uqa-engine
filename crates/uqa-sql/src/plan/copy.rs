@@ -41,6 +41,35 @@ pub(crate) fn copy_syntax_with_control<T: syntax::SyntaxCopy + Clone>(
 }
 
 impl super::CtePlan {
+    /// Copy only a declaration's scheduling metadata and transfer an independently admitted query body. The replaced body is never copied; the selected root retains its original allocation and lease.
+    pub fn copy_with_query(
+        &self,
+        query: super::OwnedQueryPlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>> {
+        let query = query.into_produced_box(control)?;
+        let Some(mut copying) = Copying::new(*control) else {
+            return Ok(control.finish(
+                Self {
+                    name: self.name.clone(),
+                    columns: self.columns.clone(),
+                    recursive: self.recursive,
+                    materialization: self.materialization,
+                    search: self.search.clone(),
+                    cycle: self.cycle.clone(),
+                    body: super::CtePlanBody::Query(
+                        query.into_uncontrolled().expect("ordinary CTE query"),
+                    ),
+                },
+                None,
+            )?);
+        };
+        let plan = copying.cte_using(self, |copying| {
+            Ok(super::CtePlanBody::Query(copying.take(query)))
+        })?;
+        copying.finish(plan)
+    }
+
     /// Copy a complete CTE declaration under the selected allowance and cancellation scopes.
     pub fn clone_with_control(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>> {
         control.check()?;
@@ -49,6 +78,18 @@ impl super::CtePlan {
         };
         let plan = copying.cte(self)?;
         copying.finish(plan)
+    }
+}
+
+impl super::QueryBlockPlan {
+    /// Retain an immutable physical recheck input under the invoking request's allowance.
+    pub fn clone_with_control(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>> {
+        control.check()?;
+        let Some(mut copying) = Copying::new(*control) else {
+            return Ok(control.finish(self.clone(), None)?);
+        };
+        let block = copying.block(self)?;
+        copying.finish(block)
     }
 }
 

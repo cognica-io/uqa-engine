@@ -8,8 +8,8 @@
 
 mod production;
 pub use production::{
-    expression_may_return_set_with_control, function_may_return_set_with_control,
-    SetFunctionAnalysis,
+    expression_may_return_set_with_control, expressions_may_return_set_with_control,
+    function_may_return_set_with_control, SetFunctionAnalysis,
 };
 
 use crate::ast::FunctionBinding;

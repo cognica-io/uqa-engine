@@ -274,11 +274,18 @@ pub fn dml_returning_result_with_projections<S: Clone + 'static>(
     let output = crate::query::binding::bind_projection_output_schema(
         services.routines,
         projections,
-        &expression_schema,
-        &star_schema,
+        uqa_sql::binding::ProjectionSchemas {
+            expressions: &expression_schema,
+            star: &star_schema,
+        },
         &shape.ctes.scalar_subqueries,
         shape.params,
         shape.ctes,
+        &services
+            .relational
+            .expressions
+            .production_resources()?
+            .control(),
     )?;
     crate::mutation::output::MutationOutput::from_returning(
         output.for_result_columns(output.columns()),

@@ -30,7 +30,7 @@ pub fn attach_order_limit<'a, S: Clone + 'static>(
     ctes: &CteScope<S>,
     runtime: QueryRuntimeView<'a>,
     evaluator: SharedExpressionEvaluator<'a>,
-    recheck_source: Option<crate::query::recheck_source::LockRowsRecheckSource<S>>,
+    recheck_source: Option<crate::query::recheck_source::LockRowsRecheckInput<'_, S>>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     attach_ordered_slice(
         operator,
@@ -79,7 +79,7 @@ fn attach_ordered_slice<'a, S: Clone + 'static>(
     ctes: &CteScope<S>,
     runtime: QueryRuntimeView<'a>,
     evaluator: SharedExpressionEvaluator<'a>,
-    recheck_source: Option<crate::query::recheck_source::LockRowsRecheckSource<S>>,
+    recheck_source: Option<crate::query::recheck_source::LockRowsRecheckInput<'_, S>>,
     presorted: bool,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     use crate::{ExternalSort, Limit};

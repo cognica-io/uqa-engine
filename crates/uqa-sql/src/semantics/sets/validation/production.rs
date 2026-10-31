@@ -272,7 +272,7 @@ pub fn expression_may_return_set_with_control(
     }
 }
 
-fn expressions_may_return_set_with_control<'a>(
+pub fn expressions_may_return_set_with_control<'a>(
     engine: &dyn crate::routines::RoutineResolution,
     resolver: &dyn FunctionTypeResolver,
     expressions: impl IntoIterator<Item = &'a ScalarExpr>,

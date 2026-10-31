@@ -227,6 +227,17 @@ impl OwnedQueryPlan {
         )
     }
 
+    /// Transfer the existing root allocation and all of its original leases into an enclosing SQL constructor, without copying or reallocating the box.
+    pub(in crate::plan) fn into_produced_box(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Box<QueryPlan>>, SQLError> {
+        Ok(control.finish(
+            self.query,
+            control.combine(self.memory.storage, self.memory.root),
+        )?)
+    }
+
     pub fn into_executable(self) -> OwnedExecutablePlan {
         OwnedExecutablePlan::from_parts(UnifiedPlan::Query(self.query), self.memory)
     }

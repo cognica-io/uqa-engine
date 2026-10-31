@@ -88,16 +88,16 @@ pub fn visit_bound_projection_star_fields(
     )
 }
 
-pub(crate) struct ProjectionStarMetadata<'a> {
+pub struct ProjectionStarMetadata<'a> {
     pub name: &'a str,
     pub logical: Option<usize>,
     pub qualifier: Option<&'a str>,
     pub ty: Option<&'a crate::ColumnType>,
     pub collation: Option<u32>,
-    pub record: Option<&'a crate::schema::RecordMetadata>,
+    pub(crate) record: Option<&'a crate::schema::RecordMetadata>,
 }
 
-pub(crate) fn visit_bound_projection_star_metadata<'a>(
+pub fn visit_bound_projection_star_metadata<'a>(
     expression: &'a ScalarExpr,
     schema: &'a RowSchema,
     expression_schema: &'a RowSchema,

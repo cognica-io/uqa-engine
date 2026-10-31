@@ -91,40 +91,40 @@ pub fn infer_prepared_parameter_types<S: Clone>(
 pub fn bind_projection_output_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     projections: &[ProjectionPlan],
-    expression_schema: &RowSchema,
-    star_schema: &RowSchema,
+    schemas: uqa_sql::binding::ProjectionSchemas<'_>,
     subqueries: &[QueryPlan],
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::bind_projection_output_schema(
+    uqa_sql::binding::bind_projection_output_schema_with_control(
         routines,
         projections,
-        expression_schema,
-        star_schema,
+        schemas,
         subqueries,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
+        control,
     )
 }
 
 pub fn analyze_projection_output_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     projections: &[ProjectionPlan],
-    expression_schema: &RowSchema,
-    star_schema: &RowSchema,
+    schemas: uqa_sql::binding::ProjectionSchemas<'_>,
     subqueries: &[QueryPlan],
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::analyze_projection_output_schema(
+    uqa_sql::binding::analyze_projection_output_schema_with_control(
         routines,
         projections,
-        expression_schema,
-        star_schema,
+        schemas,
         subqueries,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
+        control,
     )
 }
 
@@ -134,13 +134,15 @@ pub fn validate_query_block_expression_types<S: Clone>(
     schema: &RowSchema,
     params: &[SQLParam],
     ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    uqa_sql::binding::validate_query_block_expression_types(
+    uqa_sql::binding::validate_query_block_expression_types_with_control(
         routines,
         statement,
         schema,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
+        control,
     )
 }
 
@@ -151,14 +153,16 @@ pub fn validate_query_block_references<S: Clone>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    uqa_sql::binding::validate_query_block_references(
+    uqa_sql::binding::validate_query_block_references_with_control(
         routines,
         statement,
         schema,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
         outer,
+        control,
     )
 }
 

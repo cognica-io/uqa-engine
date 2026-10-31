@@ -69,6 +69,7 @@ fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
         &expression_schema,
         params,
         ctes,
+        &context.ctes.production_resources()?.control(),
     )?;
     let type_resolver = context.relational.expression_scope(ctes.clone());
     validate_query_set_contexts(
@@ -98,6 +99,7 @@ fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
             params,
             ctes,
             outer.as_ref(),
+            &context.ctes.production_resources()?.control(),
         )?;
         return Ok((expression_schema, outer));
     };
@@ -166,6 +168,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                     params,
                     ctes,
                     outer,
+                    &context.ctes.production_resources()?.control(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_foreign_select_output(
@@ -224,6 +227,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                     params,
                     ctes,
                     outer,
+                    &context.ctes.production_resources()?.control(),
                 )?;
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_table_select_output(
@@ -267,6 +271,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             params,
             ctes,
             outer,
+            &context.ctes.production_resources()?.control(),
         )?;
     }
     let column_prune = context
@@ -332,6 +337,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
                 outer,
+                &context.ctes.production_resources()?.control(),
             )?;
             let physical_filter =
                 context

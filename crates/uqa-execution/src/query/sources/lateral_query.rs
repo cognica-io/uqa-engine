@@ -323,6 +323,7 @@ fn bind_lateral_output_columns<S: Clone + Send + Sync + 'static>(
         schema,
         params,
         scoped_ctes,
+        &context.ctes.production_resources()?.control(),
     )?;
     if let (Some(from), Some(filter)) = (stmt.from.as_ref(), stmt.r#where.as_ref()) {
         uqa_sql::semantics::text_indexes::validate_joined_expr_text_match_fields(
@@ -338,6 +339,7 @@ fn bind_lateral_output_columns<S: Clone + Send + Sync + 'static>(
         params,
         scoped_ctes,
         Some(outer_schema),
+        &context.ctes.production_resources()?.control(),
     )?;
     uqa_sql::semantics::sets::validation::validate_query_set_contexts(
         context.relational.catalog,

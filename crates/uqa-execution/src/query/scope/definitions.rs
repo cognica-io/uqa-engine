@@ -117,7 +117,10 @@ impl<S: Clone> CteScope<S> {
             .is_some_and(|name| self.folded_ctes.contains(&name))
     }
 
-    pub(crate) fn take_deferred_input(&mut self, name: &str) -> Option<(CtePlan, Self)> {
+    pub(crate) fn deferred_input(
+        &self,
+        name: &str,
+    ) -> Option<(uqa_sql::plan::RetainedCtePlan, Self)> {
         let scope = self.definition_scope(name)?;
         self.deferred_for_scan(name).map(|plan| (plan, scope))
     }

@@ -7,7 +7,7 @@
 use super::*;
 use crate::query::{
     expression::ScalarExpressionContext,
-    recheck_source::LockRowsRecheckSource,
+    recheck_source::LockRowsRecheckInput,
     relational::{QueryExpressionFactory, RowLockOperatorFactory},
     routine_invocation::SQLRoutineInvoker,
     set_projection::SetFunctionRuntime,
@@ -183,7 +183,7 @@ impl RowLockOperatorFactory<()> for Services {
         _: &'a [SQLParam],
         _: &CteScope,
         _: Option<u64>,
-        _: Option<LockRowsRecheckSource<()>>,
+        _: Option<LockRowsRecheckInput<'_, ()>>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
         panic!("unexpected row locking")
     }

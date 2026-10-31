@@ -27494,8 +27494,8 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/tests/queries/planning_memory/demand.rs",
       "capability": "Planning output demand",
-      "workload": "Prune 1,024 required outputs through the native CTE adapter under rejected, cancelled and exact admitted allowances on all four providers.",
-      "invariant": "Propagate the actual request budget and cancellation, reject before mutation, release temporary storage and preserve subsequent SQL and final owner cleanup.",
+      "workload": "Prepare an admitted 1,024-column mutable query, invoke the native consuming output-demand adapter under 128-byte rejection and 1,024-byte success limits, cancel and recover on four providers.",
+      "invariant": "Pruning shares the original request allowance, rejects before scratch growth, releases consumed input owners on failure and cancellation, retains exact surviving output leases and preserves immutable source syntax and recovery.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",
@@ -32277,6 +32277,220 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "repeated_deferred_scan_inputs_share_the_retained_definition_and_its_lease",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/retained_plans.rs",
+      "capability": "Retained folded CTE input ownership",
+      "workload": "Retain a four-MiB deferred CTE, scan it repeatedly and release its original scope before the final reader.",
+      "invariant": "Keep the original admitted plan shared, avoid repeated body copies and release its lease only after the last scan owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_cte_query_transfer_preserves_root_identity_metadata_and_exact_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/owned/tests/ctes.rs",
+      "capability": "Retained folded CTE input ownership",
+      "workload": "Replace a four-MiB CTE body with an admitted query while retaining SEARCH/CYCLE and declaration metadata.",
+      "invariant": "Transfer the existing root box without copying the old body; preserve metadata and exact live allocation reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_cte_query_transfer_releases_inputs_on_rejection_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/owned/tests/ctes.rs",
+      "capability": "Retained folded CTE input ownership",
+      "workload": "Reject a four-MiB declaration name under 64 KiB, cancel each request owner and unwind after a successful selected-query transfer.",
+      "invariant": "Reject before the large copy and release every consumed query and provisional metadata lease on all exit paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_folded_sources_borrow_replaced_definitions_before_selected_execution",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/ctes.rs",
+      "capability": "Retained folded CTE input ownership",
+      "workload": "Select a small prepared body instead of a four-MiB deferred definition under a bounded native allowance on all four providers; reject the full-body path, cancel, recover and retain the resulting physical expression.",
+      "invariant": "Avoid discarded-body copies, preserve original controls and recovered payloads, retain the physical payload allowance until operator drop, and release all source owners after session completion.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_folded_sources_preserve_pg18_demand_lexical_scope_and_effects",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/ctes.rs",
+      "capability": "Retained folded CTE input ownership",
+      "workload": "Replay PostgreSQL 18 output demand, filters, same-name shadows, volatile CTE reuse, SEARCH/CYCLE, generic/custom plans, cursors, mutation CTEs and rollback on four providers.",
+      "invariant": "Preserve exact outputs, lazy errors, effect counts, no-effect EXPLAIN, original lexical bindings and durable reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_reference_validation_admits_literal_scratch_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/projection/tests.rs",
+      "capability": "Native projection reference admission",
+      "workload": "Analyze a four-MiB cast under 64 KiB, cancel each control, recover and retain only the output descriptor.",
+      "invariant": "Reject before payload allocation; cancellation and failed metadata production release all private owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_clause_type_validation_preserves_callback_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/projection/tests.rs",
+      "capability": "Native projection reference admission",
+      "workload": "Resolve SELECT, GROUP BY and invalid ORDER BY types under the request allowance.",
+      "invariant": "Invoke each resolver in SQL order and return the later type error before comparison-capability checks; release scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "immutable_query_block_capture_admits_owned_payload_and_releases_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests.rs",
+      "capability": "Tuple recheck input ownership",
+      "workload": "Capture a four-MiB block with exact live reservations, insufficient allowance and both cancellation controls.",
+      "invariant": "Admit before copy, preserve the immutable block and release every reservation on failure or final drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unused_lock_recheck_inputs_borrow_the_original_statement_and_scope",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/recheck_source.rs",
+      "capability": "Tuple recheck input ownership",
+      "workload": "Prepare an unused lock recheck over a four-MiB query block.",
+      "invariant": "Borrow the original block and scope without allocating or copying their payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_projection_schema_preserves_slots_duplicates_types_and_internal_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/projection/tests.rs",
+      "capability": "Physical projection layout ownership",
+      "workload": "Build replacing and appending layouts with duplicate names, computed and NULL slots, and internal columns.",
+      "invariant": "Preserve column identities, types, qualifiers, physical positions and collations; retain output leases until the last schema reader drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_schema_admission_precedes_large_label_copy_and_observes_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/projection/tests.rs",
+      "capability": "Physical projection layout ownership",
+      "workload": "Produce a four-MiB output label under 64 KiB and cancel each request owner.",
+      "invariant": "Reject before the large copy and release all partial output metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_projection_keeps_only_live_expression_and_schema_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/production/tests.rs",
+      "capability": "Physical scalar projection ownership",
+      "workload": "Build a four-MiB physical scalar, retain its output schema after operator drop and unwind a second construction.",
+      "invariant": "Keep the physical payload charged while the operator lives; retire expressions independently from the shared output schema and release all owners on unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_projection_rejects_before_copying_and_consumes_cancelled_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/production/tests.rs",
+      "capability": "Physical scalar projection ownership",
+      "workload": "Construct a four-MiB scalar under 64 KiB and cancel either control after producing independent input fields.",
+      "invariant": "Reject before copying, consume cancelled inputs and restore the original budget without retaining provisional state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "call_state_capacity_is_admitted_and_retained_through_duplicate_registration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/production_tests.rs",
+      "capability": "Physical scalar call-state ownership",
+      "workload": "Register the same column root twice under the request allowance.",
+      "invariant": "Deduplicate addresses without losing the actual admitted buffer capacity; live allocations exactly equal reservations and final drop releases them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failed_call_state_construction_stops_root_traversal_and_releases_private_buffers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/production_tests.rs",
+      "capability": "Physical scalar call-state ownership",
+      "workload": "Build 256 column call-state slots under 256 bytes and cancel each request owner.",
+      "invariant": "Stop fallible root traversal at the first rejection or cancellation and release every partial state buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_projection_collects_then_binds_all_inputs_before_layout_type_observation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/project/production/tests.rs",
+      "capability": "Physical scalar projection ownership",
+      "workload": "Fail a later input or binding callback, then build two successful owned projections.",
+      "invariant": "Collect all inputs before binding, finish every binding before observing layout types and release each provisional owner on failure.",
+      "case_names": [
+        ""
       ]
     }
   ]

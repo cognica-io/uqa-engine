@@ -176,9 +176,9 @@ impl<S: Clone> CteScope<S> {
     }
 
     /// Return a folded definition without consuming its lexical binding. A single syntactic reference can be built again by a recursive working-table iteration or a correlated consumer. Materialized producers replace the definition explicitly when installed.
-    pub fn deferred_for_scan(&self, name: &str) -> Option<CtePlan> {
+    pub fn deferred_for_scan(&self, name: &str) -> Option<uqa_sql::plan::RetainedCtePlan> {
         let name = uqa_sql::semantics::cte_reference_name(name)?;
-        self.deferred_ctes.get(&name).map(|plan| (**plan).clone())
+        self.deferred_ctes.get(&name).cloned()
     }
 
     pub fn materialized_for_scan(

@@ -46,6 +46,26 @@ impl Copying<'_> {
     }
 
     pub(super) fn cte(&mut self, cte: &CtePlan) -> Result<CtePlan> {
+        self.cte_using(cte, |copying| {
+            Ok(match &cte.body {
+                CtePlanBody::Query(query) => {
+                    CtePlanBody::Query(copying.boxed(|copying| copying.query(query))?)
+                }
+                CtePlanBody::Command(command) => {
+                    CtePlanBody::Command(copying.boxed(|copying| {
+                        copying.field("command", |copying| copying.command_syntax(command))
+                    })?)
+                }
+            })
+        })
+    }
+
+    pub(super) fn cte_using(
+        &mut self,
+        cte: &CtePlan,
+        body: impl FnOnce(&mut Self) -> Result<CtePlanBody>,
+    ) -> Result<CtePlan> {
+        self.check()?;
         Ok(CtePlan {
             name: self.text(&cte.name)?,
             columns: self.texts(&cte.columns)?,
@@ -79,18 +99,7 @@ impl Copying<'_> {
                     })
                     .transpose()
             })?,
-            body: self.field("body", |copying| {
-                Ok(match &cte.body {
-                    CtePlanBody::Query(query) => {
-                        CtePlanBody::Query(copying.boxed(|copying| copying.query(query))?)
-                    }
-                    CtePlanBody::Command(command) => {
-                        CtePlanBody::Command(copying.boxed(|copying| {
-                            copying.field("command", |copying| copying.command_syntax(command))
-                        })?)
-                    }
-                })
-            })?,
+            body: self.field("body", body)?,
         })
     }
 

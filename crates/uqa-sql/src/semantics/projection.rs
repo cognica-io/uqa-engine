@@ -25,7 +25,7 @@ pub use stars::{
     bound_projection_expression_with_control, visit_bound_projection_star_fields,
     ProjectionFieldVisitor,
 };
-pub(crate) use stars::{visit_bound_projection_star_metadata, ProjectionStarMetadata};
+pub use stars::{visit_bound_projection_star_metadata, ProjectionStarMetadata};
 
 pub fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
     projections.iter().map(projection_label_at).collect()

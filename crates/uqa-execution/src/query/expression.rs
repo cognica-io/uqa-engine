@@ -168,6 +168,29 @@ impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
     ) -> ScalarExpr {
         crate::bind_type_introspection_with_resolver(expression, schema, self.params, self)
     }
+    fn bind_type_introspection_owned(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        schema: &crate::RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        uqa_sql::bind_type_introspection_owned(expression, schema, self.params, Some(self), control)
+    }
+
+    fn expression_type_with_control(
+        &self,
+        expression: &ScalarExpr,
+        schema: &crate::RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        uqa_sql::scalar_type_with_resolver_and_control(
+            expression,
+            schema,
+            self.params,
+            Some(self),
+            control,
+        )
+    }
 }
 
 fn intercepted_call<'expression>(

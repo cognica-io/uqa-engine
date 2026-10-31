@@ -12,7 +12,7 @@ use crate::{
     Engine,
 };
 use std::sync::Arc;
-use uqa_execution::query::recheck_source::LockRowsRecheckSource;
+use uqa_execution::query::recheck_source::LockRowsRecheckInput;
 use uqa_execution::query::relational::{
     QueryExpressionFactory, RelationalContext, RowLockOperatorFactory,
 };
@@ -76,7 +76,7 @@ impl RowLockOperatorFactory<StatementReadSnapshot> for Engine {
         params: &'a [SQLParam],
         scope: &CteScope,
         max_rows: Option<u64>,
-        recheck: Option<LockRowsRecheckSource<StatementReadSnapshot>>,
+        recheck: Option<LockRowsRecheckInput<'_, StatementReadSnapshot>>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
         uqa_execution::query::locking::attach_lock_rows(
             self.row_lock_context(),

@@ -74,8 +74,11 @@ mod tests;
 pub use cte_controls::{analyze_recursive_control_step, extend_cte_generated_schema};
 pub use preparation::resolve_variable_sites_owned;
 pub use projection::{
-    analyze_projection_output_schema, bind_projection_output_schema,
-    validate_query_block_expression_types, validate_query_block_references,
+    analyze_projection_output_schema, analyze_projection_output_schema_with_control,
+    bind_projection_output_schema, bind_projection_output_schema_with_control,
+    validate_query_block_expression_types, validate_query_block_expression_types_with_control,
+    validate_query_block_references, validate_query_block_references_with_control,
+    ProjectionSchemas,
 };
 pub use routine_binding::{
     bind_expression_plan_routines_for_storage, bind_query_plan_routines_for_storage,

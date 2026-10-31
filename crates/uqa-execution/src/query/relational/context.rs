@@ -6,7 +6,7 @@
 
 //! Physical relational assembly with independent expression and lock construction services.
 
-use crate::query::recheck_source::LockRowsRecheckSource;
+use crate::query::recheck_source::LockRowsRecheckInput;
 use crate::query::runtime::QueryRuntimeView;
 use crate::query::set_projection::{SetFunctionRuntime, SetProjectionOutput};
 use crate::query::CteScope;
@@ -39,7 +39,7 @@ pub trait RowLockOperatorFactory<S: Clone + 'static>: Sync {
         params: &'a [SQLParam],
         scope: &CteScope<S>,
         max_rows: Option<u64>,
-        recheck: Option<LockRowsRecheckSource<S>>,
+        recheck: Option<LockRowsRecheckInput<'_, S>>,
     ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError>;
 }
 
@@ -100,7 +100,7 @@ pub fn attach_lock_rows<'a, S: Clone + 'static>(
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
     max_rows: Option<u64>,
-    recheck: Option<LockRowsRecheckSource<S>>,
+    recheck: Option<LockRowsRecheckInput<'_, S>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     context
         .row_locks

@@ -6,7 +6,7 @@
 
 //! Row-lock target resolution and the physical `LockRows` operator.
 
-use super::recheck_source::LockRowsRecheckSource;
+use super::recheck_source::{LockRowsRecheckInput, LockRowsRecheckSource};
 use crate::catalog::schema::virtual_relation_accepts_row_lock as virtual_row_lockable;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use crate::query::{binding::bind_source_plan_schema, CteScope};
@@ -767,7 +767,7 @@ pub fn attach_lock_rows<'a, S: Clone + Send + Sync + 'static>(
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
     max_rows: Option<u64>,
-    recheck_source: Option<LockRowsRecheckSource<S>>,
+    recheck_source: Option<LockRowsRecheckInput<'_, S>>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     crate::physical::construction::OperatorBuild::build(operator, |operator| {
         let Some(first_clause) = statement.locking.first() else {
@@ -803,6 +803,9 @@ pub fn attach_lock_rows<'a, S: Clone + Send + Sync + 'static>(
         }
         // The recheck context is shared per SQL statement through the context session, so every locking scope reaches it: top-level queries, DML sources, DML CTEs, CREATE TABLE AS, prepared execution, and EXPLAIN ANALYZE bodies.
         let retry_cache = context.session.statement_row_lock_cache()?;
+        let recheck_source = recheck_source
+            .map(LockRowsRecheckInput::retain)
+            .transpose()?;
         operator.wrap(|input| {
             Box::new(LockRows::new(
                 input,

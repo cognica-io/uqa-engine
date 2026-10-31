@@ -49,6 +49,8 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
     runtime: QueryRuntimeView<'a>,
 ) -> Result<(Box<dyn PhysicalOperator + 'a>, RelationalResjunk), SQLError> {
     crate::physical::construction::OperatorBuild::run(operator, |operator| {
+        let resources = context.expressions.production_resources()?;
+        let control = resources.control();
         let type_resolver = context.expression_scope(ctes.clone());
         let mut resjunk = RelationalResjunk::default();
         let expanded_statement = statement
@@ -169,14 +171,22 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
         match statement.compute {
             ComputePlan::Project => {
                 if statement.order_by.is_empty() {
-                    let mut projections = physical_projections(&statement.projections);
                     let distinct_output =
                         identity_order_columns(&projection_columns(&statement.projections));
-                    resjunk.distinct_on.extend(append_distinct_set_projections(
+                    let mut distinct_inputs = uqa_core::memory::ProductionVec::new(control);
+                    super::aggregation::visit_distinct_set_projections(
                         statement,
                         &distinct_output,
-                        &mut projections,
-                    )?);
+                        |index, column, expression| {
+                            distinct_inputs.push_copy((index, column, expression))?;
+                            Ok(())
+                        },
+                    )?;
+                    resjunk.distinct_on.extend(
+                        distinct_inputs
+                            .iter()
+                            .map(|(index, column, _)| (*index, *column)),
+                    );
                     if !statement.locking.is_empty() {
                         let (physical, output) =
                             order_projection(&statement.projections, operator.row_schema())?;
@@ -195,11 +205,12 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                         runtime,
                         Arc::clone(&evaluator),
                         Some(
-                            crate::query::recheck_source::LockRowsRecheckSource::with_projections(
+                            crate::query::recheck_source::LockRowsRecheckInput::with_projections(
                                 statement,
                                 ctes,
                                 false,
                                 recheck_projections,
+                                &control,
                             ),
                         ),
                     )
@@ -208,13 +219,13 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                         operator.wrap(|operator| {
                             Box::new(ColumnSelection::with_physical_positions(operator, output))
                         });
-                    } else if projections_may_return_set(
-                        context.catalog,
-                        type_resolver.as_ref(),
-                        &projections,
-                        operator.row_schema(),
-                        params,
+                    } else if uqa_sql::semantics::sets::validation::expressions_may_return_set_with_control(
+                        context.catalog, type_resolver.as_ref(),
+                        statement.projections.iter().map(|projection| &projection.expr).chain(distinct_inputs.iter().map(|(_, _, expression)| *expression)),
+                        operator.row_schema(), params, &control,
                     )? {
+                        let mut projections = physical_projections(&statement.projections);
+                        projections.extend(distinct_inputs.iter().map(|(_, column, expression)| (crate::ProjectionTarget::Internal(*column), (*expression).clone())));
                         // PostgreSQL evaluates set-returning target expressions above LockRows, so a rechecked tuple re-expands its rows from the substituted base tuple. Locks therefore attach below the set projection, and LIMIT is applied to the expanded output above.
                         operator.attach(|operator| {
                             super::attach_lock_rows(
@@ -224,8 +235,8 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                                 params,
                                 ctes,
                                 None,
-                                Some(crate::query::recheck_source::LockRowsRecheckSource::new(
-                                    statement, ctes, false,
+                                Some(crate::query::recheck_source::LockRowsRecheckInput::new(
+                                    statement, ctes, false, &control,
                                 )),
                             )
                         })?;
@@ -267,16 +278,16 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                             operator.wrap(|operator| Box::new(RowAtATime::new(operator)));
                         }
                         let work_mem = runtime.work_mem_bytes()?;
-                        operator.wrap(|operator| {
-                            Box::new(
-                                Project::with_target_evaluator(
-                                    operator,
-                                    projections,
-                                    Arc::clone(&evaluator),
-                                )
-                                .with_memory_budget(work_mem),
-                            )
-                        });
+                        let labels = uqa_sql::semantics::projection_labels_with_control(&statement.projections, &[], &control)?;
+                        operator.attach(|operator| {
+                            let projections = labels.iter().zip(&statement.projections).map(|(label, projection)| {
+                                crate::query::projection::owned_physical_projection(crate::query::projection::owned_projection_column(label, &control)?, &projection.expr, true, &control)
+                            }).chain(distinct_inputs.iter().map(|(_, column, expression)| {
+                                crate::query::projection::owned_physical_projection(control.finish(crate::ProjectionTarget::Internal(*column), control.empty_reservation())?, expression, false, &control)
+                            }));
+                            let project = Project::with_owned_target_evaluator(operator, projections, Arc::clone(&evaluator), &control)?;
+                            Ok(Box::new(project.with_memory_budget(work_mem)))
+                        })?;
                         operator.attach(|operator| {
                             attach_order_limit(
                                 operator,
@@ -287,8 +298,8 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                                 ctes,
                                 runtime,
                                 Arc::clone(&evaluator),
-                                Some(crate::query::recheck_source::LockRowsRecheckSource::new(
-                                    statement, ctes, false,
+                                Some(crate::query::recheck_source::LockRowsRecheckInput::new(
+                                    statement, ctes, false, &control,
                                 )),
                             )
                         })?;
@@ -431,11 +442,12 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                         runtime,
                         Arc::clone(&evaluator),
                         Some(
-                            crate::query::recheck_source::LockRowsRecheckSource::with_projections(
+                            crate::query::recheck_source::LockRowsRecheckInput::with_projections(
                                 statement,
                                 ctes,
                                 true,
                                 recheck_projections,
+                                &control,
                             ),
                         ),
                     )
