@@ -6,6 +6,7 @@
 
 //! Arena-aware edits finish nested query namespaces before copying occurrences into their parent.
 
+use super::super::analysis::QueryObserver;
 use super::super::{
     nodes, CommandQuerySlot, MutableExecutablePlan, MutableQueryPlan, OwnedScalarExpr,
     QueryChildSlot, RewriteMemory, SourceChildSlot,
@@ -44,7 +45,23 @@ impl MutableExecutablePlan {
         control: &ProductionControl<'_>,
         transform: &mut ScalarArenaTransform<'_>,
     ) -> Result<(), SQLError> {
-        let mut walker = Walker { control, transform };
+        self.transform_scalar_arenas_with_metadata(control, transform, &mut |_| {
+            Ok(crate::plan::QueryMetadataUpdate::default())
+        })
+    }
+
+    /// Complete query metadata before an enclosing expression can copy the analyzed query into another occurrence.
+    pub(crate) fn transform_scalar_arenas_with_metadata(
+        &mut self,
+        control: &ProductionControl<'_>,
+        transform: &mut ScalarArenaTransform<'_>,
+        complete: &mut QueryObserver<'_>,
+    ) -> Result<(), SQLError> {
+        let mut walker = Walker {
+            control,
+            transform,
+            complete,
+        };
         match self {
             Self::Query(query) => {
                 query.assert_owner(control);
@@ -73,9 +90,10 @@ impl MutableQueryPlan {
     }
 }
 
-struct Walker<'a, 'c, 't> {
+struct Walker<'a, 'c, 't, 'q> {
     control: &'a ProductionControl<'c>,
     transform: &'a mut ScalarArenaTransform<'t>,
+    complete: &'a mut QueryObserver<'q>,
 }
 
 fn field<'a>(memory: Option<&'a mut RewriteMemory>, name: &str) -> Option<&'a mut RewriteMemory> {
@@ -96,7 +114,7 @@ fn item(memory: Option<&mut RewriteMemory>, index: usize) -> Option<&mut Rewrite
     })
 }
 
-impl Walker<'_, '_, '_> {
+impl Walker<'_, '_, '_, '_> {
     fn executable(
         &mut self,
         plan: &mut UnifiedPlan,
@@ -174,10 +192,10 @@ impl Walker<'_, '_, '_> {
         }
         nodes::query_scalars(query, memory.as_deref_mut(), false, control, &mut action)?;
         *query_arena(&mut query.root) = arena.queries;
-        if let Some(memory) = memory {
+        if let Some(memory) = memory.as_deref_mut() {
             *query_memory(memory) = arena.memory;
         }
-        Ok(())
+        (self.complete)(query)?.install(query, memory, control)
     }
 
     fn source_children(

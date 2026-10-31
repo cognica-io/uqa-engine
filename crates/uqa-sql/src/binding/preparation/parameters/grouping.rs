@@ -6,7 +6,7 @@
 
 //! Keep DISTINCT grouping identity at the analyzed, pre-optimization boundary.
 
-use super::{AnalysisMap, NonNull, ParameterTypes, SQLError, SQLParam, UnifiedPlan};
+use super::{AnalysisMap, NonNull, ParameterTypes, SQLError, SQLParam};
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan};
 use crate::{routines::RoutineResolution, RowSchema};
 use uqa_core::memory::ProductionControl;
@@ -70,7 +70,7 @@ impl GroupingInputs {
         })
     }
 
-    fn apply_block(
+    pub(super) fn apply_block(
         &mut self,
         query: &mut QueryPlan,
         routines: &dyn RoutineResolution,
@@ -104,24 +104,6 @@ impl GroupingInputs {
         }
         let mut result = Ok(());
         query.visit_queries_mut(&mut |query| {
-            if result.is_ok() {
-                result = self.apply_block(query, routines, params);
-            }
-        });
-        result
-    }
-
-    pub(super) fn apply_plan(
-        &mut self,
-        plan: &mut UnifiedPlan,
-        routines: &dyn RoutineResolution,
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        if self.is_empty() {
-            return Ok(());
-        }
-        let mut result = Ok(());
-        plan.visit_queries_mut(&mut |query| {
             if result.is_ok() {
                 result = self.apply_block(query, routines, params);
             }

@@ -110,21 +110,19 @@ impl InputConstants {
             Ok(aliases.finish()?)
         })?;
         plan.apply_source_metadata(control, &mut |source| self.source_metadata(source, control))?;
-        plan.transform_scalar_nodes_in_place(control, &mut |identity, expression| {
-            self.apply_node_owned(identity, expression, control)
-        })?;
-        plan.apply_query_metadata(control, &mut |query| {
-            self.8.groupings.metadata(query, routines, params, control)
-        })?;
-        if !self.2.is_empty() {
-            plan.transform_scalar_arenas_in_place(control, &mut |identity, expression, arena| {
-                match self.2.remove(&identity) {
-                    Some(membership) => membership.apply_owned(expression, arena, control),
-                    None => Ok(expression),
-                }
-            })?;
-        }
-        if !self.is_consumed() {
+        let mut groupings = std::mem::take(&mut self.8.groupings);
+        plan.transform_scalar_arenas_with_metadata(
+            control,
+            &mut |identity, expression, arena| {
+                let expression = match self.2.remove(&identity) {
+                    Some(membership) => membership.apply_owned(expression, arena, control)?,
+                    None => expression,
+                };
+                self.apply_node_owned(identity, expression, control)
+            },
+            &mut |query| groupings.metadata(query, routines, params, control),
+        )?;
+        if !self.is_consumed() || !groupings.is_empty() {
             return Err(SQLError::Internal(
                 "prepared input constant did not belong to the analyzed plan".into(),
             ));

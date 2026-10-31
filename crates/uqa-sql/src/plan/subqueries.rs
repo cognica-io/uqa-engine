@@ -23,8 +23,8 @@ pub use transfer::transfer_expression;
 
 mod transform;
 pub(crate) use transform::{
-    copy_occurrences, query_nodes as rewrite_query_with_arenas, rewrite_expression_with_arena,
-    rewrite_with_arenas,
+    copy_occurrences, rewrite_expression_with_arena, rewrite_expression_with_arena_and_metadata,
+    rewrite_query_with_arenas, rewrite_with_arenas, rewrite_with_arenas_and_metadata,
 };
 
 /// Drop unreferenced query children and remap local command expressions without evaluating them.

@@ -140,28 +140,17 @@ impl InputConstants {
             query.visit_queries_mut(&mut |query| self.apply_query(query));
             query.visit_sources_mut(&mut |source| self.apply_source(source));
         }
-        let mut result = Ok(());
-        let mut apply = |node: &mut ScalarExpr| {
-            if result.is_ok() {
-                result = self.apply_node(node);
-            }
-        };
-        crate::plan::rewrite_scalar_expression(expression, &mut apply);
-        for query in subqueries.iter_mut() {
-            query.rewrite_scalar_expressions(&mut apply);
-        }
-        result?;
-        for query in subqueries.iter_mut() {
-            self.8.groupings.apply_query(query, routines, params)?;
-        }
-        if !self.2.is_empty() {
-            crate::plan::subqueries::rewrite_expression_with_arena(
-                expression,
-                subqueries,
-                &mut |node, arena| self.apply_membership(node, arena),
-            )?;
-        }
-        if self.is_consumed() {
+        let mut groupings = std::mem::take(&mut self.8.groupings);
+        crate::plan::subqueries::rewrite_expression_with_arena_and_metadata(
+            expression,
+            subqueries,
+            &mut |node, arena| {
+                self.apply_membership(node, arena)?;
+                self.apply_node(node)
+            },
+            &mut |query| groupings.apply_block(query, routines, params),
+        )?;
+        if self.is_consumed() && groupings.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(
@@ -179,21 +168,17 @@ impl InputConstants {
         plan.visit_queries_mut(&mut |query| self.apply_query(query));
         // Source selections are consumed before expression rewrites can move their enclosing nodes.
         plan.visit_sources_mut(&mut |source| self.apply_source(source));
-        // Children are rewritten before their enclosing clauses move them; every retained identity is consumed at its original address.
-        let mut result = Ok(());
-        plan.rewrite_scalar_expressions(&mut |expression| {
-            if result.is_ok() {
-                result = self.apply_node(expression);
-            }
-        });
-        result?;
-        self.8.groupings.apply_plan(plan, routines, params)?;
-        if !self.2.is_empty() {
-            crate::plan::subqueries::rewrite_with_arenas(plan, &mut |node, arena| {
-                self.apply_membership(node, arena)
-            })?;
-        }
-        if self.is_consumed() {
+        // Consume all selected inputs at their original address before a parent transfers its children.
+        let mut groupings = std::mem::take(&mut self.8.groupings);
+        crate::plan::subqueries::rewrite_with_arenas_and_metadata(
+            plan,
+            &mut |node, arena| {
+                self.apply_membership(node, arena)?;
+                self.apply_node(node)
+            },
+            &mut |query| groupings.apply_block(query, routines, params),
+        )?;
+        if self.is_consumed() && groupings.is_empty() {
             Ok(())
         } else {
             Err(SQLError::Internal(

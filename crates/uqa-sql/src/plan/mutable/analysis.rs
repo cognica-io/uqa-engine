@@ -26,10 +26,55 @@ pub(crate) struct QueryMetadataUpdate {
     pub grouping: Option<Produced<crate::semantics::grouping_sets::AnalyzedGroupingSets>>,
 }
 
+impl QueryMetadataUpdate {
+    pub(super) fn install(
+        self,
+        query: &mut QueryPlan,
+        mut memory: Option<&mut RewriteMemory>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        if let Some(root) = self.root {
+            root.assert_owner(control);
+            let MutableQueryPlan {
+                query: replacement,
+                memory: mut replacement_memory,
+            } = root;
+            query.root = replacement.root;
+            if let Some(memory) = memory.as_deref_mut() {
+                *memory.field_mut("root") = replacement_memory
+                    .as_mut()
+                    .expect("replacement query owner")
+                    .field_mut("root")
+                    .take();
+            }
+        }
+        if let Some(output) = self.output {
+            query.analyzed_output = Some(output);
+        }
+        if let Some(source) = self.source {
+            query.analyzed_source = Some(source);
+        }
+        if let Some(grouping) = self.grouping {
+            let (grouping, lease) = grouping.into_parts();
+            let (grouping, lease) = control.finish(grouping, lease)?.into_parts();
+            query.analyzed_grouping = Some(grouping);
+            if let Some(memory) = memory {
+                let direct = lease.expect("admitted grouping metadata");
+                *memory.field_mut("analyzed_grouping") = Some(RewriteMemory::Fields {
+                    fields: BudgetedVec::new(direct.budget()),
+                    direct,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(crate) type SourceMetadataUpdate = Produced<Vec<(usize, Produced<FunctionBinding>)>>;
 type ProjectionObserver<'a> =
     dyn FnMut(&[ProjectionPlan]) -> Result<ProjectionAliasUpdates, SQLError> + 'a;
-type QueryObserver<'a> = dyn FnMut(&QueryPlan) -> Result<QueryMetadataUpdate, SQLError> + 'a;
+pub(super) type QueryObserver<'a> =
+    dyn FnMut(&QueryPlan) -> Result<QueryMetadataUpdate, SQLError> + 'a;
 type SourceObserver<'a> = dyn FnMut(&SourcePlan) -> Result<SourceMetadataUpdate, SQLError> + 'a;
 type SourceReplacement<'a> =
     dyn FnMut(&SourcePlan) -> Result<Option<super::MutableSourcePlan>, SQLError> + 'a;
@@ -152,7 +197,7 @@ impl Walker<'_, '_> {
     fn install_query(
         &mut self,
         query: &mut QueryPlan,
-        mut memory: Option<&mut RewriteMemory>,
+        memory: Option<&mut RewriteMemory>,
     ) -> Result<(), SQLError> {
         self.control.check()?;
         if self.mark_relations {
@@ -162,40 +207,7 @@ impl Walker<'_, '_> {
             return Ok(());
         };
         let update = observe(query)?;
-        if let Some(root) = update.root {
-            root.assert_owner(&self.control);
-            let MutableQueryPlan {
-                query: replacement,
-                memory: mut replacement_memory,
-            } = root;
-            query.root = replacement.root;
-            if let Some(memory) = memory.as_deref_mut() {
-                *memory.field_mut("root") = replacement_memory
-                    .as_mut()
-                    .expect("replacement query owner")
-                    .field_mut("root")
-                    .take();
-            }
-        }
-        if let Some(output) = update.output {
-            query.analyzed_output = Some(output);
-        }
-        if let Some(source) = update.source {
-            query.analyzed_source = Some(source);
-        }
-        if let Some(grouping) = update.grouping {
-            let (grouping, lease) = grouping.into_parts();
-            let (grouping, lease) = self.control.finish(grouping, lease)?.into_parts();
-            query.analyzed_grouping = Some(grouping);
-            if let Some(memory) = memory {
-                let direct = lease.expect("admitted grouping metadata");
-                *memory.field_mut("analyzed_grouping") = Some(RewriteMemory::Fields {
-                    fields: BudgetedVec::new(direct.budget()),
-                    direct,
-                });
-            }
-        }
-        Ok(())
+        update.install(query, memory, &self.control)
     }
 
     fn install_projection_aliases(
