@@ -37,6 +37,8 @@ on:
       - .github/workflows/workspace-tests.yml
       - ".github/actions/setup-nextest/**"
       - .config/nextest.toml
+  pull_request:
+    types: [ready_for_review]
   workflow_dispatch:
     inputs:
       run_rust:
@@ -90,21 +92,21 @@ env:
 jobs:
   test-linux:
     name: test Linux
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     uses: ./.github/workflows/workspace-tests.yml
     with:
       os: ubuntu-24.04
 
   test-macos:
     name: test macOS
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     uses: ./.github/workflows/workspace-tests.yml
     with:
       os: macos-14
 
   clippy:
     name: clippy ${{ matrix.label }}
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -135,7 +137,7 @@ jobs:
 
   msrv:
     name: check minimum Rust versions
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -157,7 +159,7 @@ jobs:
 
   doc:
     name: doc
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     env:
       RUSTDOCFLAGS: "-D warnings"
@@ -177,7 +179,7 @@ jobs:
 
   deny:
     name: deny
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -190,7 +192,7 @@ jobs:
 
   upstream-regression-oracle:
     name: PostgreSQL upstream regression oracle
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -217,7 +219,7 @@ jobs:
 
   nori-reference:
     name: Lucene dictionaries and reference regeneration
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -266,7 +268,7 @@ jobs:
 
   nori-benchmark:
     name: Nori native analysis and indexing gate
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations)) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations)) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

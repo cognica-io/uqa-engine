@@ -1298,6 +1298,12 @@ The scan checkpoint passed 2,983 SQL unit/integration cases, 494 Planner unit/in
 
 The eleven linked follow-up issues retain all unfinished producer requirements, the complete allocation inventory and optimized replay under #1292. They are outside this PR's implementation scope. Main `95c14fd05` is reconciled in `f3e21b2eb`; all eleven native SQLite HNSW owner tests pass on the combined source. The merged regression inventory validates 2,546 checks / 3,703 required cases. All 35 performance-verifier tests, full-workspace formatting and ownership/dependency/harness/header/file-size policies pass. The verifier's process-retirement assertions were repeated with process-status access after the restricted environment rejected `ps`; no assertion or test was changed. Actual final-source automatic Linux/macOS and affected FDW qualification and delivery remain required before #1293 can close.
 
+## Automatic qualification corrections
+
+The initial PR policy run at `618d9922e1fab5e94859012d5981c28e27705548` stopped when the public-host detector matched a qualified SQL fixture field. The fixture now uses `local_value` in the source and exact shadowing assertion; the same SQL owner regression and unchanged repository hygiene check pass. This changes no production SQL behavior. The complete policy suite passes 605 tests with four existing skips.
+
+The required `pre-merge CI` status previously had no pull-request event producer. Its existing workflow now starts on `ready_for_review`, and that event selects the same nine Rust validation entries used for main pushes. The aggregate gate, job bodies, main trigger, dispatch selections and branch protection are unchanged. All 26 pre-merge workflow/script tests and 16 FDW policy tests pass after the correction. Existing automatic runs at the earlier source remain historical; final qualification must identify the corrected source and actual results.
+
 ## Live requirements
 
 PR #1299 contains the implemented planning-ownership foundation, EXPLAIN MEMORY and the native scan batch. Further producer implementations are outside its scope. Remaining implementation is tracked by #1301–#1311 under #1292. Filing those issues transfers work; it does not complete it. #1292 stays open after this PR.
