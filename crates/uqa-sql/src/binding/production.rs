@@ -176,7 +176,7 @@ impl SchemaScope {
             deferred_ctes: binding.deferred_ctes,
             non_returning_ctes: binding.non_returning_ctes,
             production: control.capture(),
-            visiting_views: std::collections::BTreeSet::new(),
+            visiting_views: BindingNameSet::new(),
             validate_references: false,
             stored_expression_outer: None,
             rule_condition_event: None,

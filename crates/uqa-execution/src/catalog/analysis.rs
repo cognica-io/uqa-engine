@@ -10,6 +10,79 @@ use uqa_sql::catalog::analysis::{AnalysisCatalog, TableDefinition, ViewDefinitio
 use uqa_sql::{ColumnType, SQLError};
 
 impl AnalysisCatalog for CatalogReadView {
+    fn relation_row_type_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ast::CompositeTypeReference>>, SQLError>
+    {
+        let selected = self.relation_kind_resolution_with_control(resolution, name, control)?;
+        let super::RelationResolution::Found(canonical, _) = &*selected else {
+            return Ok(None);
+        };
+        let reference =
+            uqa_core::RelationIdentity::try_borrowed_reference(canonical).map_err(|error| {
+                control
+                    .format(format_args!("{error}"))
+                    .map(|text| SQLError::Internal(text.into_parts().0))
+                    .unwrap_or_else(Into::into)
+            })?;
+        let relation =
+            reference.identity_with_control(uqa_core::RelationName::decoded("public"), control)?;
+        let snapshot = self.snapshot();
+        let oids = snapshot
+            .tables
+            .get(&*relation)
+            .map(|table| table.catalog_oids)
+            .or_else(|| {
+                snapshot
+                    .definitions
+                    .views
+                    .get(&*relation)
+                    .map(|view| view.relation_oids())
+            })
+            .or_else(|| {
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .get(&*relation)
+                    .map(super::foreign::StoredForeignTable::relation_oids)
+            });
+        oids.map(|oids| {
+            oids.row_type_reference_with_control(&relation, control)
+                .map_err(Into::into)
+        })
+        .transpose()
+        .map(Option::flatten)
+    }
+
+    fn sequence_exists_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        CatalogReadView::sequence_exists_with_control(self, resolution, name, control)
+    }
+
+    fn virtual_relation_schema_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        Option<uqa_core::memory::Produced<uqa_sql::catalog::analysis::VirtualRelationSchema>>,
+        SQLError,
+    > {
+        if let Some(relation) =
+            self.virtual_relation_resolved_with_control(resolution, name, control)?
+        {
+            return relation.schema_with_control(control).map(Some);
+        }
+        super::graph::age_label_relation_schema_with_control(self, resolution, name, control)
+    }
+
     fn with_view_definition_with_control(
         &self,
         resolution: &RelationNameResolution,
@@ -269,8 +342,12 @@ impl AnalysisCatalog for CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<bool, SQLError> {
-        CatalogReadView::sequence_resolved(self, resolution, name)
-            .map(|sequence| sequence.is_some())
+        CatalogReadView::sequence_exists_with_control(
+            self,
+            resolution,
+            name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
     }
 
     fn virtual_relation_schema(
@@ -287,6 +364,38 @@ impl AnalysisCatalog for CatalogReadView {
         name: &str,
     ) -> Result<Option<Vec<Arc<uqa_sql::routines::SQLUserFunction>>>, SQLError> {
         CatalogReadView::sql_functions(self, resolution, name)
+    }
+
+    fn unopenable_relation_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        Option<uqa_core::memory::Produced<uqa_sql::catalog::analysis::UnopenableRelation>>,
+        SQLError,
+    > {
+        let selected = self.relation_kind_resolution_with_control(resolution, name, control)?;
+        let super::RelationResolution::Found(canonical, "composite type") = &*selected else {
+            return Ok(None);
+        };
+        let reference =
+            uqa_core::RelationIdentity::try_borrowed_reference(canonical).map_err(|error| {
+                control
+                    .format(format_args!("{error}"))
+                    .map(|text| SQLError::Internal(text.into_parts().0))
+                    .unwrap_or_else(Into::into)
+            })?;
+        let (name, memory) = control
+            .format(format_args!("{}", reference.name))?
+            .into_parts();
+        Ok(Some(control.finish(
+            uqa_sql::catalog::analysis::UnopenableRelation {
+                name,
+                kinds: "composite types",
+            },
+            memory,
+        )?))
     }
 
     fn unopenable_relation(

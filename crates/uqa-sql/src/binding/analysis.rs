@@ -348,15 +348,6 @@ impl SchemaScope {
     }
 }
 
-pub(super) fn with_table_pseudo_columns(schema: &RowSchema, qualifier: &str) -> RowSchema {
-    with_table_pseudo_columns_with_control(
-        schema,
-        qualifier,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
-    .expect("ordinary table pseudo columns")
-}
-
 pub(super) fn with_table_pseudo_columns_with_control(
     schema: &RowSchema,
     qualifier: &str,

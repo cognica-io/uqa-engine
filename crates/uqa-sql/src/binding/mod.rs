@@ -122,9 +122,7 @@ use crate::ast::ColumnType;
 use crate::catalog::analysis::CatalogReadView;
 use crate::catalog::resolution::RelationNameResolution;
 use crate::routines::RoutineResolution;
-use crate::semantics::sets::placement_scope::SetPlacementScope;
 use crate::RowSchema;
-use std::collections::BTreeSet;
 
 #[cfg(test)]
 thread_local! {
@@ -147,7 +145,7 @@ struct SchemaScope {
     deferred_ctes: production::BindingMap<crate::plan::RetainedCtePlan>,
     non_returning_ctes: production::BindingNameSet,
     production: uqa_core::memory::OwnedProductionControl,
-    visiting_views: BTreeSet<String>,
+    visiting_views: production::BindingNameSet,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
     rule_condition_event: Option<crate::ast::RuleEvent>,
@@ -429,155 +427,7 @@ impl SchemaScope {
             .flatten();
         let outer = input.as_ref();
         match source {
-            SourcePlan::Table {
-                name,
-                qualifier,
-                alias,
-                column_aliases,
-                bound_columns,
-                ..
-            } => {
-                let qualifier = alias.as_deref().unwrap_or(qualifier);
-                let cte_name = crate::semantics::cte_reference_name(name);
-                if let Some(schema) = cte_name.as_ref().and_then(|name| self.ctes.get(name)) {
-                    if let Some(name) = cte_name
-                        .as_ref()
-                        .filter(|name| self.non_returning_ctes.contains(name))
-                    {
-                        return Err(non_returning_cte_error(name));
-                    }
-                    return alias_table_schema(schema, qualifier, column_aliases);
-                }
-                if let Some(plan) = cte_name
-                    .as_ref()
-                    .and_then(|name| self.deferred_ctes.get(name))
-                {
-                    if !plan.body.returns_rows() {
-                        return Err(non_returning_cte_error(&plan.name));
-                    }
-                }
-                if let Some(plan) = cte_name.and_then(|name| self.deferred_ctes.remove(&name)) {
-                    let result = self
-                        .bind_cte_schemas(
-                            routines,
-                            std::slice::from_ref(plan.as_ref()),
-                            params,
-                            outer,
-                        )
-                        .and_then(|previous| {
-                            let schema = self.ctes.get(&plan.name).expect("CTE schema was bound");
-                            let result = alias_table_schema(schema, qualifier, column_aliases);
-                            self.restore_cte_schemas(previous);
-                            result
-                        });
-                    self.deferred_ctes.insert(plan.name.clone(), plan);
-                    return result;
-                }
-                if self.catalog.sequence_exists(&self.resolution, name)? {
-                    self.record_relation_dependency(name)?;
-                    let schema = RowSchema::with_qualified_types(
-                        qualifier,
-                        vec!["last_value".into(), "log_cnt".into(), "is_called".into()],
-                        vec![
-                            Some(ColumnType::BigInteger),
-                            Some(ColumnType::BigInteger),
-                            Some(ColumnType::Boolean),
-                        ],
-                    );
-                    return self.alias_relation_schema(&schema, name, qualifier, column_aliases);
-                }
-                let view = self.catalog.view_resolved(&self.resolution, name)?;
-                if let Some(view) = view {
-                    self.record_relation_dependency(name)?;
-                    if view.materialized {
-                        let columns = view.output_columns.unwrap_or_default();
-                        if columns.len() != view.materialized_column_types.len() {
-                            return Err(SQLError::Internal(format!(
-                                "materialized view `{name}` has {} columns but {} stored column types",
-                                columns.len(),
-                                view.materialized_column_types.len()
-                            )));
-                        }
-                        let schema = crate::catalog::view::materialized_view_schema(
-                            &columns,
-                            &view.materialized_column_types,
-                            view.materialized_column_collations.as_deref(),
-                        )?;
-                        let schema = RowSchema::with_relation_qualifier(&schema, qualifier);
-                        return self.alias_relation_schema(
-                            &schema,
-                            name,
-                            qualifier,
-                            column_aliases,
-                        );
-                    }
-                    let key = name.to_ascii_lowercase();
-                    if !self.visiting_views.insert(key.clone()) {
-                        return Err(SQLError::Internal(format!(
-                            "view `{name}` has a recursive schema dependency"
-                        )));
-                    }
-                    self.record_stored_query_dependencies(&view.query)?;
-                    // A view's stored query is bound as it was created; its set-returning calls are not placed again.
-                    let result = {
-                        let _stored = SetPlacementScope::stored_definition();
-                        self.bind_query(routines, &view.query, params, outer)
-                    }
-                    .and_then(|schema| {
-                        let schema = rename_schema(
-                            &schema,
-                            view.output_columns.as_deref().unwrap_or(&[]),
-                            Some(qualifier),
-                        );
-                        self.alias_relation_schema(&schema, name, qualifier, column_aliases)
-                    });
-                    self.visiting_views.remove(&key);
-                    return result;
-                }
-                let table = self.catalog.table_resolved(&self.resolution, name)?;
-                if let Some(table) = table {
-                    self.record_relation_dependency(name)?;
-                    let schema =
-                        RowSchema::with_column_definitions(Some(qualifier), &table.columns);
-                    let schema =
-                        crate::semantics::bound_source_schema(&schema, bound_columns.as_deref())?;
-                    let schema =
-                        self.alias_relation_schema(&schema, name, qualifier, column_aliases)?;
-                    let schema = if table.columns.is_empty() && !table.columns_declared {
-                        RowSchema::with_open_columns(&schema, Some(qualifier))
-                    } else {
-                        schema
-                    };
-                    return Ok(analysis::with_table_pseudo_columns(&schema, qualifier));
-                }
-                let foreign_table = self
-                    .catalog
-                    .foreign_table_resolved(&self.resolution, name)?;
-                if let Some(foreign_table) = foreign_table {
-                    self.record_relation_dependency(name)?;
-                    let schema =
-                        RowSchema::with_column_definitions(Some(qualifier), &foreign_table.columns);
-                    let schema =
-                        crate::semantics::bound_source_schema(&schema, bound_columns.as_deref())?;
-                    return self.alias_relation_schema(&schema, name, qualifier, column_aliases);
-                }
-                if let Some(schema) = self
-                    .catalog
-                    .virtual_relation_schema(&self.resolution, name)?
-                {
-                    self.record_relation_dependency(name)?;
-                    let (columns, types): (Vec<_>, Vec<_>) = schema
-                        .into_iter()
-                        .map(|(column, ty)| (column, Some(ty)))
-                        .unzip();
-                    let schema = RowSchema::with_qualified_types(qualifier, columns, types);
-                    return self.alias_relation_schema(&schema, name, qualifier, column_aliases);
-                }
-                if let Some(relation) = self.catalog.unopenable_relation(&self.resolution, name)? {
-                    return Err(relation.error());
-                }
-                Err(SQLError::UnknownTable(name.clone()))
-            }
+            SourcePlan::Table { .. } => self.bind_relation_source(routines, source, params, outer),
             SourcePlan::Values {
                 rows,
                 alias,
@@ -592,17 +442,24 @@ impl SchemaScope {
                 {
                     let inferred =
                         self.bind_values_schema(routines, rows, subqueries, outer, params)?;
-                    if let Some(schema) =
-                        source.internal_values_schema_with_inference(Some(&inferred))?
+                    if let Some(schema) = source
+                        .internal_values_schema_with_control(Some(&inferred), &self.control())?
                     {
                         return Ok(schema);
                     }
                 }
-                if let Some(schema) = source.internal_values_schema()? {
+                if let Some(schema) =
+                    source.internal_values_schema_with_control(None, &self.control())?
+                {
                     return Ok(schema);
                 }
                 let schema = self.bind_values_schema(routines, rows, subqueries, outer, params)?;
-                Ok(rename_schema(&schema, column_aliases, alias.as_deref()))
+                projection::rename_schema_with_control(
+                    &schema,
+                    column_aliases,
+                    alias.as_deref(),
+                    &self.control(),
+                )
             }
             SourcePlan::RetainedRows(source) => Ok(source.schema().clone()),
             SourcePlan::Function { .. } => {
@@ -622,12 +479,19 @@ impl SchemaScope {
                     SourcePlan::Subquery {
                         captured_output: Some(relation),
                         ..
-                    } => RowSchema::capture_output(&schema, *relation),
+                    } => {
+                        RowSchema::capture_output_with_control(&schema, *relation, &self.control())?
+                    }
                     _ => match alias {
                         Some(alias) if !schema.columns_are_open(None) => {
-                            alias_table_schema(&schema, alias, column_aliases)?
+                            alias_table_schema(&schema, alias, column_aliases, &self.control())?
                         }
-                        alias => rename_schema(&schema, column_aliases, alias.as_deref()),
+                        alias => projection::rename_schema_with_control(
+                            &schema,
+                            column_aliases,
+                            alias.as_deref(),
+                            &self.control(),
+                        )?,
                     },
                 })
             }

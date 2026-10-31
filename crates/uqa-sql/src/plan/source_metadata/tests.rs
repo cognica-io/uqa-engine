@@ -86,3 +86,59 @@ fn internal_values_metadata_restores_legacy_defaults_and_rejects_invalid_collati
         assert_eq!(error.to_string(), format!("internal error: {message}"));
     }
 }
+
+#[test]
+fn internal_declarations_admit_selected_types_and_release_failed_or_retired_schemas() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let relation = InternalRelationId::allocate();
+    let source = SourcePlan::Values {
+        lateral: false,
+        rows: vec![],
+        alias: None,
+        column_aliases: vec![],
+        internal_relation: Some(relation),
+        internal_column_types: vec![None, Some(ColumnType::Integer)],
+        internal_column_collations: vec![None, None],
+    };
+    let inferred = RowSchema::with_types(
+        vec!["text".into(), "ignored".into()],
+        vec![Some(ColumnType::Text), Some(ColumnType::Text)],
+    )
+    .with_column_collations([Some(950), Some(951)]);
+    let expected = RowSchema::with_internal_relation_metadata(
+        relation,
+        [
+            (Some(ColumnType::Text), Some(950)),
+            (Some(ColumnType::Integer), None),
+        ],
+    );
+    let memory = MemoryBudget::new(1 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let schema = source
+        .internal_values_schema_with_control(Some(&inferred), &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(schema, expected);
+    let retained = schema.clone();
+    drop(schema);
+    assert!(memory.used() > 0);
+    drop(retained);
+    assert_eq!(memory.used(), 0);
+    for token in [&original, &invoking] {
+        token.cancel();
+        assert_eq!(
+            source
+                .internal_values_schema_with_control(Some(&inferred), &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), 0);
+        token.reset();
+    }
+}

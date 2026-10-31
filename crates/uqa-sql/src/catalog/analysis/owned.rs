@@ -12,6 +12,31 @@ use std::sync::Arc;
 use uqa_core::memory::Produced;
 
 impl<T: AnalysisCatalog> AnalysisCatalog for Produced<T> {
+    fn relation_row_type_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Produced<crate::ast::CompositeTypeReference>>, SQLError> {
+        (**self).relation_row_type_with_control(resolution, name, control)
+    }
+    fn sequence_exists_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        (**self).sequence_exists_with_control(resolution, name, control)
+    }
+    fn virtual_relation_schema_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Produced<super::VirtualRelationSchema>>, SQLError> {
+        (**self).virtual_relation_schema_with_control(resolution, name, control)
+    }
+
     fn with_view_definition_with_control(
         &self,
         resolution: &RelationNameResolution,
@@ -168,6 +193,15 @@ impl<T: AnalysisCatalog> AnalysisCatalog for Produced<T> {
         name: &str,
     ) -> Result<Option<Vec<Arc<crate::routines::SQLUserFunction>>>, SQLError> {
         (**self).sql_functions(resolution, name)
+    }
+
+    fn unopenable_relation_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Produced<super::UnopenableRelation>>, SQLError> {
+        (**self).unopenable_relation_with_control(resolution, name, control)
     }
 
     fn unopenable_relation(

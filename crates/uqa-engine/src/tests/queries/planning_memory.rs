@@ -440,3 +440,5 @@ mod conflict_inference;
 mod mutation_privileges;
 
 mod physical_joins;
+
+mod source_descriptors;

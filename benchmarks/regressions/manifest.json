@@ -33778,6 +33778,155 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_source_descriptors_reject_wide_declarations_and_aliases_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/source_schemas/production_tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Four table, foreign, CTE alias and internal VALUES bypasses with 1 MiB declarations and a 32 KiB scope.",
+      "invariant": "Reject with 53200 before 128 KiB attempted allocation and restore the original binding allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_descriptor_owners_survive_scope_retirement_and_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/source_schemas/production_tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Wide source declarations, both cancellation scopes, successful retry and a schema outliving its binder.",
+      "invariant": "Retain the admitted descriptor until its final reader drops and release all failed construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_selection_preserves_exact_lookup_collations_and_executor_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/remapping/tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Selected and repeated fields, absent inputs, record metadata, hidden attributes, collations and scores.",
+      "invariant": "Preserve the original exact selector and metadata policy with bounded rejection and final-owner retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_named_row_types_preserve_namespace_replacement_and_last_reader",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/relation_types/tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Named row-type replacement over unique and shared descriptors, wide identities and both cancellations.",
+      "invariant": "Reuse unique physical metadata, independently admit shared copies and preserve every other relation identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "internal_declarations_admit_selected_types_and_release_failed_or_retired_schemas",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/source_metadata/tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Explicit and inferred internal VALUES types and collations with no visible names.",
+      "invariant": "Explicit declarations retain precedence; cancellation and final-owner retirement release selected metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "fixed_catalog_descriptors_admit_nested_types_and_release_partial_construction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/schema_production/tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "All fixed virtual catalog schemas including domain and array payloads under partial quotas and both cancellations.",
+      "invariant": "Retained bytes match allocator live bytes, declarations keep their original order and failures leave no owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_view_binding_retires_recursion_keys_and_restores_deferred_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/sources/relations/tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Repeated failed view analysis and a deferred CTE whose output alias exceeds the remaining allowance.",
+      "invariant": "Remove recursive-view keys, restore the retained deferred CTE without copying it and permit a subsequent valid binding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_schema_binding_borrows_retained_view_payloads_instead_of_cloning_them",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analysis/tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "A stored view with a 4 MiB constant bound under a 64 KiB scope through the native catalog adapter.",
+      "invariant": "Borrow the retained body, attempt less than 256 KiB, retain the selected schema and release both cancelled scopes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_source_catalog_adapters_preserve_shadowing_row_type_identity_and_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analysis/tests.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Native row-type, sequence and virtual catalog selection through a retained trait-object adapter.",
+      "invariant": "Preserve namespace shadowing and exact identities while admitting output and restoring quota on rejection or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_source_descriptors_admit_aliases_and_hold_the_last_schema_owner",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_descriptors.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Table, view, materialized view, sequence, foreign table and virtual catalog aliases with a 64 KiB scope on four providers.",
+      "invariant": "Reject before 256 KiB attempted allocation, recover from both cancellations and retain ownership through the last schema reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_source_descriptors_preserve_pg18_types_collations_and_namespace_order",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_descriptors.rs",
+      "capability": "Native source descriptor ownership",
+      "workload": "Eight PostgreSQL 18.4 row-type, alias, CTE, collation, sequence and catalog observations plus failed-statement recovery.",
+      "invariant": "Match independent results on memory, native SQLite, SQLite Key/Value and redb without changing namespace or type order.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

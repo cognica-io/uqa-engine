@@ -12,31 +12,36 @@ use crate::RowSchema;
 use crate::{SQLError, SQLParam};
 
 use super::{
-    operator_join_relation_schemas, projection::rename_schema, BindingContext, ScalarExpr,
-    SchemaScope, SourceScope,
+    operator_join_relation_schemas, projection::rename_schema_with_control, BindingContext,
+    ScalarExpr, SchemaScope, SourceScope,
 };
 use crate::routines::RoutineResolution;
 
 mod execution;
 mod functions;
+mod relations;
 pub use execution::bind_source_plan_for_execution_owned;
 
 pub(super) fn alias_table_schema(
     schema: &RowSchema,
     qualifier: &str,
     column_aliases: &[String],
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
     if column_aliases.len() > schema.len() {
         return Err(SQLError::Routine {
             sqlstate: "42P10".into(),
-            message: format!(
-                "table \"{qualifier}\" has {} columns available but {} columns specified",
-                schema.len(),
-                column_aliases.len()
-            ),
+            message: control
+                .format(format_args!(
+                    "table \"{qualifier}\" has {} columns available but {} columns specified",
+                    schema.len(),
+                    column_aliases.len()
+                ))?
+                .into_parts()
+                .0,
         });
     }
-    Ok(rename_schema(schema, column_aliases, Some(qualifier)))
+    rename_schema_with_control(schema, column_aliases, Some(qualifier), control)
 }
 
 impl SchemaScope {
@@ -47,10 +52,16 @@ impl SchemaScope {
         qualifier: &str,
         column_aliases: &[String],
     ) -> Result<RowSchema, SQLError> {
-        let schema = alias_table_schema(schema, qualifier, column_aliases)?;
-        match self.catalog.relation_row_type(&self.resolution, name)? {
+        let control = self.control();
+        let schema = alias_table_schema(schema, qualifier, column_aliases, &control)?;
+        match self
+            .catalog
+            .relation_row_type_with_control(&self.resolution, name, &control)?
+        {
             Some(row_type) => {
-                schema.with_relation_row_type(qualifier, crate::ColumnType::Composite(row_type))
+                let (row_type, memory) = row_type.into_parts();
+                let ty = control.finish(crate::ColumnType::Composite(row_type), memory)?;
+                schema.with_relation_row_type_with_control(qualifier, &ty, &control)
             }
             None => Ok(schema),
         }

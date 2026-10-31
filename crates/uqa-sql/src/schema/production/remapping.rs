@@ -161,6 +161,29 @@ pub(in crate::schema) fn physical<'a>(
 }
 
 impl RowSchema {
+    /// Select borrowed output/source names while retaining the original physical fragments and executor metadata.
+    pub fn select_with_control<'a>(
+        input: &Self,
+        columns: impl IntoIterator<Item = (&'a str, &'a str)>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let mut layout = Layout::new(input, control)?;
+        for (output, source) in columns {
+            control.check()?;
+            layout.push(
+                output,
+                (None, output),
+                input.exact_slot(source).unwrap_or(NULL_SLOT),
+                input.exact_type(source),
+                input
+                    .position(source)
+                    .and_then(|position| input.inherited_column_collation(position)),
+                false,
+            )?;
+        }
+        layout.finish(input.physical_width(), &[], false, None, control)
+    }
+
     pub(crate) fn remap_join_alias_with_control(
         input: &Self,
         qualifier: &str,

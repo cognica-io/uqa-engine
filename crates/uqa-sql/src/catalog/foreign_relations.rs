@@ -6,7 +6,10 @@
 
 //! `PostgreSQL` foreign catalog row descriptors, shared by relation and type projection.
 
-use super::VirtualRelation;
+use super::{
+    schema_production::CatalogColumnType::{self, Array, Inline},
+    VirtualRelation,
+};
 use crate::ColumnType;
 
 pub struct ForeignCatalogDescriptor {
@@ -39,28 +42,25 @@ pub const FOREIGN_CATALOGS: &[ForeignCatalogDescriptor] = &[
 
 pub(super) fn visit_columns(
     relation: VirtualRelation,
-    visit: &mut dyn FnMut(&'static str, fn() -> ColumnType),
+    visit: &mut dyn FnMut(&'static str, CatalogColumnType),
 ) {
     use ColumnType::{AclItem, Name, Oid, Text};
-    fn array(ty: ColumnType) -> ColumnType {
-        ColumnType::Array(Box::new(ty))
-    }
     macro_rules! columns {
-        ($($name:literal => $ty:expr),* $(,)?) => {{ $(visit($name, || $ty);)* }};
+        ($($name:literal => $ty:expr),* $(,)?) => {{ $(visit($name, $ty);)* }};
     }
     match relation {
         VirtualRelation::PgForeignDataWrapper => columns![
-            "oid" => Oid, "fdwname" => Name, "fdwowner" => Oid,
-            "fdwhandler" => Oid, "fdwvalidator" => Oid,
-            "fdwacl" => array(AclItem), "fdwoptions" => array(Text),
+            "oid" => Inline(Oid), "fdwname" => Inline(Name), "fdwowner" => Inline(Oid),
+            "fdwhandler" => Inline(Oid), "fdwvalidator" => Inline(Oid),
+            "fdwacl" => Array(AclItem), "fdwoptions" => Array(Text),
         ],
         VirtualRelation::PgForeignServer => columns![
-            "oid" => Oid, "srvname" => Name, "srvowner" => Oid,
-            "srvfdw" => Oid, "srvtype" => Text, "srvversion" => Text,
-            "srvacl" => array(AclItem), "srvoptions" => array(Text),
+            "oid" => Inline(Oid), "srvname" => Inline(Name), "srvowner" => Inline(Oid),
+            "srvfdw" => Inline(Oid), "srvtype" => Inline(Text), "srvversion" => Inline(Text),
+            "srvacl" => Array(AclItem), "srvoptions" => Array(Text),
         ],
         VirtualRelation::PgForeignTable => columns![
-            "ftrelid" => Oid, "ftserver" => Oid, "ftoptions" => array(Text),
+            "ftrelid" => Inline(Oid), "ftserver" => Inline(Oid), "ftoptions" => Array(Text),
         ],
         _ => unreachable!("foreign catalog descriptor"),
     }

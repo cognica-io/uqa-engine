@@ -144,3 +144,51 @@ impl RelationRowTypes {
         }))))
     }
 }
+
+impl crate::RowSchema {
+    pub fn with_relation_row_type_with_control(
+        mut self,
+        qualifier: &str,
+        ty: &crate::ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        if !matches!(ty, crate::ColumnType::Composite(_))
+            || (!self.is_empty() && !self.has_qualifier(qualifier))
+        {
+            return Err(SQLError::Internal(
+                "a relation row type requires its named composite and source namespace".into(),
+            ));
+        }
+        let previous = self.index.cold.row_types.0.as_deref();
+        let types = SchemaMap::from_produced(
+            previous
+                .into_iter()
+                .flat_map(|rows| rows.types.iter())
+                .filter(|(name, _)| name.as_ref() != qualifier)
+                .map(|(name, ty)| {
+                    Ok((
+                        boxed_text(name, control)?,
+                        crate::schema::production::optional_type(ty.as_ref(), control)?,
+                    ))
+                })
+                .chain(std::iter::once_with(|| {
+                    Ok((
+                        boxed_text(qualifier, control)?,
+                        crate::schema::production::optional_type(Some(ty), control)?,
+                    ))
+                })),
+            control,
+        )?;
+        let source = (types.len() == 1).then_some(qualifier);
+        let row_types = RelationRowTypes::from_parts_with_control(types, source, control)?;
+        if let Some(index) = Arc::get_mut(&mut self.index) {
+            index.cold.row_types = row_types;
+            control.check()?;
+            return Ok(self);
+        }
+        let mut metadata = crate::schema::production::copy::metadata(&self, control)?;
+        metadata.row_types = row_types;
+        crate::schema::production::copy::with_metadata(&self, metadata, control)
+    }
+}

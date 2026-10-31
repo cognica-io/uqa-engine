@@ -174,3 +174,216 @@ fn correlation_catalog_selection_rejects_before_callbacks_and_preserves_sibling_
         assert_eq!(parent.used(), sibling.bytes());
     }
 }
+
+fn source_view_context(
+    query: uqa_sql::plan::QueryPlan,
+) -> uqa_sql::binding::BindingContext<'static> {
+    let mut snapshot = fixture().snapshot().clone();
+    Arc::make_mut(&mut snapshot.definitions.views)
+        .get_mut(&RelationIdentity::new("public", "v"))
+        .unwrap()
+        .definition
+        .query = query;
+    uqa_sql::binding::BindingContext {
+        catalog: Arc::new(CatalogReadView::new(snapshot)),
+        resolution: namespace(),
+        ctes: std::collections::BTreeMap::new(),
+        deferred_ctes: std::collections::BTreeMap::new(),
+        non_returning_ctes: std::collections::BTreeSet::new(),
+        scalar_subqueries: &[],
+    }
+}
+
+#[test]
+fn source_schema_binding_borrows_retained_view_payloads_instead_of_cloning_them() {
+    use crate::catalog::test_support::NoRoutines;
+    use uqa_sql::plan::{RelationalPlan, UnifiedPlan};
+    let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(
+        uqa_sql::compile(&format!("SELECT '{}'::text AS n", "x".repeat(4 << 20)))
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query")
+    };
+    // Catalog definitions pass through stored input binding before publication.
+    let raw_context = source_view_context(*query.clone());
+    uqa_sql::binding::bind_query_plan_routines_for_storage(
+        &NoRoutines,
+        &mut query,
+        &[],
+        &raw_context,
+        None,
+    )
+    .unwrap();
+    query.visit_scalar_expressions(&mut |expression| {
+        assert!(!uqa_sql::type_resolution::contains_unknown_literal(
+            expression
+        ));
+    });
+    let context = source_view_context(*query);
+    let UnifiedPlan::Query(query) =
+        UnifiedPlan::lower(uqa_sql::compile("SELECT * FROM v").unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    let source = block.from.as_ref().unwrap();
+    let memory = MemoryBudget::new(64 << 10);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    // Unanalyzed definitions still owe input conversion; reject that allocation before copying the payload.
+    let rejected = allocation_counter::measure(|| {
+        assert_eq!(
+            uqa_sql::binding::production::bind_source_plan_schema_with_control(
+                &NoRoutines,
+                source,
+                &[],
+                raw_context.copy_with_control(&control).unwrap(),
+                None,
+                &control,
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("53200"),
+        );
+    });
+    assert!(rejected.bytes_total < 256 << 10, "{rejected:?}");
+    assert_eq!(memory.used(), 0);
+    let mut schema = None;
+    let allocation = allocation_counter::measure(|| {
+        schema = Some(
+            uqa_sql::binding::production::bind_source_plan_schema_with_control(
+                &NoRoutines,
+                source,
+                &[],
+                context.copy_with_control(&control).unwrap(),
+                None,
+                &control,
+            )
+            .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_total < 256 << 10, "{allocation:?}");
+    let schema = schema.unwrap();
+    assert_eq!(schema.column_type(0), Some(&ColumnType::Text));
+    assert!(memory.used() > 0);
+    drop(schema);
+    assert_eq!(memory.used(), 0);
+    for token in [&original, &invoking] {
+        let scope = context.copy_with_control(&control).unwrap();
+        token.cancel();
+        assert_eq!(
+            uqa_sql::binding::production::bind_source_plan_schema_with_control(
+                &NoRoutines,
+                source,
+                &[],
+                scope,
+                None,
+                &control
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), 0);
+        token.reset();
+    }
+}
+
+#[test]
+fn admitted_source_catalog_adapters_preserve_shadowing_row_type_identity_and_cleanup() {
+    let mut snapshot = fixture().snapshot().clone();
+    Arc::make_mut(&mut snapshot.definitions.sequences).insert(
+        RelationIdentity::new("later", "v"),
+        crate::catalog::sequence::SequenceState::initial(
+            1,
+            1,
+            uqa_sql::ast::SequenceDataType::BigInt,
+        ),
+    );
+    let catalog = CatalogReadView::new(snapshot);
+    let mut namespace = namespace();
+    namespace.search_path.push("later".into());
+    let memory = MemoryBudget::new(128 << 10);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let owned: Arc<dyn AnalysisCatalog> = control
+        .finish(catalog.clone(), control.empty_reservation())
+        .unwrap()
+        .into_shared(&control)
+        .unwrap();
+    let baseline = memory.used();
+    assert!(!owned
+        .sequence_exists_with_control(&namespace, "v", &control)
+        .unwrap());
+    assert!(owned
+        .sequence_exists_with_control(&namespace, "later.v", &control)
+        .unwrap());
+    for name in ["v", "remote", "later.v"] {
+        let expected = catalog.relation_row_type(&namespace, name).unwrap();
+        let selected = owned
+            .relation_row_type_with_control(&namespace, name, &control)
+            .unwrap();
+        assert_eq!(selected.as_deref(), expected.as_ref());
+        drop(selected);
+        assert_eq!(memory.used(), baseline);
+    }
+    let columns = owned
+        .virtual_relation_schema_with_control(&namespace, "pg_catalog.pg_class", &control)
+        .unwrap()
+        .unwrap();
+    assert!(columns
+        .iter()
+        .any(|(name, ty)| name == "relacl"
+            && *ty == ColumnType::Array(Box::new(ColumnType::AclItem))));
+    assert!(memory.used() > baseline);
+    drop(columns);
+    assert_eq!(memory.used(), baseline);
+    for cancelled in 0..3 {
+        let occupied = (cancelled == 0).then(|| memory.reserve(memory.available()).unwrap());
+        if cancelled == 1 {
+            original.cancel();
+        }
+        if cancelled == 2 {
+            invoking.cancel();
+        }
+        let state = if cancelled == 0 { "53200" } else { "57014" };
+        assert_eq!(
+            owned
+                .relation_row_type_with_control(&namespace, "v", &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some(state)
+        );
+        assert_eq!(
+            owned
+                .sequence_exists_with_control(&namespace, "later.v", &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some(state)
+        );
+        assert_eq!(
+            owned
+                .virtual_relation_schema_with_control(&namespace, "pg_catalog.pg_class", &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some(state)
+        );
+        assert_eq!(
+            memory.used(),
+            baseline
+                + occupied
+                    .as_ref()
+                    .map_or(0, uqa_core::memory::MemoryReservation::bytes)
+        );
+        drop(occupied);
+        original.reset();
+        invoking.reset();
+    }
+    drop(owned);
+    assert_eq!(memory.used(), 0);
+}

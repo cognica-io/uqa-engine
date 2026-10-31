@@ -14,6 +14,8 @@ use crate::{ColumnType, SQLError};
 use std::sync::Arc;
 mod owned;
 
+pub type VirtualRelationSchema = Vec<(String, ColumnType)>;
+
 #[derive(Clone)]
 pub struct TableDefinition {
     pub columns: Arc<Vec<ColumnDef>>,
@@ -59,6 +61,52 @@ pub trait AnalysisCatalog: Send + Sync {
         _name: &str,
     ) -> Result<Option<crate::ast::CompositeTypeReference>, SQLError> {
         Ok(None)
+    }
+
+    fn relation_row_type_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ast::CompositeTypeReference>>, SQLError>
+    {
+        control.check()?;
+        self.relation_row_type(resolution, name)?
+            .map(|ty| ty.clone_with_control(control).map_err(Into::into))
+            .transpose()
+    }
+
+    fn sequence_exists_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        let exists = self.sequence_exists(resolution, name)?;
+        control.check()?;
+        Ok(exists)
+    }
+
+    fn virtual_relation_schema_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<VirtualRelationSchema>>, SQLError> {
+        control.check()?;
+        let Some(schema) = self.virtual_relation_schema(resolution, name)? else {
+            return Ok(None);
+        };
+        let mut output = uqa_core::memory::ProductionVec::new(*control);
+        for (name, ty) in &schema {
+            let (name, name_memory) = control.copy_text(name)?.into_parts();
+            let (ty, type_memory) = ty.clone_with_control(control)?.into_parts();
+            output.push_produced(
+                control.finish((name, ty), control.combine(name_memory, type_memory))?,
+            )?;
+        }
+        Ok(Some(output.finish()?))
     }
 
     /// Exact revisions of the requested identities in this catalog view. Return `None` only when the catalog has no revision capability; within an available snapshot, include every requested identity and use a missing value for an absent object.
@@ -257,6 +305,27 @@ pub trait AnalysisCatalog: Send + Sync {
         name: &str,
     ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError>;
 
+    fn unopenable_relation_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<UnopenableRelation>>, SQLError> {
+        control.check()?;
+        self.unopenable_relation(resolution, name)?
+            .map(|relation| {
+                let (name, memory) = control.copy_text(&relation.name)?.into_parts();
+                Ok(control.finish(
+                    UnopenableRelation {
+                        name,
+                        kinds: relation.kinds,
+                    },
+                    memory,
+                )?)
+            })
+            .transpose()
+    }
+
     /// A relation that a query cannot open, such as a composite type's relation: its unqualified name and the kind `PostgreSQL`'s detail names.
     fn unopenable_relation(
         &self,
@@ -293,6 +362,26 @@ pub struct UnopenableRelation {
 }
 
 impl UnopenableRelation {
+    pub fn error_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> SQLError {
+        let output = (|| {
+            let message = control.format(format_args!("cannot open relation \"{}\"", self.name))?;
+            let detail = control.format(format_args!(
+                "This operation is not supported for {}.",
+                self.kinds
+            ))?;
+            Ok::<_, uqa_core::ValueRetentionError>(SQLError::Diagnostic {
+                sqlstate: "42809".into(),
+                message: message.into_parts().0,
+                detail: Some(detail.into_parts().0),
+                hint: None,
+            })
+        })();
+        output.unwrap_or_else(Into::into)
+    }
+
     /// `table_open`'s refusal of a relation that is not a table.
     #[must_use]
     pub fn error(&self) -> SQLError {

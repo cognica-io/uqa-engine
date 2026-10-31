@@ -291,3 +291,35 @@ fn expected_output(input: &RowSchema) -> RowSchema {
         ],
     )
 }
+
+#[test]
+fn controlled_selection_preserves_exact_lookup_collations_and_executor_metadata() {
+    let input = fixture();
+    let names = [
+        ("text", "l.b"),
+        ("record", "r.rec"),
+        ("absent", "missing"),
+        ("again", "l.b"),
+    ];
+    let expected = RowSchema::select(
+        &input,
+        &names.map(|(output, source)| (output.into(), source.into())),
+    );
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let schema = RowSchema::select_with_control(&input, names, &control).unwrap();
+    assert_eq!(schema, expected);
+    assert_eq!(schema.physical_width(), input.physical_width());
+    assert!(memory.used() > 0);
+    drop(schema);
+    assert_eq!(memory.used(), 0);
+    let occupied = memory.reserve(memory.available()).unwrap();
+    assert_eq!(
+        RowSchema::select_with_control(&input, names, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(memory.used(), occupied.bytes());
+}

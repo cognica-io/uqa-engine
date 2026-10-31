@@ -18,6 +18,7 @@ pub(super) mod copy;
 mod identity_aliases;
 mod indexes;
 mod internal_aliases;
+mod internal_relations;
 pub(super) mod lease;
 mod parts;
 mod projection;

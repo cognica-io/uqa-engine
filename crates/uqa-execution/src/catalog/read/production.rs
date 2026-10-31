@@ -15,6 +15,28 @@ use uqa_core::{
 mod hierarchy;
 
 impl CatalogReadView {
+    /// Analysis selects a declaration without reading runtime sequence positions or security payloads.
+    pub fn sequence_exists_with_control(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        let candidates = self
+            .relation_names()
+            .relation_lookup_candidates_with_control(resolution, name, control)?;
+        for relation in candidates.iter() {
+            control.check()?;
+            if self.snapshot.definitions.sequences.contains_key(relation) {
+                return Ok(true);
+            }
+            if self.relation_exists(relation) {
+                return Ok(false);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn virtual_relation_resolved_with_control(
         &self,
         resolution: &RelationNameResolution,

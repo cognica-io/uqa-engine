@@ -184,3 +184,70 @@ fn anonymous_empty_namespaces_shadow_named_outer_rows() {
     assert!(!scope.has_qualified_column("q", "k"));
     assert!(scope.qualified_star_position_layout("q").is_empty());
 }
+
+#[test]
+fn admitted_named_row_types_preserve_namespace_replacement_and_last_reader() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let left = source("a", 20_000, &["n"]);
+    let right = source("b", 30_000, &["n"]);
+    let input = RowSchema::join(&left, &right, []);
+    let ty = row_type("replacement", 40_000);
+    let expected = input
+        .clone()
+        .with_relation_row_type("a", ty.clone())
+        .unwrap();
+    let memory = MemoryBudget::new(1 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let output = input
+        .clone()
+        .with_relation_row_type_with_control("a", &ty, &control)
+        .unwrap();
+    assert_eq!(output, expected);
+    let retained = output.clone();
+    let held = memory.used();
+    drop(output);
+    assert_eq!(memory.used(), held);
+    drop(retained);
+    assert_eq!(memory.used(), 0);
+    for token in [&original, &invoking] {
+        token.cancel();
+        assert_eq!(
+            input
+                .clone()
+                .with_relation_row_type_with_control("a", &ty, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), 0);
+        token.reset();
+    }
+    let unique = source("a", 20_000, &["n"]);
+    let names = unique.columns().as_ptr();
+    let unique = unique
+        .with_relation_row_type_with_control("a", &ty, &control)
+        .unwrap();
+    assert_eq!(unique.columns().as_ptr(), names);
+    assert_eq!(unique.whole_row_type("a"), Some(&ty));
+    drop(unique);
+    assert_eq!(memory.used(), 0);
+    let wide = row_type(&"x".repeat(1 << 20), 40_000);
+    let occupied = memory.reserve(memory.available() - (32 << 10)).unwrap();
+    let allocation = allocation_counter::measure(|| {
+        assert_eq!(
+            input
+                .clone()
+                .with_relation_row_type_with_control("a", &wide, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("53200")
+        );
+    });
+    assert!(allocation.bytes_total < 128 << 10, "{allocation:?}");
+    assert_eq!(memory.used(), occupied.bytes());
+}
