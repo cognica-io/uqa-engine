@@ -6,8 +6,9 @@
 
 //! Correlated physical join operator.
 
+use uqa_core::memory::{MemoryReservation, ProductionControl};
 use uqa_sql::ast::JoinKind;
-use uqa_sql::ResultRow;
+use uqa_sql::{ResultRow, SQLError};
 
 use crate::batch::DEFAULT_BATCH_SIZE;
 use crate::{
@@ -34,19 +35,6 @@ pub trait LateralSource<'a>: Send {
     }
 }
 
-fn output_schema(
-    left: &RowSchema,
-    right: &RowSchema,
-    left_nulls: &ResultRow,
-    right_nulls: &ResultRow,
-) -> RowSchema {
-    RowSchema::join(
-        left,
-        right,
-        left_nulls.keys().chain(right_nulls.keys()).cloned(),
-    )
-}
-
 /// Streaming physical implementation of a SQL `LATERAL` join.
 ///
 /// The left child is pulled in batches. The correlated right relation is
@@ -64,6 +52,7 @@ pub struct LateralJoin<'a> {
     right_rows: Option<LateralRows<'a>>,
     matched_left: bool,
     exhausted: bool,
+    memory: Option<MemoryReservation>,
 }
 
 impl<'a> LateralJoin<'a> {
@@ -86,20 +75,65 @@ impl<'a> LateralJoin<'a> {
         right_nulls: ResultRow,
         right_schema: RowSchema,
     ) -> Self {
-        let left =
-            crate::join::presence::input(left, matches!(kind, JoinKind::Right | JoinKind::Full));
-        let right_presence = crate::join::presence::NullableRow::new(
-            &right_schema,
-            matches!(kind, JoinKind::Left | JoinKind::Full),
-        );
-        let schema = output_schema(
-            left.row_schema(),
-            &right_presence.schema,
-            &left_nulls,
-            &right_nulls,
-        );
+        Self::with_right_schema_with_control(
+            left,
+            source,
+            kind,
+            left_nulls,
+            right_nulls,
+            right_schema,
+            &ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary lateral join construction")
+    }
+
+    pub fn with_right_schema_with_control(
+        left: Box<dyn PhysicalOperator + 'a>,
+        mut source: Box<dyn LateralSource<'a> + 'a>,
+        kind: JoinKind,
+        left_nulls: ResultRow,
+        right_nulls: ResultRow,
+        right_schema: RowSchema,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let built = crate::physical::construction::OperatorBuild::run(left, |left| {
+            left.attach(|input| {
+                crate::join::presence::input_with_control(
+                    input,
+                    matches!(kind, JoinKind::Right | JoinKind::Full),
+                    control,
+                )
+            })?;
+            let right_presence = crate::join::presence::NullableRow::with_control(
+                &right_schema,
+                matches!(kind, JoinKind::Left | JoinKind::Full),
+                control,
+            )?;
+            let schema = RowSchema::join_borrowed_columns_with_control(
+                left.row_schema(),
+                &right_presence.schema,
+                left_nulls
+                    .keys()
+                    .chain(right_nulls.keys())
+                    .map(String::as_str),
+                control,
+            )?;
+            Ok((right_presence, schema))
+        });
+        let (left, (right_presence, schema)) = match built {
+            Ok(output) => output,
+            Err(error) => {
+                return Err(match source.close() {
+                    Ok(()) => error,
+                    Err(cleanup) => error.with_cleanup(
+                        crate::physical::physical_exec_error(cleanup),
+                        "close lateral source after construction failure",
+                    ),
+                })
+            }
+        };
         let left_schema = left.row_schema().clone();
-        Self {
+        Ok(Self {
             left,
             source,
             kind,
@@ -111,6 +145,23 @@ impl<'a> LateralJoin<'a> {
             right_rows: None,
             matched_left: false,
             exhausted: false,
+            memory: None,
+        })
+    }
+
+    pub fn into_boxed(mut self, control: &ProductionControl<'_>) -> Result<Box<Self>, SQLError> {
+        match control.reserve(size_of::<Self>()) {
+            Ok(memory) => {
+                self.memory = memory;
+                Ok(Box::new(self))
+            }
+            Err(error) => Err(match self.close() {
+                Ok(()) => error.into(),
+                Err(cleanup) => SQLError::from(error).with_cleanup(
+                    crate::physical::physical_exec_error(cleanup),
+                    "close lateral join after wrapper admission failure",
+                ),
+            }),
         }
     }
 
@@ -438,3 +489,6 @@ mod tests {
         assert!(error.to_string().contains("injected lateral failure"));
     }
 }
+
+#[cfg(test)]
+mod production_tests;

@@ -121,3 +121,31 @@ fn native_join_planning_preserves_pg18_keys_types_lateral_patterns_and_errors(
     }
     engine.close().unwrap();
 }
+
+// Independent PostgreSQL 18.4 output is retained in tests/parity/pg18/nullable_join_planning.expected.txt.
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_nullable_join_metadata_preserves_whole_rows_aliases_and_lateral_presence(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("nullable-join-observation.db"));
+    for (sql, expected) in [
+        ("SELECT l.id::text || ':' || coalesce(r::text,'ABSENT') AS result FROM (VALUES(1),(2)) AS l(id) LEFT JOIN (VALUES(NULL::integer,NULL::text)) AS r(n,v) ON l.id=1 ORDER BY l.id;", &["1:(,)","2:ABSENT"][..]),
+        ("SELECT a.id::text || ':' || coalesce(b::text,'ABSENT') || ':' || coalesce(c::text,'ABSENT') AS result FROM (VALUES(1),(2),(3)) AS a(id) LEFT JOIN (VALUES(2)) AS b(id) ON a.id=b.id LEFT JOIN (VALUES(NULL::integer)) AS c(n) ON a.id<>3 ORDER BY a.id;", &["1:ABSENT:()","2:(2):()","3:ABSENT:ABSENT"][..]),
+        ("SELECT id::text || ':' || coalesce(l::text,'ABSENT') || ':' || coalesce(r::text,'ABSENT') AS result FROM (VALUES(1::integer),(2)) AS l(id) FULL JOIN (VALUES(2::bigint),(3)) AS r(id) USING(id) ORDER BY id;", &["1:(1):ABSENT","2:(2):(2)","3:ABSENT:(3)"][..]),
+        ("SELECT j.x::text || ':' || j::text AS result FROM ((VALUES(1),(2)) AS l(id) LEFT JOIN (VALUES(1,NULL::text)) AS r(id,v) ON l.id=r.id) AS j(x,y,z) ORDER BY j.x;", &["1:(1,1,)","2:(2,,)"][..]),
+        ("SELECT l.id::text || ':' || coalesce(r::text,'ABSENT') AS result FROM (VALUES(1),(2)) AS l(id) LEFT JOIN LATERAL (SELECT NULL::integer AS n WHERE l.id=1) AS r ON true ORDER BY l.id;", &["1:()","2:ABSENT"][..]),
+        ("SELECT l.id::text || ':' || coalesce(r::text,'ABSENT') AS result FROM (VALUES(1),(2)) AS l(id) LEFT JOIN LATERAL (SELECT NULL::integer AS n) AS r ON l.id=1 ORDER BY l.id;", &["1:()","2:ABSENT"][..]),
+    ] {
+        let result = engine.sql(sql, &[]).unwrap();
+        let actual = result.rows.iter().map(|row| match &row["result"] {
+            Value::Str(value) => value.as_str(), value => panic!("unexpected result {value:?}")
+        }).collect::<Vec<_>>();
+        assert_eq!(actual, expected, "{provider:?}: {sql}");
+    }
+    engine.close().unwrap();
+}

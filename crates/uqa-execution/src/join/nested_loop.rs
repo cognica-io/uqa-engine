@@ -128,12 +128,7 @@ impl<'a> NestedLoopJoin<'a> {
         let (left, right, (schema, predicate)) =
             crate::physical::construction::OperatorBuild::pair(left, right, |left, right| {
                 control.check()?;
-                left.wrap(|input| {
-                    super::presence::input(input, matches!(kind, JoinKind::Right | JoinKind::Full))
-                });
-                right.wrap(|input| {
-                    super::presence::input(input, matches!(kind, JoinKind::Left | JoinKind::Full))
-                });
+                super::presence::join_inputs(left, right, kind, control)?;
                 let schema = RowSchema::join_borrowed_columns_with_control(
                     left.row_schema(),
                     right.row_schema(),

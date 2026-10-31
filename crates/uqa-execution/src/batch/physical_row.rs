@@ -11,18 +11,53 @@ use super::{
     INLINE_ROW_FRAGMENTS, NULL_SLOT, NULL_VALUE,
 };
 
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct RowFragment {
-    pub(super) values: Arc<Vec<Value>>,
-    /// Fragment-local output slot -> stored value slot. `None` is the common
-    /// contiguous case. A projection lets an in-memory scan share its stored
-    /// row even when column pruning selects or reorders fields.
-    pub(super) projection: Option<Arc<[usize]>>,
+#[derive(Debug, Clone)]
+pub(super) enum RowFragment {
+    Stored {
+        values: Arc<Vec<Value>>,
+        /// Fragment-local output slot -> stored value slot; absent for contiguous values.
+        projection: Option<Arc<[usize]>>,
+    },
+    /// NULL extension and Boolean presence have no width-sized value storage.
+    Constant { value: &'static Value, width: usize },
+}
+
+impl PartialEq for RowFragment {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Stored {
+                    values: left,
+                    projection: lp,
+                },
+                Self::Stored {
+                    values: right,
+                    projection: rp,
+                },
+            ) => left == right && lp == rp,
+            (
+                Self::Constant {
+                    value: left,
+                    width: lw,
+                },
+                Self::Constant {
+                    value: right,
+                    width: rw,
+                },
+            ) => left == right && lw == rw,
+            (Self::Constant { value, width }, Self::Stored { values, projection })
+            | (Self::Stored { values, projection }, Self::Constant { value, width }) => {
+                projection.is_none()
+                    && values.len() == *width
+                    && values.iter().all(|stored| stored == *value)
+            }
+        }
+    }
 }
 
 impl RowFragment {
     fn contiguous(values: Arc<Vec<Value>>) -> Self {
-        Self {
+        Self::Stored {
             values,
             projection: None,
         }
@@ -40,7 +75,7 @@ impl RowFragment {
         if identity {
             Self::contiguous(values)
         } else {
-            Self {
+            Self::Stored {
                 values,
                 projection: Some(projection),
             }
@@ -50,25 +85,42 @@ impl RowFragment {
     pub(super) fn len(&self) -> usize {
         #[cfg(test)]
         FRAGMENT_WIDTH_READS.with(|reads| reads.set(reads.get() + 1));
-        self.projection
-            .as_ref()
-            .map_or(self.values.len(), |projection| projection.len())
-    }
-
-    pub(super) fn get(&self, slot: usize) -> Option<&Value> {
-        match self.projection.as_ref() {
-            Some(projection) => match projection.get(slot).copied()? {
-                NULL_SLOT => Some(&NULL_VALUE),
-                stored => self.values.get(stored),
-            },
-            None => self.values.get(slot),
+        match self {
+            Self::Stored { values, projection } => projection
+                .as_ref()
+                .map_or(values.len(), |projection| projection.len()),
+            Self::Constant { width, .. } => *width,
         }
     }
 
+    pub(super) fn get(&self, slot: usize) -> Option<&Value> {
+        match self {
+            Self::Constant { value, width } => (slot < *width).then_some(*value),
+            Self::Stored { values, projection } => match projection.as_ref() {
+                Some(projection) => match projection.get(slot).copied()? {
+                    NULL_SLOT => Some(&NULL_VALUE),
+                    stored => values.get(stored),
+                },
+                None => values.get(slot),
+            },
+        }
+    }
+
+    pub(super) fn has_shared_values(&self) -> bool {
+        matches!(self, Self::Stored { values, .. } if Arc::strong_count(values) > 1)
+    }
+
+    pub(super) fn can_copy_directly(&self) -> bool {
+        matches!(self, Self::Constant { .. }) || self.has_shared_values()
+    }
+
     fn stored_slot(&self, slot: usize) -> Option<usize> {
-        match self.projection.as_ref() {
-            Some(projection) => projection.get(slot).copied(),
-            None => (slot < self.values.len()).then_some(slot),
+        match self {
+            Self::Constant { width, .. } => (slot < *width).then_some(slot),
+            Self::Stored { values, projection } => match projection.as_ref() {
+                Some(projection) => projection.get(slot).copied(),
+                None => (slot < values.len()).then_some(slot),
+            },
         }
     }
 
@@ -77,16 +129,35 @@ impl RowFragment {
         if width == self.len() {
             return self;
         }
-        if let Some(projection) = self.projection.as_ref() {
-            self.projection = Some(Arc::from(&projection[..width]));
-            return self;
-        }
-        if let Some(values) = Arc::get_mut(&mut self.values) {
-            values.truncate(width);
-        } else {
-            self.projection = Some((0..width).collect::<Arc<[usize]>>());
+        match &mut self {
+            Self::Constant { width: old, .. } => *old = width,
+            Self::Stored { values, projection } => {
+                if let Some(slots) = projection.as_ref() {
+                    *projection = Some(Arc::from(&slots[..width]));
+                } else if let Some(values) = Arc::get_mut(values) {
+                    values.truncate(width);
+                } else {
+                    *projection = Some((0..width).collect::<Arc<[usize]>>());
+                }
+            }
         }
         self
+    }
+
+    #[cfg(test)]
+    pub(super) fn stored_values(&self) -> &Arc<Vec<Value>> {
+        let Self::Stored { values, .. } = self else {
+            panic!("expected stored fragment")
+        };
+        values
+    }
+
+    #[cfg(test)]
+    pub(super) fn projection(&self) -> Option<&Arc<[usize]>> {
+        match self {
+            Self::Stored { projection, .. } => projection.as_ref(),
+            Self::Constant { .. } => None,
+        }
     }
 }
 
@@ -152,7 +223,22 @@ impl PhysicalRow {
     }
 
     pub fn nulls(width: usize) -> Self {
-        Self::from_values(vec![Value::Null; width])
+        Self::constant(&NULL_VALUE, width)
+    }
+
+    pub(crate) fn present() -> Self {
+        Self::constant(&Value::Bool(true), 1)
+    }
+
+    fn constant(value: &'static Value, width: usize) -> Self {
+        let mut fragments = RowFragments::new();
+        if width != 0 {
+            fragments.push(RowFragment::Constant { value, width });
+        }
+        Self {
+            fragments,
+            lock_origins: None,
+        }
     }
 
     pub fn append_values(mut self, values: Vec<Value>) -> Self {
@@ -219,51 +305,67 @@ impl PhysicalRow {
     /// particular no string payload) is cloned.
     pub(crate) fn project_slots(&self, slots: &[usize]) -> Self {
         let mut output = RowFragments::new();
-        let null_values = Arc::new(Vec::new());
+        let null = RowFragment::Constant {
+            value: &NULL_VALUE,
+            width: 1,
+        };
         let null_source = self.fragments.len();
         let mut current_source = None;
-        let mut current_values: Option<Arc<Vec<Value>>> = None;
+        let mut current = None;
+        let mut current_width = 0;
         let mut current_projection = Vec::new();
-
         let flush = |output: &mut RowFragments,
-                     values: &mut Option<Arc<Vec<Value>>>,
+                     fragment: &mut Option<&RowFragment>,
+                     width: usize,
                      projection: &mut Vec<usize>| {
-            if let Some(values) = values.take() {
-                output.push(RowFragment::projected(
-                    values,
-                    Arc::from(std::mem::take(projection)),
-                ));
+            if let Some(fragment) = fragment.take() {
+                output.push(match fragment {
+                    RowFragment::Constant { value, .. } => RowFragment::Constant { value, width },
+                    RowFragment::Stored { values, .. } => RowFragment::projected(
+                        Arc::clone(values),
+                        Arc::from(std::mem::take(projection)),
+                    ),
+                });
             }
         };
-
         for requested in slots {
             let mut remaining = *requested;
-            let resolved = if remaining == NULL_SLOT {
-                None
-            } else {
-                let mut found = None;
-                for (fragment_index, fragment) in self.fragments.iter().enumerate() {
+            let mut resolved = None;
+            if remaining != NULL_SLOT {
+                for (index, fragment) in self.fragments.iter().enumerate() {
                     if remaining < fragment.len() {
-                        found = fragment
+                        resolved = fragment
                             .stored_slot(remaining)
                             .filter(|slot| *slot != NULL_SLOT)
-                            .map(|stored| (fragment_index, Arc::clone(&fragment.values), stored));
+                            .map(|slot| (index, fragment, slot));
                         break;
                     }
                     remaining -= fragment.len();
                 }
-                found
-            };
-            let (source, values, stored) =
-                resolved.unwrap_or_else(|| (null_source, Arc::clone(&null_values), NULL_SLOT));
-            if current_source != Some(source) {
-                flush(&mut output, &mut current_values, &mut current_projection);
-                current_source = Some(source);
-                current_values = Some(values);
             }
-            current_projection.push(stored);
+            let (source, fragment, stored) = resolved.unwrap_or((null_source, &null, NULL_SLOT));
+            if current_source != Some(source) {
+                flush(
+                    &mut output,
+                    &mut current,
+                    current_width,
+                    &mut current_projection,
+                );
+                current_source = Some(source);
+                current = Some(fragment);
+                current_width = 0;
+            }
+            current_width += 1;
+            if matches!(fragment, RowFragment::Stored { .. }) {
+                current_projection.push(stored);
+            }
         }
-        flush(&mut output, &mut current_values, &mut current_projection);
+        flush(
+            &mut output,
+            &mut current,
+            current_width,
+            &mut current_projection,
+        );
         Self {
             fragments: output,
             lock_origins: self.lock_origins.clone(),

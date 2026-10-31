@@ -33483,6 +33483,126 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "wide_null_extension_has_no_width_sized_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "A 100,000-column NULL extension and its retained prefix.",
+      "invariant": "Construction allocates zero bytes regardless of width and preserves exact NULL values and bounds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "nullable_join_metadata_rejects_growth_before_copying_wide_input_schemas",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/production/tests.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "Hash and nested FULL JOIN construction with wide qualified labels and 32 KiB available.",
+      "invariant": "Reject with 53200 before 128 KiB attempted allocation, close both inputs and release every new reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constant_fragments_preserve_positional_projection_and_materialization",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/constants.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "NULL and TRUE fragments at widths 0 through 23 with prefixes, reordered and repeated selections, absent slots and named output.",
+      "invariant": "Match independently constructed positional values through every materialization boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constant_selection_does_not_allocate_or_copy_shared_stored_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/constants.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "Wide constant selection followed by mixed constant and repeated stored fragment aliases carrying 320 KiB of text.",
+      "invariant": "Constant-only selection allocates zero bytes; final selected ownership moves the original text without copying its payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "direct_constant_materialization_retires_the_row_without_ownership_attempts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/constants.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "Direct and selected constant output including absent result positions.",
+      "invariant": "Emit the exact values, release the source row and never attempt to acquire a nonexistent value buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "output_batches_keep_nullable_schema_owners_after_the_operator_retires",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/presence/tests.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "A nullable input produces an all-NULL present record whose batch outlives its physical operator.",
+      "invariant": "Retain admitted schema storage through the final batch and preserve present-record identity until retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "lateral_construction_retires_both_inputs_on_admission_cancellation_and_wrapper_failure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/lateral_join/production_tests.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "LATERAL schema and wrapper admission fails and each retained cancellation token fires.",
+      "invariant": "Close the left operator and right source once and restore the exact request allowance on every failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nullable_layout_admits_growth_and_keeps_shared_marker_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/relation_presence/tests.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "Wide nullable labels under a 32 KiB allowance, both cancellations and cloned nested-marker layouts.",
+      "invariant": "Admit before copies, retain existing marker identities and keep shared owners until the last schema retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_nullable_join_metadata_preserves_whole_rows_aliases_and_lateral_presence",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/physical_joins.rs",
+      "capability": "Native nullable JOIN metadata ownership",
+      "workload": "PostgreSQL 18 all-NULL present rows, nested LEFT/FULL joins, USING, relation aliases and two LATERAL null-extension forms on four providers.",
+      "invariant": "Match the independently captured PostgreSQL values for memory, native SQLite, SQLite Key/Value and redb.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

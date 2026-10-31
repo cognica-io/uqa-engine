@@ -131,12 +131,7 @@ impl<'a> HashJoin<'a> {
             ),
         ) = OperatorBuild::pair(left, right, |left, right| {
             control.check()?;
-            left.wrap(|input| {
-                presence::input(input, matches!(kind, JoinKind::Right | JoinKind::Full))
-            });
-            right.wrap(|input| {
-                presence::input(input, matches!(kind, JoinKind::Left | JoinKind::Full))
-            });
+            presence::join_inputs(left, right, kind, control)?;
             let left_key_positions = simple_key_positions(left.row_schema(), &left_keys, control)?;
             let right_key_positions =
                 simple_key_positions(right.row_schema(), &right_keys, control)?;

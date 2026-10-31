@@ -99,6 +99,76 @@ fn keys(control: &ProductionControl<'_>) -> [Produced<Vec<ScalarExpr>>; 2] {
 }
 
 #[test]
+fn nullable_join_metadata_rejects_growth_before_copying_wide_input_schemas() {
+    for hash in [false, true] {
+        let memory = MemoryBudget::new(32 * 1024);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let closes = Arc::new(AtomicUsize::new(0));
+        let input = |qualifier| {
+            Box::new(Input {
+                schema: RowSchema::with_qualified_types(
+                    qualifier,
+                    (0..256)
+                        .map(|index| format!("{index}_{}", "x".repeat(1024)))
+                        .collect(),
+                    vec![Some(uqa_sql::ColumnType::Integer); 256],
+                ),
+                closes: closes.clone(),
+            })
+        };
+        let mut inputs = Some((input("l"), input("r")));
+        let mut owned_keys = Some(keys(&control));
+        let evaluator = Arc::new(Evaluator);
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| {
+            let (left, right) = inputs.take().unwrap();
+            let [left_keys, right_keys] = owned_keys.take().unwrap();
+            result = Some(if hash {
+                HashJoin::with_owned_expressions(
+                    left,
+                    right,
+                    JoinKind::Full,
+                    left_keys,
+                    right_keys,
+                    None,
+                    evaluator.clone(),
+                    ResultRow::new(),
+                    ResultRow::new(),
+                    1024,
+                    &[],
+                    &control,
+                )
+                .map(Box::new)
+                .map(Join::Hash)
+            } else {
+                NestedLoopJoin::with_owned_predicate(
+                    left,
+                    right,
+                    JoinKind::Full,
+                    None,
+                    evaluator.clone(),
+                    ResultRow::new(),
+                    ResultRow::new(),
+                    1024,
+                    &control,
+                )
+                .map(Box::new)
+                .map(Join::Nested)
+            });
+        });
+        assert_eq!(result.unwrap().err().unwrap().sqlstate(), Some("53200"));
+        assert_eq!(memory.used(), 0);
+        assert_eq!(closes.load(Ordering::Relaxed), 2);
+        assert!(
+            allocation.bytes_total < 128 * 1024,
+            "hash={hash}: {allocation:?}"
+        );
+    }
+}
+
+#[test]
 fn join_construction_and_wrapper_failures_close_both_owned_inputs() {
     for hash in [false, true] {
         let memory = MemoryBudget::new(1 << 20);

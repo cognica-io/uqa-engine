@@ -8,10 +8,10 @@
 
 use super::{
     alias_join_operator, bind_join_on_schema, bind_source_plan_schema,
-    build_join_operator_with_ctes, combine_filters, null_row_for_schema, physical_exec_error,
-    qualifier_filter, require_lateral_function_execute, shape_join_using_output, unproduced_column,
-    CteScope, PhysicalOperator, QualifierFilters, QueryLateralSource, RowSchema,
-    RowSchemaExecution, SQLError, SQLParam, SourceContext, SourcePlan,
+    build_join_operator_with_ctes, combine_filters, physical_exec_error, qualifier_filter,
+    require_lateral_function_execute, shape_join_using_output, unproduced_column, CteScope,
+    PhysicalOperator, QualifierFilters, QueryLateralSource, RowSchema, RowSchemaExecution,
+    SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::physical::construction::OperatorBuild;
 use crate::{OwnedPhysicalRow, PhysicalRow, SQLRowSource, SQLRowStream};
@@ -89,8 +89,6 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
         let right = specialized.as_deref().unwrap_or(binding.right);
         let runtime_columns = bound.columns_are_open(None);
         let bind = |left_schema: RowSchema, right_schema: RowSchema| {
-            let left_nulls = null_row_for_schema(left_schema.columns());
-            let right_nulls = null_row_for_schema(right_schema.columns());
             let (on, evaluator) = bind_join_on_schema(
                 context,
                 on.as_ref(),
@@ -206,21 +204,12 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                 prepared_right: None,
                 runtime_columns,
             };
-            Ok((
-                source,
-                left_schema,
-                right_schema,
-                left_nulls,
-                right_nulls,
-                resolved_using,
-            ))
+            Ok((source, left_schema, right_schema, resolved_using))
         };
         left.attach(|left| {
-            let (
-                left,
-                first,
-                (mut source, left_schema, right_schema, left_nulls, right_nulls, using),
-            ) = if bound.columns_are_open(None) {
+            let (left, first, (mut source, left_schema, right_schema, using)) = if bound
+                .columns_are_open(None)
+            {
                 let (left, first) = describe_from_first_row(left, |left_row| {
                     let mut scope =
                         ctes.copy_with_control(&context.ctes.production_resources()?.control())?;
@@ -244,14 +233,16 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                 (left, None, binding)
             };
             source.prepared_right = first;
-            let join = Box::new(crate::LateralJoin::new_with_right_schema(
+            let join = crate::LateralJoin::with_right_schema_with_control(
                 left,
                 Box::new(source),
                 *kind,
-                left_nulls,
-                right_nulls,
+                uqa_sql::ResultRow::new(),
+                uqa_sql::ResultRow::new(),
                 right_schema.clone(),
-            ));
+                &control,
+            )?
+            .into_boxed(&control)?;
             OperatorBuild::build(join, |join| {
                 if let Some(using) = using.as_ref() {
                     join.attach(|input| {

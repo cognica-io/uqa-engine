@@ -8,9 +8,8 @@
 
 use super::{
     physical_exec_error, qualifier_filter, CteScope, JoinKind, PhysicalOperator, QualifierFilters,
-    QueryOutput, QueryPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SourceContext, Value,
+    QueryOutput, QueryPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SourceContext,
 };
-use uqa_sql::ResultRow;
 
 pub(super) fn execute_view_plan_output_with_parent_cache<S: Clone + 'static>(
     context: &SourceContext<'_, S>,
@@ -115,13 +114,6 @@ pub(super) fn unproduced_column(
     unproduced
 }
 
-pub(super) fn null_row_for_schema(schema: &[String]) -> ResultRow {
-    schema
-        .iter()
-        .map(|column| (column.clone(), Value::Null))
-        .collect()
-}
-
 pub(super) fn shape_join_using_output<'a>(
     operator: Box<dyn PhysicalOperator + 'a>,
     kind: JoinKind,
@@ -145,6 +137,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+    use uqa_core::Value;
 
     #[test]
     fn rejected_filter_evaluator_closes_its_input_and_retains_cleanup_diagnostics() {
