@@ -8,6 +8,54 @@ use super::*;
 use uqa_storage::read_control::StorageReadControl;
 
 #[test]
+fn cold_native_snapshots_retain_the_view_without_loading_vector_payloads() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    let mut raw = SQLiteVectorIndex::new(connection.clone(), "wide", "embedding", 768);
+    for id in 1..=64 {
+        let mut vector = vec![0.0; 768];
+        vector[id as usize - 1] = 1.0;
+        raw.add(id, vector).unwrap();
+    }
+    let mut index = SQLiteHNSWIndex::new(connection.clone(), "wide", "embedding", 768);
+    index.initialize().unwrap();
+    drop((raw, index));
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let mut index = SQLiteHNSWIndex::open_existing(
+        connection.clone(),
+        "wide",
+        "embedding",
+        768,
+        HNSWIndexParams::default(),
+    );
+    let control = connection.retention_control().unwrap();
+    let pressure = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used() - 128 * 1024)
+        .unwrap();
+    loading::RESTORED_GRAPHS.set(0);
+    let retained = index.snapshot().unwrap();
+    let nested = retained.snapshot().unwrap();
+    assert_eq!(retained.count().unwrap(), 64);
+    assert_eq!(loading::RESTORED_GRAPHS.get(), 0);
+    drop(pressure);
+
+    let mut query = vec![0.0; 768];
+    query[0] = 1.0;
+    index.delete(1).unwrap();
+    index.add(65, query.clone()).unwrap();
+    assert_eq!(nearest(&index, &query), vec![65]);
+    // The first search happens after the source changes and every live handle closes.
+    drop((index, connection, retained));
+    assert_eq!(nearest(&*nested, &query), vec![1]);
+    assert_eq!(nested.count().unwrap(), 64);
+    drop(nested);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn native_graph_cache_replacement_retains_each_live_generations_original_allowance() {
     let (connection, mut index) = fixture();
     let control = connection.retention_control().unwrap();

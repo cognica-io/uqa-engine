@@ -24,6 +24,7 @@ fn sequential_native_hnsw_mutations_do_not_restore_the_entire_graph(
     if explicit {
         connection.begin_transaction().unwrap();
     }
+    assert_eq!(nearest(&index, &[1.0, 0.0]), vec![1]);
     let retained = index.snapshot().unwrap();
     loading::RESTORED_GRAPHS.set(0);
     for id in 3..=34 {
@@ -131,6 +132,12 @@ fn native_warm_graphs_reject_private_and_committed_canonical_drift() {
         }
         let mut raw = SQLiteVectorIndex::new(connection.clone(), "docs", "embedding", 2);
         raw.add(1, vec![-1.0, 0.0]).unwrap();
+        let corrupt = index.snapshot().unwrap();
+        assert!(corrupt
+            .search_knn(&[1.0, 0.0], 1)
+            .unwrap_err()
+            .to_string()
+            .contains("differs from its live graph node"));
         assert!(index
             .search_knn(&[1.0, 0.0], 1)
             .unwrap_err()
@@ -158,6 +165,7 @@ fn native_hnsw_catalog_validation_checks_persisted_parameters_and_missing_header
         },
     );
     assert!(different.validate_existing().is_err());
+    assert!(different.snapshot().is_err());
     assert!(different.search_knn(&[1.0, 0.0], 1).is_err());
     let mut required = SQLiteHNSWIndex::open_existing(
         connection.clone(),
