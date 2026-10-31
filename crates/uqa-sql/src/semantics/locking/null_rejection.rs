@@ -6,14 +6,21 @@
 
 //! Determine nullable join sides from SQL predicates and strict function metadata.
 
-use crate::semantics::{join_alias_input_schemas, resolve_join_using};
+use crate::semantics::{join_alias_input_schemas_with_control, resolve_join_using_with_control};
 use crate::{
-    binding::{bind_source_plan_schema_in_scope, context::BindingContext, SourceScope},
+    binding::{
+        context::BindingContext,
+        production::{bind_source_plan_schema_in_scope_with_control, ControlledBindingContext},
+        SourceScope,
+    },
     plan::SourcePlan,
     routines::RoutineResolution,
     RowSchema, SQLError, SQLParam, ScalarExpr,
 };
-use uqa_core::Value;
+use uqa_core::{
+    memory::{ProductionControl, ProductionVec},
+    Value,
+};
 
 pub fn reduce_null_rejected_outer_joins_to_fixpoint(
     routines: &dyn RoutineResolution,
@@ -22,11 +29,34 @@ pub fn reduce_null_rejected_outer_joins_to_fixpoint(
     params: &[SQLParam],
     context: &BindingContext<'_>,
 ) -> Result<(), SQLError> {
+    let control = ProductionControl::uncontrolled();
+    reduce_null_rejected_outer_joins_with_control(
+        routines,
+        source,
+        predicate,
+        params,
+        &context.copy_with_control(&control)?,
+        &control,
+    )
+}
+
+pub(crate) fn reduce_null_rejected_outer_joins_with_control(
+    routines: &dyn RoutineResolution,
+    source: &mut SourcePlan,
+    predicate: Option<&ScalarExpr>,
+    params: &[SQLParam],
+    context: &ControlledBindingContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
     loop {
-        let mut qualifications = predicate.iter().map(|expr| (*expr).clone()).collect();
-        collect_inner_join_qualifications(source, &mut qualifications);
+        control.check()?;
+        let mut qualifications = ProductionVec::new(*control);
+        if let Some(predicate) = predicate {
+            qualifications.push_produced(predicate.clone_with_control(control)?)?;
+        }
+        collect_inner_join_qualifications(source, &mut qualifications, control)?;
         let mut changed = false;
-        for qualification in &qualifications {
+        for qualification in qualifications.iter() {
             changed |= reduce_null_rejected_outer_joins(
                 routines,
                 source,
@@ -34,6 +64,7 @@ pub fn reduce_null_rejected_outer_joins_to_fixpoint(
                 params,
                 context,
                 SourceScope::new(None),
+                control,
             )?;
         }
         if !changed {
@@ -42,7 +73,12 @@ pub fn reduce_null_rejected_outer_joins_to_fixpoint(
     }
 }
 
-fn collect_inner_join_qualifications(source: &SourcePlan, output: &mut Vec<ScalarExpr>) {
+fn collect_inner_join_qualifications(
+    source: &SourcePlan,
+    output: &mut ProductionVec<'_, ScalarExpr>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     let SourcePlan::Join {
         left,
         right,
@@ -51,19 +87,19 @@ fn collect_inner_join_qualifications(source: &SourcePlan, output: &mut Vec<Scala
         ..
     } = source
     else {
-        return;
+        return Ok(());
     };
     if !matches!(
         kind,
         crate::ast::JoinKind::Inner | crate::ast::JoinKind::Cross
     ) {
-        return;
+        return Ok(());
     }
     if let Some(on) = on {
-        output.push(on.clone());
+        output.push_produced(on.clone_with_control(control)?)?;
     }
-    collect_inner_join_qualifications(left, output);
-    collect_inner_join_qualifications(right, output);
+    collect_inner_join_qualifications(left, output, control)?;
+    collect_inner_join_qualifications(right, output, control)
 }
 
 fn reduce_null_rejected_outer_joins(
@@ -71,9 +107,11 @@ fn reduce_null_rejected_outer_joins(
     source: &mut SourcePlan,
     predicate: &ScalarExpr,
     params: &[SQLParam],
-    context: &BindingContext<'_>,
+    context: &ControlledBindingContext<'_>,
     scope: SourceScope<'_>,
+    control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    control.check()?;
     let SourcePlan::Join {
         left,
         right,
@@ -88,26 +126,45 @@ fn reduce_null_rejected_outer_joins(
     else {
         return Ok(false);
     };
-    let left_schema =
-        bind_source_plan_schema_in_scope(routines, left, params, context, scope.with_names())?;
-    let preceding = scope.right_namespace(left, &left_schema, *kind);
+    let left_schema = bind_source_plan_schema_in_scope_with_control(
+        routines,
+        left,
+        params,
+        context.copy_with_control(control)?,
+        scope.with_names(),
+        control,
+    )?;
+    let preceding = scope.right_namespace_with_control(left, &left_schema, *kind, control)?;
     let right_scope = SourceScope {
         outer: scope.outer,
         preceding: Some(&preceding),
         inherited_lateral: *lateral,
         retain_names: true,
     };
-    let right_schema =
-        bind_source_plan_schema_in_scope(routines, right, params, context, right_scope)?;
-    let resolved_using = resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+    let right_schema = bind_source_plan_schema_in_scope_with_control(
+        routines,
+        right,
+        params,
+        context.copy_with_control(control)?,
+        right_scope,
+        control,
+    )?;
+    let resolved_using = resolve_join_using_with_control(
+        using.as_ref(),
+        *natural,
+        &left_schema,
+        &right_schema,
+        control,
+    )?;
     let (left_predicate_schema, right_predicate_schema) = match alias.as_deref() {
-        Some(alias) => join_alias_input_schemas(
+        Some(alias) => join_alias_input_schemas_with_control(
             *kind,
             &left_schema,
             &right_schema,
-            resolved_using.as_ref(),
+            resolved_using.as_deref(),
             alias,
             column_aliases,
+            control,
         )?,
         None => (left_schema.clone(), right_schema.clone()),
     };
@@ -117,6 +174,7 @@ fn reduce_null_rejected_outer_joins(
         &left_predicate_schema,
         &right_predicate_schema,
         params,
+        control,
     )?;
     let rejects_right = predicate_rejects_null_extended_side(
         routines,
@@ -124,6 +182,7 @@ fn reduce_null_rejected_outer_joins(
         &right_predicate_schema,
         &left_predicate_schema,
         params,
+        control,
     )?;
     let reduced = match (*kind, rejects_left, rejects_right) {
         (crate::ast::JoinKind::Left, _, true) | (crate::ast::JoinKind::Right, true, _) => {
@@ -136,9 +195,18 @@ fn reduce_null_rejected_outer_joins(
     };
     let mut changed = reduced != *kind;
     *kind = reduced;
-    changed |= reduce_null_rejected_outer_joins(routines, left, predicate, params, context, scope)?;
-    changed |=
-        reduce_null_rejected_outer_joins(routines, right, predicate, params, context, right_scope)?;
+    changed |= reduce_null_rejected_outer_joins(
+        routines, left, predicate, params, context, scope, control,
+    )?;
+    changed |= reduce_null_rejected_outer_joins(
+        routines,
+        right,
+        predicate,
+        params,
+        context,
+        right_scope,
+        control,
+    )?;
     Ok(changed)
 }
 
@@ -153,8 +221,13 @@ fn predicate_rejects_null_extended_side(
     side: &RowSchema,
     other: &RowSchema,
     params: &[SQLParam],
+    control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    Ok(truth_values_with_null_side(routines, expression, side, other, params)? & TRUTH_TRUE == 0)
+    Ok(
+        truth_values_with_null_side(routines, expression, side, other, params, control)?
+            & TRUTH_TRUE
+            == 0,
+    )
 }
 
 fn truth_values_with_null_side(
@@ -163,7 +236,9 @@ fn truth_values_with_null_side(
     side: &RowSchema,
     other: &RowSchema,
     params: &[SQLParam],
+    control: &ProductionControl<'_>,
 ) -> Result<u8, SQLError> {
+    control.check()?;
     match expression {
         ScalarExpr::Literal(Value::Bool(value)) => {
             if *value {
@@ -174,7 +249,7 @@ fn truth_values_with_null_side(
         }
         ScalarExpr::Literal(Value::Null) => Ok(TRUTH_NULL),
         ScalarExpr::IsNull { expr, negated }
-            if expression_is_null_with_side(routines, expr, side, other, params)? =>
+            if expression_is_null_with_side(routines, expr, side, other, params, control)? =>
         {
             if *negated {
                 Ok(TRUTH_FALSE)
@@ -183,9 +258,12 @@ fn truth_values_with_null_side(
             }
         }
         ScalarExpr::Between { expr, low, high } => {
-            let value_is_null = expression_is_null_with_side(routines, expr, side, other, params)?;
-            let low_is_null = expression_is_null_with_side(routines, low, side, other, params)?;
-            let high_is_null = expression_is_null_with_side(routines, high, side, other, params)?;
+            let value_is_null =
+                expression_is_null_with_side(routines, expr, side, other, params, control)?;
+            let low_is_null =
+                expression_is_null_with_side(routines, low, side, other, params, control)?;
+            let high_is_null =
+                expression_is_null_with_side(routines, high, side, other, params, control)?;
             if value_is_null || (low_is_null && high_is_null) {
                 Ok(TRUTH_NULL)
             } else if low_is_null || high_is_null {
@@ -194,23 +272,27 @@ fn truth_values_with_null_side(
                 Ok(TRUTH_ANY)
             }
         }
-        expression if expression_is_null_with_side(routines, expression, side, other, params)? => {
+        expression
+            if expression_is_null_with_side(
+                routines, expression, side, other, params, control,
+            )? =>
+        {
             Ok(TRUTH_NULL)
         }
         ScalarExpr::Not(inner) => Ok(negate_truth_values(truth_values_with_null_side(
-            routines, inner, side, other, params,
+            routines, inner, side, other, params, control,
         )?)),
         ScalarExpr::And(items) => items.iter().try_fold(TRUTH_TRUE, |left, right| {
             Ok(combine_truth_values(
                 left,
-                truth_values_with_null_side(routines, right, side, other, params)?,
+                truth_values_with_null_side(routines, right, side, other, params, control)?,
                 true,
             ))
         }),
         ScalarExpr::Or(items) => items.iter().try_fold(TRUTH_FALSE, |left, right| {
             Ok(combine_truth_values(
                 left,
-                truth_values_with_null_side(routines, right, side, other, params)?,
+                truth_values_with_null_side(routines, right, side, other, params, control)?,
                 false,
             ))
         }),
@@ -224,7 +306,9 @@ fn expression_is_null_with_side(
     side: &RowSchema,
     other: &RowSchema,
     params: &[SQLParam],
+    control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    control.check()?;
     match expression {
         ScalarExpr::Literal(Value::Null) => Ok(true),
         ScalarExpr::Column(column) => Ok(side.unqualified_position(column).is_some()
@@ -233,24 +317,24 @@ fn expression_is_null_with_side(
             .has_qualified_column(qualifier, column)
             && !other.has_qualified_column(qualifier, column)),
         ScalarExpr::Binary { lhs, rhs, .. } => Ok(expression_is_null_with_side(
-            routines, lhs, side, other, params,
+            routines, lhs, side, other, params, control,
         )? || expression_is_null_with_side(
-            routines, rhs, side, other, params,
+            routines, rhs, side, other, params, control,
         )?),
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Cast { expr: inner, .. }
         | ScalarExpr::Collated { expr: inner, .. } => {
-            expression_is_null_with_side(routines, inner, side, other, params)
+            expression_is_null_with_side(routines, inner, side, other, params, control)
         }
-        ScalarExpr::Between { expr, low, high } => {
-            Ok(
-                expression_is_null_with_side(routines, expr, side, other, params)?
-                    || (expression_is_null_with_side(routines, low, side, other, params)?
-                        && expression_is_null_with_side(routines, high, side, other, params)?),
-            )
-        }
+        ScalarExpr::Between { expr, low, high } => Ok(expression_is_null_with_side(
+            routines, expr, side, other, params, control,
+        )? || (expression_is_null_with_side(
+            routines, low, side, other, params, control,
+        )? && expression_is_null_with_side(
+            routines, high, side, other, params, control,
+        )?)),
         ScalarExpr::InList { expr, .. } => {
-            expression_is_null_with_side(routines, expr, side, other, params)
+            expression_is_null_with_side(routines, expr, side, other, params, control)
         }
         ScalarExpr::Func {
             name,
@@ -263,14 +347,21 @@ fn expression_is_null_with_side(
                 name,
                 binding.as_ref(),
                 args,
-                side,
-                other,
+                (side, other),
                 params,
+                control,
             )? {
                 return Ok(false);
             }
-            for argument in crate::scalar_call_arguments(args)? {
-                if expression_is_null_with_side(routines, argument.value, side, other, params)? {
+            for argument in crate::ir::scalar_call_arguments_with_control(args, control)?.iter() {
+                if expression_is_null_with_side(
+                    routines,
+                    argument.value,
+                    side,
+                    other,
+                    params,
+                    control,
+                )? {
                     return Ok(true);
                 }
             }
@@ -285,40 +376,44 @@ fn scalar_function_is_strict(
     name: &str,
     binding: Option<&crate::ast::FunctionBinding>,
     args: &[ScalarExpr],
-    side: &RowSchema,
-    other: &RowSchema,
+    sides: (&RowSchema, &RowSchema),
     params: &[SQLParam],
+    control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    let runtime_name = name
-        .strip_prefix("pg_catalog.")
-        .unwrap_or(name)
-        .to_ascii_lowercase();
-    if routines.has_registered_scalar_function(&runtime_name) {
+    let (side, other) = sides;
+    let runtime_name = control.copy_text(name.strip_prefix("pg_catalog.").unwrap_or(name))?;
+    let (mut runtime_name, memory) = runtime_name.into_parts();
+    runtime_name.make_ascii_lowercase();
+    let runtime_name = control.finish(runtime_name, memory)?;
+    if routines.has_registered_scalar_function_with_control(&runtime_name, control)? {
         return Ok(false);
     }
     if let Some(strict) = crate::expr::bound_scalar_function_strictness(name, binding, args.len()) {
         return Ok(strict);
     }
-    let schema = RowSchema::join(side, other, std::iter::empty::<String>());
-    let (argument_names, argument_types, explicit_variadic) =
-        crate::type_resolution::function_call_argument_signature(
-            args,
-            &schema,
-            params,
-            Some(routines),
-        )?;
-    if binding.is_none() && routines.lookup_visible_sql_functions(name)?.is_none() {
+    let schema = RowSchema::join_with_control(side, other, std::iter::empty(), control)?;
+    let signature = crate::function_call_argument_signature_with_control(
+        args,
+        &schema,
+        params,
+        Some(routines),
+        control,
+    )?;
+    if binding.is_none() && !routines.has_visible_sql_functions_with_control(name, control)? {
         return Ok(false);
     }
     Ok(routines
-        .resolve_static_sql_function(
+        .resolve_static_sql_function_strictness_with_control(
             name,
             binding,
-            &argument_names,
-            &argument_types,
-            explicit_variadic,
+            crate::type_resolution::RoutineCallDescriptor {
+                argument_names: &signature.0,
+                argument_types: &signature.1,
+                explicit_variadic: signature.2,
+            },
+            control,
         )?
-        .is_some_and(|function| function.def.strict))
+        .unwrap_or(false))
 }
 
 fn negate_truth_values(values: u8) -> u8 {

@@ -410,7 +410,10 @@ fn build_lateral_query_source<'a, S: Clone + Send + Sync + 'static>(
             scoped_ctes,
         )?;
         let child = {
-            let mut source_scope = scoped_ctes.enter_source_row_locks(source_row_locks);
+            let mut source_scope = scoped_ctes.enter_source_row_locks_with_control(
+                source_row_locks,
+                &context.ctes.production_resources()?.control(),
+            )?;
             build_join_operator_with_ctes(context, from, params, &mut source_scope, None, filters)?
         };
         child

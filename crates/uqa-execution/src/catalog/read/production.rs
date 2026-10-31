@@ -12,6 +12,8 @@ use uqa_core::{
     RelationName, RelationReference,
 };
 
+mod hierarchy;
+
 impl CatalogReadView {
     pub fn virtual_relation_resolved_with_control(
         &self,

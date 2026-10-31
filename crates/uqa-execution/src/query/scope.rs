@@ -33,7 +33,7 @@ mod row_locks;
 mod statement_commands;
 pub mod subqueries;
 use row_locks::RowLockScopeState;
-pub use row_locks::{LockIdentityOptions, ResolvedRowLock};
+pub use row_locks::{LockIdentityOptions, ResolvedRowLock, SelectedRowLock};
 pub use statement_commands::StatementCommands;
 use subqueries::ScalarSubqueryCacheEntry;
 

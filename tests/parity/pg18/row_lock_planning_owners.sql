@@ -1,0 +1,24 @@
+\set VERBOSITY sqlstate
+SELECT version();
+BEGIN;
+CREATE TEMP TABLE lock_left(id integer);
+CREATE TEMP TABLE lock_right(id integer);
+INSERT INTO lock_left VALUES(1),(2);
+INSERT INTO lock_right VALUES(1);
+CREATE FUNCTION pg_temp.lock_strict(integer) RETURNS integer LANGUAGE sql IMMUTABLE STRICT AS $$SELECT $1$$;
+CREATE TEMP VIEW lock_view AS SELECT id FROM lock_left;
+SELECT a.id FROM lock_left a LEFT JOIN lock_right b ON a.id=b.id WHERE b.id>0 FOR UPDATE OF b;
+SELECT a.id FROM lock_left a LEFT JOIN lock_right b ON a.id=b.id WHERE pg_temp.lock_strict(b.id)>0 FOR UPDATE OF b;
+SELECT a.id FROM lock_left a FULL JOIN lock_right b ON a.id=b.id WHERE a.id IS NOT NULL AND b.id IS NOT NULL FOR UPDATE OF a,b;
+SELECT a.id FROM lock_left a RIGHT JOIN lock_right b ON a.id=b.id WHERE a.id>0 FOR UPDATE OF a;
+SELECT j.aid FROM (lock_left a LEFT JOIN lock_right b ON a.id=b.id) AS j(aid,bid) WHERE j.bid>0 FOR UPDATE;
+SELECT id FROM lock_view ORDER BY id FOR SHARE;
+SAVEPOINT invalid;
+SELECT a.id FROM lock_left a LEFT JOIN lock_right b ON a.id=b.id FOR UPDATE OF b;
+ROLLBACK TO invalid;
+SELECT a.id FROM lock_left a LEFT JOIN lock_right b ON a.id=b.id WHERE coalesce(b.id,1)>0 FOR UPDATE OF b;
+ROLLBACK TO invalid;
+SELECT j.id FROM (lock_left a FULL JOIN lock_right b USING(id)) AS j WHERE j.id IS NOT NULL FOR UPDATE;
+ROLLBACK TO invalid;
+SELECT id FROM lock_view ORDER BY id FOR UPDATE;
+ROLLBACK;

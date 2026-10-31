@@ -296,7 +296,10 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
     )?;
     let sources = ensure_select_with_sources(stmt, from, ctes, sources)?;
     let operator = {
-        let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+        let mut scoped_ctes = ctes.enter_source_row_locks_with_control(
+            source_row_locks,
+            &context.ctes.production_resources()?.control(),
+        )?;
         if context.planning.block_input_is_empty(stmt) {
             crate::query::sources::empty_source_operator(
                 context,

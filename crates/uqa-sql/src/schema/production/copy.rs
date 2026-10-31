@@ -20,12 +20,37 @@ pub(in crate::schema) fn metadata(
     input: &RowSchema,
     control: &ProductionControl<'_>,
 ) -> Result<SchemaBuildMetadata, SQLError> {
+    let aliases = SchemaMap::from_produced(
+        input.index.aliases.iter().map(|(identity, slot)| {
+            Ok((
+                identity.clone_with_control(control)?,
+                inline(*slot, control)?,
+            ))
+        }),
+        control,
+    )?;
+    metadata_with_identity_maps(
+        input,
+        input.index.cold.collations.copy_with_control(control)?,
+        aliases,
+        identity_types(&input.index.cold.aliases, control)?,
+        control,
+    )
+}
+
+pub(super) fn metadata_with_identity_maps(
+    input: &RowSchema,
+    collations: crate::schema::collations::Collations,
+    aliases: SchemaMap<ColumnIdentity, usize>,
+    alias_types: SchemaMap<ColumnIdentity, Option<crate::ColumnType>>,
+    control: &ProductionControl<'_>,
+) -> Result<SchemaBuildMetadata, SQLError> {
     control.check()?;
     let index = &input.index;
     let cold = &index.cold;
     let score_sources = score_sources(input, control)?;
     let mut output = SchemaBuildMetadata {
-        collations: cold.collations.copy_with_control(control)?,
+        collations,
         row_types: cold.row_types.clone(),
         row_presence: cold.row_presence.clone(),
         record_fields: SchemaMap::from_produced(
@@ -34,16 +59,8 @@ pub(in crate::schema) fn metadata(
             }),
             control,
         )?,
-        aliases: SchemaMap::from_produced(
-            index.aliases.iter().map(|(identity, slot)| {
-                Ok((
-                    identity.clone_with_control(control)?,
-                    inline(*slot, control)?,
-                ))
-            }),
-            control,
-        )?,
-        alias_types: identity_types(&cold.aliases, control)?,
+        aliases,
+        alias_types,
         internal: SchemaMap::from_produced(
             index
                 .executor_attributes

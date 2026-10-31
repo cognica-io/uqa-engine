@@ -50,7 +50,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
         row: PhysicalRow,
     ) -> Result<Option<PhysicalRow>, SQLError> {
         let mut candidates: Vec<LockCandidate> = Vec::new();
-        for target in &self.targets {
+        for target in self.targets.iter() {
             for origin in row.lock_origins() {
                 if !lock_origin_matches_target(origin, target) {
                     continue;
@@ -403,13 +403,17 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 "row-lock recheck attempted without a rebuildable plan source".into(),
             ));
         };
-        let source_leaves = source
-            .statement
-            .from
-            .as_ref()
-            .map(|from| collect_source_leaves(from, false, &source.ctes))
-            .transpose()?
-            .unwrap_or_default();
+        let control = source.resources.control();
+        let catalog = source.ctes.catalog_read_view()?;
+        let resolution = source
+            .ctes
+            .relation_name_resolution_with_control(&control)?;
+        let source_leaves = match source.statement.from.as_ref() {
+            Some(from) => {
+                collect_source_leaves(from, false, &catalog, &resolution, &source.ctes, &control)?
+            }
+            None => control.finish(Vec::new(), control.empty_reservation())?,
+        };
         let mut pins = crate::row_locks::recheck::RowLockRecheckPins::new();
         if let Some(from) = source.statement.from.as_ref() {
             let mut leaf_plans = Vec::new();
@@ -421,7 +425,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                     source_leaves.len()
                 )));
             }
-            for ((path, source_plan), leaf) in leaf_plans.into_iter().zip(&source_leaves) {
+            for ((path, source_plan), leaf) in leaf_plans.into_iter().zip(source_leaves.iter()) {
                 let is_lock_target = candidates.iter().any(|candidate| {
                     candidate
                         .qualifiers
@@ -434,13 +438,13 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 let (schema, source_row) = copy_recheck_source_row(
                     self.context,
                     source_plan,
-                    &leaf.qualifier,
+                    leaf.qualifier,
                     &self.schema,
                     row,
                     self.params,
                     &source.ctes,
                 )?;
-                pins.pin_source_row(path, leaf.qualifier.clone(), schema, source_row);
+                pins.pin_source_row(path, leaf.qualifier.to_owned(), schema, source_row);
             }
         }
         for origin in row.lock_origins() {

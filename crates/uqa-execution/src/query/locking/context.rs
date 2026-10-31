@@ -35,6 +35,11 @@ pub trait LockingCatalog: RoutineResolution + RelationLockCatalog {
         bound: bool,
     ) -> Result<Option<(String, &'static str)>, SQLError>;
     fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
+    fn view_exists_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError>;
     fn table_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String>;
     fn referenceable_keys(&self, table: &str) -> Result<Vec<TableKeyConstraint>, String>;
     fn table_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
@@ -60,6 +65,7 @@ pub trait RowLockReadSource: CommittedRowSource + Sync {
 }
 
 pub trait RowLockScopeSource<S: Clone>: Sync {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError>;
     fn current_routine_scope(&self) -> Result<CteScope<S>, SQLError>;
     fn transition_relation_names(&self) -> BTreeSet<String>;
 }

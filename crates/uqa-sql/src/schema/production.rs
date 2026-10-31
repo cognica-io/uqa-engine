@@ -15,6 +15,7 @@ mod captured_aliases;
 mod captured_output;
 mod composition;
 pub(super) mod copy;
+mod identity_aliases;
 mod indexes;
 mod internal_aliases;
 pub(super) mod lease;

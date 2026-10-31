@@ -65,3 +65,17 @@ pub fn analyze_expression_plan_type_with_control(
     super::super::SchemaScope::for_analysis_with_control(scope, control)?
         .bind_expression_type_with_control(routines, &plan.scalar, &empty, &plan.subqueries, params)
 }
+
+/// Bind preceding peers and lexical ancestors with the original schema-analysis mode and allowance.
+pub fn bind_source_plan_schema_in_scope_with_control(
+    routines: &dyn RoutineResolution,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    scope: ControlledBindingContext<'_>,
+    names: crate::binding::SourceScope<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    let subqueries = scope.scalar_subqueries;
+    super::super::SchemaScope::from_context_with_control(scope, control)?
+        .bind_source_in_scope(routines, source, subqueries, params, names)
+}

@@ -340,6 +340,26 @@ pub trait RoutineResolution: FunctionTypeResolver {
         Ok(None)
     }
 
+    /// Observe strictness after the same static function selection; native overload workspace retains the invoking allowance.
+    fn resolve_static_sql_function_strictness_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        control.check()?;
+        let selected = self.resolve_static_sql_function(
+            name,
+            binding,
+            call.argument_names,
+            call.argument_types,
+            call.explicit_variadic,
+        )?;
+        control.check()?;
+        Ok(selected.map(|function| function.def.strict))
+    }
+
     /// Select the same routine as static expression analysis and observe only its set-returning declaration. Native adapters retain admitted overload workspace; external adapters keep the existing selection callback.
     fn resolve_static_sql_function_setness_with_control(
         &self,

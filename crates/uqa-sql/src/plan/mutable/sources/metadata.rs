@@ -49,3 +49,26 @@ impl MutableSourcePlan {
         Ok(self)
     }
 }
+
+impl MutableSourcePlan {
+    /// Null-rejection changes only join-kind decisions; every source constructor and child keeps its existing owner.
+    pub fn reduce_null_rejected_outer_joins(
+        mut self,
+        routines: &dyn crate::routines::RoutineResolution,
+        predicate: Option<&crate::ScalarExpr>,
+        params: &[crate::SQLParam],
+        context: &crate::binding::production::ControlledBindingContext<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        crate::semantics::locking::null_rejection::reduce_null_rejected_outer_joins_with_control(
+            routines,
+            &mut self.source,
+            predicate,
+            params,
+            context,
+            control,
+        )?;
+        Ok(self)
+    }
+}

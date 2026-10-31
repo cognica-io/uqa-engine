@@ -192,43 +192,14 @@ impl RowSchema {
 
     /// Add hidden structured lookup identities for existing logical positions.
     pub fn with_identity_aliases(input: &Self, aliases: &[(ColumnIdentity, usize)]) -> Self {
-        let mut collations = input.index.cold.collations.clone();
-        let mut lookup_aliases = input.index.aliases.clone();
-        let mut alias_types = input.index.cold.aliases.clone();
-        for (identity, logical) in aliases {
-            collations.alias(
-                identity,
-                input.inherited_column_collation(*logical),
-                input.column_type(*logical),
-            );
-            lookup_aliases.insert(identity.clone(), input.slot(*logical).unwrap_or(NULL_SLOT));
-            alias_types.insert(identity.clone(), input.column_type(*logical).cloned());
-        }
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations,
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: lookup_aliases,
-                alias_types,
-                internal: input.index.executor_attributes.clone(),
-                internal_types: input.index.cold.executor_attribute_types.clone(),
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only: input.index.cold.binding_only.clone(),
-                lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
-                extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
-                ..SchemaBuildMetadata::default()
-            },
+        Self::with_identity_aliases_with_control(
+            input,
+            aliases
+                .iter()
+                .map(|(identity, logical)| (identity.qualifier(), identity.column(), *logical)),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
         )
+        .expect("ordinary identity aliases")
     }
 
     /// Add hidden SQL lookup identities that point at explicit physical slots.

@@ -5,183 +5,15 @@
 //
 
 use super::{
-    bind_source_plan_schema, virtual_row_lockable, CatalogReadView, CteScope, LockStrength,
-    PhysicalRow, QueryPlan, RelationNameResolution, RelationalPlan, RowLockContext,
+    bind_source_plan_schema, LockStrength, PhysicalRow, QueryPlan, RelationalPlan, RowLockContext,
     RowProjectionValue, RowSchema, SQLError, SQLParam, SourcePlan,
 };
 
-pub(super) struct LockLeaf {
-    pub(super) names: Vec<String>,
-    pub(super) qualifier: String,
-    pub(super) storage_name: String,
-    pub(super) display_name: String,
-    pub(super) kind: LockLeafKind,
-    pub(super) nullable: bool,
-}
+use crate::query::CteScope;
+use uqa_core::memory::ProductionControl;
 
-pub(super) enum LockLeafKind {
-    Base,
-    View(Box<QueryPlan>),
-    Subquery(Box<QueryPlan>),
-    Cte,
-    Values,
-    Function,
-    Foreign,
-    Virtual { lockable: bool },
-}
-
-impl LockLeafKind {
-    pub(super) fn implicitly_lockable(&self) -> bool {
-        matches!(
-            self,
-            Self::Base | Self::View(_) | Self::Subquery(_) | Self::Foreign | Self::Virtual { .. }
-        )
-    }
-
-    pub(super) fn carries_row_identity(&self) -> bool {
-        matches!(self, Self::Base | Self::View(_) | Self::Subquery(_))
-    }
-
-    pub(super) fn is_identity_source(&self) -> bool {
-        matches!(self, Self::View(_) | Self::Subquery(_))
-    }
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves lock target and recheck order"
-)]
-pub(super) fn collect_source_leaves<S: Clone + Send + Sync + 'static>(
-    source: &SourcePlan,
-    nullable: bool,
-    ctes: &CteScope<S>,
-) -> Result<Vec<LockLeaf>, SQLError> {
-    match source {
-        SourcePlan::RetainedRows(_) => Ok(vec![LockLeaf {
-            names: Vec::new(),
-            qualifier: String::new(),
-            storage_name: String::new(),
-            display_name: "retained rows".into(),
-            kind: LockLeafKind::Values,
-            nullable,
-        }]),
-        SourcePlan::Table {
-            name,
-            qualifier,
-            alias,
-            include_descendants,
-            ..
-        } => {
-            let visible = alias.as_deref().unwrap_or(qualifier);
-            let mut names = vec![visible.to_string()];
-            if alias.is_none() {
-                push_unique(&mut names, name);
-                if let Some((_, local)) = name.rsplit_once('.') {
-                    push_unique(&mut names, local);
-                }
-            }
-            let catalog = ctes.catalog_read_view()?;
-            let resolution = ctes.relation_name_resolution()?;
-            let kind = classify_table_leaf(&catalog, &resolution, name, ctes)?;
-            if matches!(kind, LockLeafKind::Base) {
-                return Ok(catalog
-                    .hierarchy_scan_tables(&resolution, name, *include_descendants)?
-                    .into_iter()
-                    .map(|storage_name| LockLeaf {
-                        names: names.clone(),
-                        qualifier: visible.to_string(),
-                        storage_name,
-                        display_name: visible.to_string(),
-                        kind: LockLeafKind::Base,
-                        nullable,
-                    })
-                    .collect());
-            }
-            Ok(vec![LockLeaf {
-                names,
-                qualifier: visible.to_string(),
-                storage_name: name.clone(),
-                display_name: visible.to_string(),
-                kind,
-                nullable,
-            }])
-        }
-        SourcePlan::Join {
-            left, right, kind, ..
-        } => {
-            let (left_nullable, right_nullable) = match kind {
-                uqa_sql::ast::JoinKind::Left => (nullable, true),
-                uqa_sql::ast::JoinKind::Right => (true, nullable),
-                uqa_sql::ast::JoinKind::Full => (true, true),
-                uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross => {
-                    (nullable, nullable)
-                }
-            };
-            let mut leaves = collect_source_leaves(left, left_nullable, ctes)?;
-            leaves.extend(collect_source_leaves(right, right_nullable, ctes)?);
-            Ok(leaves)
-        }
-        SourcePlan::Values { alias, .. } => Ok(vec![LockLeaf {
-            names: alias.iter().cloned().collect(),
-            qualifier: alias.clone().unwrap_or_default(),
-            storage_name: String::new(),
-            display_name: alias.clone().unwrap_or_else(|| "values".into()),
-            kind: LockLeafKind::Values,
-            nullable,
-        }]),
-        SourcePlan::Function {
-            name,
-            output_name,
-            alias,
-            ..
-        } => {
-            let visible = alias.as_deref().unwrap_or(output_name);
-            Ok(vec![LockLeaf {
-                names: vec![visible.to_string(), output_name.clone(), name.clone()],
-                qualifier: visible.to_string(),
-                storage_name: String::new(),
-                display_name: visible.to_string(),
-                kind: LockLeafKind::Function,
-                nullable,
-            }])
-        }
-        SourcePlan::FunctionGroup {
-            functions, alias, ..
-        } => {
-            let first = functions
-                .first()
-                .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
-            let visible = alias.as_deref().unwrap_or(&first.output_name);
-            Ok(vec![LockLeaf {
-                names: vec![visible.to_string()],
-                qualifier: visible.to_string(),
-                storage_name: String::new(),
-                display_name: visible.to_string(),
-                kind: LockLeafKind::Function,
-                nullable,
-            }])
-        }
-        SourcePlan::Subquery { body, alias, .. } => {
-            let visible = alias.clone().unwrap_or_default();
-            Ok(vec![LockLeaf {
-                names: if visible.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![visible.clone()]
-                },
-                qualifier: visible.clone(),
-                storage_name: String::new(),
-                display_name: if visible.is_empty() {
-                    "subquery".into()
-                } else {
-                    visible
-                },
-                kind: LockLeafKind::Subquery(body.clone()),
-                nullable,
-            }])
-        }
-    }
-}
+mod sources;
+pub(super) use sources::{collect_source_leaves, LockLeaf, LockLeafKind};
 
 pub(super) fn collect_source_leaf_plans<'a>(
     source: &'a SourcePlan,
@@ -299,33 +131,13 @@ fn copy_retained_source_row(
     ))
 }
 
-pub(super) fn classify_table_leaf<S: Clone + Send + Sync + 'static>(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-    name: &str,
-    ctes: &CteScope<S>,
-) -> Result<LockLeafKind, SQLError> {
-    if ctes.is_visible_cte(name) {
-        return Ok(LockLeafKind::Cte);
-    }
-    if let Some(view) = catalog.view_resolved(resolution, name)? {
-        return Ok(LockLeafKind::View(Box::new(view.query.clone())));
-    }
-    if catalog.foreign_table_resolved(resolution, name)?.is_some() {
-        return Ok(LockLeafKind::Foreign);
-    }
-    if catalog.table(resolution, name)?.is_some() {
-        return Ok(LockLeafKind::Base);
-    }
-    let lockable = virtual_row_lockable(catalog, resolution, name)?.unwrap_or(false);
-    Ok(LockLeafKind::Virtual { lockable })
-}
-
 pub(super) fn reject_unusable_lock_leaf<S: Clone + Send + Sync + 'static>(
     context: RowLockContext<'_, S>,
-    source: &LockLeaf,
+    source: &LockLeaf<'_>,
     strength: LockStrength,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    control.check()?;
     match &source.kind {
         LockLeafKind::Values => Ok(()),
         LockLeafKind::Function => Err(SQLError::Unsupported(
@@ -335,25 +147,35 @@ pub(super) fn reject_unusable_lock_leaf<S: Clone + Send + Sync + 'static>(
             "{} cannot be applied to a WITH query",
             strength.sql_name()
         ))),
-        LockLeafKind::Foreign => Err(SQLError::Unsupported(format!(
-            "{} cannot be applied to foreign table \"{}\"",
-            strength.sql_name(),
-            source.display_name
-        ))),
+        LockLeafKind::Foreign => Err(SQLError::Unsupported(
+            control
+                .format(format_args!(
+                    "{} cannot be applied to foreign table \"{}\"",
+                    strength.sql_name(),
+                    source.display_name
+                ))?
+                .into_parts()
+                .0,
+        )),
         LockLeafKind::Virtual { lockable: true } => {
             reject_nullable_lock_source(source.nullable, strength)
         }
-        LockLeafKind::Virtual { lockable: false } => Err(SQLError::Unsupported(format!(
-            "{} cannot be applied to relation \"{}\"",
-            strength.sql_name(),
-            source.display_name
-        ))),
+        LockLeafKind::Virtual { lockable: false } => Err(SQLError::Unsupported(
+            control
+                .format(format_args!(
+                    "{} cannot be applied to relation \"{}\"",
+                    strength.sql_name(),
+                    source.display_name
+                ))?
+                .into_parts()
+                .0,
+        )),
         LockLeafKind::Base => reject_nullable_lock_source(source.nullable, strength),
-        LockLeafKind::View(ref plan) => {
-            validate_view_locking(context, plan, strength, source.nullable)
+        LockLeafKind::View(plan) => {
+            validate_view_locking(context, plan, strength, source.nullable, control)
         }
         LockLeafKind::Subquery(plan) => {
-            validate_propagated_query(context, plan, strength, source.nullable, false)
+            validate_propagated_query(context, plan, strength, source.nullable, false, control)
         }
     }
 }
@@ -376,8 +198,9 @@ pub(super) fn validate_view_locking<S: Clone + Send + Sync + 'static>(
     plan: &QueryPlan,
     strength: LockStrength,
     nullable: bool,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    validate_propagated_query(context, plan, strength, nullable, true)
+    validate_propagated_query(context, plan, strength, nullable, true, control)
 }
 
 pub(super) fn validate_propagated_query<S: Clone + Send + Sync + 'static>(
@@ -386,7 +209,9 @@ pub(super) fn validate_propagated_query<S: Clone + Send + Sync + 'static>(
     strength: LockStrength,
     nullable: bool,
     allow_set_operation_root: bool,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    control.check()?;
     match &plan.root {
         RelationalPlan::SetOp { .. } if allow_set_operation_root => Ok(()),
         RelationalPlan::SetOp { .. } => Err(SQLError::Unsupported(format!(
@@ -399,7 +224,7 @@ pub(super) fn validate_propagated_query<S: Clone + Send + Sync + 'static>(
             let Some(source) = block.from.as_ref() else {
                 return Ok(());
             };
-            validate_propagated_source(context, source, strength, nullable, plan)
+            validate_propagated_source(context, source, strength, nullable, plan, control)
         }
     }
 }
@@ -412,11 +237,13 @@ pub(super) fn validate_propagated_source<S: Clone + Send + Sync + 'static>(
     strength: LockStrength,
     nullable: bool,
     owner: &QueryPlan,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    control.check()?;
     match source {
         SourcePlan::Table { name, .. } => {
             if owner.ctes.iter().any(|cte| cte.name == *name)
-                || context.catalog.view_plan(name)?.is_some()
+                || context.catalog.view_exists_with_control(name, control)?
             {
                 return Ok(());
             }
@@ -425,19 +252,12 @@ pub(super) fn validate_propagated_source<S: Clone + Send + Sync + 'static>(
         SourcePlan::Join {
             left, right, kind, ..
         } => {
-            let (left_nullable, right_nullable) = match kind {
-                uqa_sql::ast::JoinKind::Left => (nullable, true),
-                uqa_sql::ast::JoinKind::Right => (true, nullable),
-                uqa_sql::ast::JoinKind::Full => (true, true),
-                uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross => {
-                    (nullable, nullable)
-                }
-            };
-            validate_propagated_source(context, left, strength, left_nullable, owner)?;
-            validate_propagated_source(context, right, strength, right_nullable, owner)
+            let (left_nullable, right_nullable) = join_nullability(*kind, nullable);
+            validate_propagated_source(context, left, strength, left_nullable, owner, control)?;
+            validate_propagated_source(context, right, strength, right_nullable, owner, control)
         }
         SourcePlan::Subquery { body, .. } => {
-            validate_propagated_query(context, body, strength, nullable, false)
+            validate_propagated_query(context, body, strength, nullable, false, control)
         }
         SourcePlan::RetainedRows(_)
         | SourcePlan::Values { .. }
@@ -446,9 +266,13 @@ pub(super) fn validate_propagated_source<S: Clone + Send + Sync + 'static>(
     }
 }
 
-pub(super) fn push_unique(names: &mut Vec<String>, name: &str) {
-    if !name.is_empty() && !names.iter().any(|existing| existing == name) {
-        names.push(name.to_string());
+fn join_nullability(kind: uqa_sql::ast::JoinKind, nullable: bool) -> (bool, bool) {
+    use uqa_sql::ast::JoinKind;
+    match kind {
+        JoinKind::Left => (nullable, true),
+        JoinKind::Right => (true, nullable),
+        JoinKind::Full => (true, true),
+        JoinKind::Inner | JoinKind::Cross => (nullable, nullable),
     }
 }
 

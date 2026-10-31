@@ -24,6 +24,7 @@ mod privileges;
 mod retrieval;
 mod retrieval_analysis;
 mod routine_results;
+mod row_locks;
 mod rule_binding;
 mod rule_mutations;
 mod rule_schedules;

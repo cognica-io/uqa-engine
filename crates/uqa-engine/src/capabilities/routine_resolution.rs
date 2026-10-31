@@ -314,6 +314,26 @@ impl RoutineResolution for Engine {
             .map(|function| function.def.returns_set()))
     }
 
+    fn resolve_static_sql_function_strictness_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        call: uqa_sql::type_resolution::RoutineCallDescriptor<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        self.routine_overload_context()
+            .resolve_static_sql_routine_match_with_control(
+                name,
+                binding,
+                call.argument_names,
+                call.argument_types,
+                call.explicit_variadic,
+                uqa_sql::routines::resolution::RoutineCallKind::Function,
+                control,
+            )
+            .map(|selected| selected.map(|selected| selected.function.def.strict))
+    }
+
     fn resolve_static_sql_function_match_with_control(
         &self,
         name: &str,

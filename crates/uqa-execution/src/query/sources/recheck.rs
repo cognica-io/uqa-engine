@@ -49,7 +49,10 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
         ctes,
     )?;
     let mut operator = {
-        let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+        let mut scoped_ctes = ctes.enter_source_row_locks_with_control(
+            source_row_locks,
+            &context.ctes.production_resources()?.control(),
+        )?;
         super::build_join_operator_with_recheck_pins(
             context,
             from,

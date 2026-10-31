@@ -21,13 +21,13 @@ pub(super) enum OutputColumn<'a> {
     Right(usize),
 }
 
-pub(super) fn visit_column_order(
+pub(super) fn visit_column_order<'a>(
     kind: crate::ast::JoinKind,
     left_width: usize,
     right_width: usize,
-    using: &ResolvedJoinUsing,
+    using: &'a ResolvedJoinUsing,
     control: &ProductionControl<'_>,
-    mut visit: impl FnMut(OutputColumn<'_>) -> Result<(), SQLError>,
+    mut visit: impl FnMut(OutputColumn<'a>) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
     let mut left_used = ProductionVec::new(*control);
     let mut right_used = ProductionVec::new(*control);

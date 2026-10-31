@@ -7,8 +7,6 @@
 //! Row-lock target resolution and the physical `LockRows` operator.
 
 use super::recheck_source::{LockRowsRecheckInput, LockRowsRecheckSource};
-use crate::catalog::schema::virtual_relation_accepts_row_lock as virtual_row_lockable;
-use crate::catalog::{CatalogReadView, RelationNameResolution};
 use crate::query::{binding::bind_source_plan_schema, CteScope};
 use crate::row_locks::{
     binding::{bind_relation, lock_descendants, RelationBinding},
@@ -491,105 +489,8 @@ fn validate_source_row_locks<S: Clone + Send + Sync + 'static>(
 
 use uqa_sql::semantics::locking::query_plan_has_row_locks;
 
-pub fn resolve_row_locks<S: Clone + Send + Sync + 'static>(
-    context: RowLockContext<'_, S>,
-    from: &SourcePlan,
-    locking: &[LockingClause],
-    predicate: Option<&ScalarExpr>,
-    params: &[SQLParam],
-    ctes: &CteScope<S>,
-) -> Result<Vec<ResolvedRowLock>, SQLError> {
-    if locking.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut effective_from = from.clone();
-    reduce_null_rejected_outer_joins_to_fixpoint(
-        context,
-        &mut effective_from,
-        predicate,
-        params,
-        ctes,
-    )?;
-    validate_lock_relation_aliases(&effective_from, locking)?;
-    let sources = collect_source_leaves(&effective_from, false, ctes)?;
-    let mut assigned: Vec<Option<(LockStrength, LockWait)>> = vec![None; sources.len()];
-    for clause in locking {
-        let selected = if clause.relations.is_empty() {
-            sources
-                .iter()
-                .enumerate()
-                .filter_map(|(index, source)| source.kind.implicitly_lockable().then_some(index))
-                .collect::<Vec<_>>()
-        } else {
-            let mut selected = vec![false; sources.len()];
-            for relation in &clause.relations {
-                let matches = sources
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, source)| {
-                        source
-                            .names
-                            .iter()
-                            .any(|name| name == relation)
-                            .then_some(index)
-                    })
-                    .collect::<Vec<_>>();
-                if matches.is_empty() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42P01".into(),
-                        message: format!(
-                            "relation \"{relation}\" in FOR UPDATE/SHARE clause not found in FROM clause"
-                        ),
-                    });
-                }
-                for source_index in matches {
-                    selected[source_index] = true;
-                }
-            }
-            selected
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, selected)| selected.then_some(index))
-                .collect()
-        };
-        for source_index in selected {
-            assigned[source_index] = Some(match assigned[source_index] {
-                Some((strength, wait)) => (
-                    strength.max(clause.strength),
-                    merge_lock_wait(wait, clause.wait),
-                ),
-                None => (clause.strength, clause.wait),
-            });
-        }
-    }
-    let mut resolved = Vec::new();
-    for (source, assignment) in sources.iter().zip(assigned) {
-        let Some((strength, wait)) = assignment else {
-            continue;
-        };
-        reject_unusable_lock_leaf(context, source, strength)?;
-        if !source.kind.carries_row_identity() {
-            continue;
-        }
-        resolved.push(ResolvedRowLock {
-            qualifier: source.qualifier.clone(),
-            storage_name: source.storage_name.clone(),
-            display_name: source.display_name.clone(),
-            strength,
-            wait,
-            identity_source: source.kind.is_identity_source(),
-        });
-    }
-    if context.session.current_transaction_is_read_only()
-        && locks_non_temporary_relation(context, &resolved)?
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "25006".into(),
-            message: "cannot execute SELECT in a read-only transaction".into(),
-        });
-    }
-    Ok(resolved)
-}
+mod resolution;
+pub use resolution::resolve_row_locks;
 
 fn locks_non_temporary_relation<S: Clone + Send + Sync + 'static>(
     context: RowLockContext<'_, S>,
@@ -633,7 +534,7 @@ fn source_contains_join_alias(source: &SourcePlan, target: &str) -> bool {
 mod execution;
 mod null_rejection;
 mod targets;
-use null_rejection::reduce_null_rejected_outer_joins_to_fixpoint;
+
 use targets::lock_table_function_relations;
 
 fn merge_lock_wait(left: LockWait, right: LockWait) -> LockWait {
@@ -649,14 +550,14 @@ pub use uqa_sql::semantics::locking::apply_propagated_view_lock;
 mod leaf_validation;
 use leaf_validation::{
     collect_source_leaf_plans, collect_source_leaves, copy_recheck_source_row,
-    reject_unusable_lock_leaf, validate_locking_block_shape,
+    validate_locking_block_shape,
 };
 
 pub struct LockRows<'a, S: Clone> {
     input: Box<dyn PhysicalOperator + 'a>,
     context: RowLockContext<'a, S>,
     params: &'a [SQLParam],
-    targets: Vec<ResolvedRowLock>,
+    targets: uqa_core::memory::Produced<Vec<ResolvedRowLock>>,
     max_rows: Option<u64>,
     emitted: u64,
     pending_rows: std::vec::IntoIter<PhysicalRow>,
@@ -677,7 +578,7 @@ impl<'a, S: Clone> LockRows<'a, S> {
         input: Box<dyn PhysicalOperator + 'a>,
         context: RowLockContext<'a, S>,
         params: &'a [SQLParam],
-        targets: Vec<ResolvedRowLock>,
+        targets: uqa_core::memory::Produced<Vec<ResolvedRowLock>>,
         max_rows: Option<u64>,
         discard_lock_origins: bool,
         retry_cache: Option<std::sync::Arc<RowLockRetryCache>>,

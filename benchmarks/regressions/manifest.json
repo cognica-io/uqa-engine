@@ -33193,6 +33193,94 @@
         "case_11_redb_analyzed",
         "case_12_redb_scalar"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "null_rejection_join_aliases_admit_names_and_preserve_side_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/input_aliases/tests.rs",
+      "capability": "Native row-lock target and scope ownership",
+      "workload": "Four MiB join alias under 64 KiB available, merged LEFT/RIGHT/FULL outputs, duplicates and both cancellations.",
+      "invariant": "Reject before large allocation, retain original and hidden identities on exactly their null-rejecting sides, and release every failed or completed owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_lock_scope_keeps_selected_and_child_readers_until_last_release",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/row_locks/tests.rs",
+      "capability": "Native row-lock target and scope ownership",
+      "workload": "Eight MiB resolved names retained by scope children and a selected view target, including nested empty masking.",
+      "invariant": "Selection allocates zero bytes; original payload and shared header leases survive restoration and retire only after the final reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_lock_scope_rejects_publication_without_changing_the_enclosing_binding",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/row_locks/tests.rs",
+      "capability": "Native row-lock target and scope ownership",
+      "workload": "Shared target publication with exhausted allowance, both cancellation owners and consumer unwind.",
+      "invariant": "Reject before publication, retain the enclosing target, and release replacement payloads and shared headers exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_row_lock_targets_admit_inputs_and_retire_resolved_metadata",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/row_locks.rs",
+      "capability": "Native row-lock target and scope ownership",
+      "workload": "Four MiB source aliases and nullable-join predicates with 64 KiB available on all four providers.",
+      "invariant": "Attempt less than 256 KiB before 53200, retain resolved target names after source retirement, propagate both cancellations and recover without leaked leases.",
+      "case_names": [
+        "case_1_memory_source",
+        "case_2_memory_predicate",
+        "case_3_sqlite_native_source",
+        "case_4_sqlite_native_predicate",
+        "case_5_sqlite_kv_source",
+        "case_6_sqlite_kv_predicate",
+        "case_7_redb_source",
+        "case_8_redb_predicate"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_row_lock_planning_preserves_pg18_null_rejection_views_and_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/row_locks.rs",
+      "capability": "Native row-lock target and scope ownership",
+      "workload": "PostgreSQL 18.4 strict function, aliased joins, nullable sides, view propagation and savepoint recovery on all four providers.",
+      "invariant": "Preserve independent row values and 0A000 diagnostics while releasing the complete request owner on close.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "lock_target_production_retires_partial_names_before_publishing",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/locking/resolution/tests.rs",
+      "capability": "Native row-lock target and scope ownership",
+      "workload": "Admit a four MiB qualifier then reject its independent display name; retry and cancel both request owners.",
+      "invariant": "Keep each partial name in its value-before-lease owner until every fallible copy succeeds; publish exact retained bytes and release all partial outputs.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

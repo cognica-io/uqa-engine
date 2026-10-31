@@ -686,19 +686,13 @@ impl CatalogReadView {
         name: &str,
         include_descendants: bool,
     ) -> Result<Vec<String>, SQLError> {
-        let root = self
-            .relation_lookup_candidates(resolution, name)?
-            .into_iter()
-            .find(|relation| self.snapshot.tables.contains_key(relation))
-            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-        if !include_descendants {
-            return Ok(vec![root.qualified_name()]);
-        }
-        let mut output = Vec::new();
-        let mut visiting = BTreeSet::new();
-        let mut visited = BTreeSet::new();
-        self.collect_hierarchy_descendants(&root, &mut visiting, &mut visited, &mut output)?;
-        Ok(output)
+        self.hierarchy_scan_tables_with_control(
+            resolution,
+            name,
+            include_descendants,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .map(|names| names.into_uncontrolled().expect("ordinary hierarchy names"))
     }
 
     pub fn direct_hierarchy_children(
@@ -875,45 +869,6 @@ impl CatalogReadView {
             }
         }
         Ok(None)
-    }
-
-    fn collect_hierarchy_descendants(
-        &self,
-        parent: &uqa_core::RelationIdentity,
-        visiting: &mut BTreeSet<uqa_core::RelationIdentity>,
-        visited: &mut BTreeSet<uqa_core::RelationIdentity>,
-        output: &mut Vec<String>,
-    ) -> Result<(), SQLError> {
-        if visiting.contains(parent) {
-            return Err(SQLError::Internal(format!(
-                "table inheritance cycle reaches `{}`",
-                parent.qualified_name()
-            )));
-        }
-        if !visited.insert(parent.clone()) {
-            return Ok(());
-        }
-        visiting.insert(parent.clone());
-        output.push(parent.qualified_name());
-        let parent_name = parent.qualified_name();
-        let children = self
-            .snapshot
-            .tables
-            .iter()
-            .filter(|(_, table)| {
-                table
-                    .hierarchy
-                    .parents
-                    .iter()
-                    .any(|candidate| candidate == &parent_name)
-            })
-            .map(|(identity, _)| identity.clone())
-            .collect::<Vec<_>>();
-        for child in children {
-            self.collect_hierarchy_descendants(&child, visiting, visited, output)?;
-        }
-        visiting.remove(parent);
-        Ok(())
     }
 }
 

@@ -57,6 +57,17 @@ impl LockingCatalog for Engine {
     fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
         Engine::view_plan(self, name)
     }
+    fn view_exists_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        Ok(self
+            .with_view_definition_with_control(name, control, |_, view| {
+                Ok(view.kind == crate::StoredViewKind::View)
+            })?
+            .unwrap_or(false))
+    }
     fn table_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String> {
         Engine::table_persistence(self, name).map_err(|error| error.to_string())
     }
@@ -105,6 +116,10 @@ impl RowLockReadSource for Engine {
     }
 }
 impl RowLockScopeSource<StatementReadSnapshot> for Engine {
+    fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
+        uqa_execution::query::relational::QueryExpressionFactory::production_resources(self)
+    }
+
     fn current_routine_scope(&self) -> Result<CteScope, SQLError> {
         crate::capabilities::query_scope::new_for_current_routine(self)
     }

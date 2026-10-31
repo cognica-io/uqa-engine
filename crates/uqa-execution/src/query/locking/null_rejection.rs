@@ -8,20 +8,22 @@
 
 use super::RowLockContext;
 use crate::query::CteScope;
-use uqa_sql::{plan::SourcePlan, SQLError, SQLParam, ScalarExpr};
+use uqa_core::memory::ProductionControl;
+use uqa_sql::{plan::MutableSourcePlan, SQLError, SQLParam, ScalarExpr};
 
-pub(super) fn reduce_null_rejected_outer_joins_to_fixpoint<S: Clone + Send + Sync + 'static>(
+pub(super) fn reduce_null_rejected_outer_joins<S: Clone + Send + Sync + 'static>(
     context: RowLockContext<'_, S>,
-    source: &mut SourcePlan,
+    source: MutableSourcePlan,
     predicate: Option<&ScalarExpr>,
     params: &[SQLParam],
     ctes: &CteScope<S>,
-) -> Result<(), SQLError> {
-    uqa_sql::semantics::locking::null_rejection::reduce_null_rejected_outer_joins_to_fixpoint(
+    control: &ProductionControl<'_>,
+) -> Result<MutableSourcePlan, SQLError> {
+    source.reduce_null_rejected_outer_joins(
         context.catalog,
-        source,
         predicate,
         params,
-        &crate::query::binding::binding_context(ctes)?,
+        &crate::query::binding::binding_context_with_control(ctes, control)?,
+        control,
     )
 }

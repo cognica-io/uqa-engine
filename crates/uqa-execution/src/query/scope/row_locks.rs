@@ -166,51 +166,73 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         locks: Vec<ResolvedRowLock>,
     ) -> SourceRowLockScope<'_, S> {
-        let existing_is_empty = self.row_lock_state().is_none_or(|state| {
-            state
-                .source_row_locks
-                .as_ref()
-                .is_none_or(|locks| locks.is_empty())
-        });
-        let previous = if locks.is_empty() && existing_is_empty {
+        let control = ProductionControl::uncontrolled();
+        self.enter_source_row_locks_with_control(
+            control
+                .finish(locks, None)
+                .expect("ordinary source row locks"),
+            &control,
+        )
+        .expect("ordinary source row lock owner")
+    }
+
+    /// Construct the complete shared owner before publishing a new binding; failure leaves the enclosing scope intact.
+    pub fn enter_source_row_locks_with_control(
+        &mut self,
+        locks: Produced<Vec<ResolvedRowLock>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<SourceRowLockScope<'_, S>, uqa_sql::SQLError> {
+        control.check()?;
+        let locks = if locks.is_empty() {
+            None
+        } else {
+            Some(locks.into_shared(control)?)
+        };
+        let existing_is_empty = self
+            .row_lock_state()
+            .is_none_or(|state| state.source_row_locks.is_none());
+        let previous = if locks.is_none() && existing_is_empty {
             PreviousBinding::Unchanged
         } else {
             PreviousBinding::Restore(std::mem::replace(
                 &mut self.row_lock_state_mut().source_row_locks,
-                if locks.is_empty() {
-                    None
-                } else {
-                    Some(
-                        ProductionControl::uncontrolled()
-                            .finish(locks, None)
-                            .expect("ordinary source row locks")
-                            .into_shared(&ProductionControl::uncontrolled())
-                            .expect("ordinary source row lock owner"),
-                    )
-                },
+                locks,
             ))
         };
-        SourceRowLockScope {
+        Ok(SourceRowLockScope {
             ctes: self,
             previous,
-        }
+        })
     }
 
     pub fn source_row_lock_for_view(
         &self,
         qualifier: &str,
         storage_name: &str,
-    ) -> Option<ResolvedRowLock> {
-        self.row_lock_state()?
-            .source_row_locks
-            .iter()
-            .flat_map(|locks| locks.iter())
-            .find(|target| {
-                target.identity_source
-                    && target.qualifier == qualifier
-                    && target.storage_name == storage_name
-            })
-            .cloned()
+    ) -> Option<SelectedRowLock> {
+        let locks = self.row_lock_state()?.source_row_locks.as_ref()?;
+        let index = locks.iter().position(|target| {
+            target.identity_source
+                && target.qualifier == qualifier
+                && target.storage_name == storage_name
+        })?;
+        Some(SelectedRowLock {
+            locks: Arc::clone(locks),
+            index,
+        })
+    }
+}
+
+/// An allocation-free selection keeps the immutable target's original lease alive through nested view construction.
+pub struct SelectedRowLock {
+    locks: SourceRowLocks,
+    index: usize,
+}
+
+impl std::ops::Deref for SelectedRowLock {
+    type Target = ResolvedRowLock;
+    fn deref(&self) -> &Self::Target {
+        &self.locks[self.index]
     }
 }
 
@@ -299,3 +321,6 @@ impl<S: Clone> Drop for LockIdentityEmissionScope<'_, S> {
 }
 
 pub use uqa_sql::plan::locking::ResolvedRowLock;
+
+#[cfg(test)]
+mod tests;

@@ -192,7 +192,10 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
             ctes,
         )?;
         let operator = {
-            let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
+            let mut scoped_ctes = ctes.enter_source_row_locks_with_control(
+                source_row_locks,
+                &context.ctes.production_resources()?.control(),
+            )?;
             build_join_operator_with_bound_sources(
                 context,
                 from,
