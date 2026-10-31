@@ -25,7 +25,9 @@ mod materialization;
 mod owned_row;
 mod physical_row;
 mod physical_row_view;
+mod row_lock_name;
 mod row_lock_origins;
+pub use row_lock_name::RowLockName;
 mod schema_runtime;
 
 pub use batches::Batch;

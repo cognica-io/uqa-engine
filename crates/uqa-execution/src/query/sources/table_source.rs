@@ -6,10 +6,10 @@
 //! Physical assembly for tables, CTEs, views, catalogs, and foreign tables.
 
 use super::{
-    attach_qualifier_filter, execute_view_plan_output_with_parent_cache, qualifier_filter,
-    qualifier_for, qualify_source_operator_with_columns, query_cte_names_with_control,
-    query_output_shared, try_build_streaming_subquery_operator, ColumnPrune, CteScope,
-    PhysicalOperator, QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan, Value,
+    attach_qualifier_filter, execute_view_plan_output_with_parent_cache,
+    qualify_source_operator_with_columns, query_cte_names_with_control, query_output_shared,
+    try_build_streaming_subquery_operator, ColumnPrune, CteScope, PhysicalOperator,
+    QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan, Value,
 };
 use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
 
@@ -53,27 +53,27 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             bound_columns,
             ..
         } => {
-            let qualifier = qualifier_for(qualifier, alias.as_deref());
+            let qualifier = alias.as_deref().unwrap_or(qualifier);
             if let Some(materialized) = ctes.materialized_for_scan(name) {
                 let scan: Box<dyn PhysicalOperator + 'a> = materialized.into_operator();
                 if let Some(visible) = uqa_sql::semantics::cte_reference_name(name)
                     .and_then(|name| ctes.recursive_control_width(&name))
                 {
                     let operator: Box<dyn PhysicalOperator + 'a> = Box::new(
-                        crate::ColumnSelection::hiding_trailing_columns(scan, visible, &qualifier),
+                        crate::ColumnSelection::hiding_trailing_columns(scan, visible, qualifier),
                     );
                     let source_columns = operator.schema().to_vec();
                     let aliases = table_source_aliases(&source_columns, &[], column_aliases);
                     let operator = qualify_source_operator_with_columns(
                         operator,
                         &source_columns,
-                        &qualifier,
+                        qualifier,
                         prune,
                         &aliases,
                         ctes.lock_identities.emit,
                     );
                     return attach_qualifier_filter(
-                        operator, &qualifier, filters, context, params, ctes,
+                        operator, qualifier, filters, context, params, ctes,
                     );
                 }
                 let source_columns = scan.schema().to_vec();
@@ -81,13 +81,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &source_columns,
-                    &qualifier,
+                    qualifier,
                     prune,
                     &aliases,
                     ctes.lock_identities.emit,
                 );
                 return attach_qualifier_filter(
-                    operator, &qualifier, filters, context, params, ctes,
+                    operator, qualifier, filters, context, params, ctes,
                 );
             }
 
@@ -105,7 +105,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let mut rewritten = None;
                 if let (Some(query), Some(projection)) = (
                     selected.filter(|_| executable_query.is_none()),
-                    prune.and_then(|prune| prune.get(&qualifier)),
+                    prune.and_then(|prune| prune.get(qualifier)),
                 ) {
                     let aliases =
                         production::output_aliases(&plan.columns, column_aliases, &control)?;
@@ -131,7 +131,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         let aliases =
                             production::output_aliases(&plan.columns, column_aliases, &control)?;
                         super::output_filter::specialize_source_filter(
-                            context, query, &qualifier, &aliases, filters,
+                            context, query, qualifier, &aliases, filters,
                         )?
                     }
                     None => None,
@@ -168,13 +168,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     let operator = qualify_source_operator_with_columns(
                         operator,
                         &source_columns,
-                        &qualifier,
+                        qualifier,
                         prune,
                         &aliases,
                         false,
                     );
                     return attach_qualifier_filter(
-                        operator, &qualifier, filters, context, params, ctes,
+                        operator, qualifier, filters, context, params, ctes,
                     );
                 }
                 let materialized = if plan.materialization
@@ -238,13 +238,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &source_columns,
-                    &qualifier,
+                    qualifier,
                     prune,
                     &aliases,
                     false,
                 );
                 return attach_qualifier_filter(
-                    operator, &qualifier, filters, context, params, ctes,
+                    operator, qualifier, filters, context, params, ctes,
                 );
             }
 
@@ -279,10 +279,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 );
                 let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
-                    scan, &columns, &qualifier, prune, &aliases, false,
+                    scan, &columns, qualifier, prune, &aliases, false,
                 );
                 return attach_qualifier_filter(
-                    operator, &qualifier, filters, context, params, ctes,
+                    operator, qualifier, filters, context, params, ctes,
                 );
             }
             if let Some(view) = catalog.view_resolved_with_control(&resolution, name, &control)? {
@@ -298,10 +298,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         Box::new(crate::TableScan::from_rows_with_schema(schema, rows));
                     let aliases = table_source_aliases(&columns, &[], column_aliases);
                     let operator = qualify_source_operator_with_columns(
-                        scan, &columns, &qualifier, prune, &aliases, false,
+                        scan, &columns, qualifier, prune, &aliases, false,
                     );
                     return attach_qualifier_filter(
-                        operator, &qualifier, filters, context, params, ctes,
+                        operator, qualifier, filters, context, params, ctes,
                     );
                 }
                 let privilege_subject = if view.security_invoker() {
@@ -319,13 +319,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let _stored = SetPlacementScope::stored_definition();
                 let plan = executable_query.as_deref().unwrap_or(&view.query);
                 let output_columns = view.output_columns.as_deref().unwrap_or(&[]);
-                let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);
+                let inherited_lock = ctes.source_row_lock_for_view(qualifier, name);
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
-                let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
+                let mut recheck_scope = ctes.enter_recheck_storage_pins(qualifier);
                 let ctes: &mut CteScope<S> = &mut recheck_scope;
                 let aliases = production::output_aliases(output_columns, column_aliases, &control)?;
                 let specialized_plan = super::output_filter::specialize_source_filter(
-                    context, plan, &qualifier, &aliases, filters,
+                    context, plan, qualifier, &aliases, filters,
                 )?;
                 // Successful specialization applies this complete predicate inside the view; retrieval leaves cannot be evaluated again as scalar functions.
                 let filters = if specialized_plan.is_some() {
@@ -355,7 +355,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     )?;
                 }
                 if let Some(projection) = prune
-                    .and_then(|prune| prune.get(&qualifier))
+                    .and_then(|prune| prune.get(qualifier))
                     .filter(|_| executable_query.is_none())
                 {
                     execution_plan = production::prune_outputs(
@@ -402,13 +402,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     let operator = qualify_source_operator_with_columns(
                         operator,
                         &source_columns,
-                        &qualifier,
+                        qualifier,
                         prune,
                         &aliases,
                         ctes.lock_identities.emit,
                     );
                     return attach_qualifier_filter(
-                        operator, &qualifier, filters, context, params, ctes,
+                        operator, qualifier, filters, context, params, ctes,
                     );
                 }
                 let local_cte_names = query_cte_names_with_control(
@@ -443,13 +443,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &columns,
-                    &qualifier,
+                    qualifier,
                     prune,
                     &aliases,
                     ctes.lock_identities.emit,
                 );
                 return attach_qualifier_filter(
-                    operator, &qualifier, filters, context, params, ctes,
+                    operator, qualifier, filters, context, params, ctes,
                 );
             }
 
@@ -477,7 +477,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let name = name.clone();
                 let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let request = crate::query::source_projection::catalog_request(
-                    &columns, &aliases, &qualifier, prune, filters,
+                    &columns, &aliases, qualifier, prune, filters,
                 );
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(crate::query::deferred::DeferredOperator::from_rows(
@@ -504,13 +504,13 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &columns,
-                    &qualifier,
+                    qualifier,
                     prune,
                     &aliases,
                     ctes.lock_identities.emit,
                 );
                 return attach_qualifier_filter(
-                    operator, &qualifier, filters, context, params, ctes,
+                    operator, qualifier, filters, context, params, ctes,
                 );
             }
 
@@ -544,23 +544,31 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &columns,
-                    &qualifier,
+                    qualifier,
                     prune,
                     &aliases,
                     ctes.lock_identities.emit,
                 );
                 return attach_qualifier_filter(
-                    operator, &qualifier, filters, context, params, ctes,
+                    operator, qualifier, filters, context, params, ctes,
                 );
             }
 
-            if let Some(predicate) =
-                qualifier_filter(filters, &qualifier).filter(uqa_sql::semantics::contains_retrieval)
+            if filters
+                .and_then(|filters| filters.get(qualifier))
+                .is_some_and(|parts| parts.iter().any(uqa_sql::semantics::contains_retrieval))
             {
+                let resources = context.ctes.production_resources()?;
+                let predicate = uqa_sql::semantics::source_filters::qualifier_filter_with_control(
+                    filters,
+                    qualifier,
+                    &resources.control(),
+                )?
+                .expect("selected retrieval predicate");
                 return crate::query::table_sources::hierarchy::build_hierarchy_retrieval_operator(
                     context.retrieval,
                     from,
-                    &qualifier,
+                    qualifier,
                     &predicate,
                     params,
                     ctes,
@@ -568,14 +576,16 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 );
             }
 
+            let resources = context.ctes.production_resources()?;
             let Some((operator, filter_pushed)) =
-                crate::query::table_sources::scan::try_streaming_local_table_scan(
+                crate::query::table_sources::scan::try_streaming_local_table_scan_with_control(
                     context.scans,
                     from,
                     ctes,
                     prune,
                     filters,
                     params,
+                    &resources.control(),
                 )?
             else {
                 return Err(SQLError::UnknownTable(name.clone()));
@@ -583,7 +593,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             if filter_pushed {
                 Ok(operator)
             } else {
-                attach_qualifier_filter(operator, &qualifier, filters, context, params, ctes)
+                attach_qualifier_filter(operator, qualifier, filters, context, params, ctes)
             }
         }
         _ => unreachable!("table source builder called for a different source kind"),

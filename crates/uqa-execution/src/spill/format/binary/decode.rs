@@ -371,9 +371,9 @@ impl<'a> BinaryReader<'a> {
             let storage_name = self.read_string("lock origin storage")?;
             let doc_id = self.read_u64("lock origin doc id")?;
             origins.push(crate::RowLockOrigin {
-                qualifier: std::sync::Arc::from(qualifier),
-                scan_qualifier: std::sync::Arc::from(scan_qualifier),
-                storage_name: std::sync::Arc::from(storage_name),
+                qualifier: qualifier.into(),
+                scan_qualifier: scan_qualifier.into(),
+                storage_name: storage_name.into(),
                 doc_id,
             });
         }

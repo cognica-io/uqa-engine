@@ -13,9 +13,10 @@ use uqa_sql::{plan::source_projection::RelationMetadataProjection, ResultRow, SQ
 
 mod borrowed;
 mod command_scan;
+mod production;
 mod row_source;
 
-pub type SharedLockOrigin = (Arc<str>, Arc<str>);
+pub type SharedLockOrigin = (crate::RowLockName, crate::RowLockName);
 
 pub struct LocalTableRowSource {
     scan_batch_bytes: usize,
@@ -48,6 +49,7 @@ pub struct LocalTableRowSource {
     command_base_after: Option<uqa_core::DocId>,
     command_base_ids: std::collections::VecDeque<uqa_core::DocId>,
     command_base_exhausted: bool,
+    memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 /// One logical inheritance scan over independently stored physical tables.
@@ -58,6 +60,7 @@ pub struct HierarchyRowSource {
     schema: Vec<String>,
     physical_schema: crate::RowSchema,
     estimated_cardinality: u64,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl HierarchyRowSource {
@@ -73,6 +76,7 @@ impl HierarchyRowSource {
             .sum();
         Ok(Self {
             sources: sources.into(),
+            _memory: None,
             schema,
             physical_schema,
             estimated_cardinality,
@@ -155,6 +159,7 @@ pub struct LocalTableScanConfig {
 impl LocalTableRowSource {
     pub fn new(config: LocalTableScanConfig) -> Self {
         Self {
+            memory: None,
             scan_batch_bytes: 64 * 1024 * 1024,
             batch_layout: crate::spill::EncodedBatchLayout::default(),
             shared_page_rows: 1,
@@ -194,3 +199,4 @@ impl LocalTableRowSource {
 }
 
 pub use row_source::table_lock_origin;
+pub(crate) use row_source::table_lock_origin_with_control;

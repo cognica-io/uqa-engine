@@ -21,6 +21,7 @@ mod internal_aliases;
 mod internal_relations;
 pub(super) mod lease;
 mod parts;
+mod physical_attributes;
 mod projection;
 mod rebinding;
 pub(super) mod remapping;

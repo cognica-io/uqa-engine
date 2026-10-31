@@ -209,45 +209,14 @@ impl RowSchema {
         input: &Self,
         aliases: &[(ColumnIdentity, usize, Option<ColumnType>)],
     ) -> Self {
-        let mut collations = input.index.cold.collations.clone();
-        let mut lookup_aliases = input.index.aliases.clone();
-        let mut alias_types = input.index.cold.aliases.clone();
-        for (identity, slot, ty) in aliases {
-            assert!(
-                *slot < input.physical_width(),
-                "physical identity alias is outside row width"
-            );
-            collations.alias(
-                identity,
-                input.inherited_physical_collation(*slot),
-                ty.as_ref(),
-            );
-            lookup_aliases.insert(identity.clone(), *slot);
-            alias_types.insert(identity.clone(), ty.clone());
-        }
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations,
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: lookup_aliases,
-                alias_types,
-                internal: input.index.executor_attributes.clone(),
-                internal_types: input.index.cold.executor_attribute_types.clone(),
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only: input.index.cold.binding_only.clone(),
-                lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                ..SchemaBuildMetadata::default()
-            },
+        Self::with_physical_identity_aliases_with_control(
+            input,
+            aliases.iter().map(|(identity, slot, ty)| {
+                (identity.qualifier(), identity.column(), *slot, ty.as_ref())
+            }),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
         )
+        .expect("ordinary physical identity aliases")
     }
 
     /// Add executor-only relation attributes at explicit physical slots.

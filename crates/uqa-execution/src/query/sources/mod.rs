@@ -33,7 +33,7 @@ use uqa_sql::{
     semantics::{
         cte_names::query_cte_names_with_control,
         resolve_user_table_function,
-        source_filters::{combine_filters, qualifier_filter, qualifier_for},
+        source_filters::{combine_filters, qualifier_filter},
         table_function_column_types, validate_table_function_alias_count,
         validate_table_function_column_definition, TableFunctionTypeRequest,
     },

@@ -264,7 +264,7 @@ pub struct ScoredDocumentSource {
     input_guarantees_presence: bool,
     /// The table's indexes hold every projected field, so rows are projected from index entries without reading a document.
     index_only: bool,
-    lock_origin: Option<(Arc<str>, Arc<str>)>,
+    lock_origin: Option<crate::query::local_table::SharedLockOrigin>,
     recheck_pinned: bool,
     recheck_documents: std::collections::BTreeMap<DocId, Arc<uqa_storage::StoredDocument>>,
 }
@@ -652,7 +652,10 @@ impl ScoredDocumentSource {
         self
     }
 
-    pub fn with_lock_origin(mut self, origin: Option<(Arc<str>, Arc<str>)>) -> Self {
+    pub fn with_lock_origin(
+        mut self,
+        origin: Option<crate::query::local_table::SharedLockOrigin>,
+    ) -> Self {
         self.lock_origin = origin;
         self
     }

@@ -6,8 +6,6 @@
 
 //! Schema-only projection used after an expression-producing stage.
 
-use std::sync::Arc;
-
 use uqa_core::Value;
 
 use crate::{
@@ -47,7 +45,7 @@ pub struct ColumnSelection<'a> {
     /// Executor-only projection attributes are addressed structurally and
     /// never enter the public SQL column namespace.
     ordering: Vec<PhysicalOrder>,
-    rebind_lock_qualifier: Option<Arc<str>>,
+    rebind_lock_qualifier: Option<crate::RowLockName>,
     discard_lock_origins: bool,
     compact_slots: Option<Vec<Option<usize>>>,
     _memory: Option<uqa_core::memory::MemoryReservation>,
@@ -395,7 +393,7 @@ impl<'a> ColumnSelection<'a> {
     pub fn rebinding_lock_origins(mut self, qualifier: impl Into<String>) -> Self {
         let qualifier = qualifier.into();
         if !qualifier.is_empty() {
-            self.rebind_lock_qualifier = Some(Arc::from(qualifier));
+            self.rebind_lock_qualifier = Some(qualifier.into());
         }
         self
     }
@@ -448,7 +446,7 @@ impl<'a> ColumnSelection<'a> {
             }
         } else if let Some(qualifier) = self.rebind_lock_qualifier.as_ref() {
             for row in &mut rows {
-                row.rebind_lock_origin_qualifiers_mut(Arc::clone(qualifier));
+                row.rebind_lock_origin_qualifiers_mut(qualifier.clone());
             }
         }
         Batch::from_physical_rows(self.schema.clone(), rows)

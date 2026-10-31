@@ -27,9 +27,23 @@ impl CteRows {
         }
     }
     pub fn into_operator(self) -> Box<dyn PhysicalOperator> {
+        self.into_operator_with_control(&ProductionControl::uncontrolled())
+            .expect("ordinary CTE reader")
+    }
+    pub fn into_operator_with_control(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Box<dyn PhysicalOperator>, SQLError> {
         match self {
-            Self::Complete(rows) => Box::new(crate::SharedSpillScan::new(rows)),
-            Self::Prefix(rows) => Box::new(PrefixScan { rows, position: 0 }),
+            Self::Complete(rows) => Ok(crate::SharedSpillScan::boxed_with_control(rows, control)?),
+            Self::Prefix(rows) => {
+                let memory = control.reserve(size_of::<PrefixScan>())?;
+                Ok(Box::new(PrefixScan {
+                    rows,
+                    position: 0,
+                    _memory: memory,
+                }))
+            }
         }
     }
     #[cfg(test)]
@@ -134,6 +148,7 @@ impl Drop for PrefixState {
 struct PrefixScan {
     rows: SharedPrefix,
     position: u64,
+    _memory: Option<MemoryReservation>,
 }
 impl PrefixScan {
     fn pull(&mut self, demand: NonZeroUsize) -> ExecResult<Option<Batch>> {

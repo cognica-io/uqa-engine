@@ -34163,6 +34163,74 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_scan_attributes_keep_slots_types_collations_and_alias_precedence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/physical_attributes.rs",
+      "capability": "Native table scan ownership",
+      "workload": "Build native table predicates and selected scan metadata with large retained values or aliases and a constrained original planning allowance. Retain row-lock names beyond the producing scan.",
+      "invariant": "Admit owned scan predicates, labels, physical metadata and wrappers before allocation; preserve physical slots, declared types, collations, metadata precedence and row-lock lineage; release failures and final readers exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_scan_aliases_admit_large_names_before_copying_and_release_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/physical_attributes.rs",
+      "capability": "Native table scan ownership",
+      "workload": "Build native table predicates and selected scan metadata with large retained values or aliases and a constrained original planning allowance. Retain row-lock names beyond the producing scan.",
+      "invariant": "Admit owned scan predicates, labels, physical metadata and wrappers before allocation; preserve physical slots, declared types, collations, metadata precedence and row-lock lineage; release failures and final readers exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scan_lock_names_follow_the_last_row_and_rebound_alias",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/row_lock_name.rs",
+      "capability": "Native table scan ownership",
+      "workload": "Build native table predicates and selected scan metadata with large retained values or aliases and a constrained original planning allowance. Retain row-lock names beyond the producing scan.",
+      "invariant": "Admit owned scan predicates, labels, physical metadata and wrappers before allocation; preserve physical slots, declared types, collations, metadata precedence and row-lock lineage; release failures and final readers exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scan_projection_admits_public_aliases_and_retains_the_last_schema_reader",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/column_selection/production.rs",
+      "capability": "Native table scan ownership",
+      "workload": "Build native table predicates and selected scan metadata with large retained values or aliases and a constrained original planning allowance. Retain row-lock names beyond the producing scan.",
+      "invariant": "Admit owned scan predicates, labels, physical metadata and wrappers before allocation; preserve physical slots, declared types, collations, metadata precedence and row-lock lineage; release failures and final readers exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_scan_admits_selected_predicates_before_copying",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_filters.rs",
+      "capability": "Native table scan ownership",
+      "workload": "Build native table predicates and selected scan metadata with large retained values or aliases and a constrained original planning allowance. Retain row-lock names beyond the producing scan.",
+      "invariant": "Admit owned scan predicates, labels, physical metadata and wrappers before allocation; preserve physical slots, declared types, collations, metadata precedence and row-lock lineage; release failures and final readers exactly.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

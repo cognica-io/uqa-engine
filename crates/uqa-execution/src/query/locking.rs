@@ -202,7 +202,7 @@ pub struct LockRows<'a, S: Clone> {
     recheck_source: Option<LockRowsRecheckSource<S>>,
     schema: RowSchema,
     /// Base relations that already hold this statement's `RowShare` lock. A view or derived-table target reveals its base relations only through row origins, so the relation lock is taken on first sight of each.
-    relation_locked: std::collections::BTreeSet<std::sync::Arc<str>>,
+    relation_locked: std::collections::BTreeSet<crate::RowLockName>,
 }
 
 impl<'a, S: Clone> LockRows<'a, S> {

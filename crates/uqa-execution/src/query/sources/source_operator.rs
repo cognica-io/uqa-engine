@@ -9,8 +9,8 @@
 use super::{
     attach_qualifier_filter, build_function_group_source_operator, build_function_source_operator,
     build_join_source_operator, build_subquery_source_operator, build_table_source_operator,
-    build_values_source_operator, qualifier_filter, ColumnPrune, CteScope, QualifierFilters,
-    SQLError, SQLParam, SourceContext, SourcePlan,
+    build_values_source_operator, ColumnPrune, CteScope, QualifierFilters, SQLError, SQLParam,
+    SourceContext, SourcePlan,
 };
 use crate::query::binding::sources::SourceBindings;
 
@@ -92,8 +92,9 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
             if matches!(
                 from,
                 SourcePlan::Values { .. } | SourcePlan::RetainedRows(_)
-            ) || qualifier_filter(filters, &source.qualifier)
-                .is_some_and(|predicate| uqa_sql::semantics::contains_retrieval(&predicate))
+            ) || filters
+                .and_then(|filters| filters.get(&source.qualifier))
+                .is_some_and(|parts| parts.iter().any(uqa_sql::semantics::contains_retrieval))
             {
                 return Ok(scan);
             }

@@ -347,8 +347,8 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             .table_name_resolved(&resolution, table)?
             .unwrap_or_else(|| table.to_string());
         Some((
-            std::sync::Arc::<str>::from(qualifier),
-            std::sync::Arc::<str>::from(storage_name),
+            crate::RowLockName::from(qualifier),
+            crate::RowLockName::from(storage_name),
         ))
     } else {
         None

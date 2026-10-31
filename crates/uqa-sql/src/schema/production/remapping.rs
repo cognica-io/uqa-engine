@@ -161,6 +161,29 @@ pub(in crate::schema) fn physical<'a>(
 }
 
 impl RowSchema {
+    /// A scan alias selects logical fields while retaining hidden physical attributes and lock lineage.
+    pub fn with_scan_projection_with_control<'a>(
+        input: &Self,
+        qualifier: &str,
+        columns: impl IntoIterator<Item = (&'a str, usize)>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let mut layout = Layout::new(input, control)?;
+        for (name, logical) in columns {
+            layout.push(
+                name,
+                (Some(qualifier), name),
+                input.slot(logical).unwrap_or(NULL_SLOT),
+                input.column_type(logical),
+                input.inherited_column_collation(logical),
+                input.index.cold.wildcard_hidden.contains(&logical),
+            )?;
+        }
+        layout.finish(input.physical_width(), &[], true, None, control)
+    }
+}
+
+impl RowSchema {
     /// Select borrowed output/source names while retaining the original physical fragments and executor metadata.
     pub fn select_with_control<'a>(
         input: &Self,

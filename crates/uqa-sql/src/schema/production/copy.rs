@@ -171,6 +171,15 @@ pub(in crate::schema) fn with_metadata(
     metadata: SchemaBuildMetadata,
     control: &ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
+    with_metadata_width(input, metadata, input.physical_width(), control)
+}
+
+pub(super) fn with_metadata_width(
+    input: &RowSchema,
+    metadata: SchemaBuildMetadata,
+    width: usize,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
     let mut columns = ProductionVec::new(*control);
     let mut identities = ProductionVec::new(*control);
     let mut types = ProductionVec::new(*control);
@@ -186,7 +195,7 @@ pub(in crate::schema) fn with_metadata(
         identities.finish()?,
         types.finish()?,
         slots.finish()?,
-        input.physical_width(),
+        width,
         metadata,
         control,
     )

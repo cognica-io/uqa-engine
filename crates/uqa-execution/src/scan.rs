@@ -398,9 +398,43 @@ pub struct TableScan {
     ordering: Vec<PhysicalOrder>,
     estimated_cardinality: Option<u64>,
     exhausted: bool,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl TableScan {
+    pub(crate) fn boxed_with_control(
+        source: Box<dyn RowSource>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Box<Self>, uqa_sql::SQLError> {
+        use uqa_core::memory::ProductionVec;
+        control.check()?;
+        let schema = match source.physical_schema() {
+            Some(schema) => schema.clone(),
+            None => {
+                let mut columns = ProductionVec::new(*control);
+                for column in source.schema() {
+                    columns.push_produced(control.copy_text(column)?)?;
+                }
+                RowSchema::new_with_control(columns.finish()?, control)?
+            }
+        };
+        let mut ordering = ProductionVec::new(*control);
+        for order in source.output_ordering() {
+            ordering.push_produced(control.finish(order.clone(), control.empty_reservation())?)?;
+        }
+        let (ordering, memory) = ordering.finish()?.into_parts();
+        let memory = control.combine(memory, control.reserve(size_of::<Self>())?);
+        let estimated_cardinality = source.estimated_cardinality();
+        Ok(Box::new(Self {
+            source: Some(source),
+            schema,
+            ordering,
+            estimated_cardinality,
+            exhausted: false,
+            _memory: memory,
+        }))
+    }
+
     pub fn new(source: Box<dyn RowSource>) -> Self {
         let schema = source
             .physical_schema()
@@ -414,6 +448,7 @@ impl TableScan {
             ordering,
             estimated_cardinality,
             exhausted: false,
+            _memory: None,
         }
     }
 

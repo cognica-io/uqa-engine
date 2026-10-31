@@ -27,12 +27,27 @@ pub struct SharedSpillScan {
     source: SharedSpill,
     schema: RowSchema,
     reader: Option<SharedSpillReader>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl SharedSpillScan {
+    pub(crate) fn boxed_with_control(
+        source: SharedSpill,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Box<Self>, uqa_sql::SQLError> {
+        let memory = control.reserve(size_of::<Self>())?;
+        let schema = source.row_schema().clone();
+        Ok(Box::new(Self {
+            source,
+            schema,
+            reader: None,
+            _memory: memory,
+        }))
+    }
     pub fn new(source: SharedSpill) -> Self {
         let schema = source.row_schema().clone();
         Self {
+            _memory: None,
             source,
             schema,
             reader: None,

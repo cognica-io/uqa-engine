@@ -15,10 +15,10 @@ use crate::RowSchemaExecution;
 
 /// One physical tuple this candidate row must lock. A self-join names the same tuple through several visible qualifiers; the tuple is locked once at the strongest requested strength while every qualifier stays known so each marked alias is pinned to the substituted image during a recheck.
 struct LockCandidate {
-    qualifiers: Vec<std::sync::Arc<str>>,
+    qualifiers: Vec<crate::RowLockName>,
     /// Base-scan qualifiers that produced this tuple, so identity-source rechecks pin exactly the inner scans that emitted it.
-    scan_qualifiers: Vec<std::sync::Arc<str>>,
-    storage_name: std::sync::Arc<str>,
+    scan_qualifiers: Vec<crate::RowLockName>,
+    storage_name: crate::RowLockName,
     doc_id: uqa_core::DocId,
     display_name: String,
     strength: LockStrength,
@@ -63,21 +63,19 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                     candidate.wait = merge_lock_wait(candidate.wait, target.wait);
                     candidate.identity_source |= target.identity_source;
                     if !candidate.qualifiers.contains(&origin.qualifier) {
-                        candidate
-                            .qualifiers
-                            .push(std::sync::Arc::clone(&origin.qualifier));
+                        candidate.qualifiers.push(origin.qualifier.clone());
                     }
                     if !candidate.scan_qualifiers.contains(&origin.scan_qualifier) {
                         candidate
                             .scan_qualifiers
-                            .push(std::sync::Arc::clone(&origin.scan_qualifier));
+                            .push(origin.scan_qualifier.clone());
                     }
                     continue;
                 }
                 candidates.push(LockCandidate {
-                    qualifiers: vec![std::sync::Arc::clone(&origin.qualifier)],
-                    scan_qualifiers: vec![std::sync::Arc::clone(&origin.scan_qualifier)],
-                    storage_name: std::sync::Arc::clone(&origin.storage_name),
+                    qualifiers: vec![origin.qualifier.clone()],
+                    scan_qualifiers: vec![origin.scan_qualifier.clone()],
+                    storage_name: origin.storage_name.clone(),
                     doc_id: origin.doc_id,
                     display_name: target.display_name.clone(),
                     strength: target.strength,
@@ -95,8 +93,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                     candidate.storage_name.as_ref(),
                     crate::row_locks::RelationLockMode::RowShare,
                 )?;
-                self.relation_locked
-                    .insert(std::sync::Arc::clone(&candidate.storage_name));
+                self.relation_locked.insert(candidate.storage_name.clone());
             }
         }
         let mut acquired = Vec::new();

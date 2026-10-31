@@ -130,6 +130,7 @@ impl ProjectedPredicate {
         Self::compile_bound_with_control(&expression, schema, params, control)
     }
 
+    #[cfg(test)]
     pub(crate) fn compile_bound(
         expression: &ScalarExpr,
         schema: &RowSchema,
