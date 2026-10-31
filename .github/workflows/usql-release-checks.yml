@@ -28,7 +28,8 @@ jobs:
   cli:
     name: Install usql (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Cold native release builds include bundled dependencies and ThinLTO.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
