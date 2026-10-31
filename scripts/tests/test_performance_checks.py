@@ -383,6 +383,32 @@ class PerformanceChecksTest(unittest.TestCase):
         kill.assert_called_once_with(42, signal.SIGKILL)
 
     @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_discovery_signals_escape_wait_io_recovery(self):
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=signum.name):
+                previous = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
+                process = mock.Mock(pid=42)
+
+                def wait(timeout):
+                    if process.wait.call_count == 1:
+                        try:
+                            signal.raise_signal(signum)
+                        except OSError:
+                            raise subprocess.TimeoutExpired(["listing"], timeout) from None
+
+                process.wait.side_effect = wait
+                with (
+                    mock.patch.object(runner.subprocess, "Popen", return_value=process),
+                    mock.patch.object(runner.os, "killpg") as kill,
+                    mock.patch.object(runner, "report_process_group"),
+                ):
+                    with self.assertRaisesRegex(InterruptedError, signum.name):
+                        runner.capture("listing", timeout=120)
+                kill.assert_called_once_with(42, signal.SIGKILL)
+                self.assertEqual(process.wait.call_count, 2)
+                self.assertEqual({s: signal.getsignal(s) for s in previous}, previous)
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
     def test_signals_stop_listing_descendants_and_restore_prior_handlers(self):
         child_script = LISTING_WITH_DESCENDANT
         for signum in (signal.SIGINT, signal.SIGTERM):
