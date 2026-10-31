@@ -287,13 +287,15 @@ pub fn bind_source_plan_schema<S: Clone>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::bind_source_plan_schema(
+    uqa_sql::binding::production::bind_source_plan_schema_with_control(
         routines,
         source,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
         outer,
+        control,
     )
 }
 

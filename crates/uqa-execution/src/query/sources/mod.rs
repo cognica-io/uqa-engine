@@ -13,7 +13,10 @@ use crate::query::{
     consumer::QueryOutputMode,
     output::{query_output_shared, QueryOutput},
     projection::physical_work_mem_bytes,
-    source_projection::{alias_join_operator, qualify_source_operator_with_columns},
+    source_projection::{
+        alias_join_operator_with_control as alias_join_operator,
+        qualify_source_operator_with_columns,
+    },
     table_functions::{rows_from::RowsFromOperator, TableFunctionCall},
     CteScope,
 };

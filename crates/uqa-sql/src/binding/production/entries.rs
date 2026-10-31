@@ -79,3 +79,17 @@ pub fn bind_source_plan_schema_in_scope_with_control(
     super::super::SchemaScope::from_context_with_control(scope, control)?
         .bind_source_in_scope(routines, source, subqueries, params, names)
 }
+
+/// Bind one complete source with the same preceding and outer scope as ordinary native binding.
+pub fn bind_source_plan_schema_with_control(
+    routines: &dyn RoutineResolution,
+    source: &SourcePlan,
+    params: &[SQLParam],
+    scope: ControlledBindingContext<'_>,
+    outer: Option<&RowSchema>,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    let subqueries = scope.scalar_subqueries;
+    super::super::SchemaScope::from_context_with_control(scope, control)?
+        .bind_source(routines, source, subqueries, params, outer)
+}

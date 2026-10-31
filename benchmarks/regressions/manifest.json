@@ -33603,6 +33603,181 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_join_output_binding_rejects_wide_metadata_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/source_schemas/production_tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "CROSS, INNER USING, FULL USING and complete JOIN aliases with wide labels and 32 KiB available.",
+      "invariant": "Reject before 128 KiB attempted allocation with 53200 and restore the original scope allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "join_output_condition_binding_observes_both_tokens_and_retires_failed_layouts",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/source_schemas/production_tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "JOIN ON binding in validation and inference modes, both cancellation tokens, admission failure and successful retry.",
+      "invariant": "Preserve cancellation SQLSTATE and exact cleanup while retaining the final typed alias layout.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "join_output_layout_retains_original_metadata_and_deduplicates_computed_positions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/remapping/tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "FULL JOIN computed output with duplicate aliases, collations, record fields, scores and nullable presence.",
+      "invariant": "Keep first-occurrence computed slots and original metadata, including final shared-schema ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_join_alias_replaces_namespaces_and_preserves_hidden_values_and_scores",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/remapping/tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "A fresh JOIN alias with repeated labels, hidden slots, scores and an empty descriptor.",
+      "invariant": "Match the original positional remap, hide prior namespaces and rebind scores without losing their values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "join_output_rejects_wide_types_and_alias_names_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/remapping/tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "One-MiB nested type and qualifier payloads with 32 KiB available, followed by invalid source positions.",
+      "invariant": "Reject before 128 KiB attempted allocation, restore admission and retain original ordered layout errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "using_output_payloads_retain_exact_allocated_storage_and_retire_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/output.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "INNER, LEFT, RIGHT and FULL USING layouts with coerced fields and a merged alias.",
+      "invariant": "Retained bytes exactly match allocator-observed live payload; discarded scratch and both cancellations release all owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "join_output_and_alias_construction_close_owned_inputs_on_rejection_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join_output/production_tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "Wide JOIN output and alias construction under a limited request and both cancellation tokens.",
+      "invariant": "Reject before 128 KiB attempted allocation and close the original child exactly once with no retained reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "join_output_wrapper_admission_preserves_cleanup_and_releases_computed_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join_output/production_tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "Computed output construction succeeds before the concrete wrapper allowance is exhausted.",
+      "invariant": "Wrapper failure preserves 53200, closes its child once and retires computed/schema owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "join_output_batches_retain_schema_owners_and_preserve_cast_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join_output/production_tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "COALESCE output with valid-left, invalid-left and invalid-right casts plus a batch outliving its operator.",
+      "invariant": "Evaluate casts in original demand order and retain output schema storage until the final batch drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_join_output_preserves_using_coercions_namespaces_and_lateral_aliases",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/physical_joins.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "Independent PostgreSQL 18.4 FULL/NATURAL/USING, complete aliases and LATERAL merged aliases on four providers.",
+      "invariant": "Match PostgreSQL output values and types on memory, native SQLite, SQLite Key/Value and redb.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_join_output_admits_aliases_and_retains_the_last_batch_owner",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/physical_joins.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "Native FULL USING and a wide complete alias under a 64 KiB allowance, both cancellations and retry on four providers.",
+      "invariant": "Reject before 256 KiB attempted allocation, restore the request and retain admitted output through the final batch.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_relation_attributes_preserve_declared_order_repeated_records_and_nulls",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/canonical/tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "A new relation over permuted/repeated record inputs, NULL slots and hidden executor attributes.",
+      "invariant": "Every declared attribute has its own physical ordinal; hidden values, shared record metadata, both cancellation tokens and last-owner retirement are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fresh_join_aliases_establish_relation_order_without_copying_repeated_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join_output/production_tests.rs",
+      "capability": "Native JOIN output ownership",
+      "workload": "Ordinary and controlled fresh aliases over permuted/repeated text attributes and a NULL slot.",
+      "invariant": "Qualified wildcards follow the declared namespace order while physical fragments share repeated payloads and batch schemas retain their admission.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

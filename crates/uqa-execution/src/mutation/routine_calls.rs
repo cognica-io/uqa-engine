@@ -301,6 +301,7 @@ fn expression_schemas<S: Clone + Send + Sync + 'static>(
                 params,
                 scope,
                 None,
+                &context.query.source.ctes.production_resources()?.control(),
             )
         })
         .transpose()?;

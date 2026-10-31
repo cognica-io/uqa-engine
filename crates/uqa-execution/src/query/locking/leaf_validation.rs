@@ -53,7 +53,14 @@ pub(super) fn copy_recheck_source_row<S: Clone + Send + Sync + 'static>(
         return copy_retained_source_row(source, candidate_schema, candidate);
     }
     let (schema, slots) = if qualifier.is_empty() {
-        let source_schema = bind_source_plan_schema(context.catalog, source, params, ctes, None)?;
+        let source_schema = bind_source_plan_schema(
+            context.catalog,
+            source,
+            params,
+            ctes,
+            None,
+            &context.scopes.production_resources()?.control(),
+        )?;
         let slots = source_schema
             .identities()
             .iter()

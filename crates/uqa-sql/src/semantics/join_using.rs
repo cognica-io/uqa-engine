@@ -131,11 +131,13 @@ pub fn join_using_output_schema(
     right: &RowSchema,
     using: &ResolvedJoinUsing,
 ) -> Result<RowSchema, SQLError> {
-    let input = RowSchema::join(left, right, std::iter::empty());
-    let (columns, aliases) = join_using_layout(kind, left, right, using)?;
-    crate::schema::join_output::compile_layout(&input, &columns, &aliases)
-        .map(|(schema, _)| schema)
-        .map_err(|error| SQLError::Internal(error.0))
+    join_using_output_schema_with_control(
+        kind,
+        left,
+        right,
+        using,
+        &ProductionControl::uncontrolled(),
+    )
 }
 
 /// Add a parenthesized JOIN alias to the input-side schemas for null-rejection analysis. Merged FULL JOIN columns belong to neither side exclusively because their value is a coalesce of both inputs.
@@ -167,106 +169,19 @@ pub fn join_using_layout(
     right: &RowSchema,
     using: &ResolvedJoinUsing,
 ) -> Result<JoinUsingLayout, SQLError> {
-    let right_offset = left.len();
-    let mut columns = Vec::with_capacity(left.len() + right.len() - using.columns.len());
-    let mut merged_sources = Vec::with_capacity(using.columns.len());
-    production::visit_column_order(
+    Ok(join_using_layout_with_control(
         kind,
-        left.len(),
-        right.len(),
+        left,
+        right,
         using,
         &ProductionControl::uncontrolled(),
-        |column| {
-            match column {
-                production::OutputColumn::Merged(column) => {
-                    let source = match kind {
-                        JoinKind::Inner | JoinKind::Left => coerced_output_source(
-                            column.left,
-                            left.column_type(column.left),
-                            column.output_type.as_ref(),
-                        ),
-                        JoinKind::Right => coerced_output_source(
-                            right_offset + column.right,
-                            right.column_type(column.right),
-                            column.output_type.as_ref(),
-                        ),
-                        JoinKind::Full => column.output_type.as_ref().map_or(
-                            JoinOutputSource::Input(column.left),
-                            |ty| JoinOutputSource::Coalesce {
-                                left: column.left,
-                                right: right_offset + column.right,
-                                ty: ty.clone(),
-                            },
-                        ),
-                        JoinKind::Cross => {
-                            unreachable!("qualified cross join rejected by column selection")
-                        }
-                    };
-                    columns.push((
-                        column.name.clone(),
-                        ColumnIdentity::unqualified(&column.name),
-                        source.clone(),
-                    ));
-                    merged_sources.push((column.name.clone(), source));
-                }
-                production::OutputColumn::Left(position) => columns.push((
-                    left.public_name(position)
-                        .unwrap_or(&left.columns()[position])
-                        .to_owned(),
-                    left.identities()[position].clone(),
-                    JoinOutputSource::Input(position),
-                )),
-                production::OutputColumn::Right(position) => columns.push((
-                    right
-                        .public_name(position)
-                        .unwrap_or(&right.columns()[position])
-                        .to_owned(),
-                    right.identities()[position].clone(),
-                    JoinOutputSource::Input(right_offset + position),
-                )),
-            }
-            Ok(())
-        },
-    )?;
-
-    let mut aliases = Vec::new();
-    for (position, identity) in left.identities().iter().enumerate() {
-        if identity.qualifier().is_some() {
-            aliases.push((identity.clone(), JoinOutputSource::Input(position)));
-        }
-    }
-    for (position, identity) in right.identities().iter().enumerate() {
-        if identity.qualifier().is_some() {
-            aliases.push((
-                identity.clone(),
-                JoinOutputSource::Input(right_offset + position),
-            ));
-        }
-    }
-    if let Some(alias) = using.alias.as_ref() {
-        aliases.extend(
-            merged_sources
-                .into_iter()
-                .map(|(column, source)| (ColumnIdentity::qualified(alias, column), source)),
-        );
-    }
-
-    Ok((columns, aliases))
+    )?
+    .into_uncontrolled()
+    .expect("ordinary JOIN output has no reservation"))
 }
 
-fn coerced_output_source(
-    input: usize,
-    source: Option<&ColumnType>,
-    target: Option<&ColumnType>,
-) -> JoinOutputSource {
-    match (source, target) {
-        (Some(source), Some(target)) if source != target => JoinOutputSource::Cast {
-            input,
-            ty: target.clone(),
-        },
-        _ => JoinOutputSource::Input(input),
-    }
-}
+mod output;
+pub use output::{join_using_layout_with_control, join_using_output_schema_with_control};
 
 #[cfg(test)]
 mod tests {

@@ -233,6 +233,7 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
                     params,
                     &scope,
                     outer,
+                    &control,
                 )?;
                 let prune =
                     context

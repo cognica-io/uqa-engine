@@ -133,11 +133,13 @@ impl TraversalAnalysis<'_> {
         if !block.order_by.is_empty()
             && has_effective_ordering(self.routines, block, self.params, ctes, self.control)?
         {
-            if returns_set && !ordered_set_projection(self.routines, block, self.params, ctes)? {
+            if returns_set
+                && !ordered_set_projection(self.routines, block, self.params, ctes, self.control)?
+            {
                 return Ok(BackwardScanSupport::Unsupported);
             }
             if matches!(block.compute, ComputePlan::Window)
-                && window_preserves_order(self.routines, block, self.params, ctes)?
+                && window_preserves_order(self.routines, block, self.params, ctes, self.control)?
             {
                 return Ok(BackwardScanSupport::Unsupported);
             }

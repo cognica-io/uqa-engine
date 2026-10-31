@@ -93,7 +93,14 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
             let schema = block.from.as_ref().map_or_else(
                 || Ok(RowSchema::default()),
                 |source| {
-                    bind_source_plan_schema(context.ctes.routines, source, params, scope, outer)
+                    bind_source_plan_schema(
+                        context.ctes.routines,
+                        source,
+                        params,
+                        scope,
+                        outer,
+                        &context.ctes.production_resources()?.control(),
+                    )
                 },
             )?;
             let schema = uqa_sql::binding::overlay_outer_schema(&schema, outer);

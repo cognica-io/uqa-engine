@@ -34,6 +34,7 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
         params,
         ctes,
         ctes.row_lock_outer_row().map(|row| &row.schema),
+        &context.ctes.production_resources()?.control(),
     )?;
     let column_prune =
         context

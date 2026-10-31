@@ -56,6 +56,29 @@ impl<'a, 'c> Selection<'a, 'c> {
         Ok(selected)
     }
 
+    pub(in crate::schema) fn clear_columns(&mut self, control: &ProductionControl<'c>) {
+        self.columns = ProductionMap::new(*control);
+    }
+
+    pub(in crate::schema) fn clear_lookup_aliases(&mut self, control: &ProductionControl<'c>) {
+        self.aliases = ProductionMap::new(*control);
+        self.virtual_columns = ProductionMap::new(*control);
+    }
+
+    pub(in crate::schema) fn column(
+        &mut self,
+        position: usize,
+        oid: Option<u32>,
+        ty: Option<&ColumnType>,
+    ) -> Result<(), SQLError> {
+        if let Some(oid) = override_value(oid, ty) {
+            self.columns.insert_copy(position, oid)?;
+        } else {
+            self.columns.remove(&position);
+        }
+        Ok(())
+    }
+
     pub(in crate::schema) fn alias(
         &mut self,
         identity: Key<'a>,

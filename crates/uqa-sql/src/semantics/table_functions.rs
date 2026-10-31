@@ -543,27 +543,14 @@ pub fn join_alias_columns(
     alias: &str,
     column_aliases: &[String],
 ) -> Result<Vec<String>, SQLError> {
-    let available = schema.len();
-    let specified = column_aliases.len();
-    if specified > available {
-        return Err(SQLError::Routine {
-            sqlstate: "42P10".into(),
-            message: format!(
-                "join expression \"{alias}\" has {available} columns available but {specified} columns specified"
-            ),
-        });
-    }
-    Ok(schema
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(position, column)| {
-            column_aliases
-                .get(position)
-                .cloned()
-                .unwrap_or_else(|| schema.public_name(position).unwrap_or(column).to_string())
-        })
-        .collect())
+    Ok(join_alias_columns_with_control(
+        schema,
+        alias,
+        column_aliases,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary JOIN alias has no reservation"))
 }
 
 pub fn alias_join_schema(
@@ -571,20 +558,19 @@ pub fn alias_join_schema(
     alias: Option<&str>,
     column_aliases: &[String],
 ) -> Result<crate::RowSchema, SQLError> {
-    let Some(alias) = alias else {
-        if column_aliases.is_empty() {
-            return Ok(schema.clone());
-        }
-        return Err(SQLError::Internal(
-            "JOIN column aliases exist without a relation alias".into(),
-        ));
-    };
-    let columns = join_alias_columns(schema, alias, column_aliases)?;
-    Ok(
-        crate::RowSchema::with_qualified_types(alias, columns, schema.column_types().to_vec())
-            .with_column_diagnostic_names_from(schema),
+    alias_join_schema_with_control(
+        schema,
+        alias,
+        column_aliases,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
     )
 }
+
+mod join_aliases;
+pub use join_aliases::{
+    alias_join_physical_schema_with_control, alias_join_schema_with_control,
+    join_alias_columns_with_control,
+};
 
 #[cfg(test)]
 mod tests;

@@ -50,6 +50,7 @@ pub struct ColumnSelection<'a> {
     rebind_lock_qualifier: Option<Arc<str>>,
     discard_lock_origins: bool,
     compact_slots: Option<Vec<Option<usize>>>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl<'a> ColumnSelection<'a> {
@@ -68,6 +69,7 @@ impl<'a> ColumnSelection<'a> {
             ordering: Vec::new(),
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots,
         }
     }
@@ -86,6 +88,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -114,6 +117,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -137,6 +141,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -174,6 +179,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -202,6 +208,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -242,6 +249,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: true,
+            _memory: None,
             compact_slots: None,
         }
     }
@@ -265,13 +273,19 @@ impl<'a> ColumnSelection<'a> {
             .collect::<Vec<_>>();
         let schema =
             RowSchema::remap_typed_identities_without_input_aliases(child.row_schema(), &columns);
+        let (schema, slots) = production::relation_namespace(
+            schema,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary relation namespace construction");
         Self {
             child,
             schema,
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
-            compact_slots: None,
+            _memory: None,
+            compact_slots: slots.map(|slots| slots.into_uncontrolled().expect("ordinary slots")),
         }
     }
 
@@ -298,6 +312,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: true,
+            _memory: None,
             compact_slots: (!identity_layout).then(|| source_slots.into_iter().map(Some).collect()),
         }
     }
@@ -363,6 +378,7 @@ impl<'a> ColumnSelection<'a> {
             ordering,
             rebind_lock_qualifier: None,
             discard_lock_origins: false,
+            _memory: None,
             compact_slots: (!identity_layout).then_some(slots),
         })
     }
@@ -811,3 +827,5 @@ mod tests {
         }
     }
 }
+
+mod production;

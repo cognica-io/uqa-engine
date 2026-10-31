@@ -109,7 +109,7 @@ impl Analysis<'_> {
                 )?;
         }
         let scope = owned_scope.as_ref().unwrap_or(ctes);
-        let output = output_expressions(self.routines, block, self.params, scope)?;
+        let output = output_expressions(self.routines, block, self.params, scope, self.control)?;
         let mut found = false;
         for (index, (label, expression)) in output.iter().enumerate() {
             if source_columns

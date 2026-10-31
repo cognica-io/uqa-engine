@@ -62,6 +62,7 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
             params,
             ctes,
             Some(&input_schema),
+            &control,
         )?;
         require_lateral_function_execute(context, binding.right, &input_schema, params, ctes)?;
         let pinned = binding
@@ -246,10 +247,19 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
             OperatorBuild::build(join, |join| {
                 if let Some(using) = using.as_ref() {
                     join.attach(|input| {
-                        shape_join_using_output(input, *kind, &left_schema, &right_schema, using)
+                        shape_join_using_output(
+                            input,
+                            *kind,
+                            &left_schema,
+                            &right_schema,
+                            using,
+                            &control,
+                        )
                     })?;
                 }
-                join.attach(|input| alias_join_operator(input, alias.as_deref(), column_aliases))
+                join.attach(|input| {
+                    alias_join_operator(input, alias.as_deref(), column_aliases, &control)
+                })
             })
         })
     })

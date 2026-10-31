@@ -328,11 +328,19 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 })?;
                 if let Some(using) = resolved_using.as_ref() {
                     left_operator.attach(|input| {
-                        shape_join_using_output(input, *kind, &left_schema, &right_schema, using)
+                        shape_join_using_output(
+                            input,
+                            *kind,
+                            &left_schema,
+                            &right_schema,
+                            using,
+                            &control,
+                        )
                     })?;
                 }
-                left_operator
-                    .attach(|input| alias_join_operator(input, alias.as_deref(), column_aliases))
+                left_operator.attach(|input| {
+                    alias_join_operator(input, alias.as_deref(), column_aliases, &control)
+                })
             })
         }
         _ => unreachable!("join source builder called for a different source kind"),

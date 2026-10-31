@@ -22,6 +22,7 @@ pub(super) mod lease;
 mod parts;
 mod projection;
 mod rebinding;
+pub(super) mod remapping;
 mod renaming;
 mod virtual_names;
 mod wildcards;

@@ -83,12 +83,6 @@ impl RowSchema {
         })
     }
 
-    pub(crate) fn with_column_diagnostic_names_from(mut self, input: &Self) -> Self {
-        Arc::make_mut(&mut self.index).cold.lateral_restrictions =
-            Self::requalified_column_names(input);
-        self
-    }
-
     /// Retain the left namespace while rejecting its use by the right input of a RIGHT or FULL join. The namespace must remain present so even an unknown qualified column reports the forbidden relation first.
     pub(crate) fn without_lateral_access(input: &Self, namespace: &str) -> Self {
         Self::with_lateral_denial(input, namespace, Denial::Join)

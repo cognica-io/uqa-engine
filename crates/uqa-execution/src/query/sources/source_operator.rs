@@ -163,8 +163,14 @@ pub(crate) fn empty_source_operator<'a, S: Clone + Send + Sync + 'static>(
     outer: Option<&crate::RowSchema>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     let outer = outer.or_else(|| ctes.row_lock_outer_row().map(|row| &row.schema));
-    let schema =
-        super::bind_source_plan_schema(context.ctes.routines, source, params, ctes, outer)?;
+    let schema = super::bind_source_plan_schema(
+        context.ctes.routines,
+        source,
+        params,
+        ctes,
+        outer,
+        &context.ctes.production_resources()?.control(),
+    )?;
     if schema.columns_are_open(None) {
         return Err(SQLError::Routine {
             sqlstate: "42P18".into(),

@@ -25,12 +25,38 @@ impl RowSchema {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<(Self, Produced<Vec<usize>>), SQLError> {
+        self.project_canonical_with_control(false, control)
+    }
+
+    /// Establish a new relation's attribute order independently of its input's physical slots. Every visible attribute gets its own position, including repeated inputs and NULL slots; hidden executor attributes retain their selected values.
+    pub fn canonical_relation_projection_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, Produced<Vec<usize>>), SQLError> {
+        self.project_canonical_with_control(true, control)
+    }
+
+    fn project_canonical_with_control(
+        &self,
+        distinct_columns: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, Produced<Vec<usize>>), SQLError> {
         control.check()?;
         let mut source_slots = ProductionVec::new(*control);
         let mut positions = ProductionMap::new(*control);
         let mut slots = ProductionVec::new(*control);
         for slot in &self.index.slots {
-            slots.push_copy(remap(*slot, &mut source_slots, &mut positions)?)?;
+            let position = if distinct_columns {
+                let position = source_slots.len();
+                source_slots.push_copy(*slot)?;
+                if *slot != NULL_SLOT && positions.get(slot).is_none() {
+                    positions.insert_copy(*slot, position)?;
+                }
+                position
+            } else {
+                remap(*slot, &mut source_slots, &mut positions)?
+            };
+            slots.push_copy(position)?;
         }
         let mut source_aliases = ProductionVec::new(*control);
         for (identity, slot) in &self.index.aliases {
@@ -64,7 +90,7 @@ impl RowSchema {
             }),
             control,
         )?;
-        let metadata = self.canonical_metadata(aliases, internal, &positions, control)?;
+        let metadata = self.canonical_metadata(aliases, internal, &source_slots, control)?;
         let mut columns = ProductionVec::new(*control);
         let mut identities = ProductionVec::new(*control);
         let mut types = ProductionVec::new(*control);
@@ -92,7 +118,7 @@ impl RowSchema {
         &self,
         aliases: SchemaMap<ColumnIdentity, usize>,
         internal: SchemaMap<crate::ast::InternalColumnRef, usize>,
-        positions: &ProductionMap<'_, usize, usize>,
+        source_slots: &[usize],
         control: &ProductionControl<'_>,
     ) -> Result<SchemaBuildMetadata, SQLError> {
         let cold = &self.index.cold;
@@ -101,14 +127,14 @@ impl RowSchema {
         Ok(SchemaBuildMetadata {
             collations: cold.collations.copy_with_control(control)?,
             record_fields: SchemaMap::from_produced(
-                cold.record_fields.iter().filter_map(|(slot, fields)| {
-                    positions.get(slot).map(|position| {
-                        Ok((
-                            inline(*position, control)?,
-                            inline(fields.clone(), control)?,
-                        ))
-                    })
-                }),
+                source_slots
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(position, slot)| {
+                        cold.record_fields.get(slot).map(|fields| {
+                            Ok((inline(position, control)?, inline(fields.clone(), control)?))
+                        })
+                    }),
                 control,
             )?,
             aliases,

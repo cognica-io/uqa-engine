@@ -18,7 +18,7 @@ mod entries;
 pub use entries::{
     analyze_expression_plan_type_with_control, analyze_query_plan_schema_with_control,
     analyze_source_plan_schema_with_control, bind_query_plan_schema_with_control,
-    bind_source_plan_schema_in_scope_with_control,
+    bind_source_plan_schema_in_scope_with_control, bind_source_plan_schema_with_control,
 };
 mod names;
 mod namespace;

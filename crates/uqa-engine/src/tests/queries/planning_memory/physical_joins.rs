@@ -149,3 +149,105 @@ fn native_nullable_join_metadata_preserves_whole_rows_aliases_and_lateral_presen
     }
     engine.close().unwrap();
 }
+
+// Independent PostgreSQL 18.4 output is retained in tests/parity/pg18/join_output_planning.expected.txt.
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_join_output_preserves_using_coercions_namespaces_and_lateral_aliases(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("join-output-observation.db"));
+    for (sql, expected) in [
+        ("SELECT merged.id::text || ':' || pg_typeof(merged.id)::text || ':' || coalesce(l.id::text,'_') || ':' || coalesce(r.id::text,'_') AS result FROM (VALUES(1::integer),(2)) AS l(id) FULL JOIN (VALUES(2::bigint),(3)) AS r(id) USING(id) AS merged ORDER BY merged.id;", &["1:bigint:1:_","2:bigint:2:2","3:bigint:_:3"][..]),
+        ("SELECT id::text || ':' || pg_typeof(id)::text || ':' || label || ':' || extra AS result FROM (VALUES(1::smallint,'a'),(2,'b')) AS l(id,label) NATURAL RIGHT JOIN (VALUES(2::bigint,'x'),(3,'y')) AS r(id,extra) WHERE label IS NOT NULL ORDER BY id;", &["2:bigint:b:x"][..]),
+        ("SELECT j::text || ':' || pg_typeof(j.k)::text AS result FROM ((VALUES(1::integer,'a'),(2,'b')) AS l(id,label) FULL JOIN (VALUES(2::bigint,'x'),(3,'y')) AS r(id,extra) USING(id)) AS j(k,v,w) ORDER BY j.k;", &["(1,a,):bigint","(2,b,x):bigint","(3,,y):bigint"][..]),
+        ("SELECT j.x::text || ':' || j.y::text AS result FROM ((VALUES(2),(1)) AS l(id) CROSS JOIN (VALUES(7)) AS r(id)) AS j(x,y) ORDER BY j.x;", &["1:7","2:7"][..]),
+        ("SELECT merged.id::text || ':' || r.n::text AS result FROM (VALUES(1::integer),(2)) AS l(id) LEFT JOIN LATERAL (SELECT l.id::bigint AS id,l.id+10 AS n) AS r USING(id) AS merged ORDER BY merged.id;", &["1:11","2:12"][..]),
+        ("SELECT k::text || ':' || coalesce(j::text,'ABSENT') AS result FROM ((VALUES(1::integer,'a'),(2,'b')) AS l(id,label) FULL JOIN (VALUES(2::bigint,'x'),(3,'y')) AS r(id,extra) USING(id)) AS j(k,v,w) FULL JOIN (VALUES(2::bigint),(4)) AS t(k) USING(k) ORDER BY k;", &["1:(1,a,)","2:(2,b,x)","3:(3,,y)","4:ABSENT"][..]),
+        ("SELECT ROW(j.*)::text AS result FROM ((VALUES(1::integer,'a'),(2,'b')) AS l(id,label) FULL JOIN (VALUES(2::bigint,'x'),(3,'y')) AS r(id,extra) USING(id)) AS j(k,v,w) ORDER BY j.k;", &["(1,a,)","(2,b,x)","(3,,y)"][..]),
+    ] {
+        let result = engine.sql(sql, &[]).unwrap();
+        let actual = result.rows.iter().map(|row| match &row["result"] {
+            Value::Str(value) => value.as_str(), value => panic!("unexpected result {value:?}"),
+        }).collect::<Vec<_>>();
+        assert_eq!(actual, expected, "{provider:?}: {sql}");
+    }
+    engine.close().unwrap();
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_join_output_admits_aliases_and_retains_the_last_batch_owner(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("join-output-owners.db"));
+    let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(uqa_sql::compile("SELECT * FROM ((VALUES(1,'a'),(2,'b')) AS l(id,v) FULL JOIN (VALUES(2::bigint,'x'),(3,'y')) AS r(id,w) USING(id)) AS j(k,v,w)").unwrap().remove(0)) else { panic!("query") };
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        panic!("block")
+    };
+    let source = block.from.as_mut().unwrap();
+    let uqa_sql::plan::SourcePlan::Join { column_aliases, .. } = source else {
+        panic!("join")
+    };
+    let payload = "label".repeat(1 << 18);
+    column_aliases[0] = payload.clone();
+    let resources = engine.query_retention_control().unwrap();
+    let memory = resources.memory();
+    let runtime = engine.query_runtime_view();
+    let context = engine.source_execution_context();
+    let mut scope = crate::capabilities::query_scope::new_for_statement(&engine, None).unwrap();
+    let baseline = memory.used();
+    let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+    let mut result = None;
+    let measured = allocation_counter::measure(|| {
+        result = Some(build_join_operator_with_ctes(
+            &context,
+            source,
+            &[],
+            &mut scope,
+            None,
+            None,
+        ));
+    });
+    assert!(
+        measured.bytes_total < 256 << 10,
+        "{provider:?}: {measured:?}"
+    );
+    assert_eq!(result.unwrap().err().unwrap().sqlstate(), Some("53200"));
+    assert_eq!(memory.used(), baseline + occupied.bytes());
+    drop(occupied);
+    for token in [resources.cancellation(), runtime.cancellation] {
+        token.cancel();
+        assert_eq!(
+            build_join_operator_with_ctes(&context, source, &[], &mut scope, None, None)
+                .err()
+                .unwrap()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(memory.used(), baseline);
+        token.reset();
+    }
+    let mut operator =
+        build_join_operator_with_ctes(&context, source, &[], &mut scope, None, None).unwrap();
+    assert!(memory.used() >= baseline + payload.len());
+    operator.open().unwrap();
+    let batch = operator.next().unwrap().unwrap();
+    assert_eq!(batch.schema.columns()[0], payload);
+    assert_eq!(batch.rows.len(), 3);
+    operator.close().unwrap();
+    drop(operator);
+    assert!(memory.used() >= baseline + payload.len());
+    drop(batch);
+    assert_eq!(memory.used(), baseline);
+    drop(scope);
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(memory.used(), 0);
+}

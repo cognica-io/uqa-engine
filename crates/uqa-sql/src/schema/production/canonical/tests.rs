@@ -74,6 +74,64 @@ fn canonical_capture_preserves_hidden_alias_order_null_slots_and_internal_types(
 }
 
 #[test]
+fn canonical_relation_attributes_preserve_declared_order_repeated_records_and_nulls() {
+    let original = fixture().with_record_fields([(0, vec![Some(ColumnType::Integer)].into())]);
+    let budget = MemoryBudget::new(1 << 20);
+    let first = CancellationToken::new();
+    let second = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &first, &second);
+    let (schema, sources) = original
+        .canonical_relation_projection_with_control(&control)
+        .unwrap();
+    assert_eq!(schema.layout_slots(), [0, 1, 2, 3]);
+    assert_eq!(*sources, [7, 3, NULL_SLOT, 7, 8]);
+    assert_eq!(schema.physical_width(), 5);
+    assert_eq!(schema.qualified_slot("z", "hidden"), Some(4));
+    assert_eq!(schema.qualified_slot("a", "hidden"), Some(1));
+    assert_eq!(schema.column_types(), original.column_types());
+    assert_eq!(schema.record_fields(0), original.record_fields(0));
+    assert_eq!(schema.record_fields(3), original.record_fields(0));
+    assert!(std::ptr::eq(
+        &raw const **schema.record_fields(3).unwrap(),
+        &raw const **original.record_fields(0).unwrap()
+    ));
+    let layout = schema.qualified_star_position_layout("q");
+    assert_eq!(
+        layout
+            .iter()
+            .map(|(name, ..)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["b", "a", "gone", "b"]
+    );
+    let retained = schema.clone();
+    drop((schema, sources));
+    assert!(budget.used() > 0);
+    drop(retained);
+    assert_eq!(budget.used(), 0);
+    for token in [&first, &second] {
+        token.cancel();
+        assert_eq!(
+            original
+                .canonical_relation_projection_with_control(&control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(budget.used(), 0);
+        token.reset();
+    }
+    let held = budget.reserve(budget.available()).unwrap();
+    assert_eq!(
+        original
+            .canonical_relation_projection_with_control(&control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(budget.used(), held.bytes());
+}
+
+#[test]
 fn canonical_capture_rejects_before_wide_name_copies_and_releases_partial_layouts() {
     let original = RowSchema::new(vec!["first".into(), "x".repeat(4 << 20)]);
     for limit in [0, 128, 1024, 8192] {
