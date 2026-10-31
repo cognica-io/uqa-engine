@@ -126,6 +126,8 @@ fn selected_alias_input_avoids_unrelated_catalog_projection_and_releases_lookup_
     let services = CatalogServices::default();
     let cache = RegtypeOutputCache::default();
     let context = services.context(&catalog, &cache);
+    // The built-in registry is process-owned; this lookup must release only its request-owned parsing and signature workspace.
+    let _ = uqa_sql::registry::registered_names_iter();
     let token = CancellationToken::new();
     for (ty, name) in [
         (ColumnType::Regnamespace, "public"),
@@ -142,7 +144,7 @@ fn selected_alias_input_avoids_unrelated_catalog_projection_and_releases_lookup_
             );
         });
         assert!(measured.bytes_total < 16384, "{ty:?}: {measured:?}");
-        assert_eq!(measured.bytes_current, 0);
+        assert_eq!(measured.bytes_current, 0, "{ty:?}: {measured:?}");
         assert_eq!(memory.used(), 0);
     }
     for original_cancelled in [false, true] {

@@ -90,6 +90,8 @@ fn owned_body_selection_substitutes_argument_owners_and_retires_preparation_scra
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
+    // Randomized schema indexes share process-owned seed storage; the measured result owns only its expression and diagnostic frame.
+    let _ = ahash::RandomState::new();
     let mut result = None;
     let allocations = allocation_counter::measure(|| {
         let InlineSelection::Body(candidate) = catalog

@@ -93,13 +93,14 @@ fn controlled_distinct_grouping_keeps_first_normalized_set_and_only_output_capac
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
+    let schema = input();
     let mut output = None;
     let allocations = allocation_counter::measure(|| {
         output = Some(
             analyze_distinct_grouping_with_control(
                 &Catalog,
                 &original,
-                &input(),
+                &schema,
                 None,
                 &[],
                 &control,
@@ -111,7 +112,6 @@ fn controlled_distinct_grouping_keeps_first_normalized_set_and_only_output_capac
     assert_eq!(output.retained, [0, 2, 4]);
     assert_eq!(output.original_count, 5);
     assert_eq!(budget.used(), output.reserved_bytes());
-    // The externally constructed schema is retired inside the measured call; its allocation is independent of the retained grouping selection.
     assert_eq!(allocations.bytes_current as usize, budget.used());
     drop(output);
     assert_eq!(budget.used(), 0);

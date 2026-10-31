@@ -140,6 +140,7 @@ fn columns_with_control<'a>(
     open: bool,
     control: &ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
+    control.check()?;
     columns_with_metadata(
         qualifier,
         internal_relation,
