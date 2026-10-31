@@ -137,7 +137,7 @@ fn partial_inventory_rejection_releases_names_and_container() {
             match output {
                 Ok(fields) => assert_eq!(fields.len(), 3),
                 Err(StorageBackendError::Memory(MemoryError::Limit { .. })) => {
-                    assert!(allowance < peak)
+                    assert!(allowance < peak);
                 }
                 other => panic!("{other:?}"),
             }
