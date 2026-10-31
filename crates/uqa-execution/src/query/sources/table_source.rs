@@ -7,9 +7,9 @@
 
 use super::{
     attach_qualifier_filter, execute_view_plan_output_with_parent_cache, qualifier_filter,
-    qualifier_for, qualify_source_operator_with_columns, query_cte_names, query_output_shared,
-    try_build_streaming_subquery_operator, ColumnPrune, CteScope, PhysicalOperator,
-    QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan, Value,
+    qualifier_for, qualify_source_operator_with_columns, query_cte_names_with_control,
+    query_output_shared, try_build_streaming_subquery_operator, ColumnPrune, CteScope,
+    PhysicalOperator, QualifierFilters, SQLError, SQLParam, SourceContext, SourcePlan, Value,
 };
 use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
 
@@ -411,7 +411,10 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         operator, &qualifier, filters, context, params, ctes,
                     );
                 }
-                let local_cte_names = query_cte_names(execution_plan);
+                let local_cte_names = query_cte_names_with_control(
+                    execution_plan,
+                    &context.ctes.production_resources()?.control(),
+                )?;
                 let is_volatile = uqa_sql::semantics::volatility::query_contains_volatile_function(
                     context.volatility,
                     execution_plan,

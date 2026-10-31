@@ -15,6 +15,7 @@ pub struct LockRowsRecheckSource<S: Clone> {
     pub ctes: CteScope<S>,
     pub ordered: bool,
     pub projections: Vec<crate::query::PhysicalProjection>,
+    pub(super) resources: uqa_core::memory::OwnedProductionControl,
 }
 
 /// Borrow construction inputs until the owning lock boundary establishes that tuple rechecks are needed. Rewritten ordering still supplies the original query block.
@@ -61,6 +62,7 @@ impl<'a, S: Clone> LockRowsRecheckInput<'a, S> {
             ctes: self.ctes.copy_with_control(&self.resources.control())?,
             ordered: self.ordered,
             projections: self.projections,
+            resources: self.resources,
         })
     }
 }

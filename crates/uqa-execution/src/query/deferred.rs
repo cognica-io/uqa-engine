@@ -7,6 +7,7 @@
 //! Physical sources begin execution only when their consumer first pulls.
 
 use crate::{Batch, ExecResult, PhysicalOperator, RowSchema, RowSource, TableScan};
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
 use uqa_sql::SQLError;
 
 #[cfg(test)]
@@ -17,13 +18,15 @@ type OperatorProducer<'a> =
 
 pub(in crate::query) struct DeferredOperator<'a> {
     schema: RowSchema,
-    pending: Option<OperatorProducer<'a>>,
+    pending: Option<Produced<OperatorProducer<'a>>>,
     inner: Option<Box<dyn PhysicalOperator + 'a>>,
     failed: bool,
+    _memory: Option<MemoryReservation>,
 }
 
 impl<'a> DeferredOperator<'a> {
     /// A complete physical descriptor can defer production until the first pull. Open public columns or execution-owned metadata need the producer's descriptor before consumers bind names, wildcards and score sources.
+    #[cfg(test)]
     pub(in crate::query) fn from_bound_schema(
         schema: Option<RowSchema>,
         pending: OperatorProducer<'a>,
@@ -36,12 +39,43 @@ impl<'a> DeferredOperator<'a> {
         }
     }
 
-    pub(in crate::query) fn new(schema: RowSchema, pending: OperatorProducer<'a>) -> Self {
-        Self {
+    /// Admit the concrete deferred callback before erasing its type, and retain its lease only until invocation or cancellation drops that callback. Open descriptors execute directly without allocating a deferred wrapper.
+    pub(in crate::query) fn from_bound_schema_with_control<F>(
+        schema: Option<RowSchema>,
+        pending: F,
+        control: &ProductionControl<'_>,
+    ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError>
+    where
+        F: FnOnce() -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> + Send + 'a,
+    {
+        control.check()?;
+        let Some(schema) = schema.filter(|schema| !schema.columns_are_open(None)) else {
+            return pending();
+        };
+        let callback_memory = control.reserve(size_of::<F>())?;
+        let memory = control.reserve(size_of::<Self>())?;
+        let pending: OperatorProducer<'a> = Box::new(pending);
+        let pending = control.finish(pending, callback_memory)?;
+        Ok(Box::new(Self {
             schema,
             pending: Some(pending),
             inner: None,
             failed: false,
+            _memory: memory,
+        }))
+    }
+
+    pub(in crate::query) fn new(schema: RowSchema, pending: OperatorProducer<'a>) -> Self {
+        Self {
+            schema,
+            pending: Some(
+                ProductionControl::uncontrolled()
+                    .finish(pending, None)
+                    .expect("ordinary deferred callback"),
+            ),
+            inner: None,
+            failed: false,
+            _memory: None,
         }
     }
 
@@ -66,7 +100,10 @@ impl<'a> DeferredOperator<'a> {
             let pending = self.pending.take().ok_or_else(|| {
                 SQLError::Internal("deferred source was already closed or failed".into())
             })?;
-            let source = pending()?;
+            let (pending, memory) = pending.into_parts();
+            let result = pending();
+            drop(memory);
+            let source = result?;
             let (source, ()) =
                 crate::physical::construction::OperatorBuild::run(source, |source| {
                     if source.row_schema() != &self.schema {

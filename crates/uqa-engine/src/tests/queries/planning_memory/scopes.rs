@@ -8,6 +8,7 @@ use super::*;
 use uqa_core::{memory::ProductionControl, CancellationToken, RelationIdentity};
 
 mod bindings;
+mod children;
 mod commands;
 mod ctes;
 mod evaluators;

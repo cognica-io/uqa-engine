@@ -20,7 +20,6 @@ use crate::query::{
 use crate::scalar::plan::PlanSubqueryArena;
 use crate::{eval_scalar, PhysicalOperator, RowSchema, RowSchemaExecution, ScalarEvalContext};
 pub use context::SourceContext;
-use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{
     ast::JoinKind,
@@ -29,7 +28,7 @@ use uqa_sql::{
         AccessPathPlan, ComputePlan, JoinExecutionStrategy, QueryPlan, RelationalPlan, SourcePlan,
     },
     semantics::{
-        cte_names::query_cte_names,
+        cte_names::query_cte_names_with_control,
         join_predicates::{bind_join_sides, join_conjuncts},
         resolve_user_table_function,
         source_filters::{combine_filters, qualifier_filter, qualifier_for},

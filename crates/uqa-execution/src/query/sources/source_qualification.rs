@@ -7,9 +7,8 @@
 //! Source filtering and scoped child-query cache restoration.
 
 use super::{
-    physical_exec_error, qualifier_filter, BTreeSet, CteScope, JoinKind, PhysicalOperator,
-    QualifierFilters, QueryOutput, QueryPlan, RowSchema, SQLError, SQLParam, ScalarExpr,
-    SourceContext, Value,
+    physical_exec_error, qualifier_filter, CteScope, JoinKind, PhysicalOperator, QualifierFilters,
+    QueryOutput, QueryPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SourceContext, Value,
 };
 use uqa_sql::ResultRow;
 
@@ -18,7 +17,7 @@ pub(super) fn execute_view_plan_output_with_parent_cache<S: Clone + 'static>(
     plan: &QueryPlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
-    local_cte_names: &BTreeSet<String>,
+    local_cte_names: &uqa_sql::binding::production::BindingNameSet,
 ) -> Result<QueryOutput, SQLError> {
     let resources = context.ctes.production_resources()?;
     let mut scope = ctes.enter_cte_bindings_with_control(

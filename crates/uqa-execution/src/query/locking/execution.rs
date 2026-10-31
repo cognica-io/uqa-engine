@@ -473,7 +473,7 @@ impl<S: Clone + Send + Sync + 'static> LockRows<'_, S> {
                 vec![crate::row_locks::recheck::RecheckDoc { doc_id, document }],
             );
         }
-        let mut recheck_ctes = source.ctes.clone();
+        let mut recheck_ctes = source.ctes.copy_with_control(&source.resources.control())?;
         recheck_ctes.activate_row_lock_recheck(std::sync::Arc::new(pins));
         let mut operator = self.context.recheck.build_recheck(
             &source.statement,

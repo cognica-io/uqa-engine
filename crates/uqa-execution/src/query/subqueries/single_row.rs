@@ -60,7 +60,9 @@ impl<S: Clone + Send + Sync + 'static> SubqueryContext<'_, S> {
         params: &[SQLParam],
     ) -> Result<Option<OwnedPhysicalRow>, SQLError> {
         let consumer = Rc::new(SingleRowConsumer::default());
-        let mut scope = self.ctes.clone();
+        let mut scope = self
+            .ctes
+            .copy_with_control(&self.services.production_resources()?.control())?;
         scope.lock_identities.emit = false;
         // Stop after the second output without projecting a vectorized batch ahead of the consumer.
         scope.enable_command_progress_streaming();

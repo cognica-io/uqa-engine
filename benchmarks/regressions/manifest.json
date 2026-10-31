@@ -33019,6 +33019,82 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cte_name_capture_admits_nested_names_and_releases_partial_destinations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/cte_names.rs",
+      "capability": "Native child scope and deferred descriptor ownership",
+      "workload": "Nested query, set, command and derived CTE names plus a four MiB late name.",
+      "invariant": "Preserve recursive name enumeration, reject before the large name copy and release partial destinations under either cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "deferred_callback_admission_precedes_boxing_and_tracks_invocation_or_close",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/deferred/tests.rs",
+      "capability": "Native child scope and deferred descriptor ownership",
+      "workload": "An eight KiB inline callback, exact combined header limit, early close, invocation, unwind and both cancellations.",
+      "invariant": "Admit the concrete callback before type erasure and release its lease when invoked or closed while the physical wrapper keeps its own lifetime.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "descriptor_traversal_borrows_identifiers_and_admits_only_completed_nodes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/output_descriptor/tests.rs",
+      "capability": "Native child scope and deferred descriptor ownership",
+      "workload": "A four MiB CTE reference, a 64 KiB allowance, exhausted cache-node admission and both cancellations.",
+      "invariant": "Borrow original identifier storage and lexical frames, admit only completed-query nodes and release traversal scratch on all exits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "descriptor_cycles_keep_the_same_ancestor_chain_through_definition_scopes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/output_descriptor/tests.rs",
+      "capability": "Native child scope and deferred descriptor ownership",
+      "workload": "A recursive CTE retained in a separate definition scope.",
+      "invariant": "Keep cycle ancestry across retained definition boundaries and complete the physical-descriptor observation without losing recursion identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_child_scopes_admit_before_copying_and_recover_without_cached_failures",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/children.rs",
+      "capability": "Native child scope and deferred descriptor ownership",
+      "workload": "Native EXISTS, scalar and row subqueries with a four MiB lexical name and 64 KiB available on all four providers.",
+      "invariant": "Reject before copying with less than 256 KiB attempted workspace, preserve both cancellations, recover the same uncached slot and release all retained owners.",
+      "case_names": [
+        "case_01_memory_exists",
+        "case_02_memory_scalar",
+        "case_03_memory_rows",
+        "case_04_sqlite_native_exists",
+        "case_05_sqlite_native_scalar",
+        "case_06_sqlite_native_rows",
+        "case_07_sqlite_kv_exists",
+        "case_08_sqlite_kv_scalar",
+        "case_09_sqlite_kv_rows",
+        "case_10_redb_exists",
+        "case_11_redb_scalar",
+        "case_12_redb_rows"
+      ]
     }
   ]
 }

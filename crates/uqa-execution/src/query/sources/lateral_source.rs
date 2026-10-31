@@ -324,7 +324,9 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                 .diagnostics
                 .observe(input, "Lateral Function Group Scan")?
         } else {
-            let mut scoped_ctes = self.ctes.clone();
+            let mut scoped_ctes = self
+                .ctes
+                .copy_with_control(&self.context.ctes.production_resources()?.control())?;
             scoped_ctes.set_row_lock_outer_row(left_row.clone());
             build_join_operator_with_ctes(
                 &self.context,

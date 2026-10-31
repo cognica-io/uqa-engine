@@ -9,8 +9,8 @@ use super::streaming_subquery::try_build_streaming_subquery_with_sources;
 /// Build the physical operator for a subquery source.
 use super::{
     attach_closed_qualifier_filter, execute_view_plan_output_with_parent_cache,
-    qualify_source_operator_with_columns, query_cte_names, ColumnPrune, CteScope, PhysicalOperator,
-    QualifierFilters, QueryPlan, SQLError, SQLParam, SourceContext, SourcePlan,
+    qualify_source_operator_with_columns, query_cte_names_with_control, ColumnPrune, CteScope,
+    PhysicalOperator, QualifierFilters, QueryPlan, SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::query::binding::sources::SourceBindings;
 
@@ -124,20 +124,26 @@ fn deferred_subquery_operator<'a, S: Clone + Send + Sync + 'static>(
         return Ok(operator);
     }
     let context_copy = *context;
-    let body = body.clone();
-    let mut scope = ctes.clone();
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
+    let body =
+        uqa_sql::plan::OwnedQueryPlan::from_produced(body.clone_with_control(&control)?, &control)?;
+    let mut scope = ctes.copy_with_control(&control)?;
     let bound_output = (!schema.columns_are_open(None)).then_some(schema);
     let deferred_schema = if bound_output.is_some()
-        && !super::output_descriptor::requires_physical_descriptor(&body, &scope)?
-    {
+        && !super::output_descriptor::requires_physical_descriptor_with_control(
+            &body, &scope, control,
+        )? {
         bound_output.clone()
     } else {
         None
     };
-    let operator = crate::query::deferred::DeferredOperator::from_bound_schema(
+    let callback_resources = resources.clone();
+    let operator = crate::query::deferred::DeferredOperator::from_bound_schema_with_control(
         deferred_schema,
-        Box::new(move || {
-            let local_cte_names = query_cte_names(&body);
+        move || {
+            let local_cte_names =
+                query_cte_names_with_control(&body, &callback_resources.control())?;
             let output = execute_view_plan_output_with_parent_cache(
                 &context_copy,
                 &body,
@@ -160,7 +166,8 @@ fn deferred_subquery_operator<'a, S: Clone + Send + Sync + 'static>(
                     .preserving_lock_origins(),
             };
             Ok(Box::new(source))
-        }),
+        },
+        &control,
     )?;
     Ok(operator)
 }

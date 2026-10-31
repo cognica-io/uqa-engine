@@ -45,7 +45,7 @@ pub(super) fn build_correlated_exists<S: Clone + Send + Sync + 'static>(
     let Some(decorrelated) = analysis::decorrelate_exists(services, ctes, plan)? else {
         return Ok(None);
     };
-    let mut scoped_ctes = ctes.clone();
+    let mut scoped_ctes = ctes.copy_with_control(&services.production_resources()?.control())?;
     scoped_ctes.lock_identities.emit = false;
     let result = execute_query_plan_output(
         &services.queries.query_context(),
@@ -88,7 +88,9 @@ impl<S: Clone + Send + Sync + 'static> SubqueryContext<'_, S> {
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         let consumer = std::rc::Rc::new(ExistsConsumer(std::cell::Cell::new(false)));
-        let mut scoped_ctes = self.ctes.clone();
+        let mut scoped_ctes = self
+            .ctes
+            .copy_with_control(&self.services.production_resources()?.control())?;
         scoped_ctes.lock_identities.emit = false;
         match outer_row {
             PhysicalOuterRow::Physical { schema, row } => {
@@ -129,7 +131,9 @@ impl<S: Clone + Send + Sync + 'static> SubqueryContext<'_, S> {
         plan: &QueryPlan,
         params: &[SQLParam],
     ) -> Result<CachedScalarSubquery, SQLError> {
-        let mut scoped_ctes = self.ctes.clone();
+        let mut scoped_ctes = self
+            .ctes
+            .copy_with_control(&self.services.production_resources()?.control())?;
         scoped_ctes.lock_identities.emit = false;
         scoped_ctes.clear_row_lock_outer_row();
         let output = execute_query_plan_output(

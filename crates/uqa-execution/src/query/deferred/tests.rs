@@ -10,6 +10,100 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn deferred_callback_admission_precedes_boxing_and_tracks_invocation_or_close() {
+    use std::sync::Arc;
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    struct Capture {
+        payload: [u8; 8192],
+        drops: Arc<AtomicUsize>,
+    }
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    for mode in 0..4 {
+        let calls = AtomicUsize::new(0);
+        let drops = Arc::new(AtomicUsize::new(0));
+        let capture = Capture {
+            payload: [7; 8192],
+            drops: drops.clone(),
+        };
+        let pending = || {
+            assert_eq!(capture.payload[0], 7);
+            drop(capture);
+            calls.fetch_add(1, Ordering::SeqCst);
+            assert!(mode != 3, "callback unwind");
+            Ok(
+                Box::new(TableScan::from_physical_rows(RowSchema::default(), vec![]))
+                    as Box<dyn PhysicalOperator>,
+            )
+        };
+        let callback_bytes = size_of_val(&pending);
+        assert!(callback_bytes >= 8192);
+        let bytes = callback_bytes + size_of::<DeferredOperator<'_>>();
+        let budget = MemoryBudget::new(bytes - usize::from(mode == 0));
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| {
+            result = Some(DeferredOperator::from_bound_schema_with_control(
+                Some(RowSchema::default()),
+                pending,
+                &control,
+            ));
+        });
+        if mode == 0 {
+            assert_eq!(result.unwrap().err().unwrap().sqlstate(), Some("53200"));
+            assert!(allocation.bytes_total < 4096, "{allocation:?}");
+        } else {
+            let mut scan = result.unwrap().unwrap();
+            assert_eq!(budget.used(), bytes);
+            scan.open().unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            if mode == 1 {
+                assert!(scan.next().unwrap().is_none());
+                assert_eq!(budget.used(), size_of::<DeferredOperator<'_>>());
+            } else if mode == 3 {
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan.next())).is_err()
+                );
+                assert_eq!(budget.used(), size_of::<DeferredOperator<'_>>());
+            }
+            scan.close().unwrap();
+            assert_eq!(budget.used(), size_of::<DeferredOperator<'_>>());
+        }
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            usize::from(mode == 1 || mode == 3)
+        );
+        assert_eq!(budget.used(), 0);
+    }
+    let budget = MemoryBudget::new(0);
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let calls = AtomicUsize::new(0);
+    for token in [&original, &invoking] {
+        token.cancel();
+        let result = DeferredOperator::from_bound_schema_with_control(
+            None,
+            || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(TableScan::from_physical_rows(
+                    RowSchema::default(),
+                    vec![],
+                )))
+            },
+            &control,
+        );
+        assert_eq!(result.err().unwrap().sqlstate(), Some("57014"));
+        token.reset();
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn runtime_column_binding_preserves_deferred_closed_descriptors() {
     for open in [false, true] {
         let calls = AtomicUsize::new(0);

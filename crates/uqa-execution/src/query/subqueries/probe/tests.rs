@@ -20,6 +20,7 @@ fn prepared_predicate_retains_its_scope_and_borrows_hooks_for_each_row() {
         keys,
     });
     let mut predicate = PreparedCorrelatedExistsPredicate {
+        _memory: None,
         hooks: &services,
         params: &[],
         ctes: scope.clone(),

@@ -204,7 +204,8 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                 (mut source, left_schema, right_schema, left_nulls, right_nulls, using),
             ) = if bound.columns_are_open(None) {
                 let (left, first) = describe_from_first_row(left, |left_row| {
-                    let mut scope = ctes.clone();
+                    let mut scope =
+                        ctes.copy_with_control(&context.ctes.production_resources()?.control())?;
                     let row = match ctes.row_lock_outer_row() {
                         Some(outer) => OwnedPhysicalRow::new(
                             input_schema.clone(),
