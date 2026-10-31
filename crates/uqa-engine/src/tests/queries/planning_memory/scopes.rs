@@ -8,6 +8,7 @@ use super::*;
 use uqa_core::{memory::ProductionControl, CancellationToken, RelationIdentity};
 
 mod commands;
+mod views;
 
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]

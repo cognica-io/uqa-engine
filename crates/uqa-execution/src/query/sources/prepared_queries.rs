@@ -400,12 +400,15 @@ fn prepare_named_source<S: Clone + Send + Sync + 'static>(
             return Ok(());
         }
         let subject = if view.security_invoker() {
-            scope.privilege_subject()?.clone()
+            scope.invoking_role()?.clone_with_control(&control)?
         } else {
-            catalog.view_owner(view)?
+            control.finish(
+                catalog.view_owner_with_control(view.security.role_owner, &control)?,
+                control.empty_reservation(),
+            )?
         };
         scope = {
-            let scoped = scope.enter_privilege_subject(subject);
+            let scoped = scope.enter_privilege_subject_with_control(subject, &control)?;
             (*scoped).clone()
         };
         (

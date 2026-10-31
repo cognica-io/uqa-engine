@@ -56,7 +56,6 @@ pub fn capture_view_projection(
     let subject = crate::semantics::view_privileges::next_layer_privilege_subject(
         services.authorization,
         &layer.canonical_name,
-        query.relation_privilege_subject.as_ref(),
     )?;
     services.authorization.ensure_query_select(query)?;
     let names = bind_outputs(

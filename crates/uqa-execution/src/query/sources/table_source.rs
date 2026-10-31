@@ -256,7 +256,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             }
 
             let catalog = ctes.catalog_read_view()?;
-            let resolution = ctes.relation_name_resolution()?;
+            let resources = context.ctes.production_resources()?;
+            let control = resources.control();
+            let resolution = ctes.relation_name_resolution_with_control(&control)?;
             if let Some(sequence) = catalog.sequence_resolved(&resolution, name)? {
                 let privilege_subject = ctes.privilege_subject()?;
                 if !catalog.sequence_is_selectable_to(&sequence.security, privilege_subject) {
@@ -290,7 +292,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     operator, &qualifier, filters, context, params, ctes,
                 ));
             }
-            if let Some(view) = catalog.view_resolved(&resolution, name)?.cloned() {
+            if let Some(view) = catalog.view_resolved_with_control(&resolution, name, &control)? {
                 if view.kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
                     uqa_sql::catalog::view::require_materialized_view_population(
                         name,
@@ -298,7 +300,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     )?;
                     let schema = view.definition.materialized_schema()?;
                     let columns = schema.columns().to_vec();
-                    let rows = view.definition.materialized_rows;
+                    let rows = view.definition.materialized_rows.clone();
                     let scan: Box<dyn PhysicalOperator + 'a> =
                         Box::new(crate::TableScan::from_rows_with_schema(schema, rows));
                     let aliases = table_source_aliases(&columns, &[], column_aliases);
@@ -310,11 +312,15 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     ));
                 }
                 let privilege_subject = if view.security_invoker() {
-                    ctes.privilege_subject()?.clone()
+                    ctes.invoking_role()?.clone_with_control(&control)?
                 } else {
-                    catalog.view_owner(&view)?
+                    control.finish(
+                        catalog.view_owner_with_control(view.security.role_owner, &control)?,
+                        control.empty_reservation(),
+                    )?
                 };
-                let mut privilege_scope = ctes.enter_privilege_subject(privilege_subject);
+                let mut privilege_scope =
+                    ctes.enter_privilege_subject_with_control(privilege_subject, &control)?;
                 let ctes: &mut CteScope<S> = &mut privilege_scope;
                 // A view runs its stored query as it was created; its set-returning calls are not placed again.
                 let _stored = SetPlacementScope::stored_definition();
@@ -324,12 +330,6 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
                 let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
                 let ctes: &mut CteScope<S> = &mut recheck_scope;
-                let retained = context.ctes.queries.read_control()?;
-                let control = uqa_core::memory::ProductionControl::new(
-                    retained.memory(),
-                    retained.cancellation(),
-                    context.ctes.runtime.cancellation,
-                );
                 let aliases = production::output_aliases(output_columns, column_aliases, &control)?;
                 let specialized_plan = super::output_filter::specialize_source_filter(
                     context, plan, &qualifier, &aliases, filters,

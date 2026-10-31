@@ -86,6 +86,20 @@ impl<S: Clone> CteScope<S> {
         }
     }
 
+    /// Transfer an admitted authority reference with its original lease before publishing the override. Child scopes share that owner after this guard restores its parent.
+    pub fn enter_privilege_subject_with_control(
+        &mut self,
+        subject: uqa_core::memory::Produced<RoleReference>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<PrivilegeSubjectScope<'_, S>, SQLError> {
+        let subject = super::production::subject::ScopeSubject::from_produced(subject, control)?;
+        let previous = self.privilege_subject.replace(subject);
+        Ok(PrivilegeSubjectScope {
+            ctes: self,
+            previous,
+        })
+    }
+
     /// Select the namespace semantics owned by one query plan and restore the parent plan's mode on every exit path.
     pub fn enter_relation_lookup_mode(
         &mut self,

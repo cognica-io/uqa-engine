@@ -21,9 +21,14 @@ impl ScopeSubject {
         subject: &RoleReference,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
-        Ok(Self::Captured(
-            subject.clone_with_control(control)?.into_shared(control)?,
-        ))
+        Self::from_produced(subject.clone_with_control(control)?, control)
+    }
+
+    pub(in crate::query::scope) fn from_produced(
+        subject: Produced<RoleReference>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self::Captured(subject.into_shared(control)?))
     }
 }
 

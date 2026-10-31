@@ -21,16 +21,14 @@ pub use production::{
     next_layer_privilege_subject_with_control,
 };
 
-/// The next view layer uses the view owner unless `security_invoker` retains the invoking subject.
+/// The next view layer uses its owner or, for `security_invoker`, the statement caller independently of an enclosing view owner.
 pub fn next_layer_privilege_subject(
     services: &dyn ViewPrivilegeCatalog,
     name: &str,
-    rewritten_subject: Option<&RoleReference>,
 ) -> Result<RoleReference, SQLError> {
     Ok(next_layer_privilege_subject_with_control(
         services,
         name,
-        rewritten_subject,
         &ProductionControl::uncontrolled(),
     )?
     .into_uncontrolled()

@@ -162,6 +162,11 @@ impl<S: Clone> CteScope<S> {
         if let Some(subject) = self.privilege_subject.as_ref() {
             return Ok(subject);
         }
+        self.invoking_role()
+    }
+
+    /// The statement's invoking identity is independent of relation-owner overrides in enclosing views.
+    pub fn invoking_role(&self) -> Result<&RoleReference, SQLError> {
         self.catalog_resolution
             .as_ref()
             .map(|resolution| resolution.current_user())

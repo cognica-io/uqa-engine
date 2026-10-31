@@ -320,18 +320,13 @@ fn check_privileges(
     control: &ProductionControl<'_>,
 ) -> Result<MutableCommandPlan, SQLError> {
     let plan = merge(&input);
-    let subject = privileges.check_with_control(
-        services.authorization,
-        &plan.target,
-        plan.target_privilege_subject.as_ref(),
-        control,
-        || {
+    let subject =
+        privileges.check_with_control(services.authorization, &plan.target, control, || {
             crate::semantics::view_privileges::ensure_merge_with_control(
                 services.authorization,
                 plan,
                 control,
             )
-        },
-    )?;
+        })?;
     input.set_target_privilege_subject(subject, control)
 }

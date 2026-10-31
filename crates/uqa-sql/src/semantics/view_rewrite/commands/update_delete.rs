@@ -398,32 +398,24 @@ fn check_privileges(
     control: &ProductionControl<'_>,
 ) -> Result<MutableCommandPlan, SQLError> {
     let subject: Produced<_> = match &*input {
-        CommandPlan::Update(plan) => privileges.check_with_control(
-            services.authorization,
-            &plan.table,
-            plan.target_privilege_subject.as_ref(),
-            control,
-            || {
+        CommandPlan::Update(plan) => {
+            privileges.check_with_control(services.authorization, &plan.table, control, || {
                 crate::semantics::view_privileges::ensure_update_with_control(
                     services.authorization,
                     plan,
                     control,
                 )
-            },
-        )?,
-        CommandPlan::Delete(plan) => privileges.check_with_control(
-            services.authorization,
-            &plan.table,
-            plan.target_privilege_subject.as_ref(),
-            control,
-            || {
+            })?
+        }
+        CommandPlan::Delete(plan) => {
+            privileges.check_with_control(services.authorization, &plan.table, control, || {
                 crate::semantics::view_privileges::ensure_delete_with_control(
                     services.authorization,
                     plan,
                     control,
                 )
-            },
-        )?,
+            })?
+        }
         _ => unreachable!("view UPDATE/DELETE"),
     };
     input.set_target_privilege_subject(subject, control)

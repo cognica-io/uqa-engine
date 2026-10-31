@@ -23,12 +23,11 @@ impl LayerPrivileges {
         Self { failure: None }
     }
 
-    /// Run `check`, the privilege check of view `view` as `subject`, keeping its failure for [`Self::finish`] unless an earlier layer failed, and return the role the next layer is checked as.
+    /// Run `check`, the privilege check of view `view`, keeping its failure for [`Self::finish`] unless an earlier layer failed, and return the role the next layer is checked as.
     pub(super) fn check_with_control(
         &mut self,
         services: &dyn ViewPrivilegeCatalog,
         view: &str,
-        subject: Option<&RoleReference>,
         control: &ProductionControl<'_>,
         check: impl FnOnce() -> Result<Produced<RoleReference>, SQLError>,
     ) -> Result<Produced<RoleReference>, SQLError> {
@@ -38,7 +37,7 @@ impl LayerPrivileges {
             Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
             Err(error) => {
                 self.failure.get_or_insert(error);
-                next_layer_privilege_subject_with_control(services, view, subject, control)
+                next_layer_privilege_subject_with_control(services, view, control)
             }
         }
     }

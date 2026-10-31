@@ -78,7 +78,7 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
         context.source.ctes.runtime.cancellation,
     );
     let privilege_subject = if target.security_invoker {
-        scope.privilege_subject()?.clone_with_control(&control)?
+        scope.invoking_role()?.clone_with_control(&control)?
     } else {
         control.finish(
             scope
@@ -87,8 +87,8 @@ pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
             control.empty_reservation(),
         )?
     };
-    let (privilege_subject, _subject_memory) = privilege_subject.into_parts();
-    let mut privilege_scope = scope.enter_privilege_subject(privilege_subject);
+    let mut privilege_scope =
+        scope.enter_privilege_subject_with_control(privilege_subject, &control)?;
     let result = crate::query::statement::execute_query_plan_output(
         context,
         &target.query,

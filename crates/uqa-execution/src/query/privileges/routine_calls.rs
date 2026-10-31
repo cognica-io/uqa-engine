@@ -246,20 +246,25 @@ pub(crate) fn source_calls<S: Clone + Send + Sync + 'static>(
             ..
         } => {
             let catalog = ctes.catalog_read_view()?;
-            let resolution = ctes.relation_name_resolution()?;
-            let view = if ctes.is_visible_cte(name) {
+            let resources = context.ctes.production_resources()?;
+            let control = resources.control();
+            let resolution = ctes.relation_name_resolution_with_control(&control)?;
+            let view = if ctes.is_visible_cte_with_control(name, &control)? {
                 None
             } else {
-                catalog.view_resolved(&resolution, name)?.cloned()
+                catalog.view_resolved_with_control(&resolution, name, &control)?
             };
             let mut scope = ctes.definition_scope(name).unwrap_or_else(|| ctes.clone());
             if let Some(view) = view {
                 let subject = if view.security_invoker() {
-                    scope.privilege_subject()?.clone()
+                    scope.invoking_role()?.clone_with_control(&control)?
                 } else {
-                    catalog.view_owner(&view)?
+                    control.finish(
+                        catalog.view_owner_with_control(view.security.role_owner, &control)?,
+                        control.empty_reservation(),
+                    )?
                 };
-                let scope = scope.enter_privilege_subject(subject);
+                let scope = scope.enter_privilege_subject_with_control(subject, &control)?;
                 initialize(context, permissions, query, params, &scope, outer)?;
             } else {
                 initialize(context, permissions, query, params, &scope, outer)?;

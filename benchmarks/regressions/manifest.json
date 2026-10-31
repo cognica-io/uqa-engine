@@ -32207,6 +32207,77 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transferred_authority_keeps_its_original_lease_through_scope_clones",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/subject/tests.rs",
+      "capability": "Native view authority and source ownership",
+      "workload": "Transfer a four-MiB admitted named authority into a view scope, exhaust the allowance to 64 KiB, then clone and release the parent.",
+      "invariant": "Clone without allocating or detaching the original lease, restore the parent authority and release the name only with the last child.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "transferred_authority_admission_is_atomic_and_releases_rejected_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/subject/tests.rs",
+      "capability": "Native view authority and source ownership",
+      "workload": "Reject the shared authority wrapper with zero allowance, cancel each owner, recover and unwind after successful transfer.",
+      "invariant": "Preserve the previous subject on every failure, release the consumed input, reuse its name allocation and restore its parent on unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_invoker_view_targets_select_the_statement_caller_after_enclosing_owner_checks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/view_privileges/tests.rs",
+      "capability": "Native view authority and source ownership",
+      "workload": "Authorize INSERT, UPDATE, DELETE and MERGE under an enclosing view owner, then select the underlying view subject for invoker and definer modes.",
+      "invariant": "Keep enclosing boundary checks separate from the next layer authority; invoker layers select the statement caller and returned role names retain exact leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_view_sources_admit_selected_queries_before_copying_stored_definitions",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/views.rs",
+      "capability": "Native view authority and source ownership",
+      "workload": "Build native invoker and definer view sources with four-MiB stored literals under 64 KiB remaining across four providers, cancel both owners and recover.",
+      "invariant": "Borrow immutable definitions before selected controlled query construction, reject before large copies, restore authority and preserve exact recovered payloads with final resource release.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_view_authority_preserves_invoker_checks_preparation_and_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/views.rs",
+      "capability": "Native view authority and source ownership",
+      "workload": "Replay PostgreSQL nested definer/invoker SELECT and UPDATE privileges, table grants, generic/custom execution, cursor traversal, RETURNING, rollback and persistent reopen.",
+      "invariant": "Reject 42501 for missing caller base privileges even under an enclosing definer view, retain caller identity and 25P02, preserve no-effect EXPLAIN and exact recovery rows.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

@@ -54,12 +54,11 @@ fn subject(
 fn next(
     services: &dyn ViewPrivilegeCatalog,
     view: &StoredView,
-    subject: Produced<RoleReference>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<RoleReference>, SQLError> {
     control.check()?;
     if view.security_invoker() {
-        Ok(subject)
+        services.current_role_with_control(control)
     } else {
         services.bound_role_with_control(view.security.role_owner, control)
     }
@@ -100,16 +99,10 @@ fn extend<'a>(
 pub fn next_layer_privilege_subject_with_control(
     services: &dyn ViewPrivilegeCatalog,
     name: &str,
-    rewritten_subject: Option<&RoleReference>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<RoleReference>, SQLError> {
     with_target(services, name, control, |view, _| {
-        next(
-            services,
-            view,
-            subject(services, rewritten_subject, control)?,
-            control,
-        )
+        next(services, view, control)
     })
 }
 
@@ -213,7 +206,8 @@ pub fn ensure_insert_with_control(
             },
             control,
         )?;
-        next(services, view, subject, control)
+        drop(subject);
+        next(services, view, control)
     })
 }
 
@@ -286,7 +280,8 @@ pub fn ensure_update_with_control(
             },
             control,
         )?;
-        next(services, view, subject, control)
+        drop(subject);
+        next(services, view, control)
     })
 }
 
@@ -329,7 +324,8 @@ pub fn ensure_delete_with_control(
             },
             control,
         )?;
-        next(services, view, subject, control)
+        drop(subject);
+        next(services, view, control)
     })
 }
 
@@ -388,7 +384,8 @@ pub fn ensure_merge_with_control(
             },
             control,
         )?;
-        next(services, view, subject, control)
+        drop(subject);
+        next(services, view, control)
     })
 }
 

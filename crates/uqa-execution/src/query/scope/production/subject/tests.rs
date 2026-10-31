@@ -10,6 +10,45 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::{catalog::resolution::RelationLookupMode, plan::UnifiedPlan};
 
 #[test]
+fn transferred_authority_keeps_its_original_lease_through_scope_clones() {
+    let budget = MemoryBudget::new(8 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let input = empty_scope();
+    let mut scope = CteScope::<()>::with_catalog_with_control(
+        input.catalog_read_view().unwrap(),
+        input
+            .relation_name_resolution()
+            .unwrap()
+            .copy_with_control(&control)
+            .unwrap(),
+        &control,
+    )
+    .unwrap();
+    let parent = scope.privilege_subject().unwrap().clone();
+    let authority = RoleReference::Named("v".repeat(4 << 20));
+    let subject = authority.clone_with_control(&control).unwrap();
+    let guard = scope
+        .enter_privilege_subject_with_control(subject, &control)
+        .unwrap();
+    let occupied = budget.reserve(budget.available() - (64 << 10)).unwrap();
+    let mut child = None;
+    let allocation = allocation_counter::measure(|| child = Some((*guard).clone()));
+    assert_eq!(allocation.count_total, 0, "{allocation:?}");
+    let child = child.unwrap();
+    drop(guard);
+    assert_eq!(scope.privilege_subject().unwrap(), &parent);
+    assert_eq!(child.privilege_subject().unwrap(), &authority);
+    assert!(budget.used() >= occupied.bytes() + (4 << 20));
+    drop(occupied);
+    drop(scope);
+    assert!(budget.used() >= 4 << 20);
+    drop(child);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn query_authority_admission_restores_namespace_and_subject_on_every_exit() {
     let budget = MemoryBudget::new(8 << 20);
     let original = CancellationToken::new();
@@ -110,5 +149,62 @@ fn query_authority_admission_restores_namespace_and_subject_on_every_exit() {
         .contains("has no statement name-resolution snapshot"));
     assert_eq!(budget.used(), baseline);
     drop(scope);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn transferred_authority_admission_is_atomic_and_releases_rejected_inputs() {
+    let budget = MemoryBudget::new(8 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &original, &invoking);
+    let mut scope = empty_scope();
+    let parent = scope.privilege_subject().unwrap().clone();
+    let authority = RoleReference::Named("v".repeat(4 << 20));
+    let subject = authority.clone_with_control(&control).unwrap();
+    let occupied = budget.reserve(budget.available()).unwrap();
+    assert_eq!(
+        scope
+            .enter_privilege_subject_with_control(subject, &control)
+            .err()
+            .unwrap()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(scope.privilege_subject().unwrap(), &parent);
+    assert_eq!(budget.used(), occupied.bytes());
+    drop(occupied);
+    for token in [&original, &invoking] {
+        let subject = authority.clone_with_control(&control).unwrap();
+        token.cancel();
+        assert_eq!(
+            scope
+                .enter_privilege_subject_with_control(subject, &control)
+                .err()
+                .unwrap()
+                .sqlstate(),
+            Some("57014")
+        );
+        assert_eq!(scope.privilege_subject().unwrap(), &parent);
+        assert_eq!(budget.used(), 0);
+        token.reset();
+    }
+    let subject = authority.clone_with_control(&control).unwrap();
+    let pointer = match &*subject {
+        RoleReference::Named(name) => name.as_ptr(),
+        RoleReference::Bound(_) => panic!("named"),
+    };
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let guard = scope
+            .enter_privilege_subject_with_control(subject, &control)
+            .unwrap();
+        let RoleReference::Named(name) = guard.privilege_subject().unwrap() else {
+            panic!("named")
+        };
+        assert_eq!(name.as_ptr(), pointer);
+        panic!("view source construction failed");
+    }))
+    .is_err());
+    assert_eq!(scope.privilege_subject().unwrap(), &parent);
     assert_eq!(budget.used(), 0);
 }

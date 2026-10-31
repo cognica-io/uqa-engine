@@ -73,7 +73,6 @@ pub fn capture_view_projection_owned(
     let subject = crate::semantics::view_privileges::next_layer_privilege_subject_with_control(
         services.authorization,
         &layer.canonical_name,
-        query.relation_privilege_subject.as_ref(),
         control,
     )?;
     services

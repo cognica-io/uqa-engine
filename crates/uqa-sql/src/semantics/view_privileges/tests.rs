@@ -365,3 +365,38 @@ fn view_authorization_preserves_column_diagnostics_and_merge_privilege_order() {
     );
     assert!(calls.last().unwrap().starts_with("select:"));
 }
+
+#[test]
+fn nested_invoker_view_targets_select_the_statement_caller_after_enclosing_owner_checks() {
+    let mut catalog = Catalog::new();
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for invoker in [true, false] {
+        catalog.view.definition.options[0].1 = invoker.to_string();
+        let expected = RoleReference::from(if invoker { "reader" } else { "owner" });
+        assert_eq!(
+            &*next_layer_privilege_subject_with_control(&catalog, "v", &control).unwrap(),
+            &expected
+        );
+        for sql in MUTATIONS {
+            let mut plan = plan(sql);
+            let UnifiedPlan::Command(command) = &mut plan else {
+                panic!("command")
+            };
+            let subject = match &mut **command {
+                CommandPlan::Insert(statement) => &mut statement.target_privilege_subject,
+                CommandPlan::Update(statement) => &mut statement.target_privilege_subject,
+                CommandPlan::Delete(statement) => &mut statement.target_privilege_subject,
+                CommandPlan::Merge(statement) => &mut statement.target_privilege_subject,
+                _ => panic!("mutation"),
+            };
+            *subject = Some("outer_view_owner".into());
+            let output = controlled(&catalog, &plan, &control).unwrap();
+            assert_eq!(&*output, &expected, "{sql}");
+            assert_eq!(budget.used(), output.reserved_bytes());
+            drop(output);
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
