@@ -1310,10 +1310,9 @@ The initial C binding matrix also exposed an invalid cold-start memory assertion
 
 PR #1299 contains the implemented planning-ownership foundation, EXPLAIN MEMORY and the native scan batch. Further producer implementations are outside its scope. Remaining implementation is tracked by #1301–#1311 under #1292. Filing those issues transfers work; it does not complete it. #1292 stays open after this PR.
 
-- [x] File all remaining implementation as owning-behavior follow-ups, retain parent scope and verify issue labels and dependency links.
-- [x] Complete and review the native scan batch, including the ordinary name-transfer correction; commit it as `4bbb1d296` and reconcile main `95c14fd05` as `f3e21b2eb`. The scan checkpoint, reviewed SQL correction, eleven merged HNSW cases and repository policies pass locally. Deferred producer implementations remain outside this PR.
-- [ ] Qualify the fixed delivered source: preserve the existing PostgreSQL behavior and direct/prepared/EXPLAIN admission/cancellation/recovery evidence on memory, native SQLite, SQLite Key/Value and redb; pass ownership/dependency policies and actual final-source automatic Linux/macOS bounded-work, memory and exact-output performance checks and affected FDW configurations.
-- [ ] Merge the qualified fixed-scope PR and remove its merged branch/worktree. Close #1293 only after its EXPLAIN MEMORY acceptance and delivery evidence passes; keep #1292 and the unfinished follow-ups open.
+The current delivery checklist, final-source CI results and merge/issue-closure evidence are maintained in [PR #1299](https://github.com/cognica-io/uqa-engine/pull/1299). This source ledger records the implementation scope and verification checkpoints; the PR keeps the delivery state current after those checkpoints.
+
+The native scan batch and ordinary name-transfer correction are committed as `4bbb1d296`; main `95c14fd05` is reconciled in `f3e21b2eb`. Local scan, SQL, HNSW and repository checks and subsequent qualification corrections are recorded above. Delivery requires actual final-source automatic Linux/macOS bounded-work, memory and exact-output checks, affected FDW coverage and the required Rust checks before merge. #1293 closes with qualified EXPLAIN MEMORY delivery; #1292 and its unfinished follow-ups remain open.
 
 ### Deferred implementation
 
