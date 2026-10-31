@@ -46,7 +46,7 @@ fn native_mutation_rule_inputs_reject_before_payload_copies_and_recover(
             }
             _ => panic!("mutation"),
         };
-        let scope = crate::capabilities::query_scope::new_for_current_routine(&engine);
+        let scope = crate::capabilities::query_scope::new_for_current_routine(&engine).unwrap();
         let context = engine.rule_execution_context();
         let baseline = memory.used();
         let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();

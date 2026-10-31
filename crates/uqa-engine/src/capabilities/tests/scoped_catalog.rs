@@ -39,7 +39,7 @@ fn scoped_collation_lookup_keeps_catalog_permissions_without_recapturing() {
         .unwrap();
     for (role, private_state) in [("uqa", "42704"), ("collate_reader", "42501")] {
         engine.sql(&format!("SET ROLE {role}"), &[]).unwrap();
-        let scope = query_scope::new_for_current_routine(&engine);
+        let scope = query_scope::new_for_current_routine(&engine).unwrap();
         let hook = ScopedEngineHook::new(&engine, &scope);
         scope.catalog_read_view().unwrap();
         for resolver in [&engine as &dyn FunctionTypeResolver, &hook] {
@@ -77,7 +77,7 @@ fn scoped_permissions_and_overloads_reuse_catalog_inputs() {
             &[],
         )
         .unwrap();
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     let domains = scope.catalog_read_view().unwrap().domain_snapshot();
     let binding = lower_binding();
@@ -179,7 +179,7 @@ fn scoped_relation_descriptors_reuse_the_selected_generation() {
             &[],
         )
         .unwrap();
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     for name in ["items", "item_view"] {
         let Some(ColumnType::Composite(ty)) = hook.resolve_type_name(name).unwrap() else {
@@ -204,7 +204,7 @@ fn scoped_relation_descriptors_reuse_the_selected_generation() {
 fn scoped_runtime_catalog_observes_private_ddl_acl_and_rollback() {
     let engine = Engine::new();
     engine.sql("CREATE ROLE reader; CREATE DOMAIN amount AS integer; CREATE TABLE items (id integer); SET search_path = pending, public", &[]).unwrap();
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     let binding = lower_binding();
     let original = hook.resolve_regtype_input("amount").unwrap();
@@ -242,7 +242,7 @@ fn scoped_runtime_catalog_keeps_the_portal_generation() {
     let original = engine.resolve_regtype_input("amount").unwrap();
     engine.sql("DROP DOMAIN amount; CREATE DOMAIN amount AS text; ALTER TABLE items ADD COLUMN later text", &[]).unwrap();
     engine.query_catalog_snapshot = Some(retained);
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     CATALOG_CAPTURES.set(0);
     assert_eq!(hook.resolve_regtype_input("amount").unwrap(), original);
@@ -280,7 +280,7 @@ fn runtime_catalog_does_not_mistake_an_older_scope_for_the_current_revision() {
     engine
         .sql("SET search_path = pending, public", &[])
         .unwrap();
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     engine.sql("CREATE SCHEMA pending", &[]).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     assert_eq!(hook.current_schema().unwrap().as_deref(), Some("pending"));
@@ -316,7 +316,7 @@ fn scoped_runtime_catalog_refreshes_peer_ddl_in_each_isolation_level() {
                 .unwrap();
             let peer = engine.new_session().unwrap();
             engine.sql(&format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM items; SET LOCAL search_path = pending, public"), &[]).unwrap();
-            let scope = query_scope::new_for_current_routine(&engine);
+            let scope = query_scope::new_for_current_routine(&engine).unwrap();
             let hook = ScopedEngineHook::new(&engine, &scope);
             assert_eq!(hook.current_schema().unwrap().as_deref(), Some("public"));
             peer.sql("CREATE SCHEMA pending", &[]).unwrap();
@@ -338,7 +338,7 @@ fn native_cast_descriptors_keep_qualified_identity_and_live_domain_checks() {
     use uqa_sql::expr::cast_value_with_scoped_resolution;
     let engine = Engine::new();
     engine.sql("CREATE DOMAIN public.amount AS integer CHECK (VALUE > 0); CREATE SCHEMA other_types; CREATE DOMAIN other_types.amount AS integer CHECK (VALUE < 0)", &[]).unwrap();
-    let scope = query_scope::new_for_current_routine(&engine);
+    let scope = query_scope::new_for_current_routine(&engine).unwrap();
     let hook = ScopedEngineHook::new(&engine, &scope);
     let control = ProductionControl::uncontrolled();
     let first = cast_value_with_scoped_resolution(
@@ -391,7 +391,7 @@ fn native_cast_descriptors_keep_qualified_identity_and_live_domain_checks() {
     .unwrap();
     assert_eq!(*unqualified.value, Value::Int(-1));
     assert!(unqualified.catalog.is_none());
-    let new_scope = query_scope::new_for_current_routine(&engine);
+    let new_scope = query_scope::new_for_current_routine(&engine).unwrap();
     let new_hook = ScopedEngineHook::new(&engine, &new_scope);
     assert!(retained
         .evaluate(

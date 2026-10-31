@@ -139,7 +139,7 @@ fn evaluate_column_default<S: Clone + 'static>(
     let (value, source) = expression.map_or(Ok((Value::Null, None)), |expression| {
         crate::query::catalog_expression::eval_lowered_expression_with_type(
             services.expressions.expressions,
-            services.scopes.current_routine_scope(),
+            services.scopes.current_routine_scope()?,
             expression,
             None,
             params,
@@ -414,7 +414,7 @@ fn refresh_generated_columns<S: Clone + 'static>(
         &mut |expression, row, schema| {
             crate::query::catalog_expression::eval_lowered_expression_with_schema_and_type(
                 services.expressions.expressions,
-                services.scopes.current_routine_scope(),
+                services.scopes.current_routine_scope()?,
                 expression,
                 row,
                 schema,

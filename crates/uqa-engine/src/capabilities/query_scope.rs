@@ -12,12 +12,10 @@ use uqa_core::memory::ProductionControl;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{catalog::resolution::RelationLookupMode, SQLError};
 
-pub(crate) fn new_for_current_routine(engine: &Engine) -> CteScope {
-    new_for_current_routine_with_control(
-        engine,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
-    .expect("ordinary current-routine scope capture")
+pub(crate) fn new_for_current_routine(engine: &Engine) -> Result<CteScope, SQLError> {
+    let resources =
+        uqa_execution::query::relational::QueryExpressionFactory::production_resources(engine)?;
+    new_for_current_routine_with_control(engine, &resources.control())
 }
 
 pub(crate) fn new_for_statement(
@@ -63,13 +61,10 @@ pub(crate) fn new_for_command(
     Ok(scope)
 }
 
-pub(crate) fn new_for_catalog_binding(engine: &Engine) -> CteScope {
-    let revision = engine.runtime.regtype_output_cache.revision();
-    let mut resolution = engine.session_execution_view().relation_name_resolution();
-    resolution.set_lookup_mode(RelationLookupMode::Bound);
-    let mut scope = CteScope::with_catalog(engine.restored_catalog_read_view(), resolution, None);
-    scope.set_catalog_revision(engine.session_id, revision);
-    scope
+pub(crate) fn new_for_catalog_binding(engine: &Engine) -> Result<CteScope, SQLError> {
+    let resources =
+        uqa_execution::query::relational::QueryExpressionFactory::production_resources(engine)?;
+    new_for_catalog_binding_with_control(engine, &resources.control())
 }
 
 impl
@@ -118,7 +113,7 @@ impl uqa_sql::binding::statements::StatementAnalysisScopes for Engine {
         &self,
         analyze: uqa_sql::binding::statements::StatementAnalysisOperation<'_>,
     ) -> Result<(), SQLError> {
-        let scope = new_for_current_routine(self);
+        let scope = new_for_current_routine(self)?;
         analyze(&scope)
     }
 }

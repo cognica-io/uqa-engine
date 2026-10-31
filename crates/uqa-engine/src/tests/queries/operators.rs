@@ -14,7 +14,7 @@ use uqa_sql::ScalarExpr;
 fn bound_projection_order_and_limit_build_with_explicit_runtime_view() {
     let engine = Engine::new();
     engine.set_variable("work_mem", "64kB").unwrap();
-    let ctes = crate::capabilities::query_scope::new_for_current_routine(&engine);
+    let ctes = crate::capabilities::query_scope::new_for_current_routine(&engine).unwrap();
     let schema = uqa_execution::RowSchema::with_types(
         vec!["id".into(), "payload".into()],
         vec![

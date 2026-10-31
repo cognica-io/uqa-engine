@@ -47,9 +47,9 @@ impl CteFilterPlanning<StatementReadSnapshot> for Engine {
 impl DirectionalQueryFactory<StatementReadSnapshot> for Engine {
     fn query_operator(
         &self,
-        plan: QueryPlan,
-        params: Vec<SQLParam>,
-        scope: CteScope,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        scope: &CteScope,
         schema: uqa_execution::RowSchema,
     ) -> Result<Box<dyn uqa_execution::PhysicalOperator>, SQLError> {
         self.directional_query_operator(plan, params, scope, schema)

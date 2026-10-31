@@ -424,7 +424,7 @@ pub fn validate_query_row_locks<S: Clone + Send + Sync + 'static>(
     query: &QueryPlan,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    let ctes = context.scopes.current_routine_scope();
+    let ctes = context.scopes.current_routine_scope()?;
     validate_query_plan_row_locks(context, query, params, &ctes)
 }
 

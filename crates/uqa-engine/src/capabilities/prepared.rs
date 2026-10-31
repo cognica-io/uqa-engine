@@ -100,7 +100,7 @@ impl PreparedArgumentScopes for Engine {
         parameters: &[SQLParam],
         operation: &mut ScopedArgumentOperation<'_>,
     ) -> Result<Vec<SQLParam>, SQLError> {
-        let scope = super::query_scope::new_for_current_routine(self);
+        let scope = super::query_scope::new_for_current_routine(self)?;
         let hook = ScopedEngineHook::new(self, &scope);
         let evaluation = PhysicalEvalContext::new(None, parameters)
             .with_function_hook(&hook)

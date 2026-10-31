@@ -33095,6 +33095,67 @@
         "case_11_redb_scalar",
         "case_12_redb_rows"
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_scope_factories_retain_request_admission_and_cancellation",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/factories.rs",
+      "capability": "Native routine scope and directional input ownership",
+      "workload": "Native current-routine, locking capability and stored-catalog scope factories on all four providers with 32 bytes available.",
+      "invariant": "Retain namespace and lookup mode, reject before allocation, preserve both cancellations, recover and release every owner.",
+      "case_names": [
+        "case_01_memory_direct",
+        "case_02_memory_capability",
+        "case_03_memory_catalog",
+        "case_04_sqlite_native_direct",
+        "case_05_sqlite_native_capability",
+        "case_06_sqlite_native_catalog",
+        "case_07_sqlite_kv_direct",
+        "case_08_sqlite_kv_capability",
+        "case_09_sqlite_kv_catalog",
+        "case_10_redb_direct",
+        "case_11_redb_capability",
+        "case_12_redb_catalog"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_directional_inputs_admit_before_copying_and_retain_until_close",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/directional.rs",
+      "capability": "Native routine scope and directional input ownership",
+      "workload": "Directional worker inputs with four MiB plan, parameter or lexical names and 64 KiB available on all four providers.",
+      "invariant": "Reject before copying with less than 256 KiB attempted workspace, retain original input leases until worker close, preserve cancellation and release final owners.",
+      "case_names": [
+        "case_01_memory_plan",
+        "case_02_memory_parameter",
+        "case_03_memory_scope",
+        "case_04_sqlite_native_plan",
+        "case_05_sqlite_native_parameter",
+        "case_06_sqlite_native_scope",
+        "case_07_sqlite_kv_plan",
+        "case_08_sqlite_kv_parameter",
+        "case_09_sqlite_kv_scope",
+        "case_10_redb_plan",
+        "case_11_redb_parameter",
+        "case_12_redb_scope"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "directional_wrapper_admission_retires_rejected_closed_and_failed_tasks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/directional/tests.rs",
+      "capability": "Native routine scope and directional input ownership",
+      "workload": "Directional wrapper rejection, cancellation, early close, child SQL failure and unwind.",
+      "invariant": "Admit the exact wrapper allocation, drop each pending task once and retain the wrapper lease until its actual destruction.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

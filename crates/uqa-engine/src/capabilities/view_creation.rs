@@ -83,7 +83,7 @@ impl ViewPlanBinding for Engine {
         plan: &mut QueryPlan,
         params: &[SQLParam],
     ) -> Result<RowSchema, SQLError> {
-        let scope = super::query_scope::new_for_catalog_binding(self);
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
         uqa_execution::query::binding::bind_query_plan_routines_for_storage(
             self, plan, params, &scope, None,
         )
@@ -94,7 +94,7 @@ impl ViewPlanBinding for Engine {
         })
     }
     fn assign_input_collations(&self, plan: &mut QueryPlan) -> Result<(), SQLError> {
-        let scope = super::query_scope::new_for_catalog_binding(self);
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
         uqa_execution::query::binding::assign_query_plan_input_collations(self, plan, &scope)
     }
 }

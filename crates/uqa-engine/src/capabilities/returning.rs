@@ -69,7 +69,7 @@ impl ReturningCatalog for Engine {
 }
 impl ReturningScope for Engine {
     fn binding_snapshot(&self) -> Result<BindingSnapshot, SQLError> {
-        let scope = super::query_scope::new_for_current_routine(self);
+        let scope = super::query_scope::new_for_current_routine(self)?;
         uqa_execution::query::binding::binding_context(&scope).map(BindingSnapshot::from)
     }
 }

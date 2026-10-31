@@ -245,11 +245,13 @@ fn native_rule_definitions_use_the_request_allowance_before_copying(#[case] prov
     let uqa_sql::plan::CommandPlan::Delete(delete) = command.as_ref() else {
         panic!("delete")
     };
-    let scope = crate::capabilities::query_scope::new_for_current_routine(&engine);
-    let table = engine.try_table("items").unwrap().unwrap();
-    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
     let resources = engine.query_retention_control().unwrap();
     let memory = resources.memory();
+    let before_scope = memory.used();
+    let scope = crate::capabilities::query_scope::new_for_current_routine(&engine).unwrap();
+    let table = engine.try_table("items").unwrap().unwrap();
+    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+
     let invoking = CancellationToken::new();
     let control = ProductionControl::new(memory, resources.cancellation(), &invoking);
     let mut context = engine.rule_execution_context();
@@ -305,9 +307,10 @@ fn native_rule_definitions_use_the_request_allowance_before_copying(#[case] prov
         token.reset();
     }
     drop(occupied);
+    assert_eq!(memory.used(), before);
     drop(scope);
     drop(table);
-    assert_eq!(memory.used(), before);
+    assert_eq!(memory.used(), before_scope);
     assert_eq!(
         engine
             .sql("SELECT n FROM items", &[])

@@ -105,7 +105,7 @@ impl RowLockReadSource for Engine {
     }
 }
 impl RowLockScopeSource<StatementReadSnapshot> for Engine {
-    fn current_routine_scope(&self) -> CteScope {
+    fn current_routine_scope(&self) -> Result<CteScope, SQLError> {
         crate::capabilities::query_scope::new_for_current_routine(self)
     }
     fn transition_relation_names(&self) -> BTreeSet<String> {

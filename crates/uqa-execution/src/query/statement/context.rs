@@ -30,9 +30,9 @@ pub trait ScopedQueryOperation<S: Clone + 'static> {
 pub trait DirectionalQueryFactory<S: Clone + 'static> {
     fn query_operator(
         &self,
-        plan: QueryPlan,
-        params: Vec<SQLParam>,
-        scope: CteScope<S>,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        scope: &CteScope<S>,
         schema: RowSchema,
     ) -> Result<Box<dyn PhysicalOperator>, SQLError>;
 }

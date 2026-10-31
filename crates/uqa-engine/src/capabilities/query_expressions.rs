@@ -593,7 +593,7 @@ pub(crate) fn eval_lowered_expression(
     row: Option<&ResultRow>,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine)?;
     uqa_execution::query::catalog_expression::eval_lowered_expression(
         engine, scope, expression, row, params,
     )
@@ -605,7 +605,7 @@ pub(crate) fn eval_lowered_expression_with_type(
     row: Option<&ResultRow>,
     params: &[SQLParam],
 ) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine)?;
     uqa_execution::query::catalog_expression::eval_lowered_expression_with_type(
         engine, scope, expression, row, params,
     )
@@ -618,7 +618,7 @@ pub(crate) fn eval_lowered_expression_with_schema(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine)?;
     uqa_execution::query::catalog_expression::eval_lowered_expression_with_schema(
         engine, scope, expression, row, schema, params,
     )

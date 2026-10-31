@@ -382,7 +382,7 @@ impl uqa_sql::routines::inlining::RoutinePlanExpressions for Engine {
     ) -> Result<uqa_core::Value, SQLError> {
         uqa_execution::query::catalog_expression::eval_expression_plan_with_schema(
             self,
-            crate::capabilities::query_scope::new_for_current_routine(self),
+            crate::capabilities::query_scope::new_for_current_routine(self)?,
             uqa_sql::plan::ExpressionPlan {
                 scalar: expression.clone(),
                 subqueries: Vec::new(),

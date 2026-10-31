@@ -105,7 +105,7 @@ impl RoutineExpressions for Engine {
         plan: &ExpressionPlan,
         params: &[SQLParam],
     ) -> Result<Option<ColumnType>, SQLError> {
-        let mut scope = super::query_scope::new_for_current_routine(self);
+        let mut scope = super::query_scope::new_for_current_routine(self)?;
         let resources =
             uqa_execution::query::relational::QueryExpressionFactory::production_resources(self)?;
         scope.scalar_subqueries =
@@ -307,7 +307,7 @@ impl RoutineStatements for Engine {
         &self,
         analyze: uqa_execution::routines::context::StatementScopeOperation<'_>,
     ) -> Result<(), SQLError> {
-        let scope = super::query_scope::new_for_current_routine(self);
+        let scope = super::query_scope::new_for_current_routine(self)?;
         analyze(
             self,
             &uqa_execution::query::binding::binding_context(&scope)?,

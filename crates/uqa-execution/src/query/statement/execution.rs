@@ -256,24 +256,17 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
             bind_query_plan_schema(context.source.ctes.routines, left, params, ctes, None)?;
         let right_schema =
             bind_query_plan_schema(context.source.ctes.routines, right, params, ctes, None)?;
-        let child_ctes = {
-            let child_scope = ctes.enter_lock_identity_emission(false);
-            child_scope.copy_with_control(&context.source.ctes.production_resources()?.control())?
-        };
-        let left: Box<dyn crate::PhysicalOperator + '_> = context.directional.query_operator(
-            (**left).clone(),
-            params.to_vec(),
-            child_ctes.copy_with_control(&context.source.ctes.production_resources()?.control())?,
-            left_schema,
-        )?;
+        let child_ctes = ctes.enter_lock_identity_emission(false);
+        let left: Box<dyn crate::PhysicalOperator + '_> =
+            context
+                .directional
+                .query_operator(left, params, &child_ctes, left_schema)?;
         let (left, right) = crate::physical::construction::OperatorBuild::run(left, |_| {
-            context.directional.query_operator(
-                (**right).clone(),
-                params.to_vec(),
-                child_ctes,
-                right_schema,
-            )
+            context
+                .directional
+                .query_operator(right, params, &child_ctes, right_schema)
         })?;
+        drop(child_ctes);
         let (left, right, work_mem) =
             crate::physical::construction::OperatorBuild::pair(left, right, |_, _| {
                 physical_work_mem_bytes(context.source.relational.runtime)

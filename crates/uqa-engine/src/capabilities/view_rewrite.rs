@@ -206,7 +206,7 @@ impl ViewRewriteCatalog for Engine {
         self.mutation_view_kind(name)
     }
     fn binding_scope(&self) -> Result<BindingSnapshot, SQLError> {
-        let scope = crate::capabilities::query_scope::new_for_current_routine(self);
+        let scope = crate::capabilities::query_scope::new_for_current_routine(self)?;
         uqa_execution::query::binding::binding_context(&scope).map(BindingSnapshot::from)
     }
     fn restored_view_catalog(&self) -> (CatalogReadView, RelationNameResolution) {
@@ -272,7 +272,7 @@ impl ViewPrivilegeCatalog for Engine {
         Ok(control.finish(role, control.empty_reservation())?)
     }
     fn ensure_query_select(&self, query: &uqa_sql::plan::QueryPlan) -> Result<(), SQLError> {
-        let scope = super::query_scope::new_for_current_routine(self);
+        let scope = super::query_scope::new_for_current_routine(self)?;
         uqa_execution::query::privileges::ensure_select_privileges_for_query(query, &scope)
     }
     fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError> {

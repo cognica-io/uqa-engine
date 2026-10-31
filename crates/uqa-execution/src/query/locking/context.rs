@@ -60,7 +60,7 @@ pub trait RowLockReadSource: CommittedRowSource + Sync {
 }
 
 pub trait RowLockScopeSource<S: Clone>: Sync {
-    fn current_routine_scope(&self) -> CteScope<S>;
+    fn current_routine_scope(&self) -> Result<CteScope<S>, SQLError>;
     fn transition_relation_names(&self) -> BTreeSet<String>;
 }
 

@@ -226,7 +226,7 @@ impl RetrievalAccess for Engine {
                 table,
                 Some(predicate),
                 params,
-                &crate::capabilities::query_scope::new_for_current_routine(session),
+                &crate::capabilities::query_scope::new_for_current_routine(session)?,
             )
         };
         if committed {

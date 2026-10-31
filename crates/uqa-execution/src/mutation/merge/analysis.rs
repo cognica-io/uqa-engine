@@ -67,7 +67,7 @@ pub(in crate::mutation) fn ensure_merge_privileges<S: Clone + 'static>(
         .referential
         .assignment
         .scopes
-        .current_routine_scope();
+        .current_routine_scope()?;
     ensure_target_table_select_for_expressions_with_control(
         TargetSelectPrivilegeRequest {
             table: &stmt.target,

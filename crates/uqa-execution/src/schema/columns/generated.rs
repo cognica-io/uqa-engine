@@ -78,7 +78,7 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
                 context.cancellation.check()?;
                 crate::query::catalog_expression::PreparedCatalogExpression::lower(
                     context.assignment.expressions.expressions,
-                    context.assignment.scopes.current_routine_scope(),
+                    context.assignment.scopes.current_routine_scope()?,
                     &generated.expression,
                     &schema,
                     &[],

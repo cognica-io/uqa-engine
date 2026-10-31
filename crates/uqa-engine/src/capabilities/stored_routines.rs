@@ -24,7 +24,7 @@ impl uqa_sql::binding::stored_routines::analysis::CatalogRoutineScopes for Engin
         &self,
         analyze: uqa_sql::binding::statements::StatementAnalysisOperation<'_>,
     ) -> Result<(), SQLError> {
-        let scope = crate::capabilities::query_scope::new_for_catalog_binding(self);
+        let scope = crate::capabilities::query_scope::new_for_catalog_binding(self)?;
         analyze(&scope)
     }
 }

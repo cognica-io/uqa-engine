@@ -314,7 +314,7 @@ impl uqa_sql::semantics::conflict::InferenceBindingScope for Engine {
         uqa_execution::query::binding::binding_snapshot_with_control(&scope, control)
     }
     fn binding_scope(&self) -> Result<uqa_sql::binding::snapshot::BindingSnapshot, SQLError> {
-        let scope = super::query_scope::new_for_catalog_binding(self);
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
         uqa_execution::query::binding::binding_context(&scope)
             .map(uqa_sql::binding::snapshot::BindingSnapshot::from)
     }

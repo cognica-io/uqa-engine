@@ -21,7 +21,7 @@ pub fn run_optimised(
         table,
         where_expr,
         params,
-        &crate::capabilities::query_scope::new_for_current_routine(engine),
+        &crate::capabilities::query_scope::new_for_current_routine(engine)?,
     )
 }
 

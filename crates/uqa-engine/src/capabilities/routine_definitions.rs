@@ -177,7 +177,7 @@ impl RoutineCompilationCatalog for Engine {
         Engine::has_registered_aggregate_function(self, name)
     }
     fn binding_snapshot(&self) -> Result<BindingSnapshot, SQLError> {
-        let scope = super::query_scope::new_for_catalog_binding(self);
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
         uqa_execution::query::binding::binding_context(&scope).map(Into::into)
     }
     fn stored_query_namespace(&self) -> StoredQueryNamespace {

@@ -61,7 +61,7 @@ impl uqa_execution::schema::domains::alteration::DomainConstraintBinding for Eng
         definition: &CreateDomain,
         check: uqa_sql::ast::DomainCheck,
     ) -> Result<uqa_sql::ast::DomainCheck, SQLError> {
-        let scope = super::query_scope::new_for_catalog_binding(self);
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
         let binding = uqa_execution::query::binding::binding_context(&scope)?;
         let names = self
             .schema_publication_context()
@@ -91,7 +91,7 @@ impl uqa_execution::schema::domains::alteration::DomainConstraintBinding for Eng
 }
 impl DomainDeclarationBinding for Engine {
     fn bind_domain_declaration(&self, definition: &mut CreateDomain) -> Result<(), SQLError> {
-        let scope = super::query_scope::new_for_catalog_binding(self);
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
         let binding = uqa_execution::query::binding::binding_context(&scope)?;
         let names = self
             .schema_publication_context()
