@@ -114,7 +114,7 @@ fn embedded_view_expressions_keep_positions_physical_names_and_lazy_namespace_er
 #[test]
 fn embedded_view_queries_rename_local_targets_and_preserve_correlated_source_shadowing() {
     let queries = vec![
-        query("SELECT target.local, src.logical FROM (VALUES (3)) AS target(local)"),
+        query("SELECT target.local_value, src.logical FROM (VALUES (3)) AS target(local_value)"),
         query("SELECT src.logical FROM (VALUES (7)) AS src(logical)"),
         query("WITH q AS (SELECT src.logical) SELECT logical FROM (VALUES (9)) AS nested(logical)"),
         query("SELECT src.logical UNION ALL SELECT src.logical"),
@@ -153,7 +153,7 @@ fn embedded_view_queries_rename_local_targets_and_preserve_correlated_source_sha
     assert_eq!(
         actual,
         [
-            vec!["__uqa_view_subquery_local_0.local", "target.physical"],
+            vec!["__uqa_view_subquery_local_0.local_value", "target.physical"],
             vec!["src.logical"],
             vec!["target.physical", "logical"],
             vec!["target.physical", "target.physical"],
