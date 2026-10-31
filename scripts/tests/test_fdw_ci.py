@@ -192,7 +192,9 @@ class ForeignHandlerHistoryTests(unittest.TestCase):
     def test_incomplete_foreign_run_or_wrong_repository_never_becomes_evidence(self):
         digest = fingerprint(self.root, self.base)
         completed = proof(self.root, digest, self.base, "owner/repo", "123")
-        for replacement in ({"platforms": ["ubuntu-24.04"]}, {"configurations": ["memory"]},
+        for replacement in ({"platforms": ["ubuntu-24.04"]},
+                            {"platforms": ["ubuntu-24.04", "macos-14"]},
+                            {"configurations": ["memory"]},
                             {"run_id": "0"}, {"revision": "missing"}, {"repository": "other/repo"}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
                 validate_proof({**completed, **replacement}, digest, "owner/repo")
@@ -218,7 +220,7 @@ class ForeignHandlerWorkflowTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("needs.scope.outputs.required == 'true' && needs.scope.outputs.reused != 'true'", workflow)
         self.assertNotIn("restore-keys:", workflow)
-        self.assertIn("os: [ubuntu-24.04, macos-14]", workflow)
+        self.assertIn("os: [ubuntu-24.04, macos-15]", workflow)
         self.assertIn("configuration: [memory, arrow, duckdb]", workflow)
         self.assertIn("fail-fast: false", workflow)
         qualify = workflow.split("  qualify:\n", 1)[1]

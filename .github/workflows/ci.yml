@@ -58,7 +58,7 @@ on:
         options:
           - all
           - ubuntu-24.04
-          - macos-14
+          - macos-15
           - windows-latest
       transaction_suite:
         description: Select transaction histories, retained resources, or a production owner
@@ -102,7 +102,7 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     uses: ./.github/workflows/workspace-tests.yml
     with:
-      os: macos-14
+      os: macos-15
 
   clippy:
     name: clippy ${{ matrix.label }}
@@ -115,7 +115,7 @@ jobs:
           - label: Linux
             os: ubuntu-24.04
           - label: macOS
-            os: macos-14
+            os: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -333,7 +333,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.transaction_platform == 'all' && '["ubuntu-24.04","macos-14","windows-latest"]' || format('["{0}"]', inputs.transaction_platform)) }}
+        os: ${{ fromJSON(inputs.transaction_platform == 'all' && '["ubuntu-24.04","macos-15","windows-latest"]' || format('["{0}"]', inputs.transaction_platform)) }}
     defaults:
       run:
         shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
