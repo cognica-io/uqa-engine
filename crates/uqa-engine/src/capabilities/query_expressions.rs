@@ -604,7 +604,7 @@ pub(crate) fn eval_lowered_expression_with_type(
     expression: &uqa_sql::ast::Expr,
     row: Option<&ResultRow>,
     params: &[SQLParam],
-) -> Result<(Value, Option<uqa_sql::ColumnType>), SQLError> {
+) -> Result<uqa_execution::query::catalog_expression::TypedCatalogValue, SQLError> {
     let scope = crate::capabilities::query_scope::new_for_current_routine(engine)?;
     uqa_execution::query::catalog_expression::eval_lowered_expression_with_type(
         engine, scope, expression, row, params,

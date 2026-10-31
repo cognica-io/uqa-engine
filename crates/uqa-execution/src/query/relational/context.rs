@@ -21,6 +21,11 @@ pub trait QueryExpressionFactory<S: Clone + 'static>: Sync {
         -> Result<Arc<dyn SetFunctionRuntime + '_>, SQLError>;
     /// Apply the owning planner to a validated schema/procedural execution copy.
     fn optimize_catalog_scalar(&self, expression: &mut ScalarExpr) -> Result<(), SQLError>;
+    fn optimize_owned_catalog_scalar(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError>;
     fn prepare_predicate<'a>(
         &'a self,
         expression: &ScalarExpr,

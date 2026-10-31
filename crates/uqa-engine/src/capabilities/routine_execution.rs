@@ -92,7 +92,7 @@ impl RoutineExpressions for Engine {
     fn evaluate_with_type(
         &self,
         expression: &Expr,
-    ) -> Result<(Value, Option<ColumnType>), SQLError> {
+    ) -> Result<uqa_execution::query::catalog_expression::TypedCatalogValue, SQLError> {
         crate::capabilities::query_expressions::eval_lowered_expression_with_type(
             self,
             expression,

@@ -12,6 +12,7 @@ const JOIN: &str = "SELECT a.id FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.
 
 mod analysis_cache;
 mod assignment_columns;
+mod catalog_expressions;
 mod composite_constants;
 mod demand;
 mod indexes;

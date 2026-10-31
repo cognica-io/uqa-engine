@@ -166,6 +166,14 @@ impl QueryExpressionFactory<()> for Services {
         assert!(scope.scalar_subqueries.is_empty());
         Ok(Arc::new(Self))
     }
+    fn optimize_owned_catalog_scalar(
+        &self,
+        _expression: uqa_sql::plan::OwnedScalarExpr,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        panic!("unexpected optimization")
+    }
+
     fn optimize_catalog_scalar(&self, _: &mut ScalarExpr) -> Result<(), SQLError> {
         panic!("unexpected optimization")
     }

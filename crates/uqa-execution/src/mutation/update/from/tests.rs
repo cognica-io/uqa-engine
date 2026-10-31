@@ -28,6 +28,14 @@ impl QueryExpressionFactory<()> for PreparationCounter {
         Ok(Arc::new(Services))
     }
 
+    fn optimize_owned_catalog_scalar(
+        &self,
+        _expression: uqa_sql::plan::OwnedScalarExpr,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        panic!("mutation qualification must not add constant evaluation")
+    }
+
     fn optimize_catalog_scalar(&self, _: &mut ScalarExpr) -> Result<(), SQLError> {
         panic!("mutation qualification must not add constant evaluation")
     }

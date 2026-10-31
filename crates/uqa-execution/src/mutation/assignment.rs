@@ -151,7 +151,7 @@ fn evaluate_column_default<S: Clone + 'static>(
         table,
         column,
         value,
-        source.as_ref(),
+        source.as_deref(),
     )
 }
 
@@ -406,11 +406,13 @@ fn refresh_generated_columns<S: Clone + 'static>(
     document: &mut Document,
     selected: Option<&[String]>,
 ) -> Result<(), SQLError> {
+    let resources = services.expressions.expressions.production_resources()?;
     super::generated::refresh_stored_generated_columns(
         services.assignment,
         columns,
         selected,
         document,
+        &resources.control(),
         &mut |expression, row, schema| {
             crate::query::catalog_expression::eval_lowered_expression_with_schema_and_type(
                 services.expressions.expressions,

@@ -42,6 +42,18 @@ impl QueryExpressionFactory<StatementReadSnapshot> for Engine {
         .capture())
     }
 
+    fn optimize_owned_catalog_scalar(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        uqa_planner::statement_planning::schema_expressions::optimize_owned_catalog_scalar(
+            &self.statement_planning_context(),
+            expression,
+            control,
+        )
+    }
+
     fn optimize_catalog_scalar(&self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
         uqa_planner::statement_planning::schema_expressions::optimize_catalog_scalar(
             &self.statement_planning_context(),

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_core::Value;
 use uqa_sql::{ast::FunctionBinding, ColumnType};
 
 struct Assignment;
@@ -77,9 +78,13 @@ fn unrelated_updates_evaluate_no_stored_expressions_across_a_row_batch() {
                 &table.columns,
                 Some(&selected),
                 &mut document,
+                &ProductionControl::uncontrolled(),
                 &mut |_, _, _| {
                     calls += 1;
-                    Ok((Value::Int(42), Some(ColumnType::Integer)))
+                    Ok((
+                        Value::Int(42),
+                        Some(ProductionControl::uncontrolled().finish(ColumnType::Integer, None)?),
+                    ))
                 },
             )
             .unwrap();
@@ -112,11 +117,15 @@ fn selective_rewrite_preserves_other_stored_values_and_full_column_scope() {
             &table.columns,
             selected.as_deref(),
             &mut document,
+            &ProductionControl::uncontrolled(),
             &mut |_, row, schema| {
                 calls += 1;
                 assert_eq!(row["v"], Value::Int(1));
                 assert_eq!(schema.columns(), &["v", "g", "h", "z"]);
-                Ok((Value::Int(42), Some(ColumnType::Integer)))
+                Ok((
+                    Value::Int(42),
+                    Some(ProductionControl::uncontrolled().finish(ColumnType::Integer, None)?),
+                ))
             },
         )
         .unwrap();

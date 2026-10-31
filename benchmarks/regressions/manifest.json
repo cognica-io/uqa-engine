@@ -33156,6 +33156,43 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_catalog_expression_admits_borrowed_syntax_before_binding",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/catalog_expression/production/tests.rs",
+      "capability": "Native catalog expression preparation ownership",
+      "workload": "Prepare a borrowed four MiB literal with 64 KiB available, then retry and cancel both preparation and retained evaluation.",
+      "invariant": "Reject before binding with less than 128 KiB attempted allocation; retain the scalar lease through evaluation and retire every owner on failure, cancellation and drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_catalog_expressions_admit_before_copying_and_recover",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/catalog_expressions.rs",
+      "capability": "Native catalog expression preparation ownership",
+      "workload": "Native borrowed syntax, analyzed expression and scalar preparation with four MiB literals and 64 KiB available on all four providers.",
+      "invariant": "Reject before copying with less than 256 KiB attempted allocation, retain both cancellations, retry exact literal values and release every preparation owner.",
+      "case_names": [
+        "case_01_memory_syntax",
+        "case_02_memory_analyzed",
+        "case_03_memory_scalar",
+        "case_04_sqlite_native_syntax",
+        "case_05_sqlite_native_analyzed",
+        "case_06_sqlite_native_scalar",
+        "case_07_sqlite_kv_syntax",
+        "case_08_sqlite_kv_analyzed",
+        "case_09_sqlite_kv_scalar",
+        "case_10_redb_syntax",
+        "case_11_redb_analyzed",
+        "case_12_redb_scalar"
+      ]
     }
   ]
 }

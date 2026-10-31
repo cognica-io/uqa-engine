@@ -301,7 +301,7 @@ impl RelationRewrite {
                 let value = crate::query::catalog_expression::eval_expression_plan_with_schema(
                     assignment.expressions.expressions,
                     scope.copy_with_control(&resources.control())?,
-                    analyzed.plan.clone(),
+                    &analyzed.plan,
                     &original.document,
                     analyzed.row_schema(),
                     &[],

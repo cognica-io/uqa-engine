@@ -8,22 +8,13 @@
 
 use super::DomainValidationInputs;
 use crate::{
-    query::{set_projection::SetFunctionRuntime, CteScope},
-    scalar::plan::{eval_physical, PhysicalEvalContext},
+    query::{catalog_expression::PreparedCatalogExpression, CteScope},
     RowSchema,
 };
-use std::sync::Arc;
 use uqa_core::Value;
-use uqa_sql::{
-    ast::DomainCheck, catalog::domain::StoredDomain, expr::RowLookup, plan::ExpressionPlan,
-    SQLError,
-};
+use uqa_sql::{ast::DomainCheck, catalog::domain::StoredDomain, expr::RowLookup, SQLError};
 
-pub(super) struct PreparedCheck<'a> {
-    expression: ExpressionPlan,
-    schema: RowSchema,
-    hook: Arc<dyn SetFunctionRuntime + 'a>,
-}
+pub(super) struct PreparedCheck<'a>(PreparedCatalogExpression<'a>);
 
 impl<'a> PreparedCheck<'a> {
     pub(super) fn new<S: Clone + 'static>(
@@ -31,46 +22,32 @@ impl<'a> PreparedCheck<'a> {
         domain: &StoredDomain,
         check: &DomainCheck,
     ) -> Result<Self, SQLError> {
-        let mut expression = ExpressionPlan::lower(check.expression.clone());
-        let mut scope = CteScope::with_catalog(
+        let resources = inputs.expressions.production_resources()?;
+        let control = resources.control();
+        let scope = CteScope::with_catalog_with_control(
             inputs.catalog.catalog.current_catalog_snapshot(),
-            inputs.catalog.session.relation_name_resolution(),
-            None,
-        );
-        let arena_resources = inputs.expressions.production_resources()?;
-        scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
-            &expression.subqueries,
-            &arena_resources.control(),
+            inputs
+                .catalog
+                .session
+                .relation_name_resolution_with_control(&control)?,
+            &control,
         )?;
-        let hook = inputs.expressions.bind_scope(&scope)?;
-        let schema = RowSchema::with_types(
-            vec!["value".into()],
-            vec![Some(domain.definition.base.clone())],
-        );
-        crate::scalar_type_with_resolver(&expression.scalar, &schema, &[], hook.as_ref())?;
-        expression.scalar = crate::bind_type_introspection_with_resolver(
-            expression.scalar,
+        let schema = RowSchema::with_column_metadata_with_control(
+            None,
+            [("value", Some(&domain.definition.base), None)],
+            &control,
+        )?;
+        Ok(Self(PreparedCatalogExpression::lower(
+            inputs.expressions,
+            scope,
+            &check.expression,
             &schema,
             &[],
-            hook.as_ref(),
-        );
-        inputs
-            .expressions
-            .optimize_catalog_scalar(&mut expression.scalar)?;
-        Ok(Self {
-            expression,
-            schema,
-            hook,
-        })
+        )?))
     }
 
     pub(super) fn violates(&self, value: &Value) -> Result<bool, SQLError> {
-        let row = DomainValue(value);
-        let context = PhysicalEvalContext::from_row_lookup(&row, &[])
-            .with_row_schema(&self.schema)
-            .with_function_hook(self.hook.as_ref())
-            .with_subquery_runner(self.hook.as_ref());
-        Ok(eval_physical(&self.expression, &context)? == Value::Bool(false))
+        Ok(self.0.evaluate_value(&DomainValue(value))? == Value::Bool(false))
     }
 }
 

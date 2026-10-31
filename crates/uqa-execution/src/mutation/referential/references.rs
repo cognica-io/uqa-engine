@@ -253,7 +253,7 @@ pub fn apply_set_action_to_child<S: Clone + 'static>(
             table,
             column,
             value,
-            source.as_ref(),
+            source.as_deref(),
         )?;
         new_doc.insert(column.clone(), value);
     }

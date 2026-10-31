@@ -35,7 +35,7 @@ pub trait RoutineExpressions: RoutineValueContext {
     fn evaluate_with_type(
         &self,
         expression: &Expr,
-    ) -> Result<(Value, Option<ColumnType>), SQLError>;
+    ) -> Result<crate::query::catalog_expression::TypedCatalogValue, SQLError>;
     fn expression_type(
         &self,
         plan: &ExpressionPlan,

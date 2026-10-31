@@ -70,21 +70,30 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
         super::rows::capture(context.keys.constraints.reads, table, &memory, &control)?;
     let columns =
         crate::mutation::assignment::describe_generated_columns(context.assignment, table)?;
-    let schema = crate::mutation::generated::generated_row_schema(&columns);
+    let resources = context
+        .assignment
+        .expressions
+        .expressions
+        .production_resources()?;
+    let production = resources.control();
+    let schema = crate::mutation::generated::generated_row_schema(&columns, &production)?;
     // PostgreSQL plans every rewrite expression even for an empty relation; row evaluation still preserves conditional branches and error order.
-    let expressions =
+    let mut expressions = uqa_core::memory::ProductionVec::new(production);
+    for (_, generated) in
         crate::mutation::generated::stored_generation_expressions(&columns, Some(changed))
-            .map(|(_, generated)| {
-                context.cancellation.check()?;
-                crate::query::catalog_expression::PreparedCatalogExpression::lower(
-                    context.assignment.expressions.expressions,
-                    context.assignment.scopes.current_routine_scope()?,
-                    &generated.expression,
-                    &schema,
-                    &[],
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+    {
+        context.cancellation.check()?;
+        let expression = crate::query::catalog_expression::PreparedCatalogExpression::lower(
+            context.assignment.expressions.expressions,
+            context.assignment.scopes.current_routine_scope()?,
+            &generated.expression,
+            &schema,
+            &[],
+        )?;
+        expressions
+            .push_produced(production.finish(expression, production.empty_reservation())?)?;
+    }
+    let expressions = expressions.finish()?;
     let mut rows = RewriteRows::new(&memory);
     for position in 0..original.len() {
         context.cancellation.check()?;
@@ -99,6 +108,7 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
             &columns,
             Some(changed),
             &mut document,
+            &production,
             &mut |_, row, _| {
                 let prepared = &expressions[expression_index];
                 expression_index += 1;

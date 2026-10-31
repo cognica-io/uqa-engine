@@ -159,14 +159,14 @@ fn materialize_defaults(
                 Some(saved) => saved.description.coerce_parameter(
                     parameter_index,
                     &value,
-                    source.as_ref(),
+                    source.as_deref(),
                     saved.environment(expressions),
                 )?,
                 None => coerce_routine_value_from(
                     expressions,
                     &value,
                     &invocation.parameter_types[parameter_index],
-                    source.as_ref(),
+                    source.as_deref(),
                 )?,
             }
         };
