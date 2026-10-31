@@ -7,6 +7,7 @@
 //! Bind explicit relation locking to live catalogs and transaction-owned lock marks.
 
 use crate::Engine;
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_execution::{
     row_locks::{
         binding::{RelationDefinitionSession, RelationLockCatalog, RelationLockSession},
@@ -179,22 +180,36 @@ impl SharedObjectLockSession for Engine {
 
 impl RelationLockCatalog for Engine {
     fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError> {
+        self.relation_object_id_with_control(name, &ProductionControl::uncontrolled())
+    }
+    fn relation_object_id_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<[u8; 16]>, SQLError> {
+        control.check()?;
+        let reference = uqa_core::RelationIdentity::try_borrowed_reference(name).map_err(
+            |error| match control.format(format_args!("{error}")) {
+                Ok(message) => SQLError::Internal(message.into_parts().0),
+                Err(error) => error.into(),
+            },
+        )?;
         let relation =
-            uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+            reference.identity_with_control(uqa_core::RelationName::decoded("public"), control)?;
         if let Some(system) = uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name)
         {
             return Ok(Some(system.object_id()));
         }
-        if let Some(table) = self.storage.tables.read().get(&relation) {
+        if let Some(table) = self.storage.tables.read().get(&*relation) {
             return Ok(Some(table.object_id()));
         }
-        if let Some(view) = self.durable.views.read().get(&relation) {
+        if let Some(view) = self.durable.views.read().get(&*relation) {
             return Ok(Some(view.object_id));
         }
-        if let Some(object_id) = self.durable.sequence_object_ids.read().get(&relation) {
+        if let Some(object_id) = self.durable.sequence_object_ids.read().get(&*relation) {
             return Ok(Some(*object_id));
         }
-        if let Some(index) = self.durable.catalog_indexes.read().get(&relation) {
+        if let Some(index) = self.durable.catalog_indexes.read().get(&*relation) {
             return crate::catalog_indexes::index_definition(index)
                 .map(|definition| definition.catalog.map(|catalog| catalog.identity.object_id))
                 .map_err(|error| {
@@ -205,7 +220,7 @@ impl RelationLockCatalog for Engine {
             .durable
             .foreign_tables
             .read()
-            .get(&relation)
+            .get(&*relation)
             .map(|table| table.object_id))
     }
     fn relation_catalog_oid(&self, name: &str) -> Result<Option<u32>, SQLError> {
@@ -225,9 +240,26 @@ impl RelationLockCatalog for Engine {
             .map(|table| table.relation_oids().relation))
     }
     fn table_name(&self, object_id: [u8; 16]) -> Option<String> {
-        self.storage.tables.read().iter().find_map(|(name, table)| {
-            (table.object_id() == object_id).then(|| name.qualified_name())
-        })
+        self.table_name_with_control(object_id, &ProductionControl::uncontrolled())
+            .expect("ordinary table identity lookup")
+            .map(|name| {
+                name.into_uncontrolled()
+                    .expect("ordinary table identity name")
+            })
+    }
+    fn table_name_with_control(
+        &self,
+        object_id: [u8; 16],
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<String>>, SQLError> {
+        control.check()?;
+        for (name, table) in self.storage.tables.read().iter() {
+            control.check()?;
+            if table.object_id() == object_id {
+                return Ok(Some(name.qualified_name_with_control(control)?));
+            }
+        }
+        Ok(None)
     }
     fn relation_name(&self, object_id: [u8; 16]) -> Option<String> {
         self.table_name(object_id)

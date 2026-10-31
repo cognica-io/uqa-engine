@@ -33281,6 +33281,68 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "lexical_lock_scopes_borrow_names_and_admit_only_new_nodes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/locking/relations/names/tests.rs",
+      "capability": "Native relation-lock discovery ownership",
+      "workload": "Four MiB inherited name, escaped local identifier, exhausted allowance and both cancellation tokens.",
+      "invariant": "Borrow parent and identifier storage; admit only local index nodes, never publish rejected names, and retire each lexical frame exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_relation_lock_discovery_borrows_cte_names_and_view_bodies",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/relation_locks.rs",
+      "capability": "Native relation-lock discovery ownership",
+      "workload": "Four MiB CTE names and stored view literals, 64 KiB available, all four providers.",
+      "invariant": "Discover and lock the original relations with less than 256 KiB attempted allocation, propagate both cancellations, and release all planning scratch.",
+      "case_names": [
+        "case_1_memory_cte",
+        "case_2_memory_view",
+        "case_3_sqlite_native_cte",
+        "case_4_sqlite_native_view",
+        "case_5_sqlite_kv_cte",
+        "case_6_sqlite_kv_view",
+        "case_7_redb_cte",
+        "case_8_redb_view"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_relation_lock_scope_admits_wide_cte_indexes",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/relation_locks.rs",
+      "capability": "Native relation-lock discovery ownership",
+      "workload": "4096 CTE declarations with 64 KiB available on all four providers.",
+      "invariant": "Reject name-index growth with 53200 before 256 KiB attempted allocation; release partial scopes, preserve both cancellation owners and allow a subsequent retry.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_identity_wait_retires_rejected_names_and_revalidates_renames",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/binding/tests.rs",
+      "capability": "Native relation-lock discovery ownership",
+      "workload": "Name admission fails after provisional acquisition, both cancellation tokens fire during refresh, and a relation renames while waiting.",
+      "invariant": "Release failed provisional locks and name owners, follow the original renamed identity and retain only the final lock and name lease.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

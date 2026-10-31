@@ -159,16 +159,6 @@ impl Engine {
             .relation_kind_resolution(resolution, name)
     }
 
-    pub(crate) fn try_resolve_relation_kind_for_query(
-        &self,
-        name: &str,
-        relations_bound: bool,
-    ) -> Result<Option<(String, &'static str)>, SQLError> {
-        Ok(self
-            .resolve_relation_kind_for_query(name, relations_bound)?
-            .into_found())
-    }
-
     /// Resolve one name through the shared relation namespace, retaining its
     /// concrete kind. `IF EXISTS` callers use this to distinguish a genuinely
     /// absent object from an object of the wrong kind.

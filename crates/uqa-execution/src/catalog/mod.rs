@@ -11,6 +11,7 @@ pub mod composite_type;
 pub mod domain;
 pub mod enum_type;
 pub mod foreign;
+pub mod hierarchy;
 pub mod identity;
 pub mod range_type;
 pub mod security;

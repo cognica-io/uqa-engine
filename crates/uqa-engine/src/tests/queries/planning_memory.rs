@@ -21,6 +21,7 @@ mod insert_source;
 mod insert_values;
 mod namespaces;
 mod privileges;
+mod relation_locks;
 mod retrieval;
 mod retrieval_analysis;
 mod routine_results;

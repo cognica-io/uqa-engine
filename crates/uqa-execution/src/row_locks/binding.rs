@@ -7,6 +7,7 @@
 //! Retain relation locks only after refreshing and revalidating the selected identity.
 
 use super::{RelationLockMode, ScopedRelationLock};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_sql::SQLError;
 
 pub trait RelationLockSession {
@@ -26,6 +27,16 @@ pub trait RelationDefinitionSession: RelationLockSession {
 
 pub trait RelationLockCatalog {
     fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError>;
+    fn relation_object_id_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<[u8; 16]>, SQLError>;
+    fn table_name_with_control(
+        &self,
+        object_id: [u8; 16],
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<String>>, SQLError>;
     /// The `pg_class` OID of a table, view, materialized view or foreign table, which addresses its catalog tuple.
     fn relation_catalog_oid(&self, name: &str) -> Result<Option<u32>, SQLError>;
     fn table_name(&self, object_id: [u8; 16]) -> Option<String>;
@@ -143,26 +154,77 @@ pub fn lock_descendants(
 pub fn lock_relation_identity(
     catalog: &dyn RelationLockCatalog,
     session: &dyn RelationLockSession,
-    mut name: String,
+    name: String,
     object_id: [u8; 16],
     mode: RelationLockMode,
     nowait: bool,
 ) -> Result<Option<String>, SQLError> {
+    lock_table_identity(
+        session,
+        name,
+        String::as_str,
+        || Ok(catalog.table_name(object_id)),
+        mode,
+        nowait,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+fn lock_table_identity<T>(
+    session: &dyn RelationLockSession,
+    mut name: T,
+    as_name: impl Fn(&T) -> &str,
+    mut current_name: impl FnMut() -> Result<Option<T>, SQLError>,
+    mode: RelationLockMode,
+    nowait: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Option<T>, SQLError> {
     loop {
-        let acquired = match acquire_relation(session, &name, mode, nowait) {
+        control.check()?;
+        let acquired = match acquire_relation(session, as_name(&name), mode, nowait) {
             Err(error) if error.sqlstate() != Some("55P03") => return Err(error),
             other => other,
         };
         session.refresh_after_wait()?;
-        let Some(current) = catalog.table_name(object_id) else {
+        let Some(current) = current_name()? else {
             return Ok(None);
         };
-        if current == name {
+        if as_name(&current) == as_name(&name) {
             acquired?.retain();
             return Ok(Some(current));
         }
         name = current;
     }
+}
+
+/// Resolve every selected descendant before the first wait, then retain each original identity through rename or removal. Scratch and renamed spellings keep the invoking allowance.
+pub fn lock_descendants_with_control<'a>(
+    catalog: &dyn RelationLockCatalog,
+    session: &dyn RelationLockSession,
+    names: impl Iterator<Item = &'a str>,
+    mode: RelationLockMode,
+    nowait: bool,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    let mut targets = ProductionVec::new(*control);
+    for name in names {
+        if let Some(object_id) = catalog.relation_object_id_with_control(name, control)? {
+            targets.push_copy((name, object_id))?;
+        }
+    }
+    for (name, object_id) in targets.iter() {
+        lock_table_identity(
+            session,
+            control.copy_text(name)?,
+            |name| name.as_str(),
+            || catalog.table_name_with_control(*object_id, control),
+            mode,
+            nowait,
+            control,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

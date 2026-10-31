@@ -106,6 +106,22 @@ pub fn current_transition_relation_names() -> BTreeSet<String> {
     })
 }
 
+/// Capture owned transition names while the TLS map is borrowed; recursive SQL runs only after this snapshot returns.
+pub fn current_transition_relation_names_with_control(
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_sql::binding::production::BindingNameSet> {
+    control.check()?;
+    with_current_transition_relations(|relations| {
+        let mut names = uqa_sql::binding::production::BindingNameSet::new();
+        if let Some(relations) = relations {
+            for name in relations.keys() {
+                names.insert_with_control(name, control)?;
+            }
+        }
+        Ok(names)
+    })
+}
+
 pub fn enter_empty_transition_relation_scope() -> TransitionRelationScope {
     TransitionRelationScope::empty()
 }

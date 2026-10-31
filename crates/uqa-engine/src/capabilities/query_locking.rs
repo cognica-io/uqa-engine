@@ -7,7 +7,8 @@
 //! Bind tuple-lock execution to catalog, transaction, and storage state.
 
 use crate::{capabilities::query_scope::CteScope, session::StatementReadSnapshot, Engine};
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::DocId;
 use uqa_execution::{
     query::locking::{
@@ -40,22 +41,37 @@ impl Engine {
     }
 }
 impl LockingCatalog for Engine {
-    fn hierarchy_scan_tables(
+    fn hierarchy_scan_tables_with_control(
         &self,
         table: &str,
         descendants: bool,
-    ) -> Result<Vec<String>, SQLError> {
-        Engine::query_hierarchy_scan_tables(self, table, descendants)
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Vec<String>>, SQLError> {
+        self.query_hierarchy_scan_tables_with_control(table, descendants, control)
     }
-    fn resolve_relation(
+    fn resolve_relation_with_control(
         &self,
         name: &str,
         bound: bool,
-    ) -> Result<Option<(String, &'static str)>, SQLError> {
-        self.try_resolve_relation_kind_for_query(name, bound)
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<uqa_sql::catalog::resolution::RelationResolution>, SQLError> {
+        self.resolve_relation_kind_for_query_with_control(name, bound, control)
     }
-    fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError> {
-        Engine::view_plan(self, name)
+    fn with_view_plan_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError> {
+        Ok(self
+            .with_view_definition_with_control(name, control, |_, view| {
+                if view.kind != crate::StoredViewKind::View {
+                    return Ok(false);
+                }
+                read(&view.definition.query)?;
+                Ok(true)
+            })?
+            .unwrap_or(false))
     }
     fn view_exists_with_control(
         &self,
@@ -123,8 +139,11 @@ impl RowLockScopeSource<StatementReadSnapshot> for Engine {
     fn current_routine_scope(&self) -> Result<CteScope, SQLError> {
         crate::capabilities::query_scope::new_for_current_routine(self)
     }
-    fn transition_relation_names(&self) -> BTreeSet<String> {
-        uqa_execution::mutation::triggers::current_transition_relation_names()
+    fn transition_relation_names_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::BindingNameSet, SQLError> {
+        uqa_execution::mutation::triggers::current_transition_relation_names_with_control(control)
     }
 }
 impl RowRecheckBuilder<StatementReadSnapshot> for Engine {

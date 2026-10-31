@@ -132,7 +132,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let target_tables = referential
         .locking
         .catalog
-        .hierarchy_scan_tables(target_table, stmt.include_descendants)?;
+        .hierarchy_scan_tables_with_control(target_table, stmt.include_descendants, &control)?;
     let statement_events = super::statement_events::MergeStatementEvents::from_plan(stmt);
     let mut ctes = mutation
         .scopes
@@ -260,7 +260,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 crate::PhysicalRow::nulls(source_rows.row_schema().physical_width()),
             );
 
-            for storage_table in &target_tables {
+            for storage_table in target_tables.iter() {
                 let ids = CandidateIds::from_pages(
                     work_mem,
                     constraints.cancellation,

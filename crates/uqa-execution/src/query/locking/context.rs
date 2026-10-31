@@ -16,7 +16,8 @@ use crate::row_locks::{
     session::RowLockSession,
     RelationLockMode, RowLockAcquisition,
 };
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::{CancellationToken, DocId};
 use uqa_sql::{
     ast::{ColumnDef, TableKeyConstraint},
@@ -24,17 +25,25 @@ use uqa_sql::{
 };
 
 pub trait LockingCatalog: RoutineResolution + RelationLockCatalog {
-    fn hierarchy_scan_tables(
+    fn hierarchy_scan_tables_with_control(
         &self,
         table: &str,
         descendants: bool,
-    ) -> Result<Vec<String>, SQLError>;
-    fn resolve_relation(
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Vec<String>>, SQLError>;
+    fn resolve_relation_with_control(
         &self,
         name: &str,
         bound: bool,
-    ) -> Result<Option<(String, &'static str)>, SQLError>;
-    fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<uqa_sql::catalog::resolution::RelationResolution>, SQLError>;
+    /// Lend the selected stored view generation with registry guards released before traversal.
+    fn with_view_plan_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+        read: &mut dyn FnMut(&QueryPlan) -> Result<(), SQLError>,
+    ) -> Result<bool, SQLError>;
     fn view_exists_with_control(
         &self,
         name: &str,
@@ -67,7 +76,10 @@ pub trait RowLockReadSource: CommittedRowSource + Sync {
 pub trait RowLockScopeSource<S: Clone>: Sync {
     fn production_resources(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError>;
     fn current_routine_scope(&self) -> Result<CteScope<S>, SQLError>;
-    fn transition_relation_names(&self) -> BTreeSet<String>;
+    fn transition_relation_names_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<uqa_sql::binding::production::BindingNameSet, SQLError>;
 }
 
 pub trait RowRecheckBuilder<S: Clone>: Sync {
