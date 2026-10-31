@@ -29,6 +29,7 @@ fn values_source_evaluates_each_row_only_when_its_consumer_requests_it() {
     };
     let scope = crate::catalog::test_support::empty_scope();
     let mut operator = build_values_source(
+        &uqa_core::memory::ProductionControl::uncontrolled(),
         &Services,
         &Services,
         &source,
@@ -95,6 +96,7 @@ fn values_sources_keep_each_outer_row_and_only_expose_their_own_columns() {
             crate::PhysicalRow::from_values(vec![uqa_core::Value::Int(outer_value)]),
         ));
         let mut operator = build_values_source(
+            &uqa_core::memory::ProductionControl::uncontrolled(),
             &Services,
             &Services,
             &right,
@@ -148,6 +150,7 @@ fn internal_values_capture_a_typed_outer_attribute_in_its_original_scope() {
         crate::PhysicalRow::from_values(vec![uqa_core::Value::Int(42)]),
     ));
     let mut operator = build_values_source(
+        &uqa_core::memory::ProductionControl::uncontrolled(),
         &Services,
         &Services,
         &source,
@@ -217,6 +220,7 @@ fn values_from_sources_preserve_postgresql_collations_through_qualification() {
                 internal_column_collations: Vec::new(),
             };
             let mut operator = build_values_source(
+                &uqa_core::memory::ProductionControl::uncontrolled(),
                 &Services,
                 &Services,
                 &source,
@@ -291,6 +295,7 @@ fn values_sources_apply_only_the_predicates_placed_on_their_qualifier() {
         internal_column_collations: Vec::new(),
     };
     let mut operator = build_values_source(
+        &uqa_core::memory::ProductionControl::uncontrolled(),
         &Services,
         &Services,
         &source,
@@ -346,6 +351,7 @@ fn values_sources_fail_instead_of_reading_an_unproduced_column() {
             vec![comparison(column)],
         )]);
         let mut operator = build_values_source(
+            &uqa_core::memory::ProductionControl::uncontrolled(),
             &Services,
             &Services,
             &source,

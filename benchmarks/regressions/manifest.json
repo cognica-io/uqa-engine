@@ -33927,6 +33927,61 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_conjunctions_admit_before_copying_and_preserve_order_and_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/source_filters/production/tests.rs",
+      "capability": "Native source filter ownership",
+      "workload": "Zero, one and multiple selected predicates, a 4 MiB literal and 32 KiB allowance.",
+      "invariant": "Keep exact scalar order and retained allocation bytes; reject before 128 KiB attempted allocation, honor both cancellations and release partial owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_filter_construction_releases_cancelled_inputs_and_keeps_cleanup_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/filter/production_tests.rs",
+      "capability": "Native source filter ownership",
+      "workload": "Both cancellation owners and concrete Filter allocation denial with a failing child close.",
+      "invariant": "Close the child once, preserve the original SQLSTATE with cleanup detail, and retire every predicate/wrapper reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "owned_filter_retains_exact_storage_and_preserves_deferred_column_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/filter/production_tests.rs",
+      "capability": "Native source filter ownership",
+      "workload": "Admitted Filter wrapper and deferred missing-column predicates over empty and nonempty input.",
+      "invariant": "Match exact live constructor allocation bytes and preserve first-demand diagnostics without reading empty input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_source_filters_reject_wide_predicates_before_copying",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_filters.rs",
+      "capability": "Native source filter ownership",
+      "workload": "Four-provider source-qualification copying of a 4 MiB literal with 64 KiB remaining.",
+      "invariant": "Reject with 53200 before 256 KiB attempted allocation, honor cancellation, recover and retain the admitted predicate until the operator retires.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

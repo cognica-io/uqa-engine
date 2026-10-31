@@ -12,6 +12,9 @@ use super::{
     SharedExpressionEvaluator, SharedRowPredicate,
 };
 
+use uqa_core::memory::{Produced, ProductionControl};
+use uqa_sql::{plan::OwnedScalarExpr, SQLError};
+
 /// Pipelined `WHERE` operator. Drops rows whose predicate evaluates
 /// to `false` or `NULL`; truthy rows pass through unchanged.
 pub struct Filter<'a> {
@@ -19,16 +22,17 @@ pub struct Filter<'a> {
     input_pending: crate::physical::demand::PendingRows,
     condition: FilterCondition<'a>,
     schema: RowSchema,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 enum FilterCondition<'a> {
     Expression {
-        predicate: crate::scalar::PreparedExpressions<ScalarExpr>,
+        predicate: crate::scalar::PreparedExpressions<Produced<ScalarExpr>>,
         evaluator: SharedExpressionEvaluator<'a>,
     },
     Row(SharedRowPredicate<'a>),
     /// A predicate that names a column its input does not produce. Reading that column would yield NULL for every row, so the first input row reports the defect instead.
-    Unresolved(String),
+    Unresolved(Produced<String>),
 }
 
 impl Filter<'static> {
@@ -53,10 +57,17 @@ impl<'a> Filter<'a> {
             child,
             input_pending: crate::physical::demand::PendingRows::default(),
             condition: FilterCondition::Expression {
-                predicate: crate::scalar::PreparedExpressions::scalar(predicate),
+                predicate: crate::scalar::PreparedExpressions::produced_scalar(
+                    ProductionControl::uncontrolled()
+                        .finish(predicate, None)
+                        .expect("ordinary predicate"),
+                    &ProductionControl::uncontrolled(),
+                )
+                .expect("ordinary predicate preparation"),
                 evaluator,
             },
             schema,
+            _memory: None,
         }
     }
 
@@ -70,6 +81,7 @@ impl<'a> Filter<'a> {
             input_pending: crate::physical::demand::PendingRows::default(),
             condition: FilterCondition::Row(predicate),
             schema,
+            _memory: None,
         }
     }
 
@@ -79,9 +91,85 @@ impl<'a> Filter<'a> {
         Self {
             child,
             input_pending: crate::physical::demand::PendingRows::default(),
+            condition: FilterCondition::Unresolved(
+                ProductionControl::uncontrolled()
+                    .finish(column, None)
+                    .expect("ordinary unresolved column"),
+            ),
+            schema,
+            _memory: None,
+        }
+    }
+
+    /// Prepare the admitted predicate while retaining its original child on every failure.
+    pub fn with_owned_predicate(
+        child: Box<dyn PhysicalOperator + 'a>,
+        predicate: OwnedScalarExpr,
+        evaluator: SharedExpressionEvaluator<'a>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let (child, (schema, predicate)) =
+            crate::physical::construction::OperatorBuild::run(child, |child| {
+                let schema = child.row_schema().clone();
+                let predicate =
+                    evaluator.bind_type_introspection_owned(predicate, &schema, control)?;
+                let predicate = crate::scalar::PreparedExpressions::produced_scalar(
+                    predicate.finish(control)?,
+                    control,
+                )?;
+                Ok((schema, predicate))
+            })?;
+        Ok(Self {
+            child,
+            input_pending: crate::physical::demand::PendingRows::default(),
+            condition: FilterCondition::Expression {
+                predicate,
+                evaluator,
+            },
+            schema,
+            _memory: None,
+        })
+    }
+
+    /// Keep a placed-column diagnostic deferred until its input actually produces a row.
+    pub fn with_unresolved_column(
+        child: Box<dyn PhysicalOperator + 'a>,
+        column: Produced<String>,
+    ) -> Self {
+        let schema = child.row_schema().clone();
+        Self {
+            child,
+            input_pending: crate::physical::demand::PendingRows::default(),
             condition: FilterCondition::Unresolved(column),
             schema,
+            _memory: None,
         }
+    }
+
+    pub fn into_boxed(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+        let Self {
+            child,
+            input_pending,
+            condition,
+            schema,
+            _memory: _,
+        } = self;
+        crate::physical::construction::OperatorBuild::build(child, |owner| {
+            let memory = control.reserve(size_of::<Self>())?;
+            owner.wrap(|child| {
+                Box::new(Self {
+                    child,
+                    input_pending,
+                    condition,
+                    schema,
+                    _memory: memory,
+                })
+            });
+            Ok(())
+        })
     }
 
     fn filter_batch(&self, batch: Batch) -> ExecResult<Option<Batch>> {
@@ -100,7 +188,7 @@ impl<'a> Filter<'a> {
                 FilterCondition::Row(predicate) => predicate.keep_physical(&batch.schema, &row)?,
                 FilterCondition::Unresolved(column) => {
                     return Err(ExecError::SQL(uqa_sql::SQLError::Internal(format!(
-                        "a predicate placed on its input reads {column}, which the input does not produce"
+                        "a predicate placed on its input reads {}, which the input does not produce", column.as_str()
                     ))));
                 }
             };
@@ -195,3 +283,6 @@ impl PhysicalOperator for Filter<'_> {
         self.child.close()
     }
 }
+
+#[cfg(test)]
+mod production_tests;

@@ -24,7 +24,9 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    let resources = context.ctes.production_resources()?;
     build_values_source(
+        &resources.control(),
         context.ctes.routines,
         context.types,
         from,
@@ -43,6 +45,7 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
     reason = "borrows the caller's scopes and its source predicate placement"
 )]
 fn build_values_source<'a, S: Clone + 'static>(
+    control: &uqa_core::memory::ProductionControl<'_>,
     routines: &dyn uqa_sql::routines::RoutineResolution,
     types: &dyn crate::FunctionTypeResolver,
     from: &SourcePlan,
@@ -127,7 +130,9 @@ fn build_values_source<'a, S: Clone + 'static>(
                 ctes.lock_identities.emit,
             );
             Ok(match alias.as_deref() {
-                Some(qualifier) => filter_closed_source(operator, qualifier, filters, evaluator)?,
+                Some(qualifier) => {
+                    filter_closed_source(operator, qualifier, filters, control, evaluator)?
+                }
                 None => operator,
             })
         }
