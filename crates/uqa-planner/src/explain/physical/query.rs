@@ -8,7 +8,7 @@
 
 use super::{visible_cte, Collector, DeferredCte, Scope};
 use crate::filter_pushdown::{
-    cte_output_filters_with_control, push_output_filter_into_query_plan,
+    cte_output_filters_with_control, push_output_filter_into_query_plan_with_control,
     qualifier_filters_for_stmt_with_control,
 };
 use uqa_sql::{
@@ -16,12 +16,34 @@ use uqa_sql::{
     plan::{CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, UnifiedPlan},
     semantics::{
         cte_references_own_name_with_control, cte_strategy::schedule_plan_ctes_with_control,
-        order_cte_plans_with_control, query_plan_output_columns,
+        order_cte_plans_with_control, query_plan_output_columns_with_control,
     },
     SQLError,
 };
 
 impl Collector<'_, '_, '_> {
+    fn resolution(
+        &self,
+        bound: bool,
+    ) -> Result<
+        uqa_core::memory::Produced<uqa_sql::catalog::resolution::RelationNameResolution>,
+        SQLError,
+    > {
+        let input = self.context.filters.correlation.resolution;
+        uqa_sql::catalog::resolution::RelationNameResolution::from_inputs_with_control(
+            input.search_path.iter().map(String::as_str),
+            self.control.copy_text(&input.temporary_schema)?,
+            input.temporary_namespace_allocated,
+            &input.current_user,
+            if bound {
+                RelationLookupMode::Bound
+            } else {
+                RelationLookupMode::Dynamic
+            },
+            &self.control,
+        )
+    }
+
     pub(super) fn statement(
         &mut self,
         plan: &UnifiedPlan,
@@ -120,12 +142,7 @@ impl Collector<'_, '_, '_> {
             return Ok(());
         }
         let correlation = self.context.filters.correlation;
-        let mut resolution = correlation.resolution.clone();
-        resolution.lookup_mode = if bound {
-            RelationLookupMode::Bound
-        } else {
-            RelationLookupMode::Dynamic
-        };
+        let resolution = self.resolution(bound)?;
         let Some(canonical) = correlation
             .catalog
             .table_name_resolved(&resolution, table)?
@@ -162,12 +179,7 @@ impl Collector<'_, '_, '_> {
         path: &str,
     ) -> Result<(), SQLError> {
         self.control.check()?;
-        let mut resolution = self.context.filters.correlation.resolution.clone();
-        resolution.lookup_mode = if plan.relations_bound {
-            RelationLookupMode::Bound
-        } else {
-            RelationLookupMode::Dynamic
-        };
+        let resolution = self.resolution(plan.relations_bound)?;
         let mut context = self.context;
         context.filters.correlation.resolution = &resolution;
         let mut nested = Collector {
@@ -291,46 +303,37 @@ impl Collector<'_, '_, '_> {
         let RelationalPlan::SetOp { left, right, .. } = &query.root else {
             return Ok(None);
         };
+        let inferred;
         let columns = if cte.columns.is_empty() {
-            query_plan_output_columns(left)
+            inferred = query_plan_output_columns_with_control(left, &self.control)?;
+            let Some(columns) = &inferred else {
+                return Ok(None);
+            };
+            columns.as_slice()
         } else {
-            Some(cte.columns.clone())
+            cte.columns.as_slice()
         };
-        let Some(columns) = columns else {
-            return Ok(None);
-        };
-        let anchor = push_output_filter_into_query_plan(
+        let anchor = push_output_filter_into_query_plan_with_control(
             self.context.filters,
             left,
             qualifier,
             filter,
-            Some(&columns),
+            Some(columns),
+            &self.control,
         )?;
-        let step = push_output_filter_into_query_plan(
+        let step = push_output_filter_into_query_plan_with_control(
             self.context.filters,
             right,
             qualifier,
             filter,
-            Some(&columns),
+            Some(columns),
+            &self.control,
         )?;
         let (Some(anchor), Some(step)) = (anchor, step) else {
             return Ok(None);
         };
-        let mut memory = uqa_sql::plan::ExecutableMemory::default();
-        let mut specialized = query.clone();
-        if let RelationalPlan::SetOp { left, right, .. } = &mut specialized.root {
-            let (anchor, anchor_memory) = anchor.into_parts();
-            let (step, step_memory) = step.into_parts();
-            *left = anchor;
-            *right = step;
-            memory.absorb(anchor_memory);
-            memory.absorb(step_memory);
-        }
-        let (query, mut output) =
-            uqa_sql::plan::OwnedQueryPlan::from_query(specialized, &self.control)?.into_parts();
-        output.absorb(memory);
-        Ok(Some(uqa_sql::plan::OwnedQueryPlan::from_parts(
-            query, output,
-        )))
+        query
+            .copy_with_set_inputs(anchor, step, &self.control)
+            .map(Some)
     }
 }

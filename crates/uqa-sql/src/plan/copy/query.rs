@@ -124,39 +124,53 @@ impl Copying<'_> {
                     copying.map(subqueries.iter(), Self::query)
                 })?,
             },
-            RelationalPlan::SetOp {
-                kind,
-                all,
-                left,
-                right,
-                order_by,
-                limit,
-                with_ties,
-                offset,
-                subqueries,
-            } => RelationalPlan::SetOp {
-                kind: *kind,
-                all: *all,
-                left: self.field("left", |copying| {
-                    copying.boxed(|copying| copying.query(left))
-                })?,
-                right: self.field("right", |copying| {
-                    copying.boxed(|copying| copying.query(right))
-                })?,
-                order_by: self.field("order_by", |copying| {
-                    copying.map(order_by.iter(), Self::order)
-                })?,
-                limit: self.field("limit", |copying| {
-                    copying.optional_scalar_box(limit.as_deref())
-                })?,
-                with_ties: *with_ties,
-                offset: self.field("offset", |copying| {
-                    copying.optional_scalar_box(offset.as_deref())
-                })?,
-                subqueries: self.field("subqueries", |copying| {
-                    copying.map(subqueries.iter(), Self::query)
-                })?,
-            },
+            RelationalPlan::SetOp { left, right, .. } => self.set_operation_using(
+                root,
+                |copying| copying.boxed(|copying| copying.query(left)),
+                |copying| copying.boxed(|copying| copying.query(right)),
+            )?,
+        })
+    }
+
+    pub(super) fn set_operation_using(
+        &mut self,
+        root: &RelationalPlan,
+        left: impl FnOnce(&mut Self) -> Result<Box<QueryPlan>>,
+        right: impl FnOnce(&mut Self) -> Result<Box<QueryPlan>>,
+    ) -> Result<RelationalPlan> {
+        let RelationalPlan::SetOp {
+            kind,
+            all,
+            order_by,
+            limit,
+            with_ties,
+            offset,
+            subqueries,
+            ..
+        } = root
+        else {
+            return Err(crate::SQLError::Internal(
+                "set construction requires a set operation".into(),
+            ));
+        };
+        Ok(RelationalPlan::SetOp {
+            kind: *kind,
+            all: *all,
+            left: self.field("left", left)?,
+            right: self.field("right", right)?,
+            order_by: self.field("order_by", |copying| {
+                copying.map(order_by.iter(), Self::order)
+            })?,
+            limit: self.field("limit", |copying| {
+                copying.optional_scalar_box(limit.as_deref())
+            })?,
+            with_ties: *with_ties,
+            offset: self.field("offset", |copying| {
+                copying.optional_scalar_box(offset.as_deref())
+            })?,
+            subqueries: self.field("subqueries", |copying| {
+                copying.map(subqueries.iter(), Self::query)
+            })?,
         })
     }
 

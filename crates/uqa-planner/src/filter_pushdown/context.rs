@@ -9,7 +9,7 @@
 use uqa_sql::{
     binding::correlation::CorrelationContext,
     catalog::{analysis::AnalysisCatalog, resolution::RelationNameResolution},
-    plan::UnifiedPlan,
+    plan::{MutableQueryPlan, OwnedQueryPlan},
     semantics::volatility::VolatilityCatalog,
     SQLError,
 };
@@ -18,7 +18,10 @@ use uqa_sql::{
 pub struct FilterPushdownContext<'a> {
     pub volatility: &'a dyn VolatilityCatalog,
     pub correlation: CorrelationContext<'a>,
-    pub optimizer: &'a dyn Fn(UnifiedPlan) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError>,
+    pub optimizer: &'a dyn Fn(
+        MutableQueryPlan,
+        &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<OwnedQueryPlan, SQLError>,
 }
 
 #[derive(Clone, Copy)]

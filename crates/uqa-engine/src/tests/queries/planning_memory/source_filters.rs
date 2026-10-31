@@ -219,3 +219,123 @@ fn native_physical_explain_admits_placed_predicates(#[case] provider: Provider) 
         assert_eq!(memory.used(), baseline);
     }
 }
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_derived_filter_specialization_admits_query_copies(#[case] provider: Provider) {
+    use uqa_execution::query::cte::context::QueryOutputRewriter;
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("derived-filter-owners.db"));
+    let query = |payload: &str| {
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(
+            uqa_sql::compile(&format!(
+                "SELECT v.id AS k,'{payload}'::text AS payload FROM(VALUES(1),(2)) v(id)"
+            ))
+            .unwrap()
+            .remove(0),
+        ) else {
+            panic!("query")
+        };
+        query
+    };
+    let predicate = uqa_sql::ScalarExpr::Binary {
+        op: uqa_sql::ast::BinaryOp::Equal,
+        lhs: Box::new(uqa_sql::ScalarExpr::qualified_column("q", "k")),
+        rhs: Box::new(uqa_sql::ScalarExpr::Literal(Value::Int(2))),
+    };
+    drop(
+        engine
+            .push_derived_output_filter(&query("small"), "q", &predicate, None)
+            .unwrap(),
+    );
+    let query = query(&"x".repeat(4 << 20));
+    let resources = engine.query_retention_control().unwrap();
+    let memory = resources.memory();
+    for recursive in [false, true] {
+        let invoke = || {
+            if recursive {
+                engine.push_output_filter(&query, "q", &predicate, None)
+            } else {
+                engine.push_derived_output_filter(&query, "q", &predicate, None)
+            }
+        };
+        let baseline = memory.used();
+        let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+        let mut error = None;
+        let allocation = allocation_counter::measure(|| {
+            error = invoke().err();
+        });
+        assert_eq!(memory.used(), baseline + occupied.bytes());
+        assert!(
+            error.as_ref().and_then(uqa_sql::SQLError::sqlstate) == Some("53200")
+                && allocation.bytes_total < 256 << 10,
+            "{provider:?}, recursive={recursive}: {error:?}; {allocation:?}"
+        );
+        drop(occupied);
+        resources.cancellation().cancel();
+        assert_eq!(invoke().unwrap_err().sqlstate(), Some("57014"));
+        assert_eq!(memory.used(), baseline);
+        resources.cancellation().reset();
+        let specialized = invoke().unwrap().unwrap();
+        assert!(specialized.reserved_bytes() > 0);
+        assert!(memory.used() > baseline);
+        drop(specialized);
+        assert_eq!(memory.used(), baseline);
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_explain_optimizer_admits_its_borrowed_statement(#[case] provider: Provider) {
+    use uqa_execution::statement::context::PhysicalExplainPlanning;
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("explain-optimizer-owner.db"));
+    let query = |payload: &str| {
+        UnifiedPlan::lower(
+            uqa_sql::compile(&format!("SELECT '{payload}'::text AS payload"))
+                .unwrap()
+                .remove(0),
+        )
+    };
+    drop(
+        engine
+            .plan_explained_statement((&query("small")).into())
+            .unwrap(),
+    );
+    let input = query(&"x".repeat(4 << 20));
+    let resources = engine.query_retention_control().unwrap();
+    let memory = resources.memory();
+    let baseline = memory.used();
+    let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+    let mut error = None;
+    let allocation = allocation_counter::measure(|| {
+        error = engine.plan_explained_statement((&input).into()).err();
+    });
+    assert_eq!(memory.used(), baseline + occupied.bytes());
+    assert!(
+        error.as_ref().and_then(uqa_sql::SQLError::sqlstate) == Some("53200")
+            && allocation.bytes_total < 256 << 10,
+        "{provider:?}: {error:?}; {allocation:?}"
+    );
+    drop(occupied);
+    resources.cancellation().cancel();
+    assert_eq!(
+        engine
+            .plan_explained_statement((&input).into())
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(memory.used(), baseline);
+    resources.cancellation().reset();
+    let result = engine.plan_explained_statement((&input).into()).unwrap();
+    assert!(result.reserved_bytes() > 0);
+    assert!(memory.used() > baseline);
+    drop(result);
+    assert_eq!(memory.used(), baseline);
+}

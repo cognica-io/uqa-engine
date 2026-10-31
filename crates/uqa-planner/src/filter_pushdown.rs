@@ -7,20 +7,24 @@
 //! Qualifier and CTE output-filter pushdown and specialization.
 
 use std::collections::{BTreeMap, BTreeSet};
-use uqa_sql::semantics::volatility::{
-    expr_contains_volatile_function, query_contains_volatile_function,
-};
+#[cfg(test)]
+use uqa_sql::plan::UnifiedPlan;
 use uqa_sql::semantics::{expr_contains_subquery, expr_qualifiers, flatten_and_filter_parts};
 use uqa_sql::{
     plan::{
         source_projection::QualifierFilters, ProjectionPlan, QueryBlockPlan, QueryPlan,
-        RelationalPlan, SourcePlan, UnifiedPlan,
+        RelationalPlan, SourcePlan,
     },
     SQLError, ScalarExpr,
 };
 pub mod context;
 use context::{FilterPushdownContext, FilterPushdownScope};
 mod output_boundary;
+mod specialization;
+pub use specialization::{
+    push_derived_output_filter_with_control, push_output_filter_into_query_plan_with_control,
+    specialize_query_output_filter_with_control,
+};
 pub(crate) mod owned;
 mod source_columns;
 #[cfg(test)]
@@ -211,12 +215,16 @@ pub fn push_output_filter_into_query_plan(
     plan: &QueryPlan,
     qualifier: &str,
     filter: &ScalarExpr,
-    output_columns_override: Option<&[String]>,
+    columns: Option<&[String]>,
 ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
-    if query_contains_volatile_function(context.volatility, plan)? {
-        return Ok(None);
-    }
-    push_derived_output_filter(context, plan, qualifier, filter, output_columns_override)
+    push_output_filter_into_query_plan_with_control(
+        context,
+        plan,
+        qualifier,
+        filter,
+        columns,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// Place an ordinary source predicate before its outputs. Unobserved volatile outputs do not prevent a pure predicate on other columns from selecting their input rows.
@@ -225,43 +233,16 @@ pub fn push_derived_output_filter(
     plan: &QueryPlan,
     qualifier: &str,
     filter: &ScalarExpr,
-    output_columns_override: Option<&[String]>,
+    columns: Option<&[String]>,
 ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
-    let Some(mut columns) = plan
-        .analyzed_output
-        .as_ref()
-        .filter(|schema| !schema.columns_are_open(None))
-        .map(|schema| schema.columns().to_vec())
-        .or_else(|| query_plan_output_columns(plan))
-    else {
-        return Ok(None);
-    };
-    if let Some(aliases) = output_columns_override {
-        if aliases.len() > columns.len() {
-            return Ok(None);
-        }
-        for (column, alias) in columns.iter_mut().zip(aliases) {
-            column.clone_from(alias);
-        }
-    }
-    let output_columns_override = Some(columns.as_slice());
-    if expr_contains_subquery(filter)
-        || expr_contains_volatile_function(context.volatility, filter)
-        || !output_boundary::preserves_set_types(plan, qualifier, filter, output_columns_override)
-    {
-        return Ok(None);
-    }
-    let Some(specialized) =
-        specialize_query_output_filter(context, plan, qualifier, filter, output_columns_override)
-    else {
-        return Ok(None);
-    };
-    (context.optimizer)(UnifiedPlan::Query(Box::new(specialized)))?
-        .into_query()
-        .map(Some)
-        .map_err(|_| {
-            SQLError::Internal("query optimizer changed a query into a command plan".into())
-        })
+    push_derived_output_filter_with_control(
+        context,
+        plan,
+        qualifier,
+        filter,
+        columns,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 pub fn specialize_query_output_filter(
@@ -271,15 +252,24 @@ pub fn specialize_query_output_filter(
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
 ) -> Option<QueryPlan> {
-    let mut specialized = plan.clone();
-    specialize_relational_output_filter(
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    specialize_query_output_filter_with_control(
         context,
-        &mut specialized.root,
+        plan,
         qualifier,
         filter,
         output_columns_override,
-    )?;
-    Some(specialized)
+        &control,
+    )
+    .ok()
+    .flatten()
+    .map(|query| {
+        query
+            .finish(&control)
+            .expect("ordinary specialized query")
+            .into_uncontrolled()
+            .expect("ordinary query ownership")
+    })
 }
 
 pub fn specialize_relational_output_filter(

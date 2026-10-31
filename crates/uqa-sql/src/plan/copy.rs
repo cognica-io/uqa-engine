@@ -11,6 +11,7 @@ use super::{CommandPlan, ExpressionPlan, PlanRef, QueryPlan, UnifiedPlan};
 use crate::{catalog::roles::RoleReference, SQLError, ScalarExpr};
 use uqa_core::memory::{BudgetedVec, MemoryReservation, OwnedSet, Produced, ProductionControl};
 
+mod attached_queries;
 mod command;
 mod generated_sources;
 mod lowering;

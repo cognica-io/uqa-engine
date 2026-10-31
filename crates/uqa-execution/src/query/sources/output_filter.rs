@@ -6,31 +6,14 @@
 
 //! Pass source aliases and placed predicates to the query rewrite owner.
 
-use super::{qualifier_filter, QualifierFilters, QueryPlan, SQLError, SourceContext};
-
-pub(super) struct SpecializedSource {
-    source: super::SourcePlan,
-    _memory: uqa_sql::plan::ExecutableMemory,
-}
-
-impl AsRef<super::SourcePlan> for SpecializedSource {
-    fn as_ref(&self) -> &super::SourcePlan {
-        &self.source
-    }
-}
-
-impl std::ops::Deref for SpecializedSource {
-    type Target = super::SourcePlan;
-    fn deref(&self) -> &Self::Target {
-        &self.source
-    }
-}
+use super::{QualifierFilters, QueryPlan, SQLError, SourceContext};
+use uqa_core::memory::Produced;
 
 pub(super) fn specialize_lateral_source<S: Clone>(
     context: &SourceContext<'_, S>,
     source: &super::SourcePlan,
     filters: Option<&QualifierFilters>,
-) -> Result<Option<SpecializedSource>, SQLError> {
+) -> Result<Option<Produced<super::SourcePlan>>, SQLError> {
     let super::SourcePlan::Subquery {
         body,
         alias,
@@ -50,16 +33,10 @@ pub(super) fn specialize_lateral_source<S: Clone>(
     else {
         return Ok(None);
     };
-    let mut source = source.clone();
-    let super::SourcePlan::Subquery { body, .. } = &mut source else {
-        unreachable!()
-    };
-    let (query, memory) = specialized.into_parts();
-    *body = query;
-    Ok(Some(SpecializedSource {
-        source,
-        _memory: memory,
-    }))
+    let resources = context.ctes.production_resources()?;
+    source
+        .copy_with_query(specialized, &resources.control())
+        .map(Some)
 }
 
 pub(super) fn specialize_source_filter<S: Clone>(
@@ -69,7 +46,12 @@ pub(super) fn specialize_source_filter<S: Clone>(
     aliases: &[String],
     filters: Option<&QualifierFilters>,
 ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
-    let Some(filter) = qualifier_filter(filters, qualifier) else {
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
+    let Some(filter) = uqa_sql::semantics::source_filters::qualifier_filter_with_control(
+        filters, qualifier, &control,
+    )?
+    else {
         return Ok(None);
     };
     context

@@ -274,3 +274,74 @@ fn equality_propagation_admits_selected_constants_without_mutating_source_filter
     drop(output);
     assert_eq!(budget.used(), 0);
 }
+#[test]
+fn derived_filter_specialization_admits_query_storage_and_preserves_input_owners() {
+    let fixture = Fixture::new();
+    let input = plan(&format!(
+        "SELECT x AS k,'{}' AS payload FROM (VALUES(1),(2)) v(x)",
+        "x".repeat(4 << 20)
+    ));
+    let predicate = qualified_literal_equality("q", "k", "2");
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    for recursive in [false, true] {
+        let invoke = |control: &ProductionControl<'_>| {
+            if recursive {
+                push_output_filter_into_query_plan_with_control(
+                    fixture.context(),
+                    &input,
+                    "q",
+                    &predicate,
+                    None,
+                    control,
+                )
+            } else {
+                push_derived_output_filter_with_control(
+                    fixture.context(),
+                    &input,
+                    "q",
+                    &predicate,
+                    None,
+                    control,
+                )
+            }
+        };
+        let tiny = MemoryBudget::new(32 << 10);
+        let control = ProductionControl::new(&tiny, &original, &invoking);
+        for failure in 0..3 {
+            if failure == 1 {
+                original.cancel();
+            }
+            if failure == 2 {
+                invoking.cancel();
+            }
+            let allocation = allocation_counter::measure(|| {
+                assert_eq!(
+                    invoke(&control).unwrap_err().sqlstate(),
+                    Some(if failure == 0 { "53200" } else { "57014" })
+                );
+            });
+            assert!(allocation.bytes_total < 128 << 10, "{allocation:?}");
+            assert_eq!(tiny.used(), 0);
+            original.reset();
+            invoking.reset();
+        }
+        let budget = MemoryBudget::new(32 << 20);
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let mut output = None;
+        let allocation = allocation_counter::measure(|| {
+            output = invoke(&control).unwrap();
+        });
+        let output = output.unwrap();
+        assert_eq!(allocation.bytes_current, budget.used() as i64);
+        assert_eq!(budget.used(), output.reserved_bytes());
+        assert_eq!(
+            serde_json::to_value(&block(&output).projections).unwrap(),
+            serde_json::to_value(&block(&input).projections).unwrap(),
+        );
+        assert_eq!(block(&input).r#where, None);
+        assert!(block(&output).r#where.is_some());
+        drop(output);
+        assert_eq!(budget.used(), 0);
+    }
+}

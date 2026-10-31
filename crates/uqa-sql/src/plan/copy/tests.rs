@@ -12,6 +12,7 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod attached_queries;
 mod parameters;
 mod syntax;
 

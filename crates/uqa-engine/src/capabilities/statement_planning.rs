@@ -346,6 +346,7 @@ pub(crate) fn optimize_engine_query(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn optimize_engine_plan(
     engine: &Engine,
     plan: uqa_planner::UnifiedPlan,

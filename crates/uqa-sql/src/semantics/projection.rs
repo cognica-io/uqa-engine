@@ -332,31 +332,15 @@ pub fn select_execution_stmt(
 }
 
 pub fn query_plan_output_columns_with_control(
-    mut plan: &crate::plan::QueryPlan,
+    plan: &crate::plan::QueryPlan,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
-    loop {
-        control.check()?;
-        match &plan.root {
-            crate::plan::RelationalPlan::QueryBlock(block) => {
-                let labels = projection_labels_with_control(&block.projections, &[], control)?;
-                let mut names = uqa_core::memory::ProductionVec::new(*control);
-                for label in labels.iter() {
-                    names.push_produced(control.copy_text(label)?)?;
-                }
-                return Ok(Some(names.finish()?));
-            }
-            crate::plan::RelationalPlan::SetOp { left, .. } => plan = left,
-            crate::plan::RelationalPlan::Values { rows, .. } => {
-                let Some(row) = rows.first() else {
-                    return Ok(None);
-                };
-                let mut names = uqa_core::memory::ProductionVec::new(*control);
-                for index in 1..=row.len() {
-                    names.push_produced(control.format(format_args!("column{index}"))?)?;
-                }
-                return Ok(Some(names.finish()?));
-            }
-        }
+    let mut names = uqa_core::memory::ProductionVec::new(*control);
+    if !visit_query_output_columns(plan, &[], control, &mut |name| {
+        names.push_produced(control.copy_text(name)?)?;
+        Ok(())
+    })? {
+        return Ok(None);
     }
+    Ok(Some(names.finish()?))
 }

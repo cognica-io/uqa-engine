@@ -40,8 +40,12 @@ fn with_context<T>(
                 resolution: &resolution,
                 scoped_relations: None,
             },
-            optimizer: &|plan| {
-                crate::capabilities::statement_planning::optimize_engine_plan(engine, plan)
+            optimizer: &|plan, control| {
+                uqa_planner::statement_planning::executable::optimize_retained_query(
+                    &engine.statement_planning_context(),
+                    plan,
+                    control,
+                )
             },
         },
         &control,
@@ -113,13 +117,14 @@ pub(crate) fn push_output_filter_into_query_plan(
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
 ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
-    with_context(engine, |context, _control| {
-        uqa_planner::filter_pushdown::push_output_filter_into_query_plan(
+    with_context(engine, |context, control| {
+        uqa_planner::filter_pushdown::push_output_filter_into_query_plan_with_control(
             context,
             plan,
             qualifier,
             filter,
             output_columns_override,
+            control,
         )
     })
 }
@@ -141,13 +146,14 @@ pub(crate) fn push_derived_output_filter(
     filter: &ScalarExpr,
     output_columns: Option<&[String]>,
 ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
-    with_context(engine, |context, _control| {
-        uqa_planner::filter_pushdown::push_derived_output_filter(
+    with_context(engine, |context, control| {
+        uqa_planner::filter_pushdown::push_derived_output_filter_with_control(
             context,
             plan,
             qualifier,
             filter,
             output_columns,
+            control,
         )
     })
 }

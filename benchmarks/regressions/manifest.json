@@ -34092,6 +34092,77 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "attached_queries_keep_original_roots_without_copying_replaced_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/attached_queries.rs",
+      "capability": "Derived filter and EXPLAIN optimizer ownership",
+      "workload": "Transfer replacement query roots into LATERAL source and recursive set declarations under a 64 KiB allowance while original discarded bodies contain multiple 4 MiB values.",
+      "invariant": "Admit selected metadata and scalar/query destinations before allocation, move retained child roots without copying discarded inputs, preserve predicate and effect boundaries, and retire partial or completed ownership exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "attached_query_declarations_reject_before_copying_and_retire_consumed_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/attached_queries.rs",
+      "capability": "Derived filter and EXPLAIN optimizer ownership",
+      "workload": "Reject a 4 MiB source declaration with 32 KiB available and release the consumed query on denial and either cancellation.",
+      "invariant": "Admit selected metadata and scalar/query destinations before allocation, move retained child roots without copying discarded inputs, preserve predicate and effect boundaries, and retire partial or completed ownership exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "derived_filter_specialization_admits_query_storage_and_preserves_input_owners",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/production.rs",
+      "capability": "Derived filter and EXPLAIN optimizer ownership",
+      "workload": "Derived and recursive output-filter specialization with 4 MiB query payloads, exact live storage and both cancellation scopes.",
+      "invariant": "Admit selected metadata and scalar/query destinations before allocation, move retained child roots without copying discarded inputs, preserve predicate and effect boundaries, and retire partial or completed ownership exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_derived_filter_specialization_admits_query_copies",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_filters.rs",
+      "capability": "Derived filter and EXPLAIN optimizer ownership",
+      "workload": "Derived and recursive predicate producers reject a 4 MiB query copy before allocation with 64 KiB available on every native provider.",
+      "invariant": "Admit selected metadata and scalar/query destinations before allocation, move retained child roots without copying discarded inputs, preserve predicate and effect boundaries, and retire partial or completed ownership exactly.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_explain_optimizer_admits_its_borrowed_statement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_filters.rs",
+      "capability": "Derived filter and EXPLAIN optimizer ownership",
+      "workload": "Direct EXPLAIN optimizer entry rejects a 4 MiB borrowed statement before copying with 64 KiB available on every native provider.",
+      "invariant": "Admit selected metadata and scalar/query destinations before allocation, move retained child roots without copying discarded inputs, preserve predicate and effect boundaries, and retire partial or completed ownership exactly.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

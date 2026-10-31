@@ -21,7 +21,7 @@ use uqa_core::Value;
 use uqa_sql::{
     ast::SetOpKind,
     plan::{CtePlan, ProjectionPlan, RelationalPlan, SourcePlan},
-    semantics::query_plan_output_columns,
+    semantics::query_plan_output_columns_with_control,
     SQLError, SQLParam, ScalarExpr,
 };
 
@@ -83,22 +83,26 @@ pub fn materialize_recursive_cte<S: Clone>(
     let specialized = if controls_recursion {
         None
     } else if let Some((qualifier, filter)) = output_filter {
-        let output_columns = declared_columns
-            .map(<[String]>::to_vec)
-            .or_else(|| query_plan_output_columns(left));
+        let resources = context.production_resources()?;
+        let inferred = if declared_columns.is_none() {
+            query_plan_output_columns_with_control(left, &resources.control())?
+        } else {
+            None
+        };
+        let output_columns = declared_columns.or_else(|| inferred.as_deref().map(Vec::as_slice));
         match output_columns {
             Some(output_columns) => {
                 let specialized_anchor = context.rewrites.push_output_filter(
                     left,
                     qualifier,
                     filter,
-                    Some(&output_columns),
+                    Some(output_columns),
                 )?;
                 let specialized_step = context.rewrites.push_output_filter(
                     right,
                     qualifier,
                     filter,
-                    Some(&output_columns),
+                    Some(output_columns),
                 )?;
                 match (specialized_anchor, specialized_step) {
                     (Some(anchor), Some(step)) => Some((anchor, step)),
