@@ -46,8 +46,8 @@ pub(super) fn run<S: Clone + Send + Sync + 'static>(
     } = &request;
     let mutation = &context.mutation;
     let preparation = mutation.preparation;
-    let snapshot_scope = scope.returning_statement_snapshot_scope();
-    let mut source_scope = snapshot_scope.clone();
+    let snapshot_scope = scope.returning_statement_snapshot_scope_with_control(control)?;
+    let mut source_scope = snapshot_scope.copy_with_control(control)?;
     source_scope.enable_command_progress_streaming();
     let consumer = Rc::new(InsertSelectConsumer::new(
         context.insert_source(),

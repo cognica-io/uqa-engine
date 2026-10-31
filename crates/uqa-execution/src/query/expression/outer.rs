@@ -12,49 +12,76 @@ use crate::{
 };
 use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryReservation, OwnedProductionControl, ProductionControl},
+    Value,
+};
 use uqa_sql::{expr::RowLookup, ColumnType, SQLError, SQLParam};
 
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn with_outer_row<'a>(
+#[cfg(test)]
+fn with_outer_row<'a>(
     evaluator: SharedExpressionEvaluator<'a>,
     outer: Option<&OwnedPhysicalRow>,
 ) -> SharedExpressionEvaluator<'a> {
-    outer.map_or_else(
-        || evaluator.clone(),
-        |outer| {
-            Arc::new(OuterExpressionEvaluator {
-                evaluator: evaluator.clone(),
-                outer: outer.clone(),
-                physical_schemas: std::array::from_fn(|_| OnceLock::new()),
-            })
-        },
+    with_outer_row_with_control(
+        evaluator,
+        outer.map(|row| Arc::new(row.clone())),
+        &ProductionControl::uncontrolled(),
     )
+    .expect("ordinary outer evaluator")
+}
+
+pub(crate) fn with_outer_row_with_control<'a>(
+    evaluator: SharedExpressionEvaluator<'a>,
+    outer: Option<Arc<OwnedPhysicalRow>>,
+    control: &ProductionControl<'_>,
+) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+    control.check()?;
+    let Some(outer) = outer else {
+        return Ok(evaluator);
+    };
+    let memory = control.reserve(size_of::<OuterExpressionEvaluator<'a>>())?;
+    Ok(Arc::new(OuterExpressionEvaluator {
+        evaluator,
+        outer,
+        physical_schemas: std::array::from_fn(|_| OnceLock::new()),
+        resources: control.capture(),
+        _memory: memory,
+    }))
 }
 
 struct OuterExpressionEvaluator<'a> {
     evaluator: SharedExpressionEvaluator<'a>,
-    outer: OwnedPhysicalRow,
+    outer: Arc<OwnedPhysicalRow>,
     /// A join evaluates keys in each input layout and its predicate in the joined layout. Additional callers compose an ephemeral schema instead of retaining an unbounded collection.
     physical_schemas: [OnceLock<(RowSchema, RowSchema)>; 3],
+    resources: OwnedProductionControl,
+    _memory: Option<MemoryReservation>,
 }
 
 impl OuterExpressionEvaluator<'_> {
-    fn physical_schema<'a>(&'a self, local: &'a RowSchema) -> Cow<'a, RowSchema> {
+    fn physical_schema<'a>(&'a self, local: &'a RowSchema) -> Result<Cow<'a, RowSchema>, SQLError> {
+        let control = self.resources.control();
+        control.check()?;
         for entry in &self.physical_schemas {
-            let (input, combined) = entry.get_or_init(|| {
-                (
-                    local.clone(),
-                    RowSchema::with_outer_schema(local, &self.outer.schema),
-                )
-            });
+            if entry.get().is_none() {
+                let combined =
+                    RowSchema::with_outer_schema_with_control(local, &self.outer.schema, &control)?;
+                let _ = entry.set((local.clone(), combined));
+            }
+            let (input, combined) = entry.get().expect("published outer layout");
             if input.shares_index(local) {
-                return Cow::Borrowed(combined);
+                return Ok(Cow::Borrowed(combined));
             }
         }
-        Cow::Owned(RowSchema::with_outer_schema(local, &self.outer.schema))
+        Ok(Cow::Owned(RowSchema::with_outer_schema_with_control(
+            local,
+            &self.outer.schema,
+            &control,
+        )?))
     }
 }
 
@@ -77,7 +104,7 @@ impl ExpressionEvaluator for OuterExpressionEvaluator<'_> {
     ) -> ExecResult<Value> {
         self.evaluator.evaluate_physical(
             expression,
-            &self.physical_schema(schema),
+            self.physical_schema(schema)?.as_ref(),
             &PhysicalRow::concat(row, &self.outer.row),
         )
     }
@@ -91,7 +118,7 @@ impl ExpressionEvaluator for OuterExpressionEvaluator<'_> {
     ) -> ExecResult<Value> {
         self.evaluator.evaluate_physical_with_function_states(
             expression,
-            &self.physical_schema(schema),
+            self.physical_schema(schema)?.as_ref(),
             &PhysicalRow::concat(row, &self.outer.row),
             states,
         )
@@ -110,10 +137,32 @@ impl ExpressionEvaluator for OuterExpressionEvaluator<'_> {
         expression: &ScalarExpr,
         schema: &RowSchema,
     ) -> Result<Option<ColumnType>, SQLError> {
-        self.evaluator.expression_type(
-            expression,
-            &RowSchema::with_outer_schema(schema, &self.outer.schema),
-        )
+        self.evaluator
+            .expression_type(expression, self.physical_schema(schema)?.as_ref())
+    }
+
+    fn expression_type_with_control(
+        &self,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        let schema =
+            RowSchema::with_outer_schema_with_control(schema, &self.outer.schema, control)?;
+        self.evaluator
+            .expression_type_with_control(expression, &schema, control)
+    }
+
+    fn bind_type_introspection_owned(
+        &self,
+        expression: uqa_sql::plan::OwnedScalarExpr,
+        schema: &RowSchema,
+        control: &ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
+        let schema =
+            RowSchema::with_outer_schema_with_control(schema, &self.outer.schema, control)?;
+        self.evaluator
+            .bind_type_introspection_owned(expression, &schema, control)
     }
 
     fn bind_type_introspection(&self, expression: ScalarExpr, schema: &RowSchema) -> ScalarExpr {

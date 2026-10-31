@@ -108,7 +108,10 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 stmt.relations_bound,
             )?);
             if let Some(parent) = inherited_ctes {
-                ctes.inherit_cte_bindings(parent);
+                ctes.inherit_cte_bindings_with_control(
+                    parent,
+                    &context.query.source.ctes.production_resources()?.control(),
+                )?;
             }
             ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
@@ -183,7 +186,9 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                     .as_ref()
                     .and_then(|queries| queries.original.as_deref())
                     .unwrap_or(source);
-                let mut source_scope = ctes.returning_statement_snapshot_scope();
+                let mut source_scope = ctes.returning_statement_snapshot_scope_with_control(
+                    &context.query.source.ctes.production_resources()?.control(),
+                )?;
                 source_scope.enable_command_progress_streaming();
                 crate::query::statement::execute_query_plan_output(
                     &read_context.query,

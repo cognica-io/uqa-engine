@@ -129,7 +129,10 @@ impl PhysicalSubqueryRunner for Context {
 }
 
 impl QueryExpressionContext for Context {
-    fn expression_evaluator<'a>(&'a self, _: &'a [SQLParam]) -> SharedExpressionEvaluator<'a> {
+    fn expression_evaluator<'a>(
+        &'a self,
+        _: &'a [SQLParam],
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
         panic!("unexpected nested evaluator")
     }
     fn subquery_plans(&self) -> &[QueryPlan] {
@@ -262,5 +265,63 @@ fn binding_errors_and_structural_operators_bypass_name_interception() {
     for result in evaluate_both(&context, &expression) {
         assert_eq!(result.unwrap(), Value::Int(0));
     }
+    assert!(context.events.lock().is_empty());
+}
+
+#[test]
+fn shared_and_borrowed_evaluators_admit_exact_headers_and_release_last_readers() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let context = Arc::new(Context::default());
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let bytes = size_of::<ScopedExpressionEvaluator<'_>>();
+    for borrowed in [false, true] {
+        for limit in [bytes - 1, bytes] {
+            let budget = MemoryBudget::new(limit);
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            let capture = || {
+                if borrowed {
+                    ScopedExpressionEvaluator::borrowed_with_control(
+                        context.as_ref(),
+                        &[],
+                        invoking.clone(),
+                        &control,
+                    )
+                } else {
+                    ScopedExpressionEvaluator::shared_with_control(
+                        context.clone(),
+                        &[],
+                        invoking.clone(),
+                        &control,
+                    )
+                }
+            };
+            if limit < bytes {
+                assert_eq!(capture().err().unwrap().sqlstate(), Some("53200"));
+                assert_eq!(budget.used(), 0);
+                continue;
+            }
+            let evaluator = capture().unwrap();
+            assert_eq!(budget.used(), bytes);
+            assert_eq!(
+                evaluator
+                    .evaluate(&ScalarExpr::Literal(Value::Int(42)), &ResultRow::new())
+                    .unwrap(),
+                Value::Int(42)
+            );
+            let reader = evaluator.clone();
+            drop(evaluator);
+            assert_eq!(budget.used(), bytes);
+            drop(reader);
+            assert_eq!(budget.used(), 0);
+            for token in [&original, &invoking] {
+                token.cancel();
+                assert_eq!(capture().err().unwrap().sqlstate(), Some("57014"));
+                assert_eq!(budget.used(), 0);
+                token.reset();
+            }
+        }
+    }
+    assert_eq!(Arc::strong_count(&context), 1);
     assert!(context.events.lock().is_empty());
 }

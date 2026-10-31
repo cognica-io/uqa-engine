@@ -91,13 +91,12 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
         .diagnostics
         .observe(source, "Facet Scan")?;
     if let Some(predicate) = predicate {
-        source = Box::new(Filter::with_evaluator(
-            source,
-            predicate,
+        let (input, evaluator) = crate::physical::construction::OperatorBuild::run(source, |_| {
             context
                 .relational
-                .evaluator(execution.params, execution.ctes),
-        ));
+                .evaluator(execution.params, execution.ctes)
+        })?;
+        source = Box::new(Filter::with_evaluator(input, predicate, evaluator));
     }
 
     let facet_columns = if include_field {
@@ -180,14 +179,14 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
             nulls_first: None,
         })
         .collect();
+    let (aggregate, evaluator) =
+        crate::physical::construction::OperatorBuild::run(aggregate, |_| {
+            context
+                .relational
+                .evaluator(execution.params, execution.ctes)
+        })?;
     let sorted: Box<dyn PhysicalOperator + '_> = Box::new(ExternalSort::new(
-        aggregate,
-        sort_keys,
-        context
-            .relational
-            .evaluator(execution.params, execution.ctes),
-        None,
-        work_mem,
+        aggregate, sort_keys, evaluator, None, work_mem,
     ));
     let mut columns = facet_columns;
     columns.push("facet_count".into());

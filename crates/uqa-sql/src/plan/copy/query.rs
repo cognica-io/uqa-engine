@@ -25,6 +25,15 @@ impl Copying<'_> {
         query: &QueryPlan,
         root: impl FnOnce(&mut Self) -> Result<RelationalPlan>,
     ) -> Result<QueryPlan> {
+        self.query_fields_with_ctes(query, &query.ctes, root)
+    }
+
+    pub(super) fn query_fields_with_ctes(
+        &mut self,
+        query: &QueryPlan,
+        ctes: &[CtePlan],
+        root: impl FnOnce(&mut Self) -> Result<RelationalPlan>,
+    ) -> Result<QueryPlan> {
         self.check()?;
         Ok(QueryPlan {
             analyzed_output: query.analyzed_output.clone(),
@@ -40,7 +49,7 @@ impl Copying<'_> {
             relation_privilege_subject: self.field("relation_privilege_subject", |copying| {
                 copying.role(query.relation_privilege_subject.as_ref())
             })?,
-            ctes: self.field("ctes", |copying| copying.map(query.ctes.iter(), Self::cte))?,
+            ctes: self.field("ctes", |copying| copying.map(ctes.iter(), Self::cte))?,
             root: self.field("root", root)?,
         })
     }
@@ -103,7 +112,7 @@ impl Copying<'_> {
         })
     }
 
-    fn relational(&mut self, root: &RelationalPlan) -> Result<RelationalPlan> {
+    pub(super) fn relational(&mut self, root: &RelationalPlan) -> Result<RelationalPlan> {
         self.check()?;
         Ok(match root {
             RelationalPlan::QueryBlock(block) => {
@@ -246,7 +255,7 @@ impl Copying<'_> {
         })
     }
 
-    fn order(&mut self, order: &OrderPlan) -> Result<OrderPlan> {
+    pub(super) fn order(&mut self, order: &OrderPlan) -> Result<OrderPlan> {
         Ok(OrderPlan {
             expr: self.scalar(&order.expr)?,
             descending: order.descending,

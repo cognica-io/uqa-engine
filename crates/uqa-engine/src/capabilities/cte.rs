@@ -35,7 +35,7 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
         params: &[SQLParam],
         ctes: &CteScope,
     ) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator>>, SQLError> {
-        self.retained_query_operator(query.clone(), params.to_vec(), ctes.clone())
+        self.retained_query_operator(query, params, ctes)
     }
     fn execute_query(
         &self,

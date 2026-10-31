@@ -82,7 +82,10 @@ impl PhysicalSubqueryRunner for Runtime {
     }
 }
 impl QueryExpressionContext for Runtime {
-    fn expression_evaluator<'a>(&'a self, _: &'a [SQLParam]) -> SharedExpressionEvaluator<'a> {
+    fn expression_evaluator<'a>(
+        &'a self,
+        _: &'a [SQLParam],
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
         panic!("unexpected nested evaluator")
     }
     fn subquery_plans(&self) -> &[QueryPlan] {

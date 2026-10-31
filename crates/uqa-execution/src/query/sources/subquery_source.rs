@@ -65,9 +65,9 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                     column_aliases,
                     ctes.lock_identities.emit,
                 );
-                return Ok(attach_closed_qualifier_filter(
+                return attach_closed_qualifier_filter(
                     operator, qualifier, filters, context, params, ctes,
-                ));
+                );
             }
             let operator = deferred_subquery_operator(context, body, params, ctes)?;
             if let SourcePlan::Subquery {
@@ -89,9 +89,7 @@ pub(super) fn build_subquery_source_operator<'a, S: Clone + Send + Sync + 'stati
                 column_aliases,
                 ctes.lock_identities.emit,
             );
-            Ok(attach_closed_qualifier_filter(
-                operator, qualifier, filters, context, params, ctes,
-            ))
+            attach_closed_qualifier_filter(operator, qualifier, filters, context, params, ctes)
         }
         _ => unreachable!("subquery source builder called for a different source kind"),
     }

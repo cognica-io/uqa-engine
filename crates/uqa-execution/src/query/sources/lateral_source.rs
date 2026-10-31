@@ -39,7 +39,7 @@ pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>
             .collect(),
         _ => return Ok(()),
     };
-    let hook = context.relational.expression_scope(ctes.clone());
+    let hook = context.relational.expression_scope(ctes)?;
     for (name, binding, args) in calls {
         match resolve_user_table_function(
             context.relational.catalog,
@@ -105,17 +105,18 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
 impl<'a, S: Clone + Send + Sync + 'static> QueryLateralSource<'a, S> {
     fn expression_runtime(
         &self,
-    ) -> std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a> {
+    ) -> Result<std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>, SQLError>
+    {
         if let Some(saved) = self.expression_runtime.get() {
             if saved.routine_description_scope().is_some() {
-                return std::sync::Arc::clone(saved);
+                return Ok(std::sync::Arc::clone(saved));
             }
         }
-        let hook = self.context.relational.expression_scope(self.ctes.clone());
+        let hook = self.context.relational.expression_scope(&self.ctes)?;
         if hook.routine_description_scope().is_some() {
             let _ = self.expression_runtime.set(std::sync::Arc::clone(&hook));
         }
-        hook
+        Ok(hook)
     }
     fn function_rows(
         &self,
@@ -135,7 +136,7 @@ impl<'a, S: Clone + Send + Sync + 'static> QueryLateralSource<'a, S> {
         else {
             return Ok(None);
         };
-        let hook = self.expression_runtime();
+        let hook = self.expression_runtime()?;
         let retained_function = binding
             .as_ref()
             .filter(|binding| !binding.builtin && left_row.schema == self.input_schema)
@@ -306,6 +307,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
         }
         let group_runtime = matches!(self.right, SourcePlan::FunctionGroup { .. })
             .then(|| self.expression_runtime())
+            .transpose()?
             .filter(|runtime| runtime.routine_description_scope().is_some());
         let operator = if let Some(runtime) = group_runtime {
             let input = self.function_group.operator(

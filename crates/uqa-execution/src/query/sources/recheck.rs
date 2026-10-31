@@ -62,32 +62,35 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
     if let Some(outer_row) = ctes.row_lock_outer_row() {
         operator = Box::new(crate::ScopeOverlay::new(operator, outer_row.clone()));
     }
-    let predicate =
-        context
-            .planning
-            .residual_filter(statement, from, qualifier_filters.as_ref(), ctes)?;
-    let evaluator = context.relational.evaluator(params, ctes);
-    if let Some(predicate) = predicate {
-        operator = match context
-            .relational
-            .expressions
-            .prepare_predicate(&predicate, params, ctes)?
-        {
-            Some(prepared) => Box::new(crate::Filter::with_row_predicate(operator, prepared)),
-            None => Box::new(crate::Filter::with_evaluator(
-                operator,
-                predicate,
-                Arc::clone(&evaluator),
-            )),
-        };
-    }
-    operator = if projections.is_empty() {
-        operator
-    } else {
-        Box::new(
-            Project::appending_target_evaluator(operator, projections.to_vec(), evaluator)
-                .with_memory_budget(context.relational.runtime.work_mem_bytes()?),
-        ) as Box<dyn PhysicalOperator + 'a>
-    };
-    Ok(operator)
+    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+        let predicate =
+            context
+                .planning
+                .residual_filter(statement, from, qualifier_filters.as_ref(), ctes)?;
+        let evaluator = context.relational.evaluator(params, ctes)?;
+        if let Some(predicate) = predicate {
+            let prepared = context
+                .relational
+                .expressions
+                .prepare_predicate(&predicate, params, ctes)?;
+            operator.wrap(|input| match prepared {
+                Some(prepared) => Box::new(crate::Filter::with_row_predicate(input, prepared)),
+                None => Box::new(crate::Filter::with_evaluator(
+                    input,
+                    predicate,
+                    Arc::clone(&evaluator),
+                )),
+            });
+        }
+        if !projections.is_empty() {
+            let work_mem = context.relational.runtime.work_mem_bytes()?;
+            operator.wrap(|input| {
+                Box::new(
+                    Project::appending_target_evaluator(input, projections.to_vec(), evaluator)
+                        .with_memory_budget(work_mem),
+                )
+            });
+        }
+        Ok(())
+    })
 }

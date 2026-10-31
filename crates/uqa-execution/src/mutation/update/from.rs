@@ -84,7 +84,9 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         target_rows.capture_table(table_index, source.read_documents().as_ref(), &changes)?;
     }
     let target_rows = target_rows.finish()?;
-    let snapshot_ctes = ctes.returning_statement_snapshot_scope();
+    let snapshot_ctes = ctes.returning_statement_snapshot_scope_with_control(
+        &context.query.source.ctes.production_resources()?.control(),
+    )?;
     let mut qualification = MutationPredicate::new(
         read_context
             .mutation

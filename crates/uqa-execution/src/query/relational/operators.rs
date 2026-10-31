@@ -51,7 +51,7 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
     crate::physical::construction::OperatorBuild::run(operator, |operator| {
         let resources = context.expressions.production_resources()?;
         let control = resources.control();
-        let type_resolver = context.expression_scope(ctes.clone());
+        let type_resolver = context.expression_scope(ctes)?;
         let mut resjunk = RelationalResjunk::default();
         let expanded_statement = statement
             .projections
@@ -118,7 +118,7 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                 )));
             }
         }
-        let evaluator = context.evaluator(params, ctes);
+        let evaluator = context.evaluator(params, ctes)?;
         operator.attach(|operator| {
             attach_relational_filter(context, operator, predicate, params, ctes, &evaluator)
         })?;
@@ -504,7 +504,7 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                 let aggregate_row_schema =
                     crate::RowSchema::with_types(aggregate_schema.clone(), aggregate_types.clone());
                 let aggregate_executor = PhysicalAggregateExecutor::with_outer_scope(
-                    context.expression_scope(ctes.clone()),
+                    context.expression_scope(ctes)?,
                     &output_plan.statement,
                     params,
                     input_schema,

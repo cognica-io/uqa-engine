@@ -10,9 +10,10 @@ use crate::catalog::CatalogReadView;
 use crate::row_locks::recheck::{
     recheck_storage_names_match, RecheckDoc, RecheckSourceRow, RowLockRecheckPins,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{atomic::AtomicU64, Arc};
 use uqa_core::memory::{Produced, ProductionControl};
+use uqa_sql::binding::production::{BindingMap, BindingNameSet};
 use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::SQLError;
@@ -22,6 +23,7 @@ mod cte;
 mod definitions;
 mod producers;
 mod production;
+mod recursive;
 pub use production::{CteRowsIter, CteRowsMap};
 #[cfg(test)]
 mod query_arenas;
@@ -44,16 +46,16 @@ type ScalarSubqueryCache = parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqu
 pub struct CteScope<S: Clone = ()> {
     producers: producers::CteProducers,
     pub rows: CteRowsMap,
-    deferred_ctes: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
-    definition_scopes: BTreeMap<String, Arc<definitions::DefinitionBindings>>,
-    folded_ctes: BTreeSet<String>,
-    pub non_returning_ctes: BTreeSet<String>,
+    deferred_ctes: BindingMap<uqa_sql::plan::RetainedCtePlan>,
+    definition_scopes: BindingMap<Arc<definitions::DefinitionBindings>>,
+    folded_ctes: BindingNameSet,
+    pub non_returning_ctes: BindingNameSet,
     pub scalar_subqueries: uqa_sql::plan::RetainedQueryArena,
     pub(crate) source_outer_rewrites: Option<SourceOuterRewrites>,
     pub lock_identities: LockIdentityOptions,
-    row_lock: Option<Box<RowLockScopeState>>,
-    visible_cte_names: BTreeSet<String>,
-    recursive_control_widths: BTreeMap<String, usize>,
+    row_lock: Option<RowLockScopeState>,
+    visible_cte_names: BindingNameSet,
+    recursive_control_widths: BindingMap<usize>,
     scalar_subquery_arena: u64,
     read_command_overlay: bool,
     stream_command_progress: bool,

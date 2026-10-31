@@ -73,14 +73,21 @@ pub fn combine_set_spills_with_order_output<'a, S: Clone + 'static>(
         Box::new(crate::SharedSpillScan::new(execution.rhs)),
         public_positions(),
     ));
+    let (left, right, (work_mem, evaluator)) =
+        crate::physical::construction::OperatorBuild::pair(left, right, |_, _| {
+            Ok((
+                physical_work_mem_bytes(context.runtime)?,
+                context.evaluator(params, ctes)?,
+            ))
+        })?;
     let mut operation: Box<dyn PhysicalOperator + '_> = Box::new(
         ExternalSetOperation::new_with_evaluator(
             left,
             right,
             execution.kind,
             execution.all,
-            physical_work_mem_bytes(context.runtime)?,
-            context.evaluator(params, ctes),
+            work_mem,
+            evaluator.clone(),
         )
         .map_err(physical_exec_error)?,
     );
@@ -94,7 +101,7 @@ pub fn combine_set_spills_with_order_output<'a, S: Clone + 'static>(
             params,
             ctes,
             context.runtime,
-            context.evaluator(params, ctes),
+            evaluator,
             None,
         )?;
     }

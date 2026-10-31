@@ -42,7 +42,7 @@ impl<'a> PreparedCheck<'a> {
             &expression.subqueries,
             &arena_resources.control(),
         )?;
-        let hook = inputs.expressions.bind_scope(scope);
+        let hook = inputs.expressions.bind_scope(&scope)?;
         let schema = RowSchema::with_types(
             vec!["value".into()],
             vec![Some(domain.definition.base.clone())],

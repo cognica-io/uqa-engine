@@ -135,7 +135,13 @@ pub fn build_returning_row<S: Clone + 'static>(
         input.aliases,
         returning,
     )?;
-    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    let snapshot_scope = ctes.returning_statement_snapshot_scope_with_control(
+        &services
+            .relational
+            .expressions
+            .production_resources()?
+            .control(),
+    )?;
     crate::query::relational::project_row::build_projection_physical_row_with_ctes(
         services.relational,
         &row,
@@ -160,7 +166,13 @@ pub fn build_returning_value_row<S: Clone + 'static>(
         input.aliases,
         returning,
     )?;
-    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    let snapshot_scope = ctes.returning_statement_snapshot_scope_with_control(
+        &services
+            .relational
+            .expressions
+            .production_resources()?
+            .control(),
+    )?;
     crate::query::relational::project_row::build_projection_physical_row_with_ctes(
         services.relational,
         &row,

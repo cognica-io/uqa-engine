@@ -60,6 +60,11 @@ impl<V> BindingMap<V> {
     pub fn get(&self, name: &str) -> Option<&V> {
         self.entries.get(name)
     }
+    /// Compare a borrowed decoded SQL name directly with ordered keys, including escaped quoted references.
+    pub fn get_name(&self, name: uqa_core::RelationName<'_>) -> Option<&V> {
+        self.entries
+            .get_by(|key| name.cmp(&uqa_core::RelationName::decoded(&key.0)))
+    }
     pub fn get_mut(&mut self, name: &str) -> Option<&mut V> {
         self.entries.get_mut(name)
     }
@@ -69,12 +74,12 @@ impl<V> BindingMap<V> {
     pub fn remove(&mut self, name: &str) -> Option<V> {
         self.entries.remove(name)
     }
-    pub(in crate::binding) fn extract(&mut self, name: &str) -> Self {
+    pub fn extract(&mut self, name: &str) -> Self {
         Self {
             entries: self.entries.extract(name),
         }
     }
-    pub(in crate::binding) fn append(&mut self, entries: Self) {
+    pub fn append(&mut self, entries: Self) {
         self.entries.append(entries.entries);
     }
     pub fn retain(&mut self, mut keep: impl FnMut(&String, &mut V) -> bool) {
@@ -185,16 +190,19 @@ impl BindingNameSet {
     pub fn contains(&self, name: &str) -> bool {
         self.0.contains_key(name)
     }
+    pub fn contains_name(&self, name: uqa_core::RelationName<'_>) -> bool {
+        self.0.get_name(name).is_some()
+    }
     pub fn insert(&mut self, name: String) -> bool {
         self.0.insert(name, ()).is_none()
     }
     pub fn remove(&mut self, name: &str) -> bool {
         self.0.remove(name).is_some()
     }
-    pub(in crate::binding) fn extract(&mut self, name: &str) -> Self {
+    pub fn extract(&mut self, name: &str) -> Self {
         Self(self.0.extract(name))
     }
-    pub(in crate::binding) fn append(&mut self, entries: Self) {
+    pub fn append(&mut self, entries: Self) {
         self.0.append(entries.0);
     }
     pub fn clear(&mut self) {
@@ -224,3 +232,30 @@ impl FromIterator<String> for BindingNameSet {
         Self(entries.into_iter().map(|name| (name, ())).collect())
     }
 }
+
+impl Extend<String> for BindingNameSet {
+    fn extend<I: IntoIterator<Item = String>>(&mut self, names: I) {
+        for name in names {
+            self.insert(name);
+        }
+    }
+}
+impl<'a> IntoIterator for &'a BindingNameSet {
+    type Item = &'a String;
+    type IntoIter = BindingNames<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        BindingNames(self.0.iter())
+    }
+}
+pub struct BindingNames<'a>(BindingIter<'a, ()>);
+impl<'a> Iterator for BindingNames<'a> {
+    type Item = &'a String;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(name, ())| name)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+impl ExactSizeIterator for BindingNames<'_> {}
+impl std::iter::FusedIterator for BindingNames<'_> {}

@@ -111,8 +111,8 @@ impl RoutineExpressions for Engine {
         scope.scalar_subqueries =
             uqa_sql::plan::RetainedQueryArena::capture(&plan.subqueries, &resources.control())?;
         let hook = uqa_execution::query::relational::context::QueryExpressionFactory::bind_scope(
-            self, scope,
-        );
+            self, &scope,
+        )?;
         uqa_execution::scalar_type_with_resolver(
             &plan.scalar,
             &uqa_execution::RowSchema::default(),

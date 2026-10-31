@@ -6,10 +6,11 @@
 
 //! Native scope capture admits its new immutable namespace, shared execution state and lexical row names before construction.
 
-use super::{CteScope, LockIdentityOptions};
+use super::{BindingMap, BindingNameSet, CteScope, LockIdentityOptions};
+mod copying;
 use crate::{catalog::CatalogReadView, query::cte::rows::CteRows};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     sync::{atomic::AtomicU64, Arc},
 };
 use uqa_core::memory::{Produced, ProductionControl};
@@ -36,16 +37,16 @@ impl<S: Clone> CteScope<S> {
         Ok(Self {
             producers: super::producers::CteProducers::with_control(control)?,
             rows: CteRowsMap::new(),
-            deferred_ctes: BTreeMap::new(),
-            definition_scopes: BTreeMap::new(),
-            folded_ctes: BTreeSet::new(),
-            non_returning_ctes: BTreeSet::new(),
+            deferred_ctes: BindingMap::new(),
+            definition_scopes: BindingMap::new(),
+            folded_ctes: BindingNameSet::new(),
+            non_returning_ctes: BindingNameSet::new(),
             scalar_subqueries: uqa_sql::plan::RetainedQueryArena::default(),
             source_outer_rewrites: None,
             lock_identities: LockIdentityOptions::default(),
             row_lock: None,
-            visible_cte_names: BTreeSet::new(),
-            recursive_control_widths: BTreeMap::new(),
+            visible_cte_names: BindingNameSet::new(),
+            recursive_control_widths: BindingMap::new(),
             scalar_subquery_arena: 0,
             read_command_overlay: true,
             stream_command_progress: false,
@@ -104,15 +105,36 @@ impl<S: Clone> CteScope<S> {
         rows: crate::SharedSpill,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
+        self.insert_materialized_with_control(name, rows, true, control)
+    }
+
+    /// Publish materialized rows and their command visibility together after all new name storage is admitted.
+    pub fn insert_materialized_with_control(
+        &mut self,
+        name: &str,
+        rows: crate::SharedSpill,
+        returns_rows: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let mut non_returning = BindingNameSet::new();
+        if !returns_rows && !self.non_returning_ctes.contains(name) {
+            non_returning.insert_with_control(name, control)?;
+        }
         self.rows
             .insert_with_control(name, CteRows::Complete(rows), control)?;
         self.deferred_ctes.remove(name);
         self.definition_scopes.remove(name);
         self.folded_ctes.remove(name);
-        self.non_returning_ctes.remove(name);
+        if returns_rows {
+            self.non_returning_ctes.remove(name);
+        }
+        self.non_returning_ctes.append(non_returning);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod lexical_tests;

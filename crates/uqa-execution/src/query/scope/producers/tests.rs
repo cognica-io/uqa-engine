@@ -304,3 +304,5 @@ fn retired_or_expired_owner_closes_rejected_input_without_losing_its_error() {
         drop(scope);
     }
 }
+
+mod production;

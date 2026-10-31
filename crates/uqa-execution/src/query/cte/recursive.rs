@@ -162,10 +162,18 @@ pub fn materialize_recursive_cte<S: Clone>(
         iterations += 1;
 
         append_shared_spill(&mut accumulated, &working)?;
-        ctes.insert_shared(cte.name.clone(), working);
-        let step_result = context.queries.execute_query(step_plan, params, ctes);
-        ctes.remove_materialized(&cte.name);
-        let step = step_result?;
+        let step = {
+            let resources = context.production_resources()?;
+            let mut scope = ctes.enter_recursive_cte_with_control(
+                &cte.name,
+                working,
+                None,
+                &resources.control(),
+            )?;
+            context
+                .queries
+                .execute_query(step_plan, params, &mut scope)?
+        };
         working = alias_query_output_to_shared(context, step, &anchor_columns)?;
         if let Some(seen) = seen.as_mut() {
             working = filter_new_recursive_rows(
@@ -282,14 +290,18 @@ fn materialize_controlled_recursive_cte<S: Clone>(
             )));
         }
         iterations += 1;
-        ctes.insert_shared(cte.name.clone(), expandable);
-        let previous_width = ctes.set_recursive_control_width(cte.name.clone(), base_schema.len());
-        let step_result = context
-            .queries
-            .execute_query(&controlled_step.plan, params, ctes);
-        ctes.restore_recursive_control_width(&cte.name, previous_width);
-        ctes.remove_materialized(&cte.name);
-        let step = step_result?;
+        let step = {
+            let resources = context.production_resources()?;
+            let mut scope = ctes.enter_recursive_cte_with_control(
+                &cte.name,
+                expandable,
+                Some(base_schema.len()),
+                &resources.control(),
+            )?;
+            context
+                .queries
+                .execute_query(&controlled_step.plan, params, &mut scope)?
+        };
         let step = alias_query_output_to_shared(context, step, &base_columns)?;
         (emitted, expandable) = annotate_recursive_step_rows(
             &step,

@@ -49,7 +49,7 @@ pub fn eval_lowered_expression_with_type<S: Clone + 'static>(
         &expression.subqueries,
         &arena_resources.control(),
     )?;
-    let hook = factory.bind_scope(scope);
+    let hook = factory.bind_scope(&scope)?;
     let declared_type = crate::scalar_type_with_resolver(
         &expression.scalar,
         &RowSchema::default(),
@@ -160,7 +160,7 @@ impl<'a> PreparedCatalogExpression<'a> {
             &expression.subqueries,
             &arena_resources.control(),
         )?;
-        let hook = factory.bind_scope(scope);
+        let hook = factory.bind_scope(&scope)?;
         let source =
             crate::scalar_type_with_resolver(&expression.scalar, schema, params, hook.as_ref())?;
         expression.scalar = crate::bind_type_introspection_with_resolver(
@@ -295,12 +295,15 @@ mod tests {
         }
         fn bind_scope(
             &self,
-            scope: CteScope,
-        ) -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_> {
+            scope: &CteScope,
+        ) -> Result<Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_>, SQLError>
+        {
             assert!(scope.scalar_subqueries.is_empty());
             self.binds
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Arc::new(crate::query::relational::values::test_support::Services)
+            Ok(Arc::new(
+                crate::query::relational::values::test_support::Services,
+            ))
         }
         fn optimize_catalog_scalar(&self, _: &mut crate::ScalarExpr) -> Result<(), SQLError> {
             self.optimizations

@@ -58,7 +58,7 @@ impl<'a, S: Clone> LockRowsRecheckInput<'a, S> {
             .clone_with_control(&self.resources.control())?;
         Ok(LockRowsRecheckSource {
             statement,
-            ctes: self.ctes.clone(),
+            ctes: self.ctes.copy_with_control(&self.resources.control())?,
             ordered: self.ordered,
             projections: self.projections,
         })

@@ -130,20 +130,21 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                     .iter()
                     .filter_map(|qualifier| qualifier_filter(filters, qualifier)),
             )
-            .map(|predicate| {
+            .map(|predicate| -> Result<_, SQLError> {
                 if let Some(column) = qualifiers
                     .iter()
                     .find_map(|qualifier| unproduced_column(&predicate, qualifier, &right_schema))
                 {
-                    return Err(column);
+                    return Ok(Err(column));
                 }
-                let evaluator = context.relational.evaluator(params, ctes);
+                let evaluator = context.relational.evaluator(params, ctes)?;
                 let predicate = evaluator.bind_type_introspection(predicate, &right_schema);
-                Ok((
+                Ok(Ok((
                     crate::scalar::PreparedExpressions::scalar(predicate),
                     evaluator,
-                ))
-            });
+                )))
+            })
+            .transpose()?;
             let source = QueryLateralSource {
                 context: *context,
                 right: right.clone(),
@@ -163,12 +164,11 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                 }),
                 function_arguments: match right {
                     SourcePlan::Function { args, .. } => {
+                        let evaluator = context.relational.evaluator(params, ctes)?;
                         Some(crate::scalar::PreparedExpressions::scalars(
                             args.iter()
                                 .map(|argument| {
-                                    context
-                                        .relational
-                                        .evaluator(params, ctes)
+                                    evaluator
                                         .bind_type_introspection(argument.clone(), &input_schema)
                                 })
                                 .collect(),
@@ -181,7 +181,7 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                 expression_runtime: std::sync::OnceLock::new(),
                 function_group: super::function_source::PreparedFunctionGroup::default(),
                 params,
-                ctes: ctes.clone(),
+                ctes: ctes.copy_with_control(&context.ctes.production_resources()?.control())?,
                 input_schema: input_schema.clone(),
                 right_schema: right_schema.clone(),
                 pinned_right,

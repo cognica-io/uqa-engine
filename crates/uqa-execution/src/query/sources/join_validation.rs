@@ -16,13 +16,16 @@ pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<(Option<ScalarExpr>, crate::SharedExpressionEvaluator<'a>), SQLError> {
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
     let Some(on) = on else {
         return Ok((
             None,
-            crate::query::expression::with_outer_row(
-                context.relational.evaluator(params, ctes),
-                ctes.row_lock_outer_row(),
-            ),
+            crate::query::expression::with_outer_row_with_control(
+                context.relational.evaluator(params, ctes)?,
+                ctes.outer_row_binding(),
+                &control,
+            )?,
         ));
     };
     let schema = RowSchema::join(left, right, std::iter::empty::<String>());
@@ -37,7 +40,7 @@ pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
             &schema,
             &mut subqueries,
         );
-        rewritten_scope = ctes.clone();
+        rewritten_scope = ctes.copy_with_control(&control)?;
         let arena_resources = context.ctes.production_resources()?;
         arena_scope = rewritten_scope
             .enter_scalar_subqueries_with_control(&subqueries, &arena_resources.control())?;
@@ -45,10 +48,11 @@ pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
     } else {
         ctes
     };
-    let evaluator = crate::query::expression::with_outer_row(
-        context.relational.evaluator(params, ctes),
-        ctes.row_lock_outer_row(),
-    );
+    let evaluator = crate::query::expression::with_outer_row_with_control(
+        context.relational.evaluator(params, ctes)?,
+        ctes.outer_row_binding(),
+        &control,
+    )?;
     evaluator.expression_type(&on, &schema)?;
     Ok((
         Some(evaluator.bind_type_introspection(on, &schema)),

@@ -55,9 +55,9 @@ impl QueryExpressionContext for NoSequences {
     fn expression_evaluator<'a>(
         &'a self,
         params: &'a [SQLParam],
-    ) -> crate::SharedExpressionEvaluator<'a> {
+    ) -> Result<crate::SharedExpressionEvaluator<'a>, SQLError> {
         assert!(params.is_empty());
-        Arc::new(NoSequences)
+        Ok(Arc::new(NoSequences))
     }
 
     fn subquery_plans(&self) -> &[QueryPlan] {

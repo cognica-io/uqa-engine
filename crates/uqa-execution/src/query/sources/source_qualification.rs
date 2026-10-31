@@ -20,17 +20,20 @@ pub(super) fn execute_view_plan_output_with_parent_cache<S: Clone + 'static>(
     ctes: &mut CteScope<S>,
     local_cte_names: &BTreeSet<String>,
 ) -> Result<QueryOutput, SQLError> {
-    let saved = crate::query::scope::bindings::save_cte_names(ctes, local_cte_names);
-    let result = if let Some(outer) = ctes.row_lock_outer_row() {
+    let resources = context.ctes.production_resources()?;
+    let mut scope = ctes.enter_cte_bindings_with_control(
+        local_cte_names.iter().map(String::as_str),
+        &resources.control(),
+    )?;
+    let ctes = &mut *scope;
+    if let Some(outer) = ctes.row_lock_outer_row() {
         context
             .ctes
             .queries
             .execute_lateral_query(plan, outer, params, ctes)
     } else {
         context.ctes.queries.execute_query(plan, params, ctes)
-    };
-    crate::query::scope::bindings::restore_cte_names(ctes, saved);
-    result
+    }
 }
 
 pub(super) fn attach_qualifier_filter<'a, S: Clone + 'static>(
@@ -40,15 +43,15 @@ pub(super) fn attach_qualifier_filter<'a, S: Clone + 'static>(
     context: &SourceContext<'a, S>,
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
-) -> Box<dyn PhysicalOperator + 'a> {
-    let Some(predicate) = qualifier_filter(filters, qualifier) else {
-        return operator;
-    };
-    Box::new(crate::Filter::with_evaluator(
-        operator,
-        predicate,
-        context.relational.evaluator(params, ctes),
-    ))
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+        if let Some(predicate) = qualifier_filter(filters, qualifier) {
+            let evaluator = context.relational.evaluator(params, ctes)?;
+            operator
+                .wrap(|input| Box::new(crate::Filter::with_evaluator(input, predicate, evaluator)));
+        }
+        Ok(())
+    })
 }
 
 /// Attach the predicates placed on a source whose row carries every column of its qualifier; see [`filter_closed_source`].
@@ -59,30 +62,32 @@ pub(super) fn attach_closed_qualifier_filter<'a, S: Clone + 'static>(
     context: &SourceContext<'a, S>,
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
-) -> Box<dyn PhysicalOperator + 'a> {
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     filter_closed_source(operator, qualifier, filters, || {
         context.relational.evaluator(params, ctes)
     })
 }
 
-/// Apply the predicates placed on a source whose row carries every column of its qualifier, such as a VALUES list, a table function or a derived table. A placed predicate that reads another column of that qualifier would read NULL for every row, so the filter fails with an internal error when it receives a row instead.
+/// A placed predicate that reads an unproduced column retains its deferred diagnostic; valid predicates capture their evaluator before the parent takes ownership.
 pub(super) fn filter_closed_source<'a>(
     operator: Box<dyn PhysicalOperator + 'a>,
     qualifier: &str,
     filters: Option<&QualifierFilters>,
-    evaluator: impl FnOnce() -> crate::SharedExpressionEvaluator<'a>,
-) -> Box<dyn PhysicalOperator + 'a> {
-    let Some(predicate) = qualifier_filter(filters, qualifier) else {
-        return operator;
-    };
-    if let Some(column) = unproduced_column(&predicate, qualifier, operator.row_schema()) {
-        return Box::new(crate::Filter::unresolved(operator, column));
-    }
-    Box::new(crate::Filter::with_evaluator(
-        operator,
-        predicate,
-        evaluator(),
-    ))
+    evaluator: impl FnOnce() -> Result<crate::SharedExpressionEvaluator<'a>, SQLError>,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    crate::physical::construction::OperatorBuild::build(operator, |operator| {
+        let Some(predicate) = qualifier_filter(filters, qualifier) else {
+            return Ok(());
+        };
+        if let Some(column) = unproduced_column(&predicate, qualifier, operator.row_schema()) {
+            operator.wrap(|input| Box::new(crate::Filter::unresolved(input, column)));
+        } else {
+            let evaluator = evaluator()?;
+            operator
+                .wrap(|input| Box::new(crate::Filter::with_evaluator(input, predicate, evaluator)));
+        }
+        Ok(())
+    })
 }
 
 /// The first `qualifier.column` reference of `predicate` that `schema` does not produce.
@@ -132,4 +137,63 @@ pub(super) fn shape_join_using_output<'a>(
     crate::JoinOutput::try_new(operator, columns, aliases)
         .map(|output| Box::new(output) as Box<dyn PhysicalOperator + 'a>)
         .map_err(physical_exec_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[test]
+    fn rejected_filter_evaluator_closes_its_input_and_retains_cleanup_diagnostics() {
+        struct Input {
+            schema: RowSchema,
+            closes: Arc<AtomicUsize>,
+        }
+        impl PhysicalOperator for Input {
+            fn row_schema(&self) -> &RowSchema {
+                &self.schema
+            }
+            fn open(&mut self) -> crate::ExecResult<()> {
+                Ok(())
+            }
+            fn next(&mut self) -> crate::ExecResult<Option<crate::Batch>> {
+                panic!("rejected constructor must not read");
+            }
+            fn close(&mut self) -> crate::ExecResult<()> {
+                assert_eq!(self.closes.fetch_add(1, Ordering::SeqCst), 0);
+                Err(SQLError::Routine {
+                    sqlstate: "58030".into(),
+                    message: "filter input close failed".into(),
+                }
+                .into())
+            }
+        }
+        let closes = Arc::new(AtomicUsize::new(0));
+        let input = Box::new(Input {
+            schema: RowSchema::default(),
+            closes: closes.clone(),
+        });
+        let filters = QualifierFilters::from([(
+            "source".into(),
+            vec![ScalarExpr::Literal(Value::Bool(true))],
+        )]);
+        let error = filter_closed_source(input, "source", Some(&filters), || {
+            Err(SQLError::Routine {
+                sqlstate: "53200".into(),
+                message: "evaluator admission failed".into(),
+            })
+        })
+        .err()
+        .unwrap();
+        assert_eq!(error.sqlstate(), Some("53200"));
+        assert!(error
+            .detail()
+            .unwrap()
+            .contains("filter input close failed"));
+        assert_eq!(closes.load(Ordering::SeqCst), 1);
+    }
 }

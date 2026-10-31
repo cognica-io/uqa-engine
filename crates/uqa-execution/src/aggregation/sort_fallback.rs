@@ -35,6 +35,7 @@ pub(super) fn aggregate_sorted_input(
     relaxed: bool,
     outer: Option<&super::AggregateOuterRow>,
 ) -> Result<SpillBuffer, SQLError> {
+    let evaluator = context.expression_evaluator(params)?;
     let scan: Box<dyn PhysicalOperator + '_> =
         Box::new(SpillScan::new(input_schema.clone(), input));
     let keys = statement
@@ -47,7 +48,6 @@ pub(super) fn aggregate_sorted_input(
             nulls_first: None,
         })
         .collect();
-    let evaluator = context.expression_evaluator(params);
     let mut sorted = ExternalSort::new(scan, keys, evaluator, None, phase_budget);
     sorted.open().map_err(exec_to_sql_error)?;
 

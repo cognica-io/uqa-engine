@@ -108,7 +108,7 @@ fn run<S: Clone + Send + Sync + 'static>(
         .scopes
         .command_scope(subject, relations_bound)?;
     if let Some(parent) = inherited {
-        scope.inherit_cte_bindings(parent);
+        scope.inherit_cte_bindings_with_control(parent, control)?;
     }
     scope.set_statement_commands(commands);
     let result = (|| {

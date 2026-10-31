@@ -10,6 +10,8 @@ use uqa_core::{memory::ProductionControl, CancellationToken, RelationIdentity};
 mod bindings;
 mod commands;
 mod ctes;
+mod evaluators;
+mod retained;
 mod scheduling;
 mod views;
 
@@ -93,3 +95,5 @@ fn native_scope_capture_keeps_catalog_namespace_revision_and_allowance(#[case] p
     drop(engine);
     assert_eq!(memory.used(), 0);
 }
+
+mod lexical;

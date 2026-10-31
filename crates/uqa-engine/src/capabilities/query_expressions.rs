@@ -25,6 +25,7 @@ pub(crate) struct ScopedEngineHook<'a> {
     catalog: catalog::ScopedCatalog,
     cast_scope: std::sync::OnceLock<uqa_sql::expr::CatalogCastScope>,
     routine_scope: std::sync::OnceLock<routine_descriptions::NativeRoutineScope>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl<'a> ScopedEngineHook<'a> {
@@ -36,6 +37,7 @@ impl<'a> ScopedEngineHook<'a> {
             catalog: catalog::ScopedCatalog::new(engine, ctes),
             cast_scope: std::sync::OnceLock::new(),
             routine_scope: std::sync::OnceLock::new(),
+            _memory: None,
         }
     }
 }
@@ -54,15 +56,22 @@ impl<'a> ScopedEngineHook<'a> {
         }
     }
 
-    pub(crate) fn owned(engine: &'a Engine, ctes: CteScope) -> Self {
-        Self {
+    pub(crate) fn owned(
+        engine: &'a Engine,
+        ctes: &CteScope,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Arc<Self>, SQLError> {
+        let ctes = ctes.copy_with_control(control)?;
+        let memory = control.reserve(size_of::<Self>())?;
+        Ok(Arc::new(Self {
             engine,
             runtime: engine.query_runtime_view(),
             catalog: catalog::ScopedCatalog::new(engine, &ctes),
             cast_scope: std::sync::OnceLock::new(),
             routine_scope: std::sync::OnceLock::new(),
             ctes: std::borrow::Cow::Owned(ctes),
-        }
+            _memory: memory,
+        }))
     }
 }
 
@@ -91,29 +100,24 @@ impl uqa_execution::functions::AggregateFunctionRegistry for ScopedEngineHook<'_
 }
 
 impl uqa_execution::scalar::plan::QueryExpressionContext for ScopedEngineHook<'_> {
-    fn expression_evaluator<'a>(&'a self, params: &'a [SQLParam]) -> SharedExpressionEvaluator<'a> {
-        EngineExpressionEvaluator::shared(self.engine, params, &self.ctes)
+    fn expression_evaluator<'a>(
+        &'a self,
+        params: &'a [SQLParam],
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        let resources =
+            uqa_execution::query::relational::QueryExpressionFactory::production_resources(
+                self.engine,
+            )?;
+        uqa_execution::query::expression::ScopedExpressionEvaluator::borrowed_with_control(
+            self,
+            params,
+            self.engine.cancellation_token(),
+            &resources.control(),
+        )
     }
 
     fn subquery_plans(&self) -> &[uqa_sql::plan::QueryPlan] {
         &self.ctes.scalar_subqueries
-    }
-}
-
-/// Capture the engine's current execution scope for a shared physical evaluator.
-struct EngineExpressionEvaluator;
-
-impl EngineExpressionEvaluator {
-    fn shared<'a>(
-        engine: &'a Engine,
-        params: &'a [SQLParam],
-        ctes: &CteScope,
-    ) -> SharedExpressionEvaluator<'a> {
-        uqa_execution::query::expression::ScopedExpressionEvaluator::shared(
-            Arc::new(ScopedEngineHook::owned(engine, ctes.clone())),
-            params,
-            engine.cancellation_token(),
-        )
     }
 }
 

@@ -7,12 +7,15 @@
 //! Tuple-lock recheck state and scoped identity emission.
 
 use std::sync::Arc;
+use uqa_core::memory::{Produced, ProductionControl};
 
 use super::{
     recheck_storage_names_match, CteScope, RecheckDoc, RecheckSourceRow, RowLockRecheckPins,
 };
 
 type RecheckStoragePin = (String, String, Arc<Vec<RecheckDoc>>);
+type SourceRowLocks = Arc<Produced<Vec<ResolvedRowLock>>>;
+type RecheckStoragePins = Arc<Produced<Vec<RecheckStoragePin>>>;
 
 #[derive(Clone, Copy, Default)]
 pub struct LockIdentityOptions {
@@ -22,20 +25,19 @@ pub struct LockIdentityOptions {
 
 #[derive(Clone, Default)]
 pub struct RowLockScopeState {
-    source_row_locks: Vec<ResolvedRowLock>,
+    source_row_locks: Option<SourceRowLocks>,
     recheck: Option<Arc<RowLockRecheckPins>>,
     outer_row: Option<Arc<crate::OwnedPhysicalRow>>,
-    storage_pins: Vec<RecheckStoragePin>,
+    storage_pins: Option<RecheckStoragePins>,
 }
 
 impl<S: Clone> CteScope<S> {
     fn row_lock_state(&self) -> Option<&RowLockScopeState> {
-        self.row_lock.as_deref()
+        self.row_lock.as_ref()
     }
 
     fn row_lock_state_mut(&mut self) -> &mut RowLockScopeState {
-        self.row_lock
-            .get_or_insert_with(|| Box::new(RowLockScopeState::default()))
+        self.row_lock.get_or_insert_with(RowLockScopeState::default)
     }
 
     /// Enter one tuple-local recheck execution: base scans of pinned lock targets emit only the candidate's tuples and every nested `LockRows` is suppressed while lock identities keep flowing.
@@ -57,7 +59,7 @@ impl<S: Clone> CteScope<S> {
         self.row_lock_state()?.outer_row.as_deref()
     }
 
-    pub(super) fn outer_row_binding(&self) -> Option<Arc<crate::OwnedPhysicalRow>> {
+    pub(crate) fn outer_row_binding(&self) -> Option<Arc<crate::OwnedPhysicalRow>> {
         self.row_lock_state()
             .and_then(|state| state.outer_row.clone())
     }
@@ -89,6 +91,7 @@ impl<S: Clone> CteScope<S> {
         state
             .storage_pins
             .iter()
+            .flat_map(|pins| pins.iter())
             .find(|(pinned_storage, pinned_scan, _)| {
                 pinned_scan == qualifier
                     && recheck_storage_names_match(pinned_storage, storage_name)
@@ -112,12 +115,25 @@ impl<S: Clone> CteScope<S> {
             .map(|pins| pins.storage_pins_for_identity_source(qualifier))
             .unwrap_or_default();
         let previous = if added.is_empty() {
-            None
+            PreviousBinding::Unchanged
         } else {
             let state = self.row_lock_state_mut();
             let previous = state.storage_pins.clone();
-            state.storage_pins.extend(added);
-            Some(previous)
+            let entries: Vec<_> = state
+                .storage_pins
+                .iter()
+                .flat_map(|pins| pins.iter())
+                .cloned()
+                .chain(added)
+                .collect();
+            state.storage_pins = Some(
+                ProductionControl::uncontrolled()
+                    .finish(entries, None)
+                    .expect("ordinary recheck pins")
+                    .into_shared(&ProductionControl::uncontrolled())
+                    .expect("ordinary recheck pin owner"),
+            );
+            PreviousBinding::Restore(previous)
         };
         RecheckStoragePinScope {
             ctes: self,
@@ -150,15 +166,28 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         locks: Vec<ResolvedRowLock>,
     ) -> SourceRowLockScope<'_, S> {
-        let existing_is_empty = self
-            .row_lock_state()
-            .is_none_or(|state| state.source_row_locks.is_empty());
+        let existing_is_empty = self.row_lock_state().is_none_or(|state| {
+            state
+                .source_row_locks
+                .as_ref()
+                .is_none_or(|locks| locks.is_empty())
+        });
         let previous = if locks.is_empty() && existing_is_empty {
-            None
+            PreviousBinding::Unchanged
         } else {
-            Some(std::mem::replace(
+            PreviousBinding::Restore(std::mem::replace(
                 &mut self.row_lock_state_mut().source_row_locks,
-                locks,
+                if locks.is_empty() {
+                    None
+                } else {
+                    Some(
+                        ProductionControl::uncontrolled()
+                            .finish(locks, None)
+                            .expect("ordinary source row locks")
+                            .into_shared(&ProductionControl::uncontrolled())
+                            .expect("ordinary source row lock owner"),
+                    )
+                },
             ))
         };
         SourceRowLockScope {
@@ -175,6 +204,7 @@ impl<S: Clone> CteScope<S> {
         self.row_lock_state()?
             .source_row_locks
             .iter()
+            .flat_map(|locks| locks.iter())
             .find(|target| {
                 target.identity_source
                     && target.qualifier == qualifier
@@ -189,14 +219,19 @@ pub struct LockIdentityEmissionScope<'a, S: Clone> {
     previous: LockIdentityOptions,
 }
 
+enum PreviousBinding<T> {
+    Unchanged,
+    Restore(Option<T>),
+}
+
 pub struct SourceRowLockScope<'a, S: Clone> {
     ctes: &'a mut CteScope<S>,
-    previous: Option<Vec<ResolvedRowLock>>,
+    previous: PreviousBinding<SourceRowLocks>,
 }
 
 pub struct RecheckStoragePinScope<'a, S: Clone> {
     ctes: &'a mut CteScope<S>,
-    previous: Option<Vec<RecheckStoragePin>>,
+    previous: PreviousBinding<RecheckStoragePins>,
 }
 
 impl<S: Clone> std::ops::Deref for RecheckStoragePinScope<'_, S> {
@@ -215,8 +250,8 @@ impl<S: Clone> std::ops::DerefMut for RecheckStoragePinScope<'_, S> {
 
 impl<S: Clone> Drop for RecheckStoragePinScope<'_, S> {
     fn drop(&mut self) {
-        if let Some(previous) = self.previous.take() {
-            self.ctes.row_lock_state_mut().storage_pins = previous;
+        if let PreviousBinding::Restore(previous) = &mut self.previous {
+            self.ctes.row_lock_state_mut().storage_pins = previous.take();
         }
     }
 }
@@ -237,8 +272,8 @@ impl<S: Clone> std::ops::DerefMut for SourceRowLockScope<'_, S> {
 
 impl<S: Clone> Drop for SourceRowLockScope<'_, S> {
     fn drop(&mut self) {
-        if let Some(previous) = self.previous.take() {
-            self.ctes.row_lock_state_mut().source_row_locks = previous;
+        if let PreviousBinding::Restore(previous) = &mut self.previous {
+            self.ctes.row_lock_state_mut().source_row_locks = previous.take();
         }
     }
 }

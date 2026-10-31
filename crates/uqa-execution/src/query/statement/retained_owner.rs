@@ -8,6 +8,7 @@
 
 use crate::{Batch, ExecResult, PhysicalOperator, RowSchema};
 use std::num::NonZeroUsize;
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl, ProductionVec};
 use uqa_sql::SQLError;
 
 /// The host retains the session, statement snapshot, parameters and lexical scope. Execution builds and drives the existing physical pipeline while that owner remains alive.
@@ -28,25 +29,78 @@ pub struct RetainedQueryOperator {
     query: QueryCell,
     schema: RowSchema,
     closed: bool,
-    ordering: Vec<crate::PhysicalOrder>,
+    ordering: Produced<Vec<crate::PhysicalOrder>>,
+    memory: Option<MemoryReservation>,
 }
 
 impl RetainedQueryOperator {
     pub fn try_new(input: Box<dyn RetainedQueryInput>) -> Result<Option<Self>, SQLError> {
+        Self::try_new_with_control(input, &ProductionControl::uncontrolled())
+    }
+
+    pub fn try_new_with_control(
+        input: Box<dyn RetainedQueryInput>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Self>, SQLError> {
+        control.check()?;
         let query = QueryCell::try_new(input, |input| input.build())?;
-        let schema =
-            query.with_dependent(|_, input| input.as_ref().map(|input| input.row_schema().clone()));
-        let ordering = query.with_dependent(|_, input| {
-            input
-                .as_ref()
-                .map_or_else(Vec::new, |input| input.output_ordering().to_vec())
-        });
-        Ok(schema.map(|schema| Self {
+        let Some(schema) =
+            query.with_dependent(|_, input| input.as_ref().map(|input| input.row_schema().clone()))
+        else {
+            return Ok(None);
+        };
+        let mut retained = Self {
             query,
             schema,
             closed: false,
-            ordering,
-        }))
+            ordering: ProductionControl::uncontrolled()
+                .finish(Vec::new(), None)
+                .expect("empty ordering"),
+            memory: None,
+        };
+        let ordering = retained
+            .query
+            .with_dependent(|_, input| -> Result<_, SQLError> {
+                let input = input.as_ref().expect("retained query present");
+                let mut ordering = ProductionVec::new(*control);
+                ordering.reserve(input.output_ordering().len())?;
+                for entry in input.output_ordering() {
+                    ordering.push_produced(
+                        control.finish(entry.clone(), control.empty_reservation())?,
+                    )?;
+                }
+                Ok(ordering.finish()?)
+            });
+        match ordering {
+            Ok(ordering) => {
+                retained.ordering = ordering;
+                Ok(Some(retained))
+            }
+            Err(error) => Err(match retained.close() {
+                Ok(()) => error,
+                Err(cleanup) => error.with_cleanup(
+                    crate::physical::physical_exec_error(cleanup),
+                    "close retained query after ordering construction failure",
+                ),
+            }),
+        }
+    }
+
+    /// Admit the physical wrapper before boxing it; failed admission closes the already owned child pipeline.
+    pub fn into_boxed(mut self, control: &ProductionControl<'_>) -> Result<Box<Self>, SQLError> {
+        match control.reserve(size_of::<Self>()) {
+            Ok(memory) => {
+                self.memory = memory;
+                Ok(Box::new(self))
+            }
+            Err(error) => Err(match self.close() {
+                Ok(()) => SQLError::from(error),
+                Err(cleanup) => SQLError::from(error).with_cleanup(
+                    crate::physical::physical_exec_error(cleanup),
+                    "close retained query after wrapper admission failure",
+                ),
+            }),
+        }
     }
 }
 
@@ -159,6 +213,91 @@ mod tests {
                 RowSchema::new(vec!["n".into()]),
                 crate::SQLRowStream::from_source(Source(self.0.clone())),
             ))))
+        }
+    }
+
+    struct OrderedInput {
+        closes: Arc<AtomicUsize>,
+        ordering: Vec<crate::PhysicalOrder>,
+    }
+    struct Ordered<'a> {
+        source: Source,
+        ordering: &'a [crate::PhysicalOrder],
+        schema: RowSchema,
+    }
+    impl PhysicalOperator for Ordered<'_> {
+        fn row_schema(&self) -> &RowSchema {
+            &self.schema
+        }
+        fn output_ordering(&self) -> &[crate::PhysicalOrder] {
+            self.ordering
+        }
+        fn open(&mut self) -> ExecResult<()> {
+            Ok(())
+        }
+        fn next(&mut self) -> ExecResult<Option<Batch>> {
+            panic!("must not fetch")
+        }
+        fn close(&mut self) -> ExecResult<()> {
+            crate::SQLRowSource::close(&mut self.source).map_err(Into::into)
+        }
+    }
+    impl RetainedQueryInput for OrderedInput {
+        fn build(&self) -> Result<Option<Box<dyn PhysicalOperator + '_>>, SQLError> {
+            Ok(Some(Box::new(Ordered {
+                source: Source(self.closes.clone()),
+                ordering: &self.ordering,
+                schema: RowSchema::default(),
+            })))
+        }
+    }
+
+    #[test]
+    fn retained_pipeline_admission_closes_once_and_keeps_cleanup_diagnostics() {
+        use uqa_core::{memory::MemoryBudget, CancellationToken};
+        let budget = MemoryBudget::new(0);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        for ordering in [false, true] {
+            let closes = Arc::new(AtomicUsize::new(0));
+            let input = Box::new(OrderedInput {
+                closes: closes.clone(),
+                ordering: if ordering {
+                    vec![
+                        crate::PhysicalOrder {
+                            position: 0,
+                            descending: false,
+                            nulls_first: None,
+                            nullable: false
+                        };
+                        1 << 18
+                    ]
+                } else {
+                    Vec::new()
+                },
+            });
+            let allocation = allocation_counter::measure(|| {
+                let error = if ordering {
+                    RetainedQueryOperator::try_new_with_control(input, &control)
+                        .err()
+                        .unwrap()
+                } else {
+                    RetainedQueryOperator::try_new_with_control(input, &control)
+                        .unwrap()
+                        .unwrap()
+                        .into_boxed(&control)
+                        .err()
+                        .unwrap()
+                };
+                assert_eq!(error.sqlstate(), Some("53200"));
+                assert!(error
+                    .detail()
+                    .unwrap()
+                    .contains("retained scan close failed"));
+            });
+            assert!(allocation.bytes_total < 16 << 10, "{allocation:?}");
+            assert_eq!(closes.load(Ordering::SeqCst), 1);
+            assert_eq!(budget.used(), 0);
         }
     }
 

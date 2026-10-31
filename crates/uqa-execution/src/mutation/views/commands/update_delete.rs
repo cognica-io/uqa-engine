@@ -201,7 +201,10 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 stmt.relations_bound,
             )?);
             if let Some(parent) = inherited_ctes {
-                ctes.inherit_cte_bindings(parent);
+                ctes.inherit_cte_bindings_with_control(
+                    parent,
+                    &context.query.source.ctes.production_resources()?.control(),
+                )?;
             }
             ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
@@ -224,7 +227,9 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 &stmt.subqueries,
                 &arena_resources.control(),
             )?;
-            let mut source_scope = ctes.returning_statement_snapshot_scope();
+            let mut source_scope = ctes.returning_statement_snapshot_scope_with_control(
+                &context.query.source.ctes.production_resources()?.control(),
+            )?;
             let source_privilege_expressions = stmt
                 .assignments
                 .iter()
@@ -256,10 +261,14 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
                 &stmt.returning_aliases,
                 source_rows.as_ref().map(crate::SharedSpill::row_schema),
             )?;
-            let mut target_scope = ctes.returning_statement_snapshot_scope();
+            let mut target_scope = ctes.returning_statement_snapshot_scope_with_control(
+                &context.query.source.ctes.production_resources()?.control(),
+            )?;
             let candidates =
                 materialize_view_rows(&read_context.query, &target, params, &mut target_scope)?;
-            let snapshot = ctes.returning_statement_snapshot_scope();
+            let snapshot = ctes.returning_statement_snapshot_scope_with_control(
+                &context.query.source.ctes.production_resources()?.control(),
+            )?;
             let work_mem = context.mutation.rules.rules.memory.work_mem_bytes()?;
             let cancellation = context.mutation.rules.rules.cancellation.clone();
             let mut pending = MutationImageBuffer::new(work_mem, cancellation.clone());

@@ -28,7 +28,7 @@ use crate::query::{
 use std::rc::Rc;
 use uqa_sql::{
     ast::SetOpKind,
-    plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
+    plan::{QueryPlan, RelationalPlan},
     semantics::{
         primary_query_cte_references_with_control, sets::validation::validate_values_set_contexts,
     },
@@ -87,9 +87,11 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
             running_statement = Some(crate::mutation::statement_end::enter_statement(statement));
         }
     }
-    let result = ctes.with_cte_producers(!plan.ctes.is_empty(), |ctes| {
-        execute_prepared_query_output(context, plan, params, ctes, output_mode)
-    });
+    let result = ctes.with_cte_producers_with_control(
+        !plan.ctes.is_empty(),
+        &context.source.ctes.production_resources()?.control(),
+        |ctes| execute_prepared_query_output(context, plan, params, ctes, output_mode),
+    );
     drop(running_statement);
     result
 }
@@ -104,8 +106,10 @@ fn execute_prepared_query_output<S: Clone + Send + Sync + 'static>(
     let resources = context.source.ctes.production_resources()?;
     let mut relation_lookup =
         ctes.enter_query_plan_scope_with_control(plan, &resources.control())?;
-    let mut visible_ctes =
-        relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
+    let mut visible_ctes = relation_lookup.enter_visible_ctes_with_control(
+        plan.ctes.iter().map(|cte| cte.name.as_str()),
+        &resources.control(),
+    )?;
     let ctes = &mut *visible_ctes;
     install_query_ctes(context, plan, params, ctes)?;
     let output = match ctes.command_cte_snapshot() {
@@ -189,10 +193,7 @@ fn execute_values_root<S: Clone + Send + Sync + 'static>(
         let arena_resources = context.source.ctes.production_resources()?;
         let scoped_ctes =
             ctes.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
-        let type_resolver = context
-            .source
-            .relational
-            .expression_scope((*scoped_ctes).clone());
+        let type_resolver = context.source.relational.expression_scope(&scoped_ctes)?;
         validate_values_set_contexts(
             context.source.relational.catalog,
             type_resolver.as_ref(),
@@ -257,12 +258,12 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
             bind_query_plan_schema(context.source.ctes.routines, right, params, ctes, None)?;
         let child_ctes = {
             let child_scope = ctes.enter_lock_identity_emission(false);
-            (*child_scope).clone()
+            child_scope.copy_with_control(&context.source.ctes.production_resources()?.control())?
         };
         let left: Box<dyn crate::PhysicalOperator + '_> = context.directional.query_operator(
             (**left).clone(),
             params.to_vec(),
-            child_ctes.clone(),
+            child_ctes.copy_with_control(&context.source.ctes.production_resources()?.control())?,
             left_schema,
         )?;
         let (left, right) = crate::physical::construction::OperatorBuild::run(left, |_| {
@@ -420,6 +421,13 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
     let columns = lhs.columns.clone();
     let left: Box<dyn crate::PhysicalOperator + '_> = lhs.into_public_operator();
     let right: Box<dyn crate::PhysicalOperator + '_> = rhs.into_public_operator();
+    let (left, right, (work_mem, evaluator)) =
+        crate::physical::construction::OperatorBuild::pair(left, right, |_, _| {
+            Ok((
+                physical_work_mem_bytes(context.source.relational.runtime)?,
+                context.source.relational.evaluator(params, ctes)?,
+            ))
+        })?;
     let operation: Box<dyn crate::PhysicalOperator + '_> = Box::new(
         crate::ExternalSetOperation::new_with_types_and_evaluator(
             left,
@@ -427,50 +435,37 @@ fn execute_set_operation<S: Clone + Send + Sync + 'static>(
             *kind,
             *all,
             set_schema.column_types().to_vec(),
-            physical_work_mem_bytes(context.source.relational.runtime)?,
-            context.source.relational.evaluator(params, ctes),
+            work_mem,
+            evaluator,
         )
         .map_err(physical_exec_error)?,
     );
     if !order_by.is_empty() || limit.is_some() || offset.is_some() {
-        let synthetic = QueryBlockPlan {
-            deferred_outer_rewrites: Vec::new(),
-            privilege_columns: uqa_core::memory::OwnedSet::new(),
-            projections: Vec::new(),
-            from: None,
-            r#where: None,
-            compute: ComputePlan::Project,
-            group_by: Vec::new(),
-            grouping_sets: Vec::new(),
-            group_distinct: false,
-            having: None,
-            order_by: order_by.clone(),
-            limit: limit.as_deref().cloned(),
-            with_ties: *with_ties,
-            offset: offset.as_deref().cloned(),
-            distinct: false,
-            distinct_on: Vec::new(),
-            subqueries: subqueries.clone(),
-            access: AccessPathPlan::Row,
-            locking: Vec::new(),
-            windows: Vec::new(),
-        };
-        let arena_resources = context.source.ctes.production_resources()?;
-        let ordering_scope =
-            ctes.enter_scalar_subqueries_with_control(subqueries, &arena_resources.control())?;
-        let evaluator = context.source.relational.evaluator(params, &ordering_scope);
-        let output = identity_order_columns(&columns);
-        let operation = attach_order_limit(
-            operation,
-            &synthetic,
-            &output,
-            context.source.relational,
-            params,
-            &ordering_scope,
-            context.source.relational.runtime,
-            evaluator,
-            None,
-        )?;
+        let operation =
+            crate::physical::construction::OperatorBuild::build(operation, |operation| {
+                let resources = context.source.ctes.production_resources()?;
+                let synthetic = plan.set_ordering_with_control(&resources.control())?;
+                let ordering_scope =
+                    ctes.enter_scalar_subqueries_with_control(subqueries, &resources.control())?;
+                let evaluator = context
+                    .source
+                    .relational
+                    .evaluator(params, &ordering_scope)?;
+                let output = identity_order_columns(&columns);
+                operation.attach(|input| {
+                    attach_order_limit(
+                        input,
+                        &synthetic,
+                        &output,
+                        context.source.relational,
+                        params,
+                        &ordering_scope,
+                        context.source.relational.runtime,
+                        evaluator,
+                        None,
+                    )
+                })
+            })?;
         return collect_query_operator(context, columns, operation, output_mode);
     }
     collect_query_operator(context, columns, operation, output_mode)

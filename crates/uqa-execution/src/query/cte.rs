@@ -44,10 +44,10 @@ pub(crate) fn install_scheduled_ctes<'a, S: Clone>(
     );
     for scheduled in plans {
         if scheduled.deferred {
-            ctes.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(
-                scheduled.plan,
+            ctes.insert_deferred_with_control(
+                uqa_sql::plan::RetainedCtePlan::capture(scheduled.plan, &control)?,
                 &control,
-            )?);
+            )?;
         } else {
             materialize_plan_ctes_with_filters(
                 context,
@@ -96,7 +96,7 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
                     output_filters.get(&plan.name),
                 )?
             };
-            ctes.insert_shared(plan.name.clone(), rows);
+            ctes.insert_shared_with_control(&plan.name, rows, &control)?;
             continue;
         }
 
@@ -154,10 +154,12 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
                 "CTE spill collector returned in-memory rows".into(),
             ));
         };
-        ctes.insert_shared(plan.name.clone(), materialized);
-        if !plan.body.returns_rows() {
-            ctes.non_returning_ctes.insert(plan.name.clone());
-        }
+        ctes.insert_materialized_with_control(
+            &plan.name,
+            materialized,
+            plan.body.returns_rows(),
+            &control,
+        )?;
     }
     Ok(())
 }
@@ -193,7 +195,7 @@ fn install_read_only_prefix<S: Clone>(
     if let CtePlanBody::Query(query) = &plan.body {
         let scoped = {
             let scope = ctes.enter_lock_identity_emission(false);
-            (*scope).clone()
+            scope.copy_with_control(&context.production_resources()?.control())?
         };
         if let Some(operator) = context.queries.retained_query(query, params, &scoped)? {
             let columns = operator
@@ -217,7 +219,12 @@ fn install_read_only_prefix<S: Clone>(
                 crate::physical::construction::OperatorBuild::run(operator, |_| {
                     context.runtime.work_mem_bytes()
                 })?;
-            ctes.insert_producer(plan.name.clone(), operator, budget)?;
+            ctes.insert_producer_with_control(
+                &plan.name,
+                operator,
+                budget,
+                &context.production_resources()?.control(),
+            )?;
             return Ok(true);
         }
     }

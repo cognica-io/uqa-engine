@@ -138,7 +138,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
         .scopes
         .command_scope(stmt.statement_privilege_subject.as_ref(), false)?;
     if let Some(parent) = inherited_ctes {
-        ctes.inherit_cte_bindings(parent);
+        ctes.inherit_cte_bindings_with_control(parent, &control)?;
     }
     ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
     if ctes.command_cte_snapshot().is_none()
@@ -401,7 +401,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 constraints.cancellation.clone(),
                 "MERGE modified targets",
             );
-            let snapshot_ctes = ctes.returning_statement_snapshot_scope();
+            let snapshot_ctes = ctes.returning_statement_snapshot_scope_with_control(&control)?;
             let overlay = MutationOverlayScope::new(mutation.state);
             let pairing_reader = pairings
                 .read_rows()

@@ -63,6 +63,13 @@ impl CteRowsMap {
     pub fn get(&self, name: &str) -> Option<&CteRows> {
         self.rows.get(name)
     }
+    pub(in crate::query::scope) fn get_name(
+        &self,
+        name: uqa_core::RelationName<'_>,
+    ) -> Option<&CteRows> {
+        self.rows
+            .get_by(|key| name.cmp(&uqa_core::RelationName::decoded(key.value())))
+    }
     pub fn get_mut(&mut self, name: &str) -> Option<&mut CteRows> {
         self.rows.get_mut(name)
     }
@@ -83,6 +90,38 @@ impl CteRowsMap {
     }
     pub fn values(&self) -> impl ExactSizeIterator<Item = &CteRows> {
         self.iter().map(|(_, rows)| rows)
+    }
+
+    pub(in crate::query::scope) fn copy_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        let mut output = Self::new();
+        for (name, rows) in self.rows.iter() {
+            control.check()?;
+            let name = match name {
+                Name::Ordinary(name) => {
+                    Name::Captured(control.copy_text(name)?.into_shared(control)?)
+                }
+                Name::Captured(name) => Name::Captured(Arc::clone(name)),
+            };
+            if let Some(budget) = control.budget() {
+                output.rows.insert_budgeted(name, rows.clone(), budget)?;
+            } else {
+                output.rows.insert(name, rows.clone());
+            }
+        }
+        Ok(output)
+    }
+
+    pub(in crate::query::scope) fn extract(&mut self, name: &str) -> Self {
+        Self {
+            rows: self.rows.extract(name),
+        }
+    }
+    pub(in crate::query::scope) fn append(&mut self, rows: Self) {
+        self.rows.append(rows.rows);
     }
 
     pub fn insert(&mut self, name: String, rows: CteRows) -> Option<CteRows> {

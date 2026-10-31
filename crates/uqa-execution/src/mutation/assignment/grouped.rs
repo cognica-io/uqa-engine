@@ -46,7 +46,7 @@ impl<'a> AssignmentSource<'a> {
         let query = ctes.scalar_subqueries.get(*index).ok_or_else(|| {
             SQLError::Internal("assignment subquery slot is outside its plan".into())
         })?;
-        let hook = services.expressions.expressions.bind_scope(ctes.clone());
+        let hook = services.expressions.expressions.bind_scope(ctes)?;
         let outer = row.map_or(PhysicalOuterRow::Absent, |row| PhysicalOuterRow::Physical {
             schema: &row.schema,
             row: &row.row,

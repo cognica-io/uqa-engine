@@ -478,7 +478,7 @@ fn bind_table_filter<S: Clone + Send + Sync + 'static>(
     );
     Ok(context
         .relational
-        .evaluator(params, ctes)
+        .evaluator(params, ctes)?
         .bind_type_introspection(filter.clone(), &schema))
 }
 

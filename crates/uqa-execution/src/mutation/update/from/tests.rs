@@ -22,10 +22,10 @@ impl QueryExpressionFactory<()> for PreparationCounter {
     }
     fn bind_scope(
         &self,
-        _: CteScope,
-    ) -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_> {
+        _: &CteScope,
+    ) -> Result<Arc<dyn crate::query::set_projection::SetFunctionRuntime + '_>, SQLError> {
         self.0.fetch_add(1, Ordering::Relaxed);
-        Arc::new(Services)
+        Ok(Arc::new(Services))
     }
 
     fn optimize_catalog_scalar(&self, _: &mut ScalarExpr) -> Result<(), SQLError> {

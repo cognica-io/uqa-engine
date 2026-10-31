@@ -104,7 +104,7 @@ impl AdaptiveAggregateSet {
             self.partial_relation,
             &self.group_types,
             self.order_group_values,
-            context.expression_evaluator(params),
+            context.expression_evaluator(params)?,
             self.spill_budget,
         );
         sorted

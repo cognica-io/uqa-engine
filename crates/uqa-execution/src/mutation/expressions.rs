@@ -36,7 +36,7 @@ pub(crate) fn eval_mutation_expr_with_retrieval<S: Clone + 'static>(
     params: &[SQLParam],
     retrieval: Option<&crate::scalar::RetrievalPredicate<'_>>,
 ) -> Result<Value, SQLError> {
-    let hook = services.expressions.bind_scope(ctes.clone());
+    let hook = services.expressions.bind_scope(ctes)?;
     let empty_schema = RowSchema::default();
     let schema = row.map_or(&empty_schema, |row| &row.schema);
     crate::scalar_type_with_resolver(expression, schema, params, services.types)?;

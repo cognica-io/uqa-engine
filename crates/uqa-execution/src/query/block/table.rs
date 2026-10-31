@@ -51,12 +51,18 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         .columns
         .iter()
         .any(|column| column.name == super::SCORE_COLUMN);
-    let predicate = stmt.r#where.as_ref().map(|predicate| {
-        context
-            .relational
-            .evaluator(params, ctes)
-            .bind_type_introspection(predicate.clone(), schema)
-    });
+    let predicate = stmt
+        .r#where
+        .as_ref()
+        .map(|predicate| {
+            Ok::<_, SQLError>(
+                context
+                    .relational
+                    .evaluator(params, ctes)?
+                    .bind_type_introspection(predicate.clone(), schema),
+            )
+        })
+        .transpose()?;
     let score_top_k = if !has_stored_score_column
         && matches!(
             block.access,

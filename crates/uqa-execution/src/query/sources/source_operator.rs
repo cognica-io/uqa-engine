@@ -97,14 +97,14 @@ pub(super) fn build_join_operator_with_ctes_at_path<'a, S: Clone + Send + Sync +
             {
                 return Ok(scan);
             }
-            return Ok(attach_qualifier_filter(
+            return attach_qualifier_filter(
                 scan,
                 &source.qualifier,
                 filters,
                 context,
                 params,
                 ctes,
-            ));
+            );
         }
 
         match from {

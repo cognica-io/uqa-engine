@@ -313,9 +313,9 @@ fn execute_window_pass(
         .iter()
         .map(|slot| prepare_slot(context, slot, schema, params, phase_budget))
         .collect::<Result<Vec<_>, _>>()?;
+    let evaluator = context.expression_evaluator(params)?;
     let scan: Box<dyn PhysicalOperator + '_> = Box::new(SpillScan::new(schema.clone(), input));
     let keys = pass.sort_keys();
-    let evaluator = context.expression_evaluator(params);
     let key_types = keys
         .iter()
         .map(|key| evaluator.expression_type(&key.expr, schema))

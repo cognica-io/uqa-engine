@@ -121,12 +121,15 @@ impl<'a, S: Clone + 'static> ViewInsertRows<'a, S> {
         positions: &[usize],
         rows: &[Vec<ScalarExpr>],
     ) -> Result<(), SQLError> {
-        let snapshot = self.scope.returning_statement_snapshot_scope();
-        let hook = self
-            .read
-            .expressions
-            .expressions
-            .bind_scope(snapshot.clone());
+        let snapshot = self.scope.returning_statement_snapshot_scope_with_control(
+            &self
+                .read
+                .expressions
+                .expressions
+                .production_resources()?
+                .control(),
+        )?;
+        let hook = self.read.expressions.expressions.bind_scope(&snapshot)?;
         let schema = RowSchema::default();
         for expressions in rows {
             let input = expressions.iter().map(|expression| {

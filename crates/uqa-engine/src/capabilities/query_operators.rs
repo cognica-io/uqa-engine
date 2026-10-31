@@ -49,8 +49,9 @@ impl QueryExpressionFactory<StatementReadSnapshot> for Engine {
         )
     }
 
-    fn bind_scope(&self, scope: CteScope) -> Arc<dyn SetFunctionRuntime + '_> {
-        Arc::new(ScopedEngineHook::owned(self, scope))
+    fn bind_scope(&self, scope: &CteScope) -> Result<Arc<dyn SetFunctionRuntime + '_>, SQLError> {
+        let resources = self.production_resources()?;
+        Ok(ScopedEngineHook::owned(self, scope, &resources.control())?)
     }
 
     fn prepare_predicate<'a>(

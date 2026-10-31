@@ -364,7 +364,7 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 .query_context()
                 .source
                 .relational
-                .expression_scope(scope);
+                .expression_scope(&scope)?;
             serialization::RowSerialization::new(
                 settings.serialize,
                 settings.timing,

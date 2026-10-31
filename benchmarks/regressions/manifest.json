@@ -32751,6 +32751,274 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "primary_query_capture_excludes_installed_declarations_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/retained.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "A four MiB CTE excluded from a primary-query capture with 64 KiB available, original metadata and both cancellations.",
+      "invariant": "Admit only the executable primary query, preserve its metadata and release the selected owner without copying installed declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_ordering_capture_keeps_scalar_slots_and_never_copies_operands",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/retained.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Two four MiB set operands, order/limit/offset and scalar slots under a 64 KiB allowance.",
+      "invariant": "Copy only the ordering block, retain scalar identities and reject an oversized selected expression before allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "lexical_copy_rejects_before_allocating_names_and_keeps_shared_inputs_alive",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/lexical_tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "A four MiB lexical name, immutable plan readers, independent scope mutation and both cancellations.",
+      "invariant": "Reject before name allocation; keep shared plan identities while exact private map leases retire with their last owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "declaration_replacement_is_atomic_at_each_partial_allocation_boundary",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/lexical_tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Replacement of an existing declaration across ten available-allowance boundaries.",
+      "invariant": "Publish all definition, plan and visibility maps together after admission and preserve the previous binding on partial failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "lexical_guards_restore_only_selected_names_without_allocation_even_when_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/lexical_tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Shadowed lexical inputs, unrelated materialization progress, exhausted allowance, cancellation and unwind.",
+      "invariant": "Restore the exact selected nodes without allocating or discarding independent progress.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "definition_scope_copies_only_selected_names_and_preserves_quoted_identity",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/lexical_tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "A selected definition beside an unused four MiB name and quoted, escaped and multibyte CTE references.",
+      "invariant": "Capture only referenced bindings and perform borrowed quoted-name lookup with no allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "recursive_working_binding_publishes_and_restores_rows_and_width_atomically",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/production/lexical_tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "A recursive working row/width replacement with partial failures, cancellation, exhausted allowance and unwind.",
+      "invariant": "Publish both destinations after complete admission and restore the original exact lexical and width owners without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "producer_admission_releases_partial_destinations_and_reports_close_failures",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/producers/tests/production.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "CTE producer construction at eight available-allowance boundaries and a failing child close.",
+      "invariant": "Retire unpublished prefix/map owners, preserve the original error and close diagnostics, and close the child exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "producer_admission_unlocks_its_list_before_running_failure_callbacks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/producers/tests/production.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Rejected and retired producer owners with a reentrant callback that probes the owner lock.",
+      "invariant": "Release the internal list lock before callbacks run and close rejected inputs exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "scoped_producer_owners_preserve_parent_state_and_last_reader_leases",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/producers/tests/production.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Both cancellation owners, nested query producer frames and an independent final prefix reader.",
+      "invariant": "Keep parent producer identity after rejected entry and retain original prefix leases until the last reader retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rejected_retained_wrapper_reports_both_input_and_cte_cleanup_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/producers/tests/production.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Exhausted wrapper admission with independently failing physical input and CTE producer close.",
+      "invariant": "Preserve the admission error with both cleanup diagnostics, close both inputs once and restore the enclosing producer owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_pipeline_admission_closes_once_and_keeps_cleanup_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/statement/retained_owner.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Oversized retained ordering and physical-wrapper admission with a failing child close.",
+      "invariant": "Reject before ordering allocation, keep cleanup diagnostics and close the previously constructed child exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_retained_cte_inputs_admit_before_copying_and_keep_original_allowance",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/retained.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Four MiB query syntax, parameter values and lexical names with 64 KiB available on all four providers.",
+      "invariant": "Reject before copying with less than 256 KiB attempted workspace, recover, preserve both cancellations and keep successful input leases until the retained pipeline retires.",
+      "case_names": [
+        "case_01_memory_plan",
+        "case_02_memory_parameter",
+        "case_03_memory_scope",
+        "case_04_sqlite_native_plan",
+        "case_05_sqlite_native_parameter",
+        "case_06_sqlite_native_scope",
+        "case_07_sqlite_kv_plan",
+        "case_08_sqlite_kv_parameter",
+        "case_09_sqlite_kv_scope",
+        "case_10_redb_plan",
+        "case_11_redb_parameter",
+        "case_12_redb_scope"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_lexical_owners_preserve_pg18_shadowing_recursion_quotes_and_lateral",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/lexical.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "PostgreSQL 18.4 reference cases for declaration capture, nonrecursive shadowing, recursion, quoted names and correlated materialized CTEs on all four providers.",
+      "invariant": "Preserve declaration-order lookup, recursive values, decoded identity and row-dependent LATERAL observations through admitted lexical owners.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_expression_scope_admission_and_borrowed_evaluation",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/evaluators.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "A four MiB lexical binding with 64 KiB available, shared and borrowed evaluator construction, and both cancellation owners on all four providers.",
+      "invariant": "Reject lexical capture before allocation, reuse the captured scope for borrowed evaluation, preserve exact evaluator-header leases and recover without copying retained inputs.",
+      "case_names": [
+        "case_1_memory_binding",
+        "case_2_memory_borrowed",
+        "case_3_sqlite_native_binding",
+        "case_4_sqlite_native_borrowed",
+        "case_5_sqlite_kv_binding",
+        "case_6_sqlite_kv_borrowed",
+        "case_7_redb_binding",
+        "case_8_redb_borrowed"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "shared_and_borrowed_evaluators_admit_exact_headers_and_release_last_readers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/expression/tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Shared and borrowed evaluator headers, rejected construction, independent readers and both cancellation owners.",
+      "invariant": "Admit exact headers before allocation and retain their original allowance until the last reader releases them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "outer_evaluator_shares_rows_and_keeps_only_admitted_headers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/expression/outer/tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "A large retained outer row, evaluator wrapper admission and independent row readers.",
+      "invariant": "Share the original outer row instead of copying it and retain only the admitted wrapper until its final owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "outer_layout_cache_admits_before_copying_and_publishes_only_complete_schemas",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/expression/outer/tests.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "An oversized outer layout, rejected cache construction, recovery and cancellation after a successful cache fill.",
+      "invariant": "Admit schema names before copying, publish only a complete layout, preserve prior cached state on failure and observe cancellation on cache hits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rejected_filter_evaluator_closes_its_input_and_retains_cleanup_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/source_qualification.rs",
+      "capability": "Native lexical and retained input ownership",
+      "workload": "Rejected filter evaluator construction with an independently failing input close.",
+      "invariant": "Close the owned child exactly once and preserve both the admission error and its cleanup diagnostics.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

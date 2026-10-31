@@ -251,3 +251,5 @@ fn immutable_query_block_capture_admits_owned_payload_and_releases_on_failure() 
     drop(retained);
     assert_eq!(budget.used(), 0);
 }
+
+mod retained;

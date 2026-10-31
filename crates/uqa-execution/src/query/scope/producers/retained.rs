@@ -14,14 +14,26 @@ use std::num::NonZeroUsize;
 pub(super) struct ProducerQuery<'a> {
     input: Box<dyn PhysicalOperator + 'a>,
     producers: Option<CteProducers>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl<'a> ProducerQuery<'a> {
-    pub(super) fn new(input: Box<dyn PhysicalOperator + 'a>, producers: CteProducers) -> Self {
-        Self {
+    pub(super) fn with_control(
+        input: Box<dyn PhysicalOperator + 'a>,
+        producers: CteProducers,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Box<Self>, uqa_sql::SQLError> {
+        let (input, memory) = match crate::physical::construction::OperatorBuild::run(input, |_| {
+            Ok(control.reserve(size_of::<Self>())?)
+        }) {
+            Ok(prepared) => prepared,
+            Err(error) => return producers.finish(Err(error)),
+        };
+        Ok(Box::new(Self {
             input,
             producers: Some(producers),
-        }
+            _memory: memory,
+        }))
     }
 }
 

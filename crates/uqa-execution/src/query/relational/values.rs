@@ -68,7 +68,7 @@ pub fn execute_plan_values_output<S: Clone + 'static>(
     let columns = schema.columns().to_vec();
     let empty_schema = crate::RowSchema::default();
     let input_schema = outer.map_or(&empty_schema, |row| &row.schema);
-    let hook = context.expression_scope(ctes.clone());
+    let hook = context.expression_scope(ctes)?;
     let evaluation = outer
         .map_or_else(
             || PhysicalEvalContext::new(None, params),
@@ -167,15 +167,15 @@ fn execute_directional_values_output<S: Clone + 'static>(
                 .collect::<Result<Vec<_>, SQLError>>()
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    let mut values_ctes = ctes.clone();
     let arena_resources = context.expressions.production_resources()?;
+    let mut values_ctes = ctes.copy_with_control(&arena_resources.control())?;
     values_ctes.scalar_subqueries =
         uqa_sql::plan::RetainedQueryArena::capture(subqueries, &arena_resources.control())?;
     let operator: Box<dyn crate::PhysicalOperator + '_> = Box::new(DirectionalValuesScan::new(
         rows,
         source_types,
         schema,
-        context.evaluator(params, &values_ctes),
+        context.evaluator(params, &values_ctes)?,
     ));
     collect_query_operator(context.runtime, columns, operator, output_mode)
 }

@@ -12,13 +12,16 @@ use crate::{
     SharedExpressionEvaluator,
 };
 use std::sync::Arc;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryReservation, ProductionControl},
+    Value,
+};
 use uqa_sql::{expr::RowLookup, SQLError, SQLParam};
 
 mod outer;
 #[cfg(test)]
 mod tests;
-pub(crate) use outer::with_outer_row;
+pub(crate) use outer::with_outer_row_with_control;
 
 /// Scalar execution services that can intercept a function requiring its unevaluated argument expressions.
 pub trait ScalarExpressionContext: QueryExpressionContext {
@@ -32,9 +35,29 @@ pub trait ScalarExpressionContext: QueryExpressionContext {
 }
 
 pub struct ScopedExpressionEvaluator<'a> {
-    context: Arc<dyn ScalarExpressionContext + 'a>,
+    context: ExpressionContext<'a>,
     params: &'a [SQLParam],
     cancellation: uqa_core::CancellationToken,
+    _memory: Option<MemoryReservation>,
+}
+
+enum ExpressionContext<'a> {
+    Shared(Arc<dyn ScalarExpressionContext + 'a>),
+    Borrowed(&'a dyn ScalarExpressionContext),
+}
+impl<'a> AsRef<dyn ScalarExpressionContext + 'a> for ExpressionContext<'a> {
+    fn as_ref(&self) -> &(dyn ScalarExpressionContext + 'a) {
+        match self {
+            Self::Shared(context) => context.as_ref(),
+            Self::Borrowed(context) => *context,
+        }
+    }
+}
+impl<'a> std::ops::Deref for ExpressionContext<'a> {
+    type Target = dyn ScalarExpressionContext + 'a;
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
 }
 
 impl<'a> ScopedExpressionEvaluator<'a> {
@@ -43,11 +66,57 @@ impl<'a> ScopedExpressionEvaluator<'a> {
         params: &'a [SQLParam],
         cancellation: uqa_core::CancellationToken,
     ) -> SharedExpressionEvaluator<'a> {
-        Arc::new(Self {
+        Self::shared_with_control(
             context,
             params,
             cancellation,
-        })
+            &ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary expression evaluator")
+    }
+
+    pub fn shared_with_control(
+        context: Arc<dyn ScalarExpressionContext + 'a>,
+        params: &'a [SQLParam],
+        cancellation: uqa_core::CancellationToken,
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        Self::capture(
+            ExpressionContext::Shared(context),
+            params,
+            cancellation,
+            control,
+        )
+    }
+
+    /// A grouping or window evaluator borrows its already retained hook instead of recapturing the same lexical scope.
+    pub fn borrowed_with_control(
+        context: &'a dyn ScalarExpressionContext,
+        params: &'a [SQLParam],
+        cancellation: uqa_core::CancellationToken,
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        Self::capture(
+            ExpressionContext::Borrowed(context),
+            params,
+            cancellation,
+            control,
+        )
+    }
+
+    fn capture(
+        context: ExpressionContext<'a>,
+        params: &'a [SQLParam],
+        cancellation: uqa_core::CancellationToken,
+        control: &ProductionControl<'_>,
+    ) -> Result<SharedExpressionEvaluator<'a>, SQLError> {
+        let memory = control.reserve(size_of::<Self>())?;
+        Ok(Arc::new(Self {
+            context,
+            params,
+            cancellation,
+            _memory: memory,
+        }))
     }
 
     fn evaluate_physical_scoped(

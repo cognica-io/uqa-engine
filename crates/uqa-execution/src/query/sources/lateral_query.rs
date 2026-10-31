@@ -52,11 +52,16 @@ fn execute_lateral_subquery_output_inner<S: Clone + Send + Sync + 'static>(
     ctes: &CteScope<S>,
     output_mode: QueryOutputMode<'_>,
 ) -> Result<QueryOutput, SQLError> {
-    let mut scoped_ctes = ctes.clone();
+    let mut scoped_ctes =
+        ctes.copy_with_control(&context.ctes.production_resources()?.control())?;
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
-    scoped_ctes.with_cte_producers(!plan.ctes.is_empty(), |scoped_ctes| {
-        execute_lateral_query_scope(context, plan, outer_row, params, scoped_ctes, output_mode)
-    })
+    scoped_ctes.with_cte_producers_with_control(
+        !plan.ctes.is_empty(),
+        &context.ctes.production_resources()?.control(),
+        |scoped_ctes| {
+            execute_lateral_query_scope(context, plan, outer_row, params, scoped_ctes, output_mode)
+        },
+    )
 }
 
 fn execute_lateral_query_scope<S: Clone + Send + Sync + 'static>(
@@ -69,7 +74,10 @@ fn execute_lateral_query_scope<S: Clone + Send + Sync + 'static>(
 ) -> Result<QueryOutput, SQLError> {
     let resources = context.ctes.production_resources()?;
     let mut lookup = scoped_ctes.enter_query_plan_scope_with_control(plan, &resources.control())?;
-    let mut scoped_ctes = lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
+    let mut scoped_ctes = lookup.enter_visible_ctes_with_control(
+        plan.ctes.iter().map(|cte| cte.name.as_str()),
+        &resources.control(),
+    )?;
     // Keep folded occurrences selected during initialization instead of materializing their original, unpruned definitions for each outer row.
     let scheduled =
         crate::query::cte::strategy::schedule_plan_ctes(context.ctes, context.volatility, plan)?;
@@ -239,10 +247,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     if let Some(from) = stmt.from.as_ref() {
         uqa_sql::semantics::sets::validation::validate_source_set_contexts_before_build(
             context.relational.catalog,
-            context
-                .relational
-                .expression_scope((*scoped_ctes).clone())
-                .as_ref(),
+            context.relational.expression_scope(scoped_ctes)?.as_ref(),
             from,
             params,
             &crate::query::binding::binding_context(scoped_ctes)?,
@@ -370,10 +375,7 @@ fn bind_lateral_output_columns<S: Clone + Send + Sync + 'static>(
     )?;
     uqa_sql::semantics::sets::validation::validate_query_set_contexts(
         context.relational.catalog,
-        context
-            .relational
-            .expression_scope(scoped_ctes.clone())
-            .as_ref(),
+        context.relational.expression_scope(scoped_ctes)?.as_ref(),
         stmt,
         schema,
         params,

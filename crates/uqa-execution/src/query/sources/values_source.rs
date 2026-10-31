@@ -30,7 +30,7 @@ pub(super) fn build_values_source_operator<'a, S: Clone + Send + Sync + 'static>
         from,
         params,
         ctes,
-        || context.relational.expression_scope(ctes.clone()),
+        || context.relational.expression_scope(ctes),
         prune,
         filters,
         || context.relational.evaluator(params, ctes),
@@ -48,10 +48,13 @@ fn build_values_source<'a, S: Clone + 'static>(
     from: &SourcePlan,
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
-    expression_scope: impl FnOnce() -> Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+    expression_scope: impl FnOnce() -> Result<
+        Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
+        SQLError,
+    >,
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
-    evaluator: impl FnOnce() -> crate::SharedExpressionEvaluator<'a>,
+    evaluator: impl FnOnce() -> Result<crate::SharedExpressionEvaluator<'a>, SQLError>,
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     match from {
         SourcePlan::Values {
@@ -102,7 +105,7 @@ fn build_values_source<'a, S: Clone + 'static>(
                 schema.column_types()
             };
             let source_columns = schema.columns().to_vec();
-            let hook = expression_scope();
+            let hook = expression_scope()?;
             let operator = build_values_scan(
                 types,
                 hook,
@@ -124,7 +127,7 @@ fn build_values_source<'a, S: Clone + 'static>(
                 ctes.lock_identities.emit,
             );
             Ok(match alias.as_deref() {
-                Some(qualifier) => filter_closed_source(operator, qualifier, filters, evaluator),
+                Some(qualifier) => filter_closed_source(operator, qualifier, filters, evaluator)?,
                 None => operator,
             })
         }

@@ -283,7 +283,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 stmt.relations_bound,
             )?);
             if let Some(parent) = inherited_ctes {
-                scope.inherit_cte_bindings(parent);
+                scope.inherit_cte_bindings_with_control(parent, &control)?;
             }
             scope.set_statement_commands(Arc::clone(&statement_commands));
             scope.set_command_cte_snapshot(statement_snapshot.clone());
@@ -412,7 +412,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             )?;
             let cancel = context.query.source.relational.runtime.cancellation_token();
             // Evaluate, validate, and stage every VALUES row before writer promotion. A scalar subquery inside VALUES may carry FOR UPDATE, so holding the backend writer during that wait would fabricate a deadlock. Ordinary subqueries retain the statement snapshot while VOLATILE functions read the logical overlay left by preceding rows, matching PostgreSQL 18 command visibility.
-            let snapshot_scope = scope.returning_statement_snapshot_scope();
+            let snapshot_scope = scope.returning_statement_snapshot_scope_with_control(&control)?;
             let overlay = MutationOverlayScope::new(mutation.state);
             let mut conflict_locks = InsertConflictLocks::new(&preparation.referential);
             let prepared_schema = prepared_insert_spill_schema();

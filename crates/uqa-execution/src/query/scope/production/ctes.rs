@@ -5,22 +5,8 @@
 //
 
 use crate::query::{cte::rows::CteRows, CteScope};
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::memory::ProductionControl;
 use uqa_sql::{plan::CtePlan, SQLError};
-
-fn name(
-    reference: &str,
-    control: &ProductionControl<'_>,
-) -> Result<Option<Produced<String>>, SQLError> {
-    control.check()?;
-    let Some(reference) = uqa_core::RelationIdentity::borrowed_reference(reference) else {
-        return Ok(None);
-    };
-    if reference.schema.is_some() {
-        return Ok(None);
-    }
-    Ok(Some(control.format(format_args!("{}", reference.name))?))
-}
 
 impl<S: Clone> CteScope<S> {
     pub fn materialized_for_scan_with_control(
@@ -28,21 +14,29 @@ impl<S: Clone> CteScope<S> {
         reference: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<CteRows>, SQLError> {
-        Ok(name(reference, control)?.and_then(|name| self.rows.get(&name).cloned()))
+        control.check()?;
+        let rows = self.materialized_for_scan(reference);
+        control.check()?;
+        Ok(rows)
     }
     pub fn deferred_reference_with_control(
         &self,
         reference: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&CtePlan>, SQLError> {
-        Ok(name(reference, control)?
-            .and_then(|name| self.deferred_ctes.get(name.as_str()).map(AsRef::as_ref)))
+        control.check()?;
+        let plan = self.deferred_reference(reference);
+        control.check()?;
+        Ok(plan)
     }
     pub fn is_visible_cte_with_control(
         &self,
         reference: &str,
         control: &ProductionControl<'_>,
     ) -> Result<bool, SQLError> {
-        Ok(name(reference, control)?.is_some_and(|name| self.contains_cte_name(&name)))
+        control.check()?;
+        let visible = self.is_visible_cte(reference);
+        control.check()?;
+        Ok(visible)
     }
 }

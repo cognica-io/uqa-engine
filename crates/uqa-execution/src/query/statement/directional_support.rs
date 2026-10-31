@@ -7,12 +7,12 @@
 //! Backward traversal support derived from query operators and CTE scheduling.
 
 use crate::{query::CteScope, BackwardScanSupport};
-use std::{borrow::Cow, collections::BTreeMap};
+use uqa_sql::binding::production::BindingMap;
 use uqa_sql::{
     ast::SetOpKind,
     plan::{ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan},
     routines::RoutineResolution,
-    semantics::{cte_reference_name, volatility::VolatilityCatalog},
+    semantics::volatility::VolatilityCatalog,
     SQLError, SQLParam,
 };
 
@@ -35,7 +35,7 @@ pub fn query_plan_backward_scan_support<S: Clone>(
         params,
         control,
     }
-    .query(plan, ctes, &BTreeMap::new())
+    .query(plan, ctes, &BindingMap::new())
 }
 
 struct TraversalAnalysis<'a> {
@@ -50,10 +50,10 @@ impl TraversalAnalysis<'_> {
         &self,
         plan: &QueryPlan,
         ctes: &CteScope<S>,
-        inherited: &BTreeMap<String, BackwardScanSupport>,
+        inherited: &BindingMap<BackwardScanSupport>,
     ) -> Result<BackwardScanSupport, SQLError> {
-        let mut ctes = Cow::Borrowed(ctes);
-        let mut support = Cow::Borrowed(inherited);
+        let mut owned_ctes: Option<CteScope<S>> = None;
+        let mut owned_support: Option<BindingMap<BackwardScanSupport>> = None;
         let scheduled = uqa_sql::semantics::cte_strategy::schedule_plan_ctes_with_control(
             self.volatility,
             plan,
@@ -66,15 +66,36 @@ impl TraversalAnalysis<'_> {
                     .body
                     .query()
                     .ok_or_else(|| SQLError::Internal("deferred CTE has no query body".into()))?;
-                self.query(query, &ctes, &support)?
+                self.query(
+                    query,
+                    owned_ctes.as_ref().unwrap_or(ctes),
+                    owned_support.as_ref().unwrap_or(inherited),
+                )?
             } else {
                 BackwardScanSupport::Native
             };
-            support.to_mut().insert(cte.name.clone(), traversal);
+            if owned_support.is_none() {
+                owned_support =
+                    Some(inherited.copy_with_control(&self.control, |value| Ok(*value))?);
+            }
+            owned_support
+                .as_mut()
+                .expect("private traversal map")
+                .insert_with_control(&cte.name, traversal, &self.control)?;
             // Retain declaration-order schemas without executing or materializing a CTE.
-            ctes.to_mut()
-                .insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &self.control)?);
+            if owned_ctes.is_none() {
+                owned_ctes = Some(ctes.copy_with_control(&self.control)?);
+            }
+            owned_ctes
+                .as_mut()
+                .expect("private declaration scope")
+                .insert_deferred_with_control(
+                    uqa_sql::plan::RetainedCtePlan::capture(cte, &self.control)?,
+                    &self.control,
+                )?;
         }
+        let ctes = owned_ctes.as_ref().unwrap_or(ctes);
+        let support = owned_support.as_ref().unwrap_or(inherited);
         match &plan.root {
             RelationalPlan::Values { .. } => Ok(BackwardScanSupport::Native),
             RelationalPlan::SetOp {
@@ -86,8 +107,8 @@ impl TraversalAnalysis<'_> {
                 ..
             } => {
                 if !order_by.is_empty()
-                    || (self.query(left, &ctes, &support)? == BackwardScanSupport::Native
-                        && self.query(right, &ctes, &support)? == BackwardScanSupport::Native)
+                    || (self.query(left, ctes, support)? == BackwardScanSupport::Native
+                        && self.query(right, ctes, support)? == BackwardScanSupport::Native)
                 {
                     Ok(BackwardScanSupport::Native)
                 } else {
@@ -95,7 +116,7 @@ impl TraversalAnalysis<'_> {
                 }
             }
             RelationalPlan::SetOp { .. } => Ok(BackwardScanSupport::Unsupported),
-            RelationalPlan::QueryBlock(block) => self.block(block, &ctes, &support),
+            RelationalPlan::QueryBlock(block) => self.block(block, ctes, support),
         }
     }
 
@@ -103,7 +124,7 @@ impl TraversalAnalysis<'_> {
         &self,
         block: &QueryBlockPlan,
         ctes: &CteScope<S>,
-        support: &BTreeMap<String, BackwardScanSupport>,
+        support: &BindingMap<BackwardScanSupport>,
     ) -> Result<BackwardScanSupport, SQLError> {
         if block.distinct || !block.distinct_on.is_empty() || !block.locking.is_empty() {
             return Ok(BackwardScanSupport::Unsupported);
@@ -138,13 +159,14 @@ impl TraversalAnalysis<'_> {
         &self,
         source: &SourcePlan,
         ctes: &CteScope<S>,
-        support: &BTreeMap<String, BackwardScanSupport>,
+        support: &BindingMap<BackwardScanSupport>,
     ) -> Result<BackwardScanSupport, SQLError> {
         match source {
             SourcePlan::RetainedRows(_) => Ok(BackwardScanSupport::Materialize),
             SourcePlan::Table { name, .. } => {
-                if let Some(traversal) =
-                    cte_reference_name(name).and_then(|name| support.get(&name))
+                if let Some(traversal) = uqa_core::RelationIdentity::borrowed_reference(name)
+                    .filter(|reference| reference.schema.is_none())
+                    .and_then(|reference| support.get_name(reference.name))
                 {
                     return Ok(*traversal);
                 }
@@ -152,7 +174,9 @@ impl TraversalAnalysis<'_> {
                     let query = deferred.body.query().ok_or_else(|| {
                         SQLError::Internal("deferred CTE has no query body".into())
                     })?;
-                    let parent = ctes.definition_scope(name).expect("declared CTE scope");
+                    let parent = ctes
+                        .definition_scope_with_control(name, &self.control)?
+                        .expect("declared CTE scope");
                     return self.query(query, &parent, support);
                 }
                 Ok(BackwardScanSupport::Native)

@@ -131,7 +131,7 @@ fn projection_setness<S: Clone + 'static>(
     schema: &crate::RowSchema,
     execution: &FinalProjectionExecution<'_, '_, S>,
 ) -> Result<Vec<bool>, SQLError> {
-    let type_resolver = execution.context.expression_scope(execution.ctes.clone());
+    let type_resolver = execution.context.expression_scope(execution.ctes)?;
     projections
         .iter()
         .map(|(_, expression)| {

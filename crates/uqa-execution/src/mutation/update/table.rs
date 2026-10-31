@@ -152,7 +152,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 stmt.relations_bound,
             )?);
             if let Some(parent) = inherited_ctes {
-                ctes.inherit_cte_bindings(parent);
+                ctes.inherit_cte_bindings_with_control(parent, &control)?;
             }
             ctes.set_statement_commands(std::sync::Arc::clone(&statement_commands));
             ctes.set_command_cte_snapshot(statement_snapshot.clone());
@@ -320,7 +320,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                 }
             }
             let candidates = candidates.finish()?;
-            let snapshot_ctes = ctes.returning_statement_snapshot_scope();
+            let snapshot_ctes = ctes.returning_statement_snapshot_scope_with_control(&control)?;
             let overlay = MutationOverlayScope::new(context.mutation.state);
             let action_schema = prepared_mutation_action_schema();
             let mut prepared_updates =

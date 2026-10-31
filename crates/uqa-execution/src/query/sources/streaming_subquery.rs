@@ -144,7 +144,7 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
         outer_row.as_ref().map(|row| &row.schema),
         &context.ctes.production_resources()?.control(),
     )?;
-    let resolver = context.relational.expression_scope(ctes.clone());
+    let resolver = context.relational.expression_scope(ctes)?;
     uqa_sql::semantics::sets::validation::validate_query_set_contexts(
         context.relational.catalog,
         resolver.as_ref(),

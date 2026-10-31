@@ -72,9 +72,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         &aliases,
                         ctes.lock_identities.emit,
                     );
-                    return Ok(attach_qualifier_filter(
+                    return attach_qualifier_filter(
                         operator, &qualifier, filters, context, params, ctes,
-                    ));
+                    );
                 }
                 let source_columns = scan.schema().to_vec();
                 let aliases = table_source_aliases(&source_columns, &[], column_aliases);
@@ -86,12 +86,15 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     &aliases,
                     ctes.lock_identities.emit,
                 );
-                return Ok(attach_qualifier_filter(
+                return attach_qualifier_filter(
                     operator, &qualifier, filters, context, params, ctes,
-                ));
+                );
             }
 
-            if let Some((plan, mut definition_scope)) = ctes.deferred_input(name) {
+            if let Some((plan, mut definition_scope)) = ctes.deferred_input_with_control(
+                name,
+                &context.ctes.production_resources()?.control(),
+            )? {
                 let resources = context.ctes.production_resources()?;
                 let control = resources.control();
                 control.check()?;
@@ -170,9 +173,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         &aliases,
                         false,
                     );
-                    return Ok(attach_qualifier_filter(
+                    return attach_qualifier_filter(
                         operator, &qualifier, filters, context, params, ctes,
-                    ));
+                    );
                 }
                 let materialized = if plan.materialization
                     == uqa_sql::ast::CteMaterialization::NotMaterialized
@@ -240,9 +243,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     &aliases,
                     false,
                 );
-                return Ok(attach_qualifier_filter(
+                return attach_qualifier_filter(
                     operator, &qualifier, filters, context, params, ctes,
-                ));
+                );
             }
 
             let catalog = ctes.catalog_read_view()?;
@@ -278,9 +281,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 let operator = qualify_source_operator_with_columns(
                     scan, &columns, &qualifier, prune, &aliases, false,
                 );
-                return Ok(attach_qualifier_filter(
+                return attach_qualifier_filter(
                     operator, &qualifier, filters, context, params, ctes,
-                ));
+                );
             }
             if let Some(view) = catalog.view_resolved_with_control(&resolution, name, &control)? {
                 if view.kind == uqa_sql::catalog::view::StoredViewKind::Materialized {
@@ -297,9 +300,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     let operator = qualify_source_operator_with_columns(
                         scan, &columns, &qualifier, prune, &aliases, false,
                     );
-                    return Ok(attach_qualifier_filter(
+                    return attach_qualifier_filter(
                         operator, &qualifier, filters, context, params, ctes,
-                    ));
+                    );
                 }
                 let privilege_subject = if view.security_invoker() {
                     ctes.invoking_role()?.clone_with_control(&control)?
@@ -404,9 +407,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         &aliases,
                         ctes.lock_identities.emit,
                     );
-                    return Ok(attach_qualifier_filter(
+                    return attach_qualifier_filter(
                         operator, &qualifier, filters, context, params, ctes,
-                    ));
+                    );
                 }
                 let local_cte_names = query_cte_names(execution_plan);
                 let is_volatile = uqa_sql::semantics::volatility::query_contains_volatile_function(
@@ -414,7 +417,8 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     execution_plan,
                 )?;
                 let output = if is_volatile || inherited_lock.is_some() {
-                    let mut scoped = ctes.clone();
+                    let mut scoped =
+                        ctes.copy_with_control(&context.ctes.production_resources()?.control())?;
                     context
                         .ctes
                         .queries
@@ -441,9 +445,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     &aliases,
                     ctes.lock_identities.emit,
                 );
-                return Ok(attach_qualifier_filter(
+                return attach_qualifier_filter(
                     operator, &qualifier, filters, context, params, ctes,
-                ));
+                );
             }
 
             if let Some(schema) =
@@ -502,9 +506,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     &aliases,
                     ctes.lock_identities.emit,
                 );
-                return Ok(attach_qualifier_filter(
+                return attach_qualifier_filter(
                     operator, &qualifier, filters, context, params, ctes,
-                ));
+                );
             }
 
             if let Some((foreign_name, foreign_table)) =
@@ -542,9 +546,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     &aliases,
                     ctes.lock_identities.emit,
                 );
-                return Ok(attach_qualifier_filter(
+                return attach_qualifier_filter(
                     operator, &qualifier, filters, context, params, ctes,
-                ));
+                );
             }
 
             if let Some(predicate) =
@@ -576,9 +580,7 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             if filter_pushed {
                 Ok(operator)
             } else {
-                Ok(attach_qualifier_filter(
-                    operator, &qualifier, filters, context, params, ctes,
-                ))
+                attach_qualifier_filter(operator, &qualifier, filters, context, params, ctes)
             }
         }
         _ => unreachable!("table source builder called for a different source kind"),

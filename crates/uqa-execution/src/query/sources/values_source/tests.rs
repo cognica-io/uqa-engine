@@ -34,7 +34,7 @@ fn values_source_evaluates_each_row_only_when_its_consumer_requests_it() {
         &source,
         &[],
         &scope,
-        || Arc::new(Services),
+        || Ok(Arc::new(Services)),
         None,
         None,
         || panic!("no predicate"),
@@ -100,7 +100,7 @@ fn values_sources_keep_each_outer_row_and_only_expose_their_own_columns() {
             &right,
             &[],
             &scope,
-            || Arc::new(Services),
+            || Ok(Arc::new(Services)),
             None,
             None,
             || panic!("no predicate"),
@@ -153,7 +153,7 @@ fn internal_values_capture_a_typed_outer_attribute_in_its_original_scope() {
         &source,
         &[],
         &scope,
-        || Arc::new(Services),
+        || Ok(Arc::new(Services)),
         None,
         None,
         || panic!("no predicate"),
@@ -222,7 +222,7 @@ fn values_from_sources_preserve_postgresql_collations_through_qualification() {
                 &source,
                 &[],
                 &crate::catalog::test_support::empty_scope(),
-                || Arc::new(Services),
+                || Ok(Arc::new(Services)),
                 None,
                 None,
                 || panic!("no predicate is placed on the list"),
@@ -296,10 +296,14 @@ fn values_sources_apply_only_the_predicates_placed_on_their_qualifier() {
         &source,
         &[],
         &crate::catalog::test_support::empty_scope(),
-        || Arc::new(Services),
+        || Ok(Arc::new(Services)),
         None,
         Some(&filters),
-        || crate::relational::DefaultExpressionEvaluator::shared(Vec::new()),
+        || {
+            Ok(crate::relational::DefaultExpressionEvaluator::shared(
+                Vec::new(),
+            ))
+        },
     )
     .unwrap();
     let (_, actual) = crate::physical::run_to_rows(operator.as_mut()).unwrap();
@@ -347,10 +351,14 @@ fn values_sources_fail_instead_of_reading_an_unproduced_column() {
             &source,
             &[],
             &crate::catalog::test_support::empty_scope(),
-            || Arc::new(Services),
+            || Ok(Arc::new(Services)),
             None,
             Some(&filters),
-            || crate::relational::DefaultExpressionEvaluator::shared(Vec::new()),
+            || {
+                Ok(crate::relational::DefaultExpressionEvaluator::shared(
+                    Vec::new(),
+                ))
+            },
         )
         .unwrap();
         crate::physical::run_to_rows(operator.as_mut()).map(|(_, rows)| rows.len())

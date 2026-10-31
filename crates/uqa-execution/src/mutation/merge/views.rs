@@ -726,9 +726,9 @@ fn pair_view_merge_rows<S: Clone + Send + Sync + 'static>(
     )?;
     let source_rows =
         build_join_spill_with_ctes(&read_context.query.source, &plan.source, params, ctes)?;
-    let mut target_scope = ctes.returning_statement_snapshot_scope();
+    let mut target_scope = ctes.returning_statement_snapshot_scope_with_control(&control)?;
     let candidates = materialize_view_rows(&read_context.query, target, params, &mut target_scope)?;
-    let snapshot = ctes.returning_statement_snapshot_scope();
+    let snapshot = ctes.returning_statement_snapshot_scope_with_control(&control)?;
     let pairings = build_view_merge_pairings(PairingInput {
         expressions: read_context
             .mutation
@@ -786,7 +786,10 @@ fn initialize_view_merge_scope<S: Clone>(
     statement_snapshot: Option<std::sync::Arc<S>>,
 ) -> Result<(), SQLError> {
     if let Some(parent) = inherited_ctes {
-        ctes.inherit_cte_bindings(parent);
+        ctes.inherit_cte_bindings_with_control(
+            parent,
+            &context.query.source.ctes.production_resources()?.control(),
+        )?;
     }
     ctes.set_statement_commands(std::sync::Arc::clone(statement_commands));
     ctes.set_command_cte_snapshot(statement_snapshot);

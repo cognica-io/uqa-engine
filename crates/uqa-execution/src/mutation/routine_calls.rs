@@ -209,14 +209,20 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
         .scopes
         .command_scope(inputs.subject, inputs.relations_bound)?;
     if let Some(parent) = inherited {
-        scope.inherit_cte_bindings(parent);
+        scope.inherit_cte_bindings_with_control(parent, &control)?;
     }
     for cte in inputs.ctes {
-        scope.insert_deferred(uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?);
+        scope.insert_deferred_with_control(
+            uqa_sql::plan::RetainedCtePlan::capture(cte, &control)?,
+            &control,
+        )?;
     }
     scope.scalar_subqueries =
         uqa_sql::plan::RetainedQueryArena::capture(inputs.subqueries, &control)?;
-    let mut visible = scope.enter_visible_ctes(inputs.ctes.iter().map(|cte| cte.name.as_str()));
+    let mut visible = scope.enter_visible_ctes_with_control(
+        inputs.ctes.iter().map(|cte| cte.name.as_str()),
+        &control,
+    )?;
     let scope = &mut *visible;
     if let Some(source) = inputs.source {
         crate::query::privileges::ensure_select_privileges_for_source_expressions(

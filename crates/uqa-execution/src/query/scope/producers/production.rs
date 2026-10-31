@@ -13,7 +13,9 @@ impl CteProducers {
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         let list = super::super::production::shared(
-            ProducerList(parking_lot::Mutex::new(Some(Vec::new()))),
+            ProducerList(parking_lot::Mutex::new(Some(
+                uqa_core::memory::OwnedMap::new(),
+            ))),
             control,
         )?;
         Ok(Self::Owned(list))

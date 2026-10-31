@@ -79,7 +79,7 @@ fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
         ctes,
         &context.ctes.production_resources()?.control(),
     )?;
-    let type_resolver = context.relational.expression_scope(ctes.clone());
+    let type_resolver = context.relational.expression_scope(ctes)?;
     validate_query_set_contexts(
         context.relational.catalog,
         type_resolver.as_ref(),
