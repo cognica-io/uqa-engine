@@ -34270,6 +34270,84 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_inputs_finish_before_enclosing_call_metadata_moves_them",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/rewritten_inputs.rs",
+      "capability": "Analyzed membership ownership",
+      "workload": "Nested IN/NOT IN under selected calls and copied scalar subqueries with DISTINCT grouping metadata.",
+      "invariant": "Ordinary and admitted preparation consume every original input identity, retain completed grouping metadata in copied queries, and release all admitted storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "default_membership_inputs_finish_before_enclosing_call_replacement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/defaults.rs",
+      "capability": "Stored membership ownership",
+      "workload": "Repeated DEFAULT analysis of nested membership under pg_typeof and coalesce.",
+      "invariant": "Selected result types and rewritten membership survive enclosing call replacement and repeated analysis.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "both_cancellation_scopes_precede_schema_allocation_and_keep_retained_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/tests.rs",
+      "capability": "Cancelled schema construction",
+      "workload": "Each cancellation scope rejects a new schema before metadata construction.",
+      "invariant": "Cancellation attempts no allocations and preserves the existing sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_distinct_grouping_keeps_first_normalized_set_and_only_output_capacity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/grouping_sets/tests/ownership.rs",
+      "capability": "Distinct grouping storage",
+      "workload": "Aliased and duplicate grouping sets over an independently constructed input schema.",
+      "invariant": "Normalized set order is exact and only final grouping output capacity remains allocated and charged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_body_selection_substitutes_argument_owners_and_retires_preparation_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/inlining/tests/selection.rs",
+      "capability": "Inline body storage",
+      "workload": "A SQL echo body substitutes a retained text argument after selecting its owned preparation.",
+      "invariant": "Only the returned expression and diagnostic frame remain charged; their final retirement releases every request-owned byte.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "selected_alias_input_avoids_unrelated_catalog_projection_and_releases_lookup_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/input/tests.rs",
+      "capability": "Selected OID input storage",
+      "workload": "Namespace, procedure and relation lookup beside an unrelated four-MiB routine body, with both cancellation scopes.",
+      "invariant": "Lookup allocates below 16 KiB, retires all request-owned workspace and rejects cancellation before producer allocation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
