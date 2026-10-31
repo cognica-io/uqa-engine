@@ -600,8 +600,13 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         statement_snapshot,
     } = prepare_view_merge(context, plan, params, inherited_ctes)?;
     super::analysis::reject_set_valued_inserts(context.query.source.ctes.routines, plan)?;
-    let (statement_commands, _running_statement) =
-        begin_view_merge_statement(inherited_ctes, triggers, &events, &target)?;
+    let (statement_commands, _running_statement) = begin_view_merge_statement(
+        context.query.source.ctes,
+        inherited_ctes,
+        triggers,
+        &events,
+        &target,
+    )?;
     let mut statement_scope = None;
     let mut execute_read =
         |read_context: &MutationStatementContext<'_, S>| -> Result<MutationOutput, SQLError> {
@@ -748,6 +753,7 @@ fn pair_view_merge_rows<S: Clone + Send + Sync + 'static>(
 
 /// The statement a view MERGE belongs to, with the BEFORE STATEMENT triggers of the view fired for the MERGE's actions.
 fn begin_view_merge_statement<S: Clone>(
+    context: crate::query::cte::CteExecutionContext<'_, S>,
     inherited_ctes: Option<&CteScope<S>>,
     triggers: &TriggerContext<'_>,
     events: &super::statement_events::MergeStatementEvents,
@@ -759,7 +765,8 @@ fn begin_view_merge_statement<S: Clone>(
     ),
     SQLError,
 > {
-    let (statement_commands, running_statement) = statement_end::statement_commands(inherited_ctes);
+    let (statement_commands, running_statement) =
+        statement_end::statement_commands(context, inherited_ctes)?;
     statement_end::fire_before_statements(
         &statement_commands,
         triggers,

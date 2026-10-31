@@ -8,7 +8,9 @@
 
 use crate::{
     mutation::{
-        output::MutationOutput, statement::context::MutationStatementContext, statement_end,
+        output::MutationOutput,
+        statement::context::MutationStatementContext,
+        statement_end::{self, statement_commands},
     },
     query::CteScope,
 };
@@ -90,7 +92,7 @@ fn run<S: Clone + Send + Sync + 'static>(
             |original| run_original(context, &original, params, inherited, control),
         );
     }
-    let (commands, _running) = statement_end::statement_commands(inherited);
+    let (commands, _running) = statement_commands(context.query.source.ctes, inherited)?;
     let (subject, relations_bound) = match statement {
         RuleMutation::Update(plan) => (
             plan.statement_privilege_subject.as_ref(),

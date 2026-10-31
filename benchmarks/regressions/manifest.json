@@ -32680,6 +32680,77 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "postponed_cte_readers_keep_plan_owners_after_once_only_schedule_transfer",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/statement_commands/tests.rs",
+      "capability": "Native postponed CTE ownership",
+      "workload": "Two postponed definitions including a four MiB value, one independent plan reader and shared command owners.",
+      "invariant": "Move the queue once in dependency order; retire the command header and schedule vector independently while the selected plan survives until its last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "rejected_postponed_replacement_preserves_prior_schedule_and_releases_partial_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/statement_commands/tests.rs",
+      "capability": "Native postponed CTE ownership",
+      "workload": "An existing schedule, small then four MiB replacement plans, 64 KiB available, both cancellations after the first plan and observation unwind.",
+      "invariant": "Reject before the large copy, preserve the original schedule identity and deferred flag, and release every unpublished plan/vector owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "statement_owner_and_empty_schedule_admission_precede_state_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/statement_commands/tests.rs",
+      "capability": "Native postponed CTE ownership",
+      "workload": "A command header one byte above its allowance, an ancestor budget and each cancellation scope with an empty schedule.",
+      "invariant": "Admit the shared header before allocation, preserve unmodified command state on failure and release all child/ancestor reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_postponed_cte_scheduling_admits_before_copying_and_keeps_scope_atomic",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/scheduling.rs",
+      "capability": "Native postponed CTE ownership",
+      "workload": "A four MiB deferred INSERT CTE with 64 KiB available, recovery and both cancellation owners on four providers.",
+      "invariant": "Reject before copying, retain the successful plan owner, publish no new scope command state after rejection, and leave the unexecuted target empty.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_postponed_ctes_preserve_pg18_writes_triggers_and_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/scheduling.rs",
+      "capability": "Native postponed CTE ownership",
+      "workload": "PostgreSQL 18 reference writes for an empty primary output, dependency-ordered CTEs, AFTER triggers, EXPLAIN, runtime failure/savepoint and persistent reopen.",
+      "invariant": "Preserve mandatory once-only writes and AFTER effects, no effects from plain EXPLAIN or a failed primary query, recovery and durable results across memory, native SQLite, SQLite Key/Value and redb.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

@@ -71,7 +71,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
     let assignment = preparation.referential.assignment;
     let triggers = preparation.referential.triggers;
     let (statement_commands, _running_statement) =
-        statement_end::statement_commands(inherited_ctes);
+        statement_end::statement_commands(context.query.source.ctes, inherited_ctes)?;
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     preparation.referential.locking.session.lock_relation(
         &stmt.table,

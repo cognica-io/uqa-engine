@@ -86,7 +86,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     super::analysis::reject_set_valued_inserts(context.query.source.ctes.routines, stmt)?;
     crate::mutation::routine_calls::merge(context, stmt, params, inherited_ctes)?;
     let (statement_commands, _running_statement) =
-        statement_end::statement_commands(inherited_ctes);
+        statement_end::statement_commands(context.query.source.ctes, inherited_ctes)?;
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     let resources = context.query.source.ctes.production_resources()?;
     let control = resources.control();

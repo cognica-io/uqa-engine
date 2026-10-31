@@ -39,7 +39,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
     let (statement_commands, _running_statement) =
-        statement_end::statement_commands(inherited_ctes);
+        statement_end::statement_commands(context.query.source.ctes, inherited_ctes)?;
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     context.query.source.locking.session.lock_relation(
         &stmt.table,

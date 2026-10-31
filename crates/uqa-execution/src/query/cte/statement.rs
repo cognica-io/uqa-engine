@@ -95,11 +95,7 @@ pub(crate) fn install_statement_ctes<'a, S: Clone>(
     )?;
     let commands = match scope.statement_commands() {
         Some(commands) => std::sync::Arc::clone(commands),
-        None => {
-            let commands = std::sync::Arc::default();
-            scope.set_statement_commands(std::sync::Arc::clone(&commands));
-            commands
-        }
+        None => crate::query::scope::StatementCommands::with_control(&control)?,
     };
     let is_folded = |plan: &CtePlan| {
         folded
@@ -107,12 +103,13 @@ pub(crate) fn install_statement_ctes<'a, S: Clone>(
             .is_ok()
     };
     commands.begin_data_modifying_with(
-        order
-            .postponed
-            .iter()
-            .map(|plan| ((*plan).clone(), is_folded(plan)))
-            .collect(),
-    );
+        order.postponed.iter().map(|plan| ScheduledCte {
+            plan,
+            deferred: is_folded(plan),
+        }),
+        &control,
+    )?;
+    scope.set_statement_commands(commands);
     install_scheduled_ctes(
         context,
         order.primary.iter().map(|plan| ScheduledCte {
@@ -168,10 +165,13 @@ pub fn finish_statement_ctes<S: Clone>(
     let postponed = commands.take_scheduled_postponed();
     install_scheduled_ctes(
         context,
-        postponed.iter().map(|(plan, deferred)| ScheduledCte {
-            plan,
-            deferred: *deferred,
-        }),
+        postponed
+            .iter()
+            .flat_map(|schedule| schedule.iter())
+            .map(|(plan, deferred)| ScheduledCte {
+                plan,
+                deferred: *deferred,
+            }),
         params,
         scope,
         &BTreeMap::new(),

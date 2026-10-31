@@ -48,7 +48,10 @@ pub fn run_view_delete_inner<S: Clone + Send + Sync + 'static>(
         )?
         .is_empty();
     let (statement_commands, _running_statement) =
-        crate::mutation::statement_end::statement_commands(inherited_ctes);
+        crate::mutation::statement_end::statement_commands(
+            context.query.source.ctes,
+            inherited_ctes,
+        )?;
     let view_statement = crate::mutation::triggers::queue::StatementEvent::new(
         &target.canonical_name,
         uqa_sql::ast::TriggerEvent::Delete,
