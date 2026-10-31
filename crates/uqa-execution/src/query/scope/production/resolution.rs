@@ -32,6 +32,17 @@ impl ScopeResolution {
         })
     }
 
+    pub(in crate::query::scope) fn retain_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        match self {
+            Self::Captured { .. } => Ok(self.clone()),
+            Self::Ordinary(_) => Self::capture(self.copy_with_control(control)?, control),
+        }
+    }
+
     pub(in crate::query::scope) fn snapshot(&self) -> RelationNameResolution {
         let mut value = (**self).clone();
         value.set_lookup_mode(self.lookup_mode());

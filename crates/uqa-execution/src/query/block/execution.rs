@@ -61,8 +61,16 @@ fn validate_bound_query_block<S: Clone + Send + Sync + 'static>(
     source_schema: &crate::RowSchema,
 ) -> Result<(crate::RowSchema, Option<crate::RowSchema>), SQLError> {
     let outer = ctes.row_lock_outer_row().map(|row| row.schema.clone());
-    let source_schema = with_query_table_pseudo_columns(source_schema);
-    let expression_schema = overlay_outer_schema(&source_schema, outer.as_ref());
+    let resources = context.ctes.production_resources()?;
+    let source_schema = uqa_sql::binding::with_query_table_pseudo_columns_with_control(
+        source_schema,
+        &resources.control(),
+    )?;
+    let expression_schema = uqa_sql::binding::overlay_outer_schema_with_control(
+        &source_schema,
+        outer.as_ref(),
+        &resources.control(),
+    )?;
     validate_query_block_expression_types(
         context.ctes.routines,
         stmt,
@@ -310,26 +318,46 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
         }
     };
     let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
-    let rewritten =
-        uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(stmt, operator.row_schema());
-    let original =
-        uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(block, operator.row_schema());
+    let (operator, (rewritten, original)) =
+        crate::physical::construction::OperatorBuild::run(operator, |operator| {
+            let resources = context.ctes.production_resources()?;
+            let control = resources.control();
+            let rewritten = uqa_sql::binding::ExecutionQueryBlock::borrowed(stmt)
+                .resolve_outer_rewrites(operator.row_schema(), &control)?;
+            let original = uqa_sql::binding::ExecutionQueryBlock::borrowed(block)
+                .resolve_outer_rewrites(operator.row_schema(), &control)?;
+            Ok((rewritten, original))
+        })?;
     let stmt = rewritten.as_ref();
     let block = original.as_ref();
     let mut rewritten_scope;
-    let ctes = if rewrite_subqueries {
-        let arena_resources = context.ctes.production_resources()?;
-        rewritten_scope = ctes
-            .enter_scalar_subqueries_with_control(&stmt.subqueries, &arena_resources.control())?;
-        &mut *rewritten_scope
+    let (operator, ctes) = if rewrite_subqueries {
+        let (operator, scope) =
+            crate::physical::construction::OperatorBuild::run(operator, |_| {
+                let arena_resources = context.ctes.production_resources()?;
+                ctes.enter_scalar_subqueries_with_control(
+                    &stmt.subqueries,
+                    &arena_resources.control(),
+                )
+            })?;
+        rewritten_scope = scope;
+        (operator, &mut *rewritten_scope)
     } else {
-        ctes
+        (operator, ctes)
     };
     let (operator, (columns, physical_filter)) =
         crate::physical::construction::OperatorBuild::run(operator, |operator| {
             let source_schema = operator.row_schema().clone();
-            let projection_schema = with_query_table_pseudo_columns(&source_schema);
-            let projection_schema = overlay_outer_schema(&projection_schema, outer);
+            let resources = context.ctes.production_resources()?;
+            let projection_schema = uqa_sql::binding::with_query_table_pseudo_columns_with_control(
+                &source_schema,
+                &resources.control(),
+            )?;
+            let projection_schema = uqa_sql::binding::overlay_outer_schema_with_control(
+                &projection_schema,
+                outer,
+                &resources.control(),
+            )?;
             validate_query_block_references(
                 context.ctes.routines,
                 stmt,
@@ -495,8 +523,11 @@ fn prepare_query_block<'a, S: Clone + Send + Sync + 'static>(
         block,
         params,
         ctes,
-        outer,
-        defer_distinct_limit,
+        uqa_sql::binding::ExecutionBindingOptions {
+            outer,
+            defer_distinct_limit,
+        },
         None,
+        &context.ctes.production_resources()?.control(),
     )
 }

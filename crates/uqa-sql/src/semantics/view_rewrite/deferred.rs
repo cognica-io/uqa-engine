@@ -80,20 +80,23 @@ impl Clone for OuterReplacement {
 }
 
 /// Bind a pending rewrite to the complete local source descriptor without changing its retained syntax. An open descriptor cannot decide that an absent name belongs to the outer scope.
+pub(crate) fn has_resolvable_outer_rewrites(block: &QueryBlockPlan, local: &RowSchema) -> bool {
+    !block.deferred_outer_rewrites.is_empty()
+        && (!local.columns_are_open(None)
+            || block.deferred_outer_rewrites.iter().any(|rewrite| {
+                rewrite
+                    .replacements
+                    .keys()
+                    .any(|identity| identity.qualifier().is_some())
+            }))
+}
+
 pub fn resolve_outer_rewrites<'a>(
     block: &'a QueryBlockPlan,
     local: &RowSchema,
 ) -> Cow<'a, QueryBlockPlan> {
     let open = local.columns_are_open(None);
-    if block.deferred_outer_rewrites.is_empty()
-        || open
-            && !block.deferred_outer_rewrites.iter().any(|rewrite| {
-                rewrite
-                    .replacements
-                    .keys()
-                    .any(|identity| identity.qualifier().is_some())
-            })
-    {
+    if !has_resolvable_outer_rewrites(block, local) {
         return Cow::Borrowed(block);
     }
     let mut block = block.clone();

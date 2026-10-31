@@ -179,6 +179,28 @@ impl RoutineResolution for Engine {
             .map(<[String]>::to_vec)
     }
 
+    fn registered_table_function_columns_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+        let name = uqa_sql::semantics::lowercase_function_name_with_control(name, control)?;
+        let Some(registered) = self.query_runtime_view().lookup_table_function(&name) else {
+            return Ok(None);
+        };
+        registered
+            .function
+            .output_columns()
+            .map(|columns| {
+                let mut output = uqa_core::memory::ProductionVec::new(*control);
+                for column in columns {
+                    output.push_produced(control.copy_text(column)?)?;
+                }
+                Ok(output.finish()?)
+            })
+            .transpose()
+    }
+
     fn has_registered_aggregate_function(&self, name: &str) -> bool {
         Engine::has_registered_aggregate_function(self, name)
     }
@@ -290,6 +312,25 @@ impl RoutineResolution for Engine {
         Ok(self
             .select_bound_function_with_control(&binding, control)?
             .map(|function| function.def.returns_set()))
+    }
+
+    fn resolve_static_sql_function_match_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        call: uqa_sql::type_resolution::RoutineCallDescriptor<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::routines::resolution::OwnedStaticFunctionMatch>, SQLError> {
+        self.routine_overload_context()
+            .resolve_static_sql_routine_match_with_control(
+                name,
+                binding,
+                call.argument_names,
+                call.argument_types,
+                call.explicit_variadic,
+                uqa_sql::routines::resolution::RoutineCallKind::Function,
+                control,
+            )
     }
 
     fn resolve_static_sql_function_binding_with_control(

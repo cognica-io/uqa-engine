@@ -9,7 +9,7 @@
 pub mod context;
 use crate::physical::physical_exec_error;
 use crate::query::{
-    binding::{bind_source_plan_schema, bind_source_plan_schema_for_execution},
+    binding::{bind_source_plan_for_execution, bind_source_plan_schema},
     consumer::QueryOutputMode,
     output::{query_output_shared, QueryOutput},
     projection::physical_work_mem_bytes,
@@ -81,8 +81,11 @@ pub fn build_join_spill_with_ctes<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<crate::SharedSpill, SQLError> {
-    let mut bound = source.clone();
-    bind_source_plan_schema_for_execution(context.ctes.routines, &mut bound, params, ctes, None)?;
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
+    let bound = source.copy_for_rewrite(&control)?;
+    let (bound, _) =
+        bind_source_plan_for_execution(context.ctes.routines, bound, params, ctes, None, &control)?;
     let operator = build_join_operator_with_ctes(context, &bound, params, ctes, None, None)?;
     let columns = operator.schema().to_vec();
     let output = crate::query::collection::collect_query_operator(

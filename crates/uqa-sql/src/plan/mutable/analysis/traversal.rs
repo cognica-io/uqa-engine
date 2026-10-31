@@ -48,6 +48,13 @@ impl Walker<'_, '_> {
         self.ctes(&mut query.ctes, field(memory.as_deref_mut(), "ctes"))?;
         match &mut query.root {
             RelationalPlan::QueryBlock(block) => {
+                self.install_projection_aliases(
+                    &mut block.projections,
+                    field(
+                        field(field(memory.as_deref_mut(), "root"), "block"),
+                        "projections",
+                    ),
+                )?;
                 if let Some(source) = &mut block.from {
                     let memory = memory.as_deref_mut().map(|memory| {
                         super::super::sources::query_source_memory(memory)
@@ -119,7 +126,7 @@ impl Walker<'_, '_> {
             SourcePlan::Table {
                 executable_query: Some(body),
                 ..
-            } if self.query.is_some() => {
+            } if self.query.is_some() || self.projections.is_some() => {
                 self.query(body, field(field(memory, "executable_query"), "query"))?;
             }
             _ => {}
@@ -166,6 +173,27 @@ impl Walker<'_, '_> {
             self.query(
                 query,
                 memory.map(|memory| slot.memory_mut(memory).as_mut().expect("command query")),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn returning_aliases(
+        &mut self,
+        command: &mut CommandPlan,
+        memory: Option<&mut RewriteMemory>,
+    ) -> Result<(), SQLError> {
+        let returning = match command {
+            CommandPlan::Insert(plan) => Some(&mut plan.returning),
+            CommandPlan::Update(plan) => Some(&mut plan.returning),
+            CommandPlan::Delete(plan) => Some(&mut plan.returning),
+            CommandPlan::Merge(plan) => Some(&mut plan.returning),
+            _ => None,
+        };
+        if let Some(returning) = returning {
+            self.install_projection_aliases(
+                returning,
+                field(field(memory, "value0"), "returning"),
             )?;
         }
         Ok(())
@@ -242,6 +270,7 @@ impl Walker<'_, '_> {
             }
             _ => {}
         }
+        self.returning_aliases(command, memory.as_deref_mut())?;
         if let Some(ctes) = command.ctes_mut() {
             self.ctes(ctes, field(field(memory.as_deref_mut(), "value0"), "ctes"))?;
         }

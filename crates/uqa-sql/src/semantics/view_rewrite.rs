@@ -40,6 +40,7 @@ pub use commands::{
 };
 pub use validation::production::validate_public_merge_contract as validate_public_merge_contract_with_control;
 mod deferred;
+pub(crate) use deferred::has_resolvable_outer_rewrites;
 pub use deferred::{
     bind_outer_rewrite_scope, bind_outer_rewrite_scope_with_control,
     resolve_outer_expression_rewrites, resolve_outer_rewrites, resolve_outer_rewrites_owned,

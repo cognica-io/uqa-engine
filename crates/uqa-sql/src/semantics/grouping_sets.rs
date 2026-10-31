@@ -22,7 +22,10 @@ pub(crate) use production::{
 };
 mod names;
 pub(crate) use names::resolve_grouping_expression_reference_with_control;
-pub use names::{bind_grouping_names, grouping_output_name, resolve_grouping_expression};
+pub use names::{
+    bind_grouping_names, bind_grouping_names_owned, grouping_output_name,
+    resolve_grouping_expression,
+};
 mod validation;
 pub use validation::validate_grouped_expressions;
 pub(crate) use validation::validate_grouped_expressions_with_inputs;

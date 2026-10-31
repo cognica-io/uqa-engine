@@ -664,7 +664,11 @@ impl Preparation<'_> {
         let mut arguments = self.observe_function_arguments(name, args, &[], input, subqueries)?;
         let types = arguments.types()?;
         if binding.is_none()
-            && crate::type_resolution::function_arguments_have_runtime_types(args, &types)?
+            && crate::type_resolution::function_arguments_have_runtime_types_with_control(
+                args,
+                &types,
+                &self.scope.control(),
+            )?
         {
             return Ok(None);
         }

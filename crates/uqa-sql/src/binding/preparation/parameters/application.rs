@@ -82,30 +82,7 @@ impl InputConstants {
                     .flatten(),
                 _ => None,
             };
-            let mut aliases = ProductionVec::new(*control);
-            if let RelationalPlan::QueryBlock(block) = &selected.root {
-                for (index, projection) in block.projections.iter().enumerate() {
-                    if projection.alias.is_none()
-                        && self.11.contains_key(&NonNull::from(&projection.expr))
-                    {
-                        if let crate::ScalarExpr::Column(name)
-                        | crate::ScalarExpr::QualifiedColumn { column: name, .. } =
-                            &projection.expr
-                        {
-                            let name = control.copy_text(name)?;
-                            aliases.push_produced(
-                                control.finish((index, name), control.empty_reservation())?,
-                            )?;
-                        }
-                    }
-                }
-            }
             Ok(QueryMetadataUpdate {
-                projection_aliases: if aliases.is_empty() {
-                    None
-                } else {
-                    Some(aliases.finish()?)
-                },
                 root,
                 output: self.8.outputs.remove(&NonNull::from(query)),
                 source: source
@@ -113,6 +90,24 @@ impl InputConstants {
                     .transpose()?,
                 ..Default::default()
             })
+        })?;
+        plan.apply_projection_aliases(control, &mut |projections| {
+            let mut aliases = ProductionVec::new(*control);
+            for (index, projection) in projections.iter().enumerate() {
+                if projection.alias.is_none()
+                    && self.11.contains_key(&NonNull::from(&projection.expr))
+                {
+                    if let crate::ScalarExpr::Column(name)
+                    | crate::ScalarExpr::QualifiedColumn { column: name, .. } = &projection.expr
+                    {
+                        let name = control.copy_text(name)?;
+                        aliases.push_produced(
+                            control.finish((index, name), control.empty_reservation())?,
+                        )?;
+                    }
+                }
+            }
+            Ok(aliases.finish()?)
         })?;
         plan.apply_source_metadata(control, &mut |source| self.source_metadata(source, control))?;
         plan.transform_scalar_nodes_in_place(control, &mut |identity, expression| {

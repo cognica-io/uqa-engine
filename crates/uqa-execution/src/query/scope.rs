@@ -140,14 +140,15 @@ impl<S: Clone> CteScope<S> {
     }
 
     pub fn relation_name_resolution(&self) -> Result<RelationNameResolution, SQLError> {
-        self.catalog_resolution
-            .as_ref()
-            .map(production::resolution::ScopeResolution::snapshot)
-            .ok_or_else(|| {
-                SQLError::Internal(
-                    "query execution scope has no statement name-resolution snapshot".into(),
-                )
-            })
+        Ok(self.name_resolution()?.snapshot())
+    }
+
+    fn name_resolution(&self) -> Result<&production::resolution::ScopeResolution, SQLError> {
+        self.catalog_resolution.as_ref().ok_or_else(|| {
+            SQLError::Internal(
+                "query execution scope has no statement name-resolution snapshot".into(),
+            )
+        })
     }
 
     pub(crate) fn relation_lookup_mode(

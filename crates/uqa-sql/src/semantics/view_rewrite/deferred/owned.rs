@@ -54,15 +54,7 @@ pub fn resolve_outer_rewrites_owned(
         ));
     };
     let open = local.columns_are_open(None);
-    if block.deferred_outer_rewrites.is_empty()
-        || open
-            && !block.deferred_outer_rewrites.iter().any(|rewrite| {
-                rewrite
-                    .replacements
-                    .keys()
-                    .any(|identity| identity.qualifier().is_some())
-            })
-    {
+    if !super::has_resolvable_outer_rewrites(block, local) {
         return Ok(query);
     }
     let (retained, rewrites) = query.take_deferred_rewrites(control)?;

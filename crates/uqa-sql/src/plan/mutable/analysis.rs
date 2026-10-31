@@ -9,7 +9,7 @@
 use super::{MutableExecutablePlan, MutableQueryPlan, RewriteMemory};
 use crate::{
     ast::FunctionBinding,
-    plan::{QueryPlan, SharedAnalyzedSource, SourcePlan},
+    plan::{ProjectionPlan, QueryPlan, SharedAnalyzedSource, SourcePlan},
     RowSchema, SQLError,
 };
 use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionControl};
@@ -24,10 +24,11 @@ pub(crate) struct QueryMetadataUpdate {
     pub output: Option<RowSchema>,
     pub source: Option<SharedAnalyzedSource>,
     pub grouping: Option<Produced<crate::semantics::grouping_sets::AnalyzedGroupingSets>>,
-    pub projection_aliases: Option<ProjectionAliasUpdates>,
 }
 
 pub(crate) type SourceMetadataUpdate = Produced<Vec<(usize, Produced<FunctionBinding>)>>;
+type ProjectionObserver<'a> =
+    dyn FnMut(&[ProjectionPlan]) -> Result<ProjectionAliasUpdates, SQLError> + 'a;
 type QueryObserver<'a> = dyn FnMut(&QueryPlan) -> Result<QueryMetadataUpdate, SQLError> + 'a;
 type SourceObserver<'a> = dyn FnMut(&SourcePlan) -> Result<SourceMetadataUpdate, SQLError> + 'a;
 type SourceReplacement<'a> =
@@ -35,6 +36,7 @@ type SourceReplacement<'a> =
 
 struct Walker<'a, 'c> {
     query: Option<&'a mut QueryObserver<'a>>,
+    projections: Option<&'a mut ProjectionObserver<'a>>,
     source: Option<&'a mut SourceObserver<'a>>,
     replacement: Option<&'a mut SourceReplacement<'a>>,
     control: ProductionControl<'c>,
@@ -65,6 +67,7 @@ impl MutableExecutablePlan {
         }
         Walker {
             query: None,
+            projections: None,
             source: None,
             replacement: None,
             control: *control,
@@ -82,6 +85,7 @@ impl MutableExecutablePlan {
     ) -> Result<(), SQLError> {
         Walker {
             query: None,
+            projections: None,
             source: None,
             replacement: Some(replace),
             control: *control,
@@ -98,6 +102,25 @@ impl MutableExecutablePlan {
     ) -> Result<(), SQLError> {
         Walker {
             query: Some(observe),
+            projections: None,
+            source: None,
+            replacement: None,
+            mark_relations: false,
+            cte_command: false,
+            control: *control,
+        }
+        .plan(self)
+    }
+
+    /// Preserve observable projection names before scalar replacement, for both queries and mutation RETURNING clauses.
+    pub(crate) fn apply_projection_aliases<'a>(
+        &mut self,
+        control: &ProductionControl<'_>,
+        observe: &'a mut ProjectionObserver<'a>,
+    ) -> Result<(), SQLError> {
+        Walker {
+            query: None,
+            projections: Some(observe),
             source: None,
             replacement: None,
             mark_relations: false,
@@ -114,6 +137,7 @@ impl MutableExecutablePlan {
     ) -> Result<(), SQLError> {
         Walker {
             query: None,
+            projections: None,
             source: Some(observe),
             replacement: None,
             mark_relations: false,
@@ -163,7 +187,7 @@ impl Walker<'_, '_> {
             let (grouping, lease) = grouping.into_parts();
             let (grouping, lease) = self.control.finish(grouping, lease)?.into_parts();
             query.analyzed_grouping = Some(grouping);
-            if let Some(memory) = memory.as_deref_mut() {
+            if let Some(memory) = memory {
                 let direct = lease.expect("admitted grouping metadata");
                 *memory.field_mut("analyzed_grouping") = Some(RewriteMemory::Fields {
                     fields: BudgetedVec::new(direct.budget()),
@@ -171,10 +195,19 @@ impl Walker<'_, '_> {
                 });
             }
         }
-        if let Some(aliases) = update.projection_aliases {
-            install_aliases(query, memory, aliases, &self.control)?;
-        }
         Ok(())
+    }
+
+    fn install_projection_aliases(
+        &mut self,
+        projections: &mut [ProjectionPlan],
+        memory: Option<&mut RewriteMemory>,
+    ) -> Result<(), SQLError> {
+        let Some(observe) = &mut self.projections else {
+            return Ok(());
+        };
+        let aliases = observe(projections)?;
+        install_aliases(projections, memory, aliases, &self.control)
     }
 
     fn install_source(
@@ -252,16 +285,11 @@ impl Walker<'_, '_> {
 }
 
 fn install_aliases(
-    query: &mut QueryPlan,
+    projections: &mut [ProjectionPlan],
     mut memory: Option<&mut RewriteMemory>,
     aliases: Produced<Vec<(usize, Produced<String>)>>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    let crate::plan::RelationalPlan::QueryBlock(block) = &mut query.root else {
-        return Err(SQLError::Internal(
-            "projection aliases require a query block".into(),
-        ));
-    };
     let (values, buffer) = aliases.into_parts();
     struct Aliases {
         values: std::vec::IntoIter<(usize, Produced<String>)>,
@@ -275,19 +303,10 @@ fn install_aliases(
         control.check()?;
         let (alias, lease) = alias.into_parts();
         let (alias, lease) = control.finish(alias, lease)?.into_parts();
-        block.projections[index].alias = Some(alias);
+        projections[index].alias = Some(alias);
         if let Some(memory) = memory.as_deref_mut() {
             let direct = lease.expect("admitted projection alias");
             *memory
-                .field_mut("root")
-                .as_mut()
-                .expect("query root")
-                .field_mut("block")
-                .as_mut()
-                .expect("query block")
-                .field_mut("projections")
-                .as_mut()
-                .expect("projections")
                 .item_mut(index)
                 .as_mut()
                 .expect("projection")

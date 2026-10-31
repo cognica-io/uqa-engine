@@ -129,13 +129,17 @@ impl<S: Clone> CteScope<S> {
         &mut self,
         enabled: bool,
     ) -> LockIdentityEmissionScope<'_, S> {
-        let previous = std::mem::replace(
-            &mut self.lock_identities,
-            LockIdentityOptions {
-                emit: enabled,
-                retain_after_lock: false,
-            },
-        );
+        self.enter_lock_identity_options(LockIdentityOptions {
+            emit: enabled,
+            retain_after_lock: false,
+        })
+    }
+
+    pub(crate) fn enter_lock_identity_options(
+        &mut self,
+        options: LockIdentityOptions,
+    ) -> LockIdentityEmissionScope<'_, S> {
+        let previous = std::mem::replace(&mut self.lock_identities, options);
         LockIdentityEmissionScope {
             ctes: self,
             previous,

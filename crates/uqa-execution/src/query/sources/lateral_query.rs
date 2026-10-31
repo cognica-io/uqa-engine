@@ -217,25 +217,16 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
-    let (mut stmt, own_schema) = crate::query::binding::bind_query_block_for_execution(
-        context.ctes.routines,
+    let (stmt, own_schema) = bind_lateral_query_block(
+        context,
         stmt,
+        &outer_row.schema,
         params,
         &scoped_ctes,
-        Some(&outer_row.schema),
-        false,
+        &arena_resources.control(),
     )?;
-    // The operator of a lateral block also holds its outer row, whose columns must not take a GROUP BY name before an output column, so the names are bound against the block's own columns first.
-    if matches!(stmt.compute, ComputePlan::Aggregate) {
-        uqa_sql::semantics::grouping_sets::bind_grouping_names(
-            context.ctes.routines,
-            stmt.to_mut(),
-            &own_schema,
-            None,
-            params,
-        )?;
-    }
-    let stmt = stmt.as_ref();
+    let statement_owner = stmt;
+    let stmt = statement_owner.as_ref();
     let mut bound_scope;
     let scoped_ctes = if rewrite_subqueries {
         let arena_resources = context.ctes.production_resources()?;
@@ -264,7 +255,10 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         local_schema,
     } = build_lateral_query_source(context, stmt, &own_schema, outer_row, params, scoped_ctes)?;
     let pending = !stmt.deferred_outer_rewrites.is_empty();
-    let rewritten = uqa_sql::semantics::view_rewrite::resolve_outer_rewrites(stmt, &local_schema);
+    let (operator, rewritten) =
+        crate::physical::construction::OperatorBuild::run(operator, |_| {
+            statement_owner.resolve_outer_rewrites(&local_schema, &arena_resources.control())
+        })?;
     let stmt = rewritten.as_ref();
     let residual = if pending {
         stmt.r#where.clone()
@@ -272,13 +266,19 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         residual
     };
     let rewritten_scope;
-    let scoped_ctes = if rewrite_subqueries {
-        let arena_resources = context.ctes.production_resources()?;
-        rewritten_scope = scoped_ctes
-            .enter_scalar_subqueries_with_control(&stmt.subqueries, &arena_resources.control())?;
-        &*rewritten_scope
+    let (operator, scoped_ctes) = if rewrite_subqueries {
+        let (operator, scope) =
+            crate::physical::construction::OperatorBuild::run(operator, |_| {
+                let arena_resources = context.ctes.production_resources()?;
+                scoped_ctes.enter_scalar_subqueries_with_control(
+                    &stmt.subqueries,
+                    &arena_resources.control(),
+                )
+            })?;
+        rewritten_scope = scope;
+        (operator, &*rewritten_scope)
     } else {
-        &*scoped_ctes
+        (operator, &*scoped_ctes)
     };
     let (operator, columns) =
         crate::physical::construction::OperatorBuild::run(operator, |operator| {
@@ -302,6 +302,33 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         columns,
         output_mode,
     )
+}
+
+/// Resolve local GROUP BY names before the physical outer row is overlaid.
+fn bind_lateral_query_block<'a, S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    stmt: &'a QueryBlockPlan,
+    outer_schema: &crate::RowSchema,
+    params: &[SQLParam],
+    scoped_ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(uqa_sql::binding::ExecutionQueryBlock<'a>, crate::RowSchema), SQLError> {
+    let (mut stmt, own_schema) = crate::query::binding::bind_query_block_for_execution(
+        context.ctes.routines,
+        stmt,
+        params,
+        scoped_ctes,
+        uqa_sql::binding::ExecutionBindingOptions {
+            outer: Some(outer_schema),
+            defer_distinct_limit: false,
+        },
+        control,
+    )?;
+    if matches!(stmt.compute, ComputePlan::Aggregate) {
+        stmt =
+            stmt.bind_grouping_names(context.ctes.routines, &own_schema, None, params, control)?;
+    }
+    Ok((stmt, own_schema))
 }
 
 fn bind_lateral_output_columns<S: Clone + Send + Sync + 'static>(

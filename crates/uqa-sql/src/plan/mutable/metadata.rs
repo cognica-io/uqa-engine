@@ -19,6 +19,29 @@ use uqa_core::{
 };
 
 impl MutableQueryPlan {
+    /// Move DISTINCT slicing to its later execution boundary and retire only the removed LIMIT/OFFSET constructors.
+    pub(crate) fn clear_block_slice(
+        mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
+            return Err(SQLError::Internal(
+                "execution slice requires a query block".into(),
+            ));
+        };
+        block.limit = None;
+        block.offset = None;
+        if let Some(memory) = &mut self.memory {
+            let block = block_memory(memory);
+            *block.field_mut("limit") = None;
+            *block.field_mut("offset") = None;
+        }
+        control.check()?;
+        Ok(self)
+    }
+
     /// Drop cached row and source analysis after a structural input rewrite; query syntax and its independently owned fields remain intact.
     pub fn clear_row_analysis(mut self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
         self.assert_owner(control);

@@ -26,7 +26,7 @@ mod cast_compatibility;
 mod checksum;
 mod common;
 pub(crate) use common::common_context_expression_type_with_control;
-pub(crate) use common::{function_arguments_have_runtime_types, runtime_input};
+pub(crate) use common::{function_arguments_have_runtime_types_with_control, runtime_input};
 pub(crate) use common::{parameter_type_matches, parameter_type_with_control};
 pub(crate) mod concatenation;
 pub(crate) use common::literal_input_type_with_control;

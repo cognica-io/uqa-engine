@@ -94,14 +94,7 @@ impl<S: Clone> CteScope<S> {
         control: &ProductionControl<'_>,
     ) -> Result<Produced<RelationNameResolution>, SQLError> {
         control.check()?;
-        self.catalog_resolution
-            .as_ref()
-            .ok_or_else(|| {
-                SQLError::Internal(
-                    "query execution scope has no statement name-resolution snapshot".into(),
-                )
-            })?
-            .copy_with_control(control)
+        self.name_resolution()?.copy_with_control(control)
     }
 
     /// Retain a preexisting transition materialization, admitting only its new lexical name and map node. Replacing the same name reuses its existing identity allocation.

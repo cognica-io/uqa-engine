@@ -30,6 +30,7 @@ mod literal_collations;
 mod operator_joins;
 mod ordered_calls;
 mod rewritten_inputs;
+mod routine_ownership;
 mod row_stars;
 mod set_contexts;
 mod set_ordering;

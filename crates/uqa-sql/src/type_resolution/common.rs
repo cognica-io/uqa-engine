@@ -12,7 +12,7 @@ use uqa_core::{
 };
 
 use crate::schema::ScalarTypeSchema;
-use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
+use crate::{RowSchema, ScalarExpr};
 
 use super::FunctionTypeResolver;
 
@@ -36,11 +36,12 @@ pub(super) fn unknown_input(mut expression: &ScalarExpr) -> bool {
 }
 
 /// A column or callback whose type is unavailable remains a runtime carrier; it cannot participate in overload selection as an unknown string or NULL literal.
-pub(crate) fn function_arguments_have_runtime_types(
+pub(crate) fn function_arguments_have_runtime_types_with_control(
     arguments: &[ScalarExpr],
     types: &[Option<ColumnType>],
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    let arguments = scalar_call_arguments(arguments)?;
+    let arguments = crate::ir::scalar_call_arguments_with_control(arguments, control)?;
     assert_eq!(arguments.len(), types.len());
     Ok(arguments
         .iter()

@@ -13,6 +13,7 @@ use crate::{
 };
 use uqa_core::{memory::ProductionControl, Value};
 
+mod bindings;
 mod functions;
 mod generated;
 mod joins;

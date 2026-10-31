@@ -6,34 +6,57 @@
 
 //! Immutable namespace guard for immediate derived-source metadata transfer.
 
-use super::{CatalogReadView, CteScope, RelationNameResolution};
+use super::{production::resolution::ScopeResolution, CatalogReadView, CteScope};
 use crate::RowSchema;
-use std::collections::{BTreeMap, BTreeSet};
-use uqa_sql::SQLError;
+use std::sync::Arc;
+use uqa_core::memory::{Produced, ProductionControl};
+use uqa_sql::{
+    binding::production::{BindingMap, BindingNameSet},
+    SQLError,
+};
 
 pub(crate) struct SourceBindingScope {
     catalog: CatalogReadView,
-    resolution: RelationNameResolution,
-    rows: BTreeMap<String, RowSchema>,
-    deferred: BTreeMap<String, uqa_sql::plan::RetainedCtePlan>,
-    non_returning: BTreeSet<String>,
-    recursive_widths: BTreeMap<String, usize>,
+    resolution: ScopeResolution,
+    rows: BindingMap<RowSchema>,
+    deferred: BindingMap<uqa_sql::plan::RetainedCtePlan>,
+    non_returning: BindingNameSet,
+    recursive_widths: BindingMap<usize>,
 }
 
 impl SourceBindingScope {
-    pub(crate) fn capture<S: Clone>(ctes: &CteScope<S>) -> Result<Self, SQLError> {
-        Ok(Self {
+    pub(crate) fn capture<S: Clone>(
+        ctes: &CteScope<S>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Arc<Produced<Self>>, SQLError> {
+        control.check()?;
+        let mut captured = Self {
             catalog: ctes.catalog_read_view()?,
-            resolution: ctes.relation_name_resolution()?,
-            rows: ctes
+            resolution: ctes.name_resolution()?.retain_with_control(control)?,
+            rows: BindingMap::new(),
+            deferred: BindingMap::new(),
+            non_returning: BindingNameSet::new(),
+            recursive_widths: BindingMap::new(),
+        };
+        for (name, rows) in &ctes.rows {
+            captured
                 .rows
-                .iter()
-                .map(|(name, rows)| (name.clone(), rows.row_schema().clone()))
-                .collect(),
-            deferred: ctes.deferred_ctes.clone(),
-            non_returning: ctes.non_returning_ctes.clone(),
-            recursive_widths: ctes.recursive_control_widths.clone(),
-        })
+                .insert_with_control(name, rows.row_schema().clone(), control)?;
+        }
+        for (name, plan) in &ctes.deferred_ctes {
+            captured
+                .deferred
+                .insert_with_control(name, plan.clone(), control)?;
+        }
+        for name in &ctes.non_returning_ctes {
+            captured.non_returning.insert_with_control(name, control)?;
+        }
+        for (name, width) in &ctes.recursive_control_widths {
+            captured
+                .recursive_widths
+                .insert_with_control(name, *width, control)?;
+        }
+        super::production::shared(captured, control)
     }
 
     pub(crate) fn matches<S: Clone>(&self, ctes: &CteScope<S>) -> bool {
@@ -47,8 +70,11 @@ impl SourceBindingScope {
             && self.resolution.temporary_namespace_allocated
                 == resolution.temporary_namespace_allocated
             && self.resolution.current_user == resolution.current_user
-            && self.non_returning == ctes.non_returning_ctes
-            && self.recursive_widths == ctes.recursive_control_widths
+            && self.non_returning.iter().eq(ctes.non_returning_ctes.iter())
+            && self
+                .recursive_widths
+                .iter()
+                .eq(ctes.recursive_control_widths.iter())
             && self.rows.len() == ctes.rows.len()
             && self
                 .rows

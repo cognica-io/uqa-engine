@@ -4,29 +4,42 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Execution-local source bindings without copying unchanged query syntax.
+//! Execution-local source bindings preserve borrowed syntax or an admitted private query.
 
-use std::borrow::Cow;
-use std::sync::Arc;
-
-use super::{bind_source_plan_schema_for_execution, BindingContext};
+use super::{production::ControlledBindingContext, BindingContext, SchemaScope};
 use crate::{
-    plan::{QueryBlockPlan, SourcePlan},
+    plan::{QueryBlockPlan, RelationalPlan, SourcePlan},
     routines::RoutineResolution,
     RowSchema, SQLError, SQLParam,
 };
+use std::borrow::Cow;
+use uqa_core::memory::ProductionControl;
 
+mod block;
 mod sources;
+pub use block::ExecutionQueryBlock;
 pub(in crate::binding) use sources::CapturedSources;
-pub use sources::ExecutionSourceBindings;
+pub use sources::{ExecutionSourceBindings, SharedExecutionSourceBindings};
+
+#[derive(Clone, Copy, Default)]
+pub struct ExecutionBindingOptions<'a> {
+    pub outer: Option<&'a RowSchema>,
+    pub defer_distinct_limit: bool,
+}
 
 pub struct BoundExecutionBlock<'a> {
     pub block: Cow<'a, QueryBlockPlan>,
     pub schema: RowSchema,
-    pub sources: Option<Arc<ExecutionSourceBindings<'a>>>,
+    pub sources: Option<SharedExecutionSourceBindings<'a>>,
 }
 
-/// Bind the current execution tree and retain its already visited derived sources for immediate physical assembly in this same immutable scope. Source/function rewrites retain their ordinary binding path.
+pub struct ControlledExecutionBlock<'a> {
+    pub block: ExecutionQueryBlock<'a>,
+    pub schema: RowSchema,
+    pub sources: Option<SharedExecutionSourceBindings<'a>>,
+}
+
+/// Bind the current execution tree and retain its already visited derived sources for immediate physical assembly in this same immutable scope.
 pub fn bind_query_block_with_sources<'a>(
     routines: &dyn RoutineResolution,
     block: &'a QueryBlockPlan,
@@ -35,18 +48,27 @@ pub fn bind_query_block_with_sources<'a>(
     outer: Option<&RowSchema>,
     defer_distinct_limit: bool,
 ) -> Result<BoundExecutionBlock<'a>, SQLError> {
-    bind_execution_block(
+    let control = ProductionControl::uncontrolled();
+    let bound = bind_execution_block(
         routines,
         block,
         params,
-        context,
-        outer,
-        defer_distinct_limit,
+        context.copy_with_control(&control)?,
+        ExecutionBindingOptions {
+            outer,
+            defer_distinct_limit,
+        },
         true,
-    )
+        &control,
+    )?;
+    Ok(BoundExecutionBlock {
+        block: bound.block.into_uncontrolled(),
+        schema: bound.schema,
+        sources: bound.sources,
+    })
 }
 
-/// Keep the input immutable while selecting table-function identities and, when requested, moving the DISTINCT slice to its existing later boundary.
+/// Keep the input immutable while selecting table-function identities and moving DISTINCT slicing to its existing later boundary.
 pub fn bind_query_block_for_execution<'a>(
     routines: &dyn RoutineResolution,
     block: &'a QueryBlockPlan,
@@ -55,100 +77,161 @@ pub fn bind_query_block_for_execution<'a>(
     outer: Option<&RowSchema>,
     defer_distinct_limit: bool,
 ) -> Result<(Cow<'a, QueryBlockPlan>, RowSchema), SQLError> {
+    let control = ProductionControl::uncontrolled();
     let bound = bind_execution_block(
         routines,
         block,
         params,
-        context,
-        outer,
-        defer_distinct_limit,
+        context.copy_with_control(&control)?,
+        ExecutionBindingOptions {
+            outer,
+            defer_distinct_limit,
+        },
         false,
+        &control,
     )?;
+    Ok((bound.block.into_uncontrolled(), bound.schema))
+}
+
+/// Bind a private execution block without retaining descriptors for recursive physical source transfer.
+pub fn bind_query_block_for_execution_with_control<'a>(
+    routines: &dyn RoutineResolution,
+    block: &'a QueryBlockPlan,
+    params: &[SQLParam],
+    context: ControlledBindingContext<'_>,
+    options: ExecutionBindingOptions<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(ExecutionQueryBlock<'a>, RowSchema), SQLError> {
+    let bound = bind_execution_block(routines, block, params, context, options, false, control)?;
     Ok((bound.block, bound.schema))
+}
+
+pub fn bind_query_block_with_sources_with_control<'a>(
+    routines: &dyn RoutineResolution,
+    block: &'a QueryBlockPlan,
+    params: &[SQLParam],
+    context: ControlledBindingContext<'_>,
+    options: ExecutionBindingOptions<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<ControlledExecutionBlock<'a>, SQLError> {
+    bind_execution_block(routines, block, params, context, options, true, control)
 }
 
 fn bind_execution_block<'a>(
     routines: &dyn RoutineResolution,
     block: &'a QueryBlockPlan,
     params: &[SQLParam],
-    context: &BindingContext<'_>,
-    outer: Option<&RowSchema>,
-    defer_distinct_limit: bool,
+    context: ControlledBindingContext<'_>,
+    options: ExecutionBindingOptions<'_>,
     retain_sources: bool,
-) -> Result<BoundExecutionBlock<'a>, SQLError> {
-    let captured_outer =
-        outer.map(|schema| crate::semantics::view_rewrite::bind_outer_rewrite_scope(block, schema));
+    control: &ProductionControl<'_>,
+) -> Result<ControlledExecutionBlock<'a>, SQLError> {
+    control.check()?;
+    let captured_outer = options
+        .outer
+        .map(|schema| {
+            crate::semantics::view_rewrite::bind_outer_rewrite_scope_with_control(
+                block, schema, control,
+            )
+        })
+        .transpose()?;
     let outer = captured_outer.as_deref();
-    if defer_distinct_limit
+    if options.defer_distinct_limit
         || block.from.as_ref().is_some_and(source_binds_routines)
         || !block.deferred_outer_rewrites.is_empty() && block.from.is_some()
     {
-        let mut execution = crate::semantics::select_execution_stmt(block, defer_distinct_limit);
-        if let Cow::Owned(rewritten) = crate::semantics::view_rewrite::resolve_outer_sources(
-            &execution,
-            outer,
-            &mut |source, subqueries, scope| {
-                super::sources::bind_source_input_schema(
-                    routines,
-                    source,
-                    params,
-                    &BindingContext {
-                        scalar_subqueries: subqueries,
-                        ..context.clone()
-                    },
-                    scope,
-                )
-            },
-        )? {
-            execution = rewritten;
-        }
-        let source_context = BindingContext {
-            scalar_subqueries: &execution.subqueries,
-            ..context.clone()
-        };
-        let source = execution.from.as_mut().map_or_else(
-            || Ok(RowSchema::default()),
-            |source| {
-                bind_source_plan_schema_for_execution(
-                    routines,
-                    source,
-                    params,
-                    &source_context,
-                    outer,
-                )
-            },
-        )?;
-        if let Cow::Owned(rewritten) =
-            crate::semantics::view_rewrite::resolve_outer_rewrites(&execution, &source)
-        {
-            execution = rewritten;
-        }
-        return Ok(BoundExecutionBlock {
-            block: Cow::Owned(execution),
-            schema: source,
-            sources: None,
-        });
+        return bind_rewritten_block(
+            routines,
+            block,
+            params,
+            context,
+            ExecutionBindingOptions { outer, ..options },
+            control,
+        );
     }
     let (schema, sources) = if let Some(source) = &block.from {
-        let mut scope = super::SchemaScope::from_context(context)?;
-        scope.execution_sources = retain_sources
-            .then(|| CapturedSources::for_source(source))
-            .filter(|captured| !captured.is_empty());
-        let schema =
-            scope.bind_source(routines, source, context.scalar_subqueries, params, outer)?;
+        let subqueries = context.scalar_subqueries;
+        let mut scope = SchemaScope::from_context_with_control(context, control)?;
+        if retain_sources {
+            let captured = CapturedSources::for_source(source, control)?;
+            scope.execution_sources = (!captured.is_empty()).then_some(captured);
+        }
+        let schema = scope.bind_source(routines, source, subqueries, params, outer)?;
         let sources = scope
             .execution_sources
             .as_mut()
-            .map(|captured| captured.take(source));
+            .map(|captured| captured.take(source, control))
+            .transpose()?;
         (schema, sources)
     } else {
-        (RowSchema::default(), None)
+        (empty_schema(control)?, None)
     };
-    Ok(BoundExecutionBlock {
-        block: crate::semantics::view_rewrite::resolve_outer_rewrites(block, &schema),
+    let block = ExecutionQueryBlock::borrowed(block).resolve_outer_rewrites(&schema, control)?;
+    Ok(ControlledExecutionBlock {
+        block,
         schema,
         sources,
     })
+}
+
+fn bind_rewritten_block<'a>(
+    routines: &dyn RoutineResolution,
+    block: &'a QueryBlockPlan,
+    params: &[SQLParam],
+    context: ControlledBindingContext<'_>,
+    options: ExecutionBindingOptions<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<ControlledExecutionBlock<'a>, SQLError> {
+    let outer = options.outer;
+    let mut execution = block.copy_for_rewrite(control)?;
+    if options.defer_distinct_limit {
+        execution = execution.clear_block_slice(control)?;
+    }
+    execution = crate::semantics::view_rewrite::resolve_outer_sources_owned(
+        execution,
+        outer,
+        &mut |source, subqueries, scope| {
+            let context = ControlledBindingContext {
+                scalar_subqueries: subqueries,
+                ..context.copy_with_control(control)?
+            };
+            SchemaScope::from_context_with_control(context, control)?
+                .bind_source_input(routines, source, subqueries, params, scope)
+        },
+        control,
+    )?;
+    let mut schema = None;
+    execution = execution.map_source_with_parent(control, |parent, source| {
+        let RelationalPlan::QueryBlock(parent) = &parent.root else {
+            unreachable!("original query block")
+        };
+        let context = ControlledBindingContext {
+            scalar_subqueries: &parent.subqueries,
+            ..context.copy_with_control(control)?
+        };
+        let (source, bound) = SchemaScope::from_context_with_control(context, control)?
+            .bind_owned_source_for_execution(routines, source, &parent.subqueries, params, outer)?;
+        schema = Some(bound);
+        Ok(source)
+    })?;
+    let schema = match schema {
+        Some(schema) => schema,
+        None => empty_schema(control)?,
+    };
+    execution =
+        crate::semantics::view_rewrite::resolve_outer_rewrites_owned(execution, &schema, control)?;
+    Ok(ControlledExecutionBlock {
+        block: ExecutionQueryBlock::owned(execution, control)?,
+        schema,
+        sources: None,
+    })
+}
+
+fn empty_schema(control: &ProductionControl<'_>) -> Result<RowSchema, SQLError> {
+    RowSchema::new_with_control(
+        control.finish(Vec::new(), control.empty_reservation())?,
+        control,
+    )
 }
 
 fn source_binds_routines(source: &SourcePlan) -> bool {

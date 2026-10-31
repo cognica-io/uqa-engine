@@ -311,7 +311,7 @@ impl SchemaScope {
         &mut self,
         engine: &dyn RoutineResolution,
         request: TableFunctionSourceValidation<'_>,
-    ) -> Result<Option<crate::semantics::ResolvedUserTableFunction>, SQLError> {
+    ) -> Result<Option<crate::semantics::ControlledUserTableFunction>, SQLError> {
         let TableFunctionSourceValidation {
             name,
             binding,
@@ -333,7 +333,18 @@ impl SchemaScope {
                 &resolver,
             )?;
         }
-        functions::validate_table_function(engine, name, binding, args, input, params, &resolver)
+        functions::validate_table_function(
+            crate::semantics::TableFunctionAnalysis {
+                routines: engine,
+                types: &resolver,
+            },
+            name,
+            binding,
+            args,
+            input,
+            params,
+            &self.control(),
+        )
     }
 }
 

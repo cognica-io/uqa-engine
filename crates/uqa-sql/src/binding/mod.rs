@@ -47,8 +47,10 @@ mod variable_sites;
 
 pub use commands::{analyze_prepared_command_schema, analyze_prepared_command_schema_with_control};
 pub use execution::{
-    bind_query_block_for_execution, bind_query_block_with_sources, BoundExecutionBlock,
-    ExecutionSourceBindings,
+    bind_query_block_for_execution, bind_query_block_for_execution_with_control,
+    bind_query_block_with_sources, bind_query_block_with_sources_with_control, BoundExecutionBlock,
+    ControlledExecutionBlock, ExecutionBindingOptions, ExecutionQueryBlock,
+    ExecutionSourceBindings, SharedExecutionSourceBindings,
 };
 pub use preparation::bind_expression_plan_routines_for_storage_owned;
 pub use preparation::{
@@ -95,9 +97,10 @@ pub use scope::{
     values_types_in_scope,
 };
 pub use sources::{
-    analyze_source_plan_schema, bind_source_input_schema, bind_source_plan_schema,
-    bind_source_plan_schema_for_execution, with_query_table_pseudo_columns,
-    with_query_table_pseudo_columns_with_control, SourceBindingInput,
+    analyze_source_plan_schema, bind_source_input_schema, bind_source_plan_for_execution_owned,
+    bind_source_plan_schema, bind_source_plan_schema_for_execution,
+    with_query_table_pseudo_columns, with_query_table_pseudo_columns_with_control,
+    SourceBindingInput,
 };
 pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 
@@ -105,13 +108,12 @@ use catalog_sources::operator_join_relation_schemas;
 use cte_controls::extend_recursive_cte_binding_schema;
 pub use cte_controls::hide_recursive_generated_schema;
 use projection::rename_schema;
-use sources::{alias_table_schema, table_function_member_source, JoinSchemaBinding};
+use sources::{alias_table_schema, JoinSchemaBinding};
 use type_resolution::QueryFunctionTypeResolver;
 
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use crate::semantics::{cte_references_own_name, projection_columns};
 use crate::{SQLError, SQLParam, ScalarExpr};
-use catalog_sources::user_function_output_columns;
 pub use context::BindingContext;
 
 pub mod context;
@@ -121,11 +123,6 @@ use crate::catalog::analysis::CatalogReadView;
 use crate::catalog::resolution::RelationNameResolution;
 use crate::routines::RoutineResolution;
 use crate::semantics::sets::placement_scope::SetPlacementScope;
-use crate::semantics::{
-    apply_table_function_aliases, table_function_column_types, table_function_empty_schema,
-    validate_table_function_alias_count, validate_table_function_column_definition,
-    TableFunctionTypeRequest,
-};
 use crate::RowSchema;
 use std::collections::BTreeSet;
 
@@ -608,225 +605,11 @@ impl SchemaScope {
                 Ok(rename_schema(&schema, column_aliases, alias.as_deref()))
             }
             SourcePlan::RetainedRows(source) => Ok(source.schema().clone()),
-            SourcePlan::Function {
-                name,
-                binding,
-                output_name,
-                relations,
-                args,
-                alias,
-                column_aliases,
-                ordinality,
-                column_types,
-                ..
-            } => {
-                let lower = crate::semantics::builtin_function_dispatch_name(name);
-                let operator_join = crate::registry::is_operator_join_table_function(&lower);
-                let operator_inputs = operator_join
-                    .then(|| {
-                        operator_join_relation_schemas(
-                            &self.catalog,
-                            &self.resolution,
-                            relations.as_ref(),
-                        )
-                    })
-                    .transpose()?;
-                let input = outer.cloned().unwrap_or_default();
-                let type_resolver = self.query_function_type_resolver_for_subqueries(
-                    routines, args, &input, subqueries, params,
-                )?;
-                let user_function = if let Some((left, right)) = operator_inputs.as_ref() {
-                    if self.validate_references {
-                        let constant = RowSchema::default();
-                        for (position, argument) in args.iter().enumerate() {
-                            let schema = match position {
-                                0 => left,
-                                1 => right,
-                                _ => &constant,
-                            };
-                            self.validate_expression_references(
-                                routines, argument, schema, None, subqueries, params,
-                            )?;
-                        }
-                    }
-                    None
-                } else if self.validate_references {
-                    self.validate_table_function_source(
-                        routines,
-                        analysis::TableFunctionSourceValidation {
-                            name,
-                            binding: binding.as_ref(),
-                            args,
-                            subqueries,
-                            input: &input,
-                            params,
-                        },
-                    )?
-                } else {
-                    crate::semantics::resolve_user_table_function(
-                        routines,
-                        name,
-                        binding.as_ref(),
-                        args,
-                        &input,
-                        params,
-                        &type_resolver,
-                    )?
-                };
-                validate_table_function_column_definition(
-                    routines,
-                    crate::semantics::ColumnDefinitionRequest {
-                        name,
-                        binding: binding.as_ref(),
-                        user_function: user_function
-                            .as_ref()
-                            .map(|resolved| resolved.function.as_ref()),
-                        user_invocation: user_function
-                            .as_ref()
-                            .and_then(|resolved| resolved.binding.invocation.as_deref()),
-                        args,
-                        declared_types: column_types,
-                        column_names: column_aliases,
-                    },
-                    &input,
-                    params,
-                    &type_resolver,
-                )?;
-                if let Some(function) = &user_function {
-                    self.record_routine_dependency(&function.binding)?;
-                }
-                let registered_columns = user_function
-                    .is_none()
-                    .then(|| routines.registered_table_function_columns(name))
-                    .flatten();
-                let declared_host_columns = registered_columns.is_some();
-                if registered_columns.as_ref().is_some_and(Vec::is_empty) {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "table function `{name}` declares no columns"
-                    )));
-                }
-                let catalog_columns = if !self.validate_references && user_function.is_none() {
-                    user_function_output_columns(self.catalog.as_ref(), &self.resolution, name)?
-                } else {
-                    None
-                };
-                let columns = if let Some(resolved) = &user_function {
-                    crate::semantics::user_table_function_columns(
-                        routines,
-                        &resolved.function,
-                        resolved.binding.invocation.as_deref(),
-                        output_name,
-                        alias.as_deref(),
-                        column_aliases,
-                        *ordinality,
-                    )?
-                } else {
-                    registered_columns.or(catalog_columns).map_or_else(
-                        || {
-                            table_function_empty_schema(
-                                name,
-                                output_name,
-                                alias.as_deref(),
-                                column_aliases,
-                                args.len(),
-                                *ordinality,
-                            )
-                        },
-                        |columns| {
-                            apply_table_function_aliases(columns, column_aliases, *ordinality)
-                        },
-                    )
-                };
-                validate_table_function_alias_count(
-                    alias.as_deref().unwrap_or(output_name),
-                    columns.len(),
-                    column_aliases.len(),
-                )?;
-                let types = table_function_column_types(
-                    routines,
-                    TableFunctionTypeRequest {
-                        name,
-                        binding: binding.as_ref(),
-                        args,
-                        user_function: user_function
-                            .as_ref()
-                            .map(|resolved| resolved.function.as_ref()),
-                        user_invocation: user_function
-                            .as_ref()
-                            .and_then(|resolved| resolved.binding.invocation.as_deref()),
-                        declared_types: column_types,
-                        columns: &columns,
-                        ordinality: *ordinality,
-                    },
-                    &input,
-                    params,
-                    &type_resolver,
-                );
-                let qualifier = alias.as_deref().unwrap_or(output_name);
-                let schema = RowSchema::with_qualified_types(qualifier, columns, types);
-                Ok(
-                    if user_function.is_none()
-                        && !declared_host_columns
-                        && column_types.is_empty()
-                        && routines.has_registered_table_function(name)
-                    {
-                        RowSchema::with_open_columns(&schema, Some(qualifier))
-                    } else {
-                        schema
-                    },
-                )
+            SourcePlan::Function { .. } => {
+                self.bind_function_source(routines, source, subqueries, params, outer)
             }
-            SourcePlan::FunctionGroup {
-                functions,
-                alias,
-                column_aliases,
-                ordinality,
-            } => {
-                let first = functions
-                    .first()
-                    .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
-                let mut columns = Vec::new();
-                let mut types = Vec::new();
-                let mut open = false;
-                for function in functions {
-                    let member = table_function_member_source(function);
-                    let schema = self.bind_source(routines, &member, subqueries, params, outer)?;
-                    open |= schema.columns_are_open(None);
-                    columns.extend(schema.iter().enumerate().map(|(position, column)| {
-                        schema.public_name(position).unwrap_or(column).to_string()
-                    }));
-                    types.extend(schema.column_types().iter().map(|ty| {
-                        if open {
-                            None
-                        } else {
-                            ty.clone()
-                        }
-                    }));
-                }
-                if *ordinality {
-                    columns.push("ordinality".into());
-                    types.push((!open).then_some(ColumnType::BigInteger));
-                }
-                let qualifier = alias.as_deref().unwrap_or(&first.output_name);
-                // A runtime member can shift every later output position,
-                // including ordinality. Its complete descriptor validates
-                // the aliases and supplies those types at execution.
-                if !open {
-                    validate_table_function_alias_count(
-                        qualifier,
-                        columns.len(),
-                        column_aliases.len(),
-                    )?;
-                }
-                for (column, alias) in columns.iter_mut().zip(column_aliases) {
-                    column.clone_from(alias);
-                }
-                let schema = RowSchema::with_qualified_types(qualifier, columns, types);
-                Ok(if open {
-                    RowSchema::with_open_columns(&schema, Some(qualifier))
-                } else {
-                    schema
-                })
+            SourcePlan::FunctionGroup { .. } => {
+                self.bind_function_group_source(routines, source, subqueries, params, outer)
             }
             SourcePlan::Subquery {
                 body,

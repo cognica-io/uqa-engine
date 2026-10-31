@@ -203,8 +203,57 @@ pub fn bind_routine_parameter_references_owned(
         parameters: ParameterTypes::fixed_with_control(params, control)?.with_reference_retention(),
         schema_expression: None,
     };
-    analysis.observe_owned_plan(&plan, Some(parameters.schema()))?;
+    analysis.observe_routine_parameter_references(plan.as_plan_ref(), parameters.schema())?;
     let references = analysis.parameters.take_reference_constants();
     references.apply_owned(&mut plan, routines, params, control)?;
     Ok(plan)
+}
+
+impl Preparation<'_> {
+    /// Parameter binding follows statement namespaces without selecting the calls that later statement analysis owns.
+    fn observe_routine_parameter_references(
+        &mut self,
+        plan: PlanRef<'_>,
+        outer: &crate::RowSchema,
+    ) -> Result<(), SQLError> {
+        match plan {
+            PlanRef::Query(query) => {
+                self.query(query, Some(outer))?;
+            }
+            PlanRef::Command(CommandPlan::Explain { body, .. }) => {
+                let body = match &**body {
+                    crate::plan::UnifiedPlan::Query(query) => PlanRef::Query(query),
+                    crate::plan::UnifiedPlan::Command(command) => PlanRef::Command(command),
+                };
+                self.observe_routine_parameter_references(body, outer)?;
+            }
+            PlanRef::Command(
+                CommandPlan::CreateTableAs { query, .. }
+                | CommandPlan::CreateMaterializedView { query, .. }
+                | CommandPlan::DeclareCursor { query, .. },
+            ) => {
+                self.query(query, Some(outer))?;
+            }
+            PlanRef::Command(CommandPlan::Call { args, .. }) => {
+                for argument in args {
+                    for query in &argument.subqueries {
+                        self.query(query, Some(outer))?;
+                    }
+                    argument.scalar.try_visit(&mut |node| {
+                        self.scope.control().check()?;
+                        if let Some(index) = self.scope.routine_parameter_reference(node, outer) {
+                            self.parameters.named_reference(node, index)?;
+                        }
+                        Ok::<_, SQLError>(true)
+                    })?;
+                }
+            }
+            PlanRef::Command(command) if command.mutation_target().is_some() => {
+                self.command(command)?;
+            }
+            // Utility syntax has no routine parameter namespace.
+            PlanRef::Command(_) => {}
+        }
+        Ok(())
+    }
 }

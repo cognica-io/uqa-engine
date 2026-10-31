@@ -32492,6 +32492,194 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_binding_capture_shares_native_namespace_and_retains_the_last_reader",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/binding/tests.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Capture an already admitted four-MiB native namespace and retain independent source-metadata readers.",
+      "invariant": "Share native namespace payloads without another large copy and retire the original allowance only after the last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_binding_capture_admits_lexical_names_without_replacing_raw_row_schemas",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/binding/tests.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Capture row, deferred, non-returning and recursive-width names under a bounded allowance and fail the final shared header after admitted payload construction.",
+      "invariant": "Admit exact names and map nodes before copying, release partial construction, preserve raw row schemas and reject stale lexical metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "source_binding_capture_releases_on_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scope/binding/tests.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Cancel each request control and unwind after retaining a source namespace.",
+      "invariant": "Return 57014 for either cancellation and release every temporary capture and shared owner on unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_execution_binding_admits_private_syntax_and_retires_it_before_shared_schema",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/ownership.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Bind a four-MiB projection with a FROM routine under 64 KiB, then remove each LIMIT/OFFSET combination and retain an independent source schema.",
+      "invariant": "Reject before the large private syntax copy, retain exact live ownership, retire optional slice fields safely and release on cancellation and unwind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_function_group_binding_retires_temporary_members_and_preserves_ordinality",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/ownership.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Bind ROWS FROM with a four-MiB unnest argument, heterogeneous members and ordinality.",
+      "invariant": "Transfer only each selected routine identity, retire temporary member copies and preserve output types, aliases and ordinality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_source_metadata_admits_exact_nodes_and_releases_independent_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/ownership.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Capture derived-source descriptors through a join, retain one child independently and reject map construction under a one-byte allowance.",
+      "invariant": "Admit exact map, pair and shared payload storage; preserve syntax identity and release each descriptor with its last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_grouping_name_binding_preserves_outer_precedence_and_independent_scalar_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/execution/tests/ownership.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Bind GROUP BY names to local columns or a four-MiB output expression with an enclosing same-name column.",
+      "invariant": "Preserve local-input and output-name precedence over outer names and retain independently copied scalar fields through rejection and release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_source_binding_admits_private_function_syntax_before_copying",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/bindings.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Build a four-MiB derived function query through streaming, correlated and DML FROM entry points with 64 KiB available on all four providers.",
+      "invariant": "Reject all private-copy paths before large allocation, recover without lost state and retain physical payload ownership through operator completion.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_source_binding_preserves_pg18_names_functions_and_effects",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/bindings.rs",
+      "capability": "Native execution source binding ownership",
+      "workload": "Replay PostgreSQL 18 ROWS FROM, grouping precedence, LATERAL routines, DISTINCT slicing, volatile demand, prepared modes, cursors and DML FROM on four providers.",
+      "invariant": "Preserve values and types, 42P10/25P02 ordering, savepoint recovery, no-effect EXPLAIN and persistent routine execution after reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_routine_references_bind_named_call_values_without_selecting_the_procedure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Native execution binding ownership",
+      "workload": "Named and qualified CALL arguments including unresolved procedure and nested function names.",
+      "invariant": "Bind only parameter value sites; preserve argument labels and defer call selection to statement analysis.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_routine_references_preserve_returning_labels_in_all_mutations_and_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Native execution binding ownership",
+      "workload": "INSERT, UPDATE, DELETE and MERGE parameter projections, directly and inside CTEs.",
+      "invariant": "Replacing a written parameter name retains its RETURNING label and explicit aliases; relation references retain precedence and all private leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_routine_reference_failures_retire_private_parameter_and_alias_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Native execution binding ownership",
+      "workload": "Native routine reference binding under a constrained allowance and each cancellation scope.",
+      "invariant": "Return 53200 or 57014 and retire the failed private statement, parameter namespace and projection aliases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "function_descriptors_admit_host_names_and_retain_independent_schema_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/sources/functions/tests.rs",
+      "capability": "Native execution binding ownership",
+      "workload": "A four MiB host output name, 64 KiB allowance, independent schema reader, both cancellations and unwind.",
+      "invariant": "Reject before copying the large descriptor, retain the published schema lease through its final reader and release all temporary names and failure owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_result_type_probes_preserve_resource_errors_and_own_selected_type_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/sources/functions/tests.rs",
+      "capability": "Native execution binding ownership",
+      "workload": "Unnest of an array with a four MiB named element type and ordinality under 64 KiB and sufficient allowances.",
+      "invariant": "Propagate controlled type-copy rejection and cancellation without downgrading to unknown; retain only selected type storage and ordinality metadata.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

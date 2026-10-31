@@ -17,6 +17,10 @@ use super::{
 };
 use crate::routines::RoutineResolution;
 
+mod execution;
+mod functions;
+pub use execution::bind_source_plan_for_execution_owned;
+
 pub(super) fn alias_table_schema(
     schema: &RowSchema,
     qualifier: &str,
@@ -449,6 +453,31 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
+        let selected =
+            self.select_execution_table_function(routines, source, subqueries, params, outer)?;
+        if let Some(selected) = selected {
+            let SourcePlan::Function { binding, .. } = source else {
+                unreachable!("table-function source")
+            };
+            *binding = Some(
+                selected
+                    .into_uncontrolled()
+                    .expect("ordinary execution binding"),
+            );
+        }
+        Ok(())
+    }
+
+    fn select_execution_table_function(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ast::FunctionBinding>>, SQLError> {
+        let resources = self.production.clone();
+        let control = resources.control();
         let SourcePlan::Function {
             name,
             binding,
@@ -456,35 +485,38 @@ impl SchemaScope {
             ..
         } = source
         else {
-            unreachable!("table-function source");
+            unreachable!("table-function source")
         };
         let input = outer.cloned().unwrap_or_default();
         let resolver = self.query_function_type_resolver_for_subqueries(
             routines, args, &input, subqueries, params,
         )?;
-        let Some(mut selected) = crate::semantics::resolve_table_function_binding(
-            routines,
+        let Some(selected) = crate::semantics::resolve_table_function_binding_with_control(
+            crate::semantics::TableFunctionAnalysis {
+                routines,
+                types: &resolver,
+            },
             name,
             binding.as_ref(),
             args,
             &input,
             params,
-            &resolver,
+            &control,
         )?
         else {
-            return Ok(());
+            return Ok(None);
         };
+        let (mut selected, memory) = selected.into_parts();
         if binding.is_none()
             && selected.builtin
             && crate::expr::binds_input_collation_by_name(
-                &crate::semantics::builtin_function_dispatch_name(name),
+                &crate::semantics::builtin_function_dispatch_name_with_control(name, &control)?,
             )
         {
             selected.input_collation = super::preparation::call_input_collation(
                 self, routines, name, args, &input, subqueries, params,
             )?;
         }
-        *binding = Some(selected);
-        Ok(())
+        Ok(Some(control.finish(selected, memory)?))
     }
 }

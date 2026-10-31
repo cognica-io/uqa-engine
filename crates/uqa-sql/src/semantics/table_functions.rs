@@ -18,16 +18,19 @@ mod columns;
 pub use columns::table_function_empty_schema_with_control;
 mod production;
 mod selection;
+mod types;
 pub use production::{
     apply_table_function_aliases_with_control, user_function_composite_result_with_control,
     user_function_declared_columns_with_control, user_function_output_columns_with_control,
     user_table_function_columns_with_control, validate_table_function_alias_count_with_control,
 };
 pub(crate) use selection::resolve_table_function_binding_for_types_with_control;
+pub use types::table_function_column_types_with_control;
 
 mod column_definitions;
 pub use column_definitions::{
-    validate_table_function_column_definition, ColumnDefinitionRequest,
+    validate_table_function_column_definition,
+    validate_table_function_column_definition_with_control, ColumnDefinitionRequest,
     SETOF_COLUMN_DEFINITION_PREFIX,
 };
 
@@ -146,14 +149,52 @@ pub fn resolve_user_table_function(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ResolvedUserTableFunction>, SQLError> {
-    let Some(binding) = resolve_table_function_binding(
-        routines,
+    resolve_user_table_function_with_control(
+        TableFunctionAnalysis {
+            routines,
+            types: resolver,
+        },
         name,
         binding,
         args,
         input_schema,
         params,
-        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|resolved| {
+        Ok(ResolvedUserTableFunction {
+            function: resolved.function,
+            binding: resolved
+                .binding
+                .into_uncontrolled()
+                .expect("ordinary table binding"),
+        })
+    })
+    .transpose()
+}
+
+pub struct ControlledUserTableFunction {
+    pub function: Arc<SQLUserFunction>,
+    pub binding: uqa_core::memory::Produced<FunctionBinding>,
+}
+
+pub fn resolve_user_table_function_with_control(
+    context: TableFunctionAnalysis<'_>,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    input: &RowSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<ControlledUserTableFunction>, SQLError> {
+    let Some(binding) = resolve_table_function_binding_with_control(
+        TableFunctionAnalysis { ..context },
+        name,
+        binding,
+        args,
+        input,
+        params,
+        control,
     )?
     else {
         return Ok(None);
@@ -161,22 +202,43 @@ pub fn resolve_user_table_function(
     if binding.builtin {
         return Ok(None);
     }
-    let (argument_names, argument_types, explicit_variadic) =
-        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
-    let Some(matched) = routines.resolve_static_sql_function_match(
-        name,
-        Some(&binding),
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-    )?
+    let signature = crate::function_call_argument_signature_with_control(
+        args,
+        input,
+        params,
+        Some(context.types),
+        control,
+    )?;
+    let (argument_names, argument_types, explicit_variadic) = &*signature;
+    let Some(matched) = context
+        .routines
+        .resolve_static_sql_function_match_with_control(
+            name,
+            Some(&binding),
+            crate::type_resolution::RoutineCallDescriptor {
+                argument_names,
+                argument_types,
+                explicit_variadic: *explicit_variadic,
+            },
+            control,
+        )?
     else {
         return Ok(None);
     };
-    Ok(Some(ResolvedUserTableFunction {
-        binding: matched.binding(),
+    let binding = crate::routines::resolution::selected_binding(
+        &matched.function,
+        matched.invocation,
+        control,
+    )?;
+    Ok(Some(ControlledUserTableFunction {
         function: matched.function,
+        binding,
     }))
+}
+
+pub struct TableFunctionAnalysis<'a> {
+    pub routines: &'a dyn RoutineResolution,
+    pub types: &'a dyn FunctionTypeResolver,
 }
 
 pub fn resolve_table_function_binding(
@@ -188,23 +250,59 @@ pub fn resolve_table_function_binding(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<FunctionBinding>, SQLError> {
+    Ok(resolve_table_function_binding_with_control(
+        TableFunctionAnalysis {
+            routines,
+            types: resolver,
+        },
+        name,
+        binding,
+        args,
+        input_schema,
+        params,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .map(|binding| binding.into_uncontrolled().expect("ordinary table binding")))
+}
+
+pub fn resolve_table_function_binding_with_control(
+    context: TableFunctionAnalysis<'_>,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    input_schema: &RowSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<FunctionBinding>>, SQLError> {
+    control.check()?;
     if let Some(binding) = binding {
-        return Ok(Some(binding.clone()));
+        return Ok(Some(binding.clone_with_control(control)?));
     }
-    let (argument_names, argument_types, explicit_variadic) =
-        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))?;
-    if crate::type_resolution::function_arguments_have_runtime_types(args, &argument_types)? {
+    let signature = crate::function_call_argument_signature_with_control(
+        args,
+        input_schema,
+        params,
+        Some(context.types),
+        control,
+    )?;
+    let (argument_names, argument_types, explicit_variadic) = &*signature;
+    if crate::type_resolution::function_arguments_have_runtime_types_with_control(
+        args,
+        argument_types,
+        control,
+    )? {
         return Ok(None);
     }
-    resolve_table_function_binding_for_types(
-        routines,
+    resolve_table_function_binding_for_types_with_control(
+        context.routines,
         name,
         binding,
         crate::type_resolution::RoutineCallDescriptor {
-            argument_names: &argument_names,
-            argument_types: &argument_types,
-            explicit_variadic,
+            argument_names,
+            argument_types,
+            explicit_variadic: *explicit_variadic,
         },
+        control,
     )
 }
 
@@ -396,10 +494,6 @@ pub struct TableFunctionTypeRequest<'a> {
     pub ordinality: bool,
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
 pub fn table_function_column_types(
     routines: &dyn RoutineResolution,
     request: TableFunctionTypeRequest<'_>,
@@ -407,216 +501,17 @@ pub fn table_function_column_types(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Vec<Option<ColumnType>> {
-    let TableFunctionTypeRequest {
-        name,
-        binding,
-        args,
-        user_function,
-        user_invocation,
-        declared_types,
-        columns,
-        ordinality,
-    } = request;
-    let value_columns = if ordinality {
-        columns
-            .get(..columns.len().saturating_sub(1))
-            .unwrap_or(&[])
-    } else {
-        columns
-    };
-    let align = |types: Vec<Option<ColumnType>>| {
-        if types.len() == value_columns.len() {
-            types
-        } else if let [ty] = types.as_slice() {
-            vec![ty.clone(); value_columns.len()]
-        } else {
-            vec![None; value_columns.len()]
-        }
-    };
-    let mut types = if !declared_types.is_empty() {
-        align(
-            declared_types
-                .iter()
-                .map(|ty| ColumnType::from_sql_name(ty).ok())
-                .collect(),
-        )
-    } else if let Some(function) = user_function {
-        align(user_function_column_types(
-            routines,
-            function,
-            user_invocation,
-        ))
-    } else {
-        let normalized = crate::semantics::builtin_function_dispatch_name(name);
-        align(match normalized.as_ref() {
-            "pg_listening_channels" => vec![Some(ColumnType::Text)],
-            "generate_series" => vec![resolve_table_function_binding(
-                routines,
-                name,
-                binding,
-                args,
-                input_schema,
-                params,
-                resolver,
-            )
-            .ok()
-            .flatten()
-            .as_ref()
-            .and_then(crate::type_resolution::fixed_builtin_return_type)],
-            "analyze_text" => vec![Some(ColumnType::JsonB)],
-            "unnest" => args
-                .iter()
-                .map(|argument| {
-                    crate::scalar_type_with_resolver(argument, input_schema, params, resolver)
-                        .ok()
-                        .flatten()
-                        .and_then(|ty| crate::type_resolution::array_element_type(&ty).cloned())
-                })
-                .collect(),
-            "regexp_matches" => vec![Some(ColumnType::Array(Box::new(ColumnType::Text)))],
-            "regexp_split_to_table"
-            | "string_to_table"
-            | "json_object_keys"
-            | "jsonb_object_keys" => vec![Some(ColumnType::Text)],
-            "json_array_elements" => vec![Some(ColumnType::Json)],
-            "jsonb_array_elements" => vec![Some(ColumnType::JsonB)],
-            "json_array_elements_text" | "jsonb_array_elements_text" => {
-                vec![Some(ColumnType::Text)]
-            }
-            "json_each" => vec![Some(ColumnType::Text), Some(ColumnType::Json)],
-            "jsonb_each" => vec![Some(ColumnType::Text), Some(ColumnType::JsonB)],
-            "json_each_text" | "jsonb_each_text" => {
-                vec![Some(ColumnType::Text), Some(ColumnType::Text)]
-            }
-            "pg_get_sequence_data" => {
-                vec![Some(ColumnType::BigInteger), Some(ColumnType::Boolean)]
-            }
-            "pg_sequence_parameters" => vec![
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::Boolean),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::Oid),
-            ],
-            "aclexplode" => vec![
-                Some(ColumnType::Oid),
-                Some(ColumnType::Oid),
-                Some(ColumnType::Text),
-                Some(ColumnType::Boolean),
-            ],
-            "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
-            | "graph_betweenness" => vec![
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::DoublePrecision),
-            ],
-            "rpq" => vec![Some(ColumnType::BigInteger)],
-            "text_similarity_join"
-            | "vector_similarity_join"
-            | "graph_join"
-            | "hybrid_join"
-            | "cross_paradigm_join" => vec![
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::BigInteger),
-                Some(ColumnType::DoublePrecision),
-            ],
-            _ => user_table_function_column_types(
-                routines,
-                name,
-                args,
-                input_schema,
-                params,
-                resolver,
-            ),
-        })
-    };
-    if ordinality {
-        types.push(Some(ColumnType::BigInteger));
-    }
-    types
-}
-
-fn user_table_function_column_types(
-    routines: &dyn RoutineResolution,
-    name: &str,
-    args: &[ScalarExpr],
-    input_schema: &crate::RowSchema,
-    params: &[SQLParam],
-    resolver: &dyn FunctionTypeResolver,
-) -> Vec<Option<ColumnType>> {
-    let Ok((argument_names, argument_types, explicit_variadic)) =
-        crate::function_call_argument_signature(args, input_schema, params, Some(resolver))
-    else {
-        return Vec::new();
-    };
-    let Ok(Some(matched)) = routines.resolve_static_sql_function_match(
-        name,
-        None,
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
-    ) else {
-        return Vec::new();
-    };
-    user_function_column_types(routines, &matched.function, Some(&matched.invocation))
-}
-
-fn user_function_column_types(
-    routines: &dyn RoutineResolution,
-    function: &SQLUserFunction,
-    invocation: Option<&RoutineInvocationBinding>,
-) -> Vec<Option<ColumnType>> {
-    if let Ok(Some(descriptor)) = user_function_composite_result(routines, function, invocation) {
-        return descriptor
-            .attributes
-            .iter()
-            .map(|attribute| Some(attribute.ty.clone()))
-            .collect();
-    }
-    let outputs = function
-        .def
-        .params
-        .iter()
-        .enumerate()
-        .filter(|(_, parameter)| {
-            matches!(
-                parameter.mode,
-                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
-            )
-        })
-        .collect::<Vec<_>>();
-    if !outputs.is_empty() {
-        return outputs
-            .into_iter()
-            .map(|(index, parameter)| {
-                let type_name = invocation
-                    .and_then(|binding| binding.parameter_types.get(index))
-                    .unwrap_or(&parameter.type_name);
-                resolve_table_function_column_type(routines, type_name)
-            })
-            .collect();
-    }
-    match &function.def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            let type_name = invocation
-                .and_then(|binding| binding.return_type.as_ref())
-                .unwrap_or(type_name);
-            vec![resolve_table_function_column_type(routines, type_name)]
-        }
-        FunctionReturns::None | FunctionReturns::Table => Vec::new(),
-    }
-}
-
-fn resolve_table_function_column_type(
-    routines: &dyn RoutineResolution,
-    type_name: &str,
-) -> Option<ColumnType> {
-    routines
-        .resolve_type_name(type_name)
-        .ok()
-        .flatten()
-        .or_else(|| ColumnType::from_sql_name(type_name).ok())
+    table_function_column_types_with_control(
+        routines,
+        request,
+        input_schema,
+        params,
+        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary table result types")
+    .into_uncontrolled()
+    .expect("ordinary table type fields")
 }
 
 pub fn is_json_array_table_function(name: &str) -> bool {

@@ -9,6 +9,8 @@ use crate::{
     catalog::test_support::{empty_scope, NoRoutines},
     query::{binding::sources::bind_query_block_with_sources, privileges::SELECT_CHECKS},
 };
+use uqa_core::memory::ProductionControl;
+use uqa_sql::binding::ExecutionBindingOptions;
 use uqa_sql::plan::{QueryPlan, RelationalPlan, UnifiedPlan};
 
 static ROUTINES: NoRoutines = NoRoutines;
@@ -33,10 +35,18 @@ fn child(block: &QueryBlockPlan) -> &QueryBlockPlan {
     self::block(body)
 }
 fn bindings<'a>(block: &'a QueryBlockPlan, scope: &CteScope) -> SourceBindings<'a> {
-    bind_query_block_with_sources(&ROUTINES, block, &[], scope, None, false, None)
-        .unwrap()
-        .sources
-        .unwrap()
+    bind_query_block_with_sources(
+        &ROUTINES,
+        block,
+        &[],
+        scope,
+        ExecutionBindingOptions::default(),
+        None,
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap()
+    .sources
+    .unwrap()
 }
 fn enter_blocks<'a>(
     block: &'a QueryBlockPlan,
@@ -44,9 +54,16 @@ fn enter_blocks<'a>(
     scope: &CteScope,
     reuse: bool,
 ) {
-    let mut bound =
-        bind_query_block_with_sources(&ROUTINES, block, &[], scope, None, false, inherited)
-            .unwrap();
+    let mut bound = bind_query_block_with_sources(
+        &ROUTINES,
+        block,
+        &[],
+        scope,
+        ExecutionBindingOptions::default(),
+        inherited,
+        &ProductionControl::uncontrolled(),
+    )
+    .unwrap();
     if !reuse {
         if let Some(bindings) = bound.sources.as_mut() {
             bindings.authorization = None;

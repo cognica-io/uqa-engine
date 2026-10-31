@@ -313,19 +313,21 @@ pub fn analyze_source_plan_schema<S: Clone>(
     )
 }
 
-pub fn bind_source_plan_schema_for_execution<S: Clone>(
+pub fn bind_source_plan_for_execution<S: Clone>(
     routines: &dyn RoutineResolution,
-    source: &mut SourcePlan,
+    source: uqa_sql::plan::MutableSourcePlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
-) -> Result<RowSchema, SQLError> {
-    uqa_sql::binding::bind_source_plan_schema_for_execution(
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(uqa_sql::plan::MutableSourcePlan, RowSchema), SQLError> {
+    uqa_sql::binding::bind_source_plan_for_execution_owned(
         routines,
         source,
         params,
-        &binding_context(ctes)?,
+        binding_context_with_control(ctes, control)?,
         outer,
+        control,
     )
 }
 
@@ -334,16 +336,16 @@ pub fn bind_query_block_for_execution<'a, S: Clone>(
     block: &'a QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
-    outer: Option<&RowSchema>,
-    defer_distinct_limit: bool,
-) -> Result<(std::borrow::Cow<'a, QueryBlockPlan>, RowSchema), SQLError> {
-    uqa_sql::binding::bind_query_block_for_execution(
+    options: uqa_sql::binding::ExecutionBindingOptions<'_>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(uqa_sql::binding::ExecutionQueryBlock<'a>, RowSchema), SQLError> {
+    uqa_sql::binding::bind_query_block_for_execution_with_control(
         routines,
         block,
         params,
-        &binding_context(ctes)?,
-        outer,
-        defer_distinct_limit,
+        binding_context_with_control(ctes, control)?,
+        options,
+        control,
     )
 }
 

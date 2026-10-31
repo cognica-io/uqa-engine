@@ -49,6 +49,26 @@ pub fn user_function_output_columns(
     Ok(None)
 }
 
+pub(in crate::binding) fn user_function_output_columns_with_control(
+    catalog: &dyn crate::catalog::analysis::AnalysisCatalog,
+    resolution: &RelationNameResolution,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+    control.check()?;
+    let Some(overloads) = catalog.sql_functions(resolution, name)? else {
+        return Ok(None);
+    };
+    for function in &overloads {
+        if let Some(columns) =
+            crate::semantics::user_function_output_columns_with_control(function, control)?
+        {
+            return Ok(Some(columns));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;

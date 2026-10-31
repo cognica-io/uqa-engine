@@ -193,6 +193,24 @@ pub trait RoutineResolution: FunctionTypeResolver {
         None
     }
 
+    /// Native registries copy borrowed declarations under the request allowance; external catalogs retain their metadata callback.
+    fn registered_table_function_columns_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<String>>>, SQLError> {
+        control.check()?;
+        self.registered_table_function_columns(name)
+            .map(|columns| {
+                let mut output = uqa_core::memory::ProductionVec::new(*control);
+                for column in columns {
+                    output.push_produced(control.copy_text(&column)?)?;
+                }
+                Ok(output.finish()?)
+            })
+            .transpose()
+    }
+
     fn has_registered_aggregate_function(&self, _name: &str) -> bool {
         false
     }
@@ -353,6 +371,34 @@ pub trait RoutineResolution: FunctionTypeResolver {
         _explicit_variadic: bool,
     ) -> Result<Option<StaticFunctionMatch>, SQLError> {
         Ok(None)
+    }
+
+    /// Keep the selected invocation owned while callers derive table-result metadata.
+    fn resolve_static_sql_function_match_with_control(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        call: crate::type_resolution::RoutineCallDescriptor<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<resolution::OwnedStaticFunctionMatch>, SQLError> {
+        control.check()?;
+        self.resolve_static_sql_function_match(
+            name,
+            binding,
+            call.argument_names,
+            call.argument_types,
+            call.explicit_variadic,
+        )?
+        .map(|matched| {
+            Ok(resolution::OwnedStaticFunctionMatch {
+                function: matched.function,
+                invocation: crate::plan::copy::copy_syntax_with_control(
+                    matched.invocation.as_ref(),
+                    control,
+                )?,
+            })
+        })
+        .transpose()
     }
 
     /// Construct the selected table-call binding without adding scalar output-type validation.
