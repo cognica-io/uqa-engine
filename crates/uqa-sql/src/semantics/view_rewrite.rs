@@ -43,9 +43,9 @@ mod deferred;
 pub(crate) use deferred::has_resolvable_outer_rewrites;
 pub use deferred::{
     bind_outer_rewrite_scope, bind_outer_rewrite_scope_with_control,
-    resolve_outer_expression_rewrites, resolve_outer_rewrites, resolve_outer_rewrites_owned,
-    resolve_outer_source_rewrites, resolve_outer_sources, resolve_outer_sources_owned,
-    DeferredOuterRewrite,
+    resolve_outer_expression_rewrites, resolve_outer_expression_rewrites_owned,
+    resolve_outer_rewrites, resolve_outer_rewrites_owned, resolve_outer_source_rewrites,
+    resolve_outer_sources, resolve_outer_sources_owned, DeferredOuterRewrite,
 };
 mod layer_privileges;
 pub mod production;

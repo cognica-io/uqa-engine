@@ -11,6 +11,60 @@ use std::borrow::Cow;
 use crate::RowSchema;
 use crate::ScalarExpr;
 
+/// Visit flattened conjunctions in their original order without allocating an intermediate reference tree.
+pub fn visit_join_conjuncts_with_control<'a>(
+    expression: &'a ScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    visit: &mut impl FnMut(&'a ScalarExpr) -> Result<(), crate::SQLError>,
+) -> Result<(), crate::SQLError> {
+    control.check()?;
+    if let ScalarExpr::And(items) = expression {
+        for item in items {
+            visit_join_conjuncts_with_control(item, control, visit)?;
+        }
+        Ok(())
+    } else {
+        visit(expression)
+    }
+}
+
+/// Move an equality's selected operands to their own input scopes. Right-input positions change coordinates without copying either scalar tree.
+pub fn bind_join_comparison_owned(
+    left: &RowSchema,
+    right: &RowSchema,
+    comparison: crate::plan::OwnedScalarExpr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<(crate::plan::OwnedScalarExpr, crate::plan::OwnedScalarExpr)>, crate::SQLError> {
+    control.check()?;
+    comparison.try_visit(&mut |_| {
+        control.check()?;
+        Ok::<_, crate::SQLError>(true)
+    })?;
+    let ScalarExpr::Binary { lhs, rhs, .. } = &*comparison else {
+        panic!("join side binding requires a comparison");
+    };
+    let Some((selected, _)) = decide_join_sides(left, right, lhs, rhs) else {
+        return Ok(None);
+    };
+    let reversed = !std::ptr::eq(selected, lhs.as_ref());
+    let mut children = comparison.into_children();
+    let lhs = children.next().expect("comparison left operand");
+    let rhs = children.next().expect("comparison right operand");
+    let (lhs, rhs) = if reversed { (rhs, lhs) } else { (lhs, rhs) };
+    let rhs = if left.is_empty() {
+        rhs
+    } else {
+        rhs.transform_nodes(control, &mut |_, expression| {
+            if let ScalarExpr::Position(position) = &*expression {
+                Ok(ScalarExpr::Position(position - left.len()).copy_for_rewrite(control)?)
+            } else {
+                Ok(expression)
+            }
+        })?
+    };
+    Ok(Some((lhs, rhs)))
+}
+
 pub fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
     match expr {
         ScalarExpr::And(items) => {

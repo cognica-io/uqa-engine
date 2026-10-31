@@ -7,6 +7,7 @@
 //! JOIN predicates bind to the input descriptors and retain their lexical outer values.
 
 use super::{CteScope, RowSchema, SQLError, SQLParam, ScalarExpr, SourceContext};
+use uqa_sql::plan::{MutableExpressionPlan, OwnedScalarExpr};
 
 pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
     context: &SourceContext<'a, S>,
@@ -15,10 +16,16 @@ pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
     right: &RowSchema,
     params: &'a [SQLParam],
     ctes: &CteScope<S>,
-) -> Result<(Option<ScalarExpr>, crate::SharedExpressionEvaluator<'a>), SQLError> {
+) -> Result<
+    (
+        Option<OwnedScalarExpr>,
+        crate::SharedExpressionEvaluator<'a>,
+    ),
+    SQLError,
+> {
     let resources = context.ctes.production_resources()?;
     let control = resources.control();
-    let Some(on) = on else {
+    let Some(input) = on else {
         return Ok((
             None,
             crate::query::expression::with_outer_row_with_control(
@@ -28,24 +35,24 @@ pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
             )?,
         ));
     };
-    let schema = RowSchema::join(left, right, std::iter::empty::<String>());
-    let mut on = on.clone();
+    let schema = RowSchema::join_with_control(left, right, [], &control)?;
+    let on;
     let mut rewritten_scope;
     let mut arena_scope;
     let ctes = if let Some(rewrites) = &ctes.source_outer_rewrites {
-        let mut subqueries = ctes.scalar_subqueries.to_vec();
-        uqa_sql::semantics::view_rewrite::resolve_outer_expression_rewrites(
-            &mut on,
-            rewrites,
-            &schema,
-            &mut subqueries,
-        );
+        let expression =
+            MutableExpressionPlan::copy_from(input, &ctes.scalar_subqueries, &control)?;
+        let expression = uqa_sql::semantics::view_rewrite::resolve_outer_expression_rewrites_owned(
+            expression, rewrites, &schema, &control,
+        )?;
+        let (scalar, arena) = expression.into_parts(&control)?;
+        on = scalar;
+        let arena = arena.into_shared(&control)?;
         rewritten_scope = ctes.copy_with_control(&control)?;
-        let arena_resources = context.ctes.production_resources()?;
-        arena_scope = rewritten_scope
-            .enter_scalar_subqueries_with_control(&subqueries, &arena_resources.control())?;
+        arena_scope = rewritten_scope.enter_retained_scalar_subqueries(arena);
         &mut *arena_scope
     } else {
+        on = input.copy_for_rewrite(&control)?;
         ctes
     };
     let evaluator = crate::query::expression::with_outer_row_with_control(
@@ -53,9 +60,9 @@ pub(super) fn bind_join_on_schema<'a, S: Clone + 'static>(
         ctes.outer_row_binding(),
         &control,
     )?;
-    evaluator.expression_type(&on, &schema)?;
+    evaluator.expression_type_with_control(&on, &schema, &control)?;
     Ok((
-        Some(evaluator.bind_type_introspection(on, &schema)),
+        Some(evaluator.bind_type_introspection_owned(on, &schema, &control)?),
         evaluator,
     ))
 }

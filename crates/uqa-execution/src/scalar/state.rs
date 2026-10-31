@@ -463,6 +463,15 @@ impl PreparedExpressions<ScalarExpr> {
     }
 }
 
+impl PreparedExpressions<Produced<ScalarExpr>> {
+    pub(crate) fn produced_scalar(
+        expression: Produced<ScalarExpr>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Self::new_with_control(expression, |expression, visit| visit(expression), control)
+    }
+}
+
 impl PreparedExpressions<Vec<ScalarExpr>> {
     pub(crate) fn scalars(expressions: Vec<ScalarExpr>) -> Self {
         Self::new(expressions, |expressions, visit| {

@@ -316,7 +316,7 @@ impl<S: Clone> CteScope<S> {
         Ok(self.enter_retained_scalar_subqueries(arena))
     }
 
-    fn enter_retained_scalar_subqueries(
+    pub(crate) fn enter_retained_scalar_subqueries(
         &mut self,
         arena: uqa_sql::plan::RetainedQueryArena,
     ) -> ScalarSubqueryScope<'_, S> {

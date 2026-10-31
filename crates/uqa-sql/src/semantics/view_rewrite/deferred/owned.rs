@@ -19,6 +19,22 @@ mod namespaces;
 mod sources;
 pub use sources::resolve_outer_sources_owned;
 
+/// Resolve a standalone expression in its actual local namespace while moving its scalar-query arena with every replacement.
+pub fn resolve_outer_expression_rewrites_owned(
+    mut expression: crate::plan::MutableExpressionPlan,
+    rewrites: &[DeferredOuterRewrite],
+    local: &RowSchema,
+    control: &ProductionControl<'_>,
+) -> Result<crate::plan::MutableExpressionPlan, SQLError> {
+    control.check()?;
+    for rewrite in rewrites {
+        let rewrite =
+            namespaces::in_namespace(rewrite, Some(local), namespaces::Selection::All, control)?;
+        expression = rewrite.bind_expression_owned(expression, control)?;
+    }
+    Ok(expression)
+}
+
 pub fn bind_outer_rewrite_scope_with_control<'a>(
     block: &QueryBlockPlan,
     outer: &'a RowSchema,

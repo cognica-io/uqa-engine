@@ -9,9 +9,12 @@
 use uqa_core::memory::ProductionControl;
 
 mod production;
-pub use production::{join_using_column_names_with_control, resolve_join_using_with_control};
+pub use production::{
+    join_using_column_names_with_control, join_using_predicate_owned,
+    resolve_join_using_with_control,
+};
 
-use crate::ast::{BinaryOp, ColumnType, JoinKind, JoinUsing};
+use crate::ast::{ColumnType, JoinKind, JoinUsing};
 use crate::schema::join_output::JoinOutputSource;
 use crate::SQLError;
 use crate::{ColumnIdentity, RowSchema, ScalarExpr};
@@ -106,47 +109,16 @@ pub fn join_using_predicate(
     left: &RowSchema,
     right: &RowSchema,
 ) -> Option<ScalarExpr> {
-    let mut predicates = using
-        .columns
-        .iter()
-        .map(|column| {
-            let lhs = coerced_join_column(
-                ScalarExpr::Position(column.left),
-                left.column_type(column.left),
-                column.comparison_type.as_ref(),
-            );
-            let rhs = coerced_join_column(
-                ScalarExpr::Position(left.len() + column.right),
-                right.column_type(column.right),
-                column.comparison_type.as_ref(),
-            );
-            ScalarExpr::Binary {
-                op: BinaryOp::Equal,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            }
+    let control = ProductionControl::uncontrolled();
+    join_using_predicate_owned(using, left, right, &control)
+        .expect("ordinary USING predicate")
+        .map(|predicate| {
+            predicate
+                .finish(&control)
+                .expect("ordinary USING scalar")
+                .into_uncontrolled()
+                .expect("ordinary USING scalar has no reservation")
         })
-        .collect::<Vec<_>>();
-    match predicates.len() {
-        0 => None,
-        1 => predicates.pop(),
-        _ => Some(ScalarExpr::And(predicates)),
-    }
-}
-
-fn coerced_join_column(
-    expression: ScalarExpr,
-    source: Option<&ColumnType>,
-    target: Option<&ColumnType>,
-) -> ScalarExpr {
-    match (source, target) {
-        (Some(source), Some(target)) if source != target => ScalarExpr::Cast {
-            implicit: true,
-            expr: Box::new(expression),
-            ty: target.catalog_name(),
-        },
-        _ => expression,
-    }
 }
 
 /// Bind the visible and hidden output identities of a qualified join without

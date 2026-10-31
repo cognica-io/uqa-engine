@@ -15,14 +15,18 @@ use crate::{RowSchema, ScalarExpr};
 
 mod compile;
 mod evaluate;
+#[cfg(test)]
+mod production_tests;
 
 /// A predicate whose column lookups are resolved once to projection slots.
 /// Unsupported expressions return `None` and continue through the canonical
 /// map-backed evaluator.
 pub struct ProjectedPredicate {
     expression: ProjectedExpr,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum ProjectedIntPredicate {
     Comparison {
         field: usize,
@@ -102,8 +106,28 @@ impl ProjectedPredicate {
         schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<Option<Self>, SQLError> {
-        let expression = uqa_sql::bind_type_introspection(expression.clone(), schema, params);
-        Self::compile_bound(&expression, schema, params)
+        Self::compile_with_schema_with_control(
+            expression,
+            schema,
+            params,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+    }
+
+    pub fn compile_with_schema_with_control(
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Self>, SQLError> {
+        let expression = uqa_sql::bind_type_introspection_owned(
+            expression.copy_for_rewrite(control)?,
+            schema,
+            params,
+            None,
+            control,
+        )?;
+        Self::compile_bound_with_control(&expression, schema, params, control)
     }
 
     pub(crate) fn compile_bound(
@@ -111,8 +135,24 @@ impl ProjectedPredicate {
         schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<Option<Self>, SQLError> {
+        Self::compile_bound_with_control(
+            expression,
+            schema,
+            params,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+    }
+
+    pub(crate) fn compile_bound_with_control(
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        params: &[SQLParam],
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<Self>, SQLError> {
+        control.check()?;
         let mut local = true;
-        expression.visit(&mut |node| {
+        expression.try_visit(&mut |node| {
+            control.check()?;
             local &= match node {
                 ScalarExpr::Column(name) => schema.unqualified_position(name).is_some(),
                 ScalarExpr::QualifiedColumn { qualifier, column } => {
@@ -124,13 +164,20 @@ impl ProjectedPredicate {
                 | ScalarExpr::InSubquery { .. } => false,
                 _ => true,
             };
-        });
+            Ok::<_, SQLError>(true)
+        })?;
         // A projected predicate only owns local positional inputs. Expressions needing another row or a subquery belong to the caller's scoped evaluator, including their type binding.
         if !local {
             return Ok(None);
         }
-        match compile::compile(expression, schema, params) {
-            Ok(expression) => Ok(expression.map(|expression| Self { expression })),
+        match compile::compile(expression, schema, params, control) {
+            Ok(expression) => Ok(expression.map(|expression| {
+                let (expression, memory) = expression.into_parts();
+                Self {
+                    expression,
+                    _memory: memory,
+                }
+            })),
             Err(SQLError::Unsupported(_)) => Ok(None),
             Err(error) => Err(error),
         }

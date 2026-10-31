@@ -72,7 +72,7 @@ pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
     pub(super) on: Option<(
-        crate::scalar::PreparedExpressions<ScalarExpr>,
+        crate::scalar::PreparedExpressions<uqa_core::memory::Produced<ScalarExpr>>,
         crate::SharedExpressionEvaluator<'a>,
     )>,
     /// The planner's predicates on the right relation's qualifiers, bound to `right_schema`. The planner removes them from the query block's residual filter, so every produced right row must satisfy them. An error names a column they read that the relation does not produce.

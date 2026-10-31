@@ -438,3 +438,5 @@ mod query_arenas;
 
 mod conflict_inference;
 mod mutation_privileges;
+
+mod physical_joins;

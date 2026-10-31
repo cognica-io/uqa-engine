@@ -18,18 +18,38 @@ impl RowSchema {
         extra_columns: impl IntoIterator<Item = String>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        Self::join_column_inputs_with_control(left, right, extra_columns, control)
+    }
+
+    /// Borrow compatibility NULL-extension names without constructing an intermediate name buffer.
+    pub fn join_borrowed_columns_with_control<'a>(
+        left: &Self,
+        right: &Self,
+        extra_columns: impl IntoIterator<Item = &'a str>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Self::join_column_inputs_with_control(left, right, extra_columns, control)
+    }
+
+    fn join_column_inputs_with_control(
+        left: &Self,
+        right: &Self,
+        extra_columns: impl IntoIterator<Item = impl AsRef<str>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
         control.check()?;
         let mut layout = Layout::new(control);
         layout.append(left, 0, None, control)?;
         layout.append(right, left.physical_width(), None, control)?;
         for name in extra_columns {
             control.check()?;
-            if !layout.columns.contains(&name) {
-                layout.columns.push_produced(control.copy_text(&name)?)?;
+            let name = name.as_ref();
+            if !layout.columns.iter().any(|column| column == name) {
+                layout.columns.push_produced(control.copy_text(name)?)?;
                 layout
                     .identities
                     .push_produced(ColumnIdentity::from_parts_with_control(
-                        None, &name, control,
+                        None, name, control,
                     )?)?;
                 layout.types.push_produced(inline(None, control)?)?;
                 layout.slots.push_copy(NULL_SLOT)?;

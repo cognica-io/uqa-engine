@@ -33343,6 +33343,146 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "using_predicate_constructors_admit_wide_coercions_and_retain_only_scalar_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/join_using/production/tests.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "512 USING coercions with only 1024 bytes available.",
+      "invariant": "Reject before 64 KiB attempted allocation, preserve both cancellations, and retain only the completed scalar tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projected_predicate_payloads_admit_before_copy_and_retain_only_live_nodes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/projected_predicate/production_tests.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "Four MiB literals and parameters through bound and schema-binding positional predicate constructors.",
+      "invariant": "Reject before 256 KiB attempted allocation under 64 KiB available; retain exactly live allocations and release both cancelled attempts.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projected_specialization_retires_replaced_and_unsupported_partial_trees",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/projected_predicate/production_tests.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "Adjacent integer bounds and unsupported local or correlated predicate trees.",
+      "invariant": "Keep integer range specialization, discard replaced owners and release partial output on canonical fallback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projected_pattern_folding_keeps_input_and_compiled_pattern_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/projected_predicate/production_tests.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "One MiB escaped LIKE constant followed by matcher construction.",
+      "invariant": "Admit before copy, retain compiled pattern bytes, preserve escaped-literal matches and retire all memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "join_construction_and_wrapper_failures_close_both_owned_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/production/tests.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "Hash and nested-loop metadata or wrapper admission fails; either cancellation fires before construction.",
+      "invariant": "Close both original inputs and release all private scalar, schema and wrapper reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "hash_key_binding_admits_each_operand_and_releases_rejected_candidates",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/join_keys.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "Four MiB text concatenation bound to a physical equality key.",
+      "invariant": "Reject before 256 KiB attempted allocation under 64 KiB available; retry retains only selected keys and both cancellations release private owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_join_predicates_admit_before_copying_and_retain_until_operator_drop",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/physical_joins.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "Four MiB JOIN predicates in hash and nested-loop assembly on all four providers.",
+      "invariant": "Reject before 256 KiB attempted allocation with 64 KiB available, honor both cancellations, retain successful predicates until operator drop and recover.",
+      "case_names": [
+        "case_1_memory_nested",
+        "case_2_memory_hash",
+        "case_3_sqlite_native_nested",
+        "case_4_sqlite_native_hash",
+        "case_5_sqlite_kv_nested",
+        "case_6_sqlite_kv_hash",
+        "case_7_redb_nested",
+        "case_8_redb_hash"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_join_planning_preserves_pg18_keys_types_lateral_patterns_and_errors",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/physical_joins.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "PostgreSQL 18 ROW/FULL/USING joins, lateral namespaces, LIKE, array membership, cross-datetime equality and narrowing errors.",
+      "invariant": "Preserve independently observed values, result types, 0A000/22003 diagnostics and subsequent recovery on all four providers.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_selection_cache_owns_no_request_allocation_on_misses_hits_or_eviction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/cache/tests.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "Cold builtin operator selection, reuse and full-cache eviction in an isolated fixed cache.",
+      "invariant": "Select exactly the same catalog types without any heap allocation or request memory retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_selection_cache_keys_keep_exact_catalog_identity_through_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/cache/tests.rs",
+      "capability": "Native physical JOIN predicate ownership",
+      "workload": "Distinct actual catalog operator/type keys collide in a small fixed cache and then cross its capacity.",
+      "invariant": "Keep exact key identity through probing, reuse and full-cache clearing without confusing selected types.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -16,20 +16,26 @@ pub(super) fn required(
     expression: &ScalarExpr,
     schema: &RowSchema,
     params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    control.check()?;
     let pair = |op, left, right| {
-        let left = crate::scalar_type(left, schema, params)?;
-        let right = crate::scalar_type(right, schema, params)?;
-        Ok(needs_session(op, left.as_ref(), right.as_ref()))
+        let left = uqa_sql::scalar_type_with_control(left, schema, params, control)?;
+        let right = uqa_sql::scalar_type_with_control(right, schema, params, control)?;
+        needs_session(op, left.as_deref(), right.as_deref(), control)
     };
     match expression {
         ScalarExpr::Cast { expr, .. } => {
-            let source = crate::scalar_type(expr, schema, params)?;
-            let target = crate::scalar_type(expression, schema, params)?;
-            Ok(source.zip(target).is_none_or(|(source, target)| {
-                uqa_sql::type_resolution::cast_volatility(&source, &target)
-                    != FunctionVolatility::Immutable
-            }))
+            let source = uqa_sql::scalar_type_with_control(expr, schema, params, control)?;
+            let target = uqa_sql::scalar_type_with_control(expression, schema, params, control)?;
+            match source.zip(target) {
+                Some((source, target)) => {
+                    Ok(uqa_sql::type_resolution::cast_volatility_with_control(
+                        &source, &target, control,
+                    )? != FunctionVolatility::Immutable)
+                }
+                None => Ok(true),
+            }
         }
         ScalarExpr::Binary { op, lhs, rhs } => pair(*op, lhs, rhs),
         ScalarExpr::Between { expr, low, high } => {
@@ -55,22 +61,28 @@ pub(super) fn required(
             let [left, right, ..] = args.as_slice() else {
                 return Ok(false);
             };
-            let left = crate::scalar_type(left, schema, params)?;
-            let right = crate::scalar_type(right, schema, params)?;
-            let Some(ColumnType::Array(element)) = right else {
+            let left = uqa_sql::scalar_type_with_control(left, schema, params, control)?;
+            let right = uqa_sql::scalar_type_with_control(right, schema, params, control)?;
+            let Some(ColumnType::Array(element)) = right.as_deref() else {
                 return Ok(false);
             };
-            Ok(needs_session(
-                BinaryOp::Equal,
-                left.as_ref(),
-                Some(&element),
-            ))
+            needs_session(BinaryOp::Equal, left.as_deref(), Some(element), control)
         }
         _ => Ok(false),
     }
 }
 
-fn needs_session(op: BinaryOp, left: Option<&ColumnType>, right: Option<&ColumnType>) -> bool {
-    uqa_sql::type_resolution::binary_operator_volatility(op, left, right)
-        .is_ok_and(|volatility| volatility != FunctionVolatility::Immutable)
+fn needs_session(
+    op: BinaryOp,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    match uqa_sql::type_resolution::binary_operator_volatility_with_control(
+        op, left, right, control,
+    ) {
+        Ok(volatility) => Ok(volatility != FunctionVolatility::Immutable),
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
+        Err(_) => Ok(false),
+    }
 }

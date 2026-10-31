@@ -15,6 +15,9 @@ use crate::type_resolution::{
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionMap, ProductionVec};
 
+mod predicate;
+pub use predicate::join_using_predicate_owned;
+
 pub(super) enum OutputColumn<'a> {
     Merged(&'a ResolvedJoinColumn),
     Left(usize),

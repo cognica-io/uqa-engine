@@ -304,3 +304,44 @@ fn controlled_join_output_names_share_logical_order_and_retain_exact_payload() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn using_predicate_constructors_admit_wide_coercions_and_retain_only_scalar_output() {
+    let columns = (0..512).map(|i| format!("key_{i}")).collect::<Vec<_>>();
+    let left = RowSchema::with_qualified_types(
+        "l",
+        columns.clone(),
+        vec![Some(ColumnType::Integer); columns.len()],
+    );
+    let right =
+        RowSchema::with_qualified_types("r", columns, vec![Some(ColumnType::BigInteger); 512]);
+    let using = super::super::resolve_join_using(None, true, &left, &right)
+        .unwrap()
+        .unwrap();
+    let memory = MemoryBudget::new(8 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    let build = || join_using_predicate_owned(&using, &left, &right, &control);
+    let occupied = memory.reserve(memory.available() - 1024).unwrap();
+    let mut result = None;
+    let allocation = allocation_counter::measure(|| result = Some(build()));
+    assert!(allocation.bytes_total < 64 << 10, "{allocation:?}");
+    assert_eq!(result.unwrap().err().unwrap().sqlstate(), Some("53200"));
+    assert_eq!(memory.used(), occupied.bytes());
+    drop(occupied);
+    for token in [&original, &invoking] {
+        token.cancel();
+        assert_eq!(build().err().unwrap().sqlstate(), Some("57014"));
+        assert_eq!(memory.used(), 0);
+        token.reset();
+    }
+    let expression = build().unwrap().unwrap().finish(&control).unwrap();
+    let crate::ScalarExpr::And(items) = &*expression else {
+        panic!("USING conjunction")
+    };
+    assert_eq!(items.len(), 512);
+    assert_eq!(memory.used(), expression.reserved_bytes());
+    drop(expression);
+    assert_eq!(memory.used(), 0);
+}

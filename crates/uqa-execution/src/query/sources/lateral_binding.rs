@@ -8,15 +8,15 @@
 
 use super::{
     alias_join_operator, bind_join_on_schema, bind_source_plan_schema,
-    build_join_operator_with_ctes, combine_filters, join_using_predicate, null_row_for_schema,
-    physical_exec_error, qualifier_filter, require_lateral_function_execute, resolve_join_using,
-    shape_join_using_output, unproduced_column, CteScope, PhysicalOperator, QualifierFilters,
-    QueryLateralSource, RowSchema, RowSchemaExecution, SQLError, SQLParam, SourceContext,
-    SourcePlan,
+    build_join_operator_with_ctes, combine_filters, null_row_for_schema, physical_exec_error,
+    qualifier_filter, require_lateral_function_execute, shape_join_using_output, unproduced_column,
+    CteScope, PhysicalOperator, QualifierFilters, QueryLateralSource, RowSchema,
+    RowSchemaExecution, SQLError, SQLParam, SourceContext, SourcePlan,
 };
 use crate::physical::construction::OperatorBuild;
 use crate::{OwnedPhysicalRow, PhysicalRow, SQLRowSource, SQLRowStream};
 use uqa_sql::semantics::from_qualifier_set;
+use uqa_sql::semantics::{join_using_predicate_owned, resolve_join_using_with_control};
 
 #[cfg(test)]
 mod tests;
@@ -53,6 +53,8 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
         unreachable!("lateral binding requires a join");
     };
     OperatorBuild::build(left, |left| {
+        let resources = context.ctes.production_resources()?;
+        let control = resources.control();
         let input_schema = binding.input_schema;
         let mut bound = bind_source_plan_schema(
             context.ctes.routines,
@@ -97,21 +99,31 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                 params,
                 ctes,
             )?;
-            let resolved_using =
-                resolve_join_using(using.as_ref(), *natural, &left_schema, &right_schema)?;
+            let resolved_using = resolve_join_using_with_control(
+                using.as_ref(),
+                *natural,
+                &left_schema,
+                &right_schema,
+                &control,
+            )?;
             let effective_on = resolved_using
                 .as_ref()
-                .and_then(|using| join_using_predicate(using, &left_schema, &right_schema))
+                .map(|using| {
+                    join_using_predicate_owned(using, &left_schema, &right_schema, &control)
+                })
+                .transpose()?
+                .flatten()
                 .or(on);
             if *kind == uqa_sql::ast::JoinKind::Full {
                 super::join_keys::join_keys(
                     *kind,
-                    effective_on.as_ref(),
+                    effective_on.as_deref(),
                     &left_schema,
                     &right_schema,
                     params,
                     context.types,
                     context.volatility,
+                    &control,
                 )?;
             }
             let pinned_right = pinned
@@ -149,19 +161,25 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                 context: *context,
                 right: right.clone(),
                 right_filter,
-                on: effective_on.map(|expression| {
-                    let joined = RowSchema::join(
-                        &left_schema,
-                        &right_schema,
-                        left_nulls.keys().chain(right_nulls.keys()).cloned(),
-                    );
-                    (
-                        crate::scalar::PreparedExpressions::scalar(
-                            evaluator.bind_type_introspection(expression, &joined),
-                        ),
-                        evaluator.clone(),
-                    )
-                }),
+                on: effective_on
+                    .map(|expression| -> Result<_, SQLError> {
+                        let joined = RowSchema::join_with_control(
+                            &left_schema,
+                            &right_schema,
+                            [],
+                            &control,
+                        )?;
+                        let expression = evaluator
+                            .bind_type_introspection_owned(expression, &joined, &control)?;
+                        Ok((
+                            crate::scalar::PreparedExpressions::produced_scalar(
+                                expression.finish(&control)?,
+                                &control,
+                            )?,
+                            evaluator.clone(),
+                        ))
+                    })
+                    .transpose()?,
                 function_arguments: match right {
                     SourcePlan::Function { args, .. } => {
                         let evaluator = context.relational.evaluator(params, ctes)?;

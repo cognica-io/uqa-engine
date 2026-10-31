@@ -302,8 +302,11 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
     names: SourceScope<'_>,
     memory: &mut uqa_sql::plan::ExecutableMemory,
 ) -> Result<(), SQLError> {
+    let resources = context.ctes.production_resources()?;
+    let control = resources.control();
     let input = (!matches!(source, SourcePlan::Join { .. }))
-        .then(|| names.input(source))
+        .then(|| names.input_with_control(source, &control))
+        .transpose()?
         .flatten();
     let outer = input.as_ref();
     match source {
@@ -326,14 +329,17 @@ fn prepare_source<S: Clone + Send + Sync + 'static>(
                 names.with_names(),
                 memory,
             )?;
-            let left_schema = uqa_sql::binding::bind_source_plan_schema_in_scope(
-                context.ctes.routines,
-                left,
-                params,
-                &crate::query::binding::binding_context(parent)?,
-                names.with_names(),
-            )?;
-            let preceding = names.right_namespace(left, &left_schema, *kind);
+            let left_schema =
+                uqa_sql::binding::production::bind_source_plan_schema_in_scope_with_control(
+                    context.ctes.routines,
+                    left,
+                    params,
+                    crate::query::binding::binding_context_with_control(parent, &control)?,
+                    names.with_names(),
+                    &control,
+                )?;
+            let preceding =
+                names.right_namespace_with_control(left, &left_schema, *kind, &control)?;
             prepare_source(
                 context,
                 right,

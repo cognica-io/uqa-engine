@@ -17,8 +17,8 @@ mod owned;
 type OuterColumns = uqa_core::memory::OwnedMap<ColumnIdentity, crate::ast::InternalColumnRef>;
 mod scope;
 pub use owned::{
-    bind_outer_rewrite_scope_with_control, resolve_outer_rewrites_owned,
-    resolve_outer_sources_owned,
+    bind_outer_rewrite_scope_with_control, resolve_outer_expression_rewrites_owned,
+    resolve_outer_rewrites_owned, resolve_outer_sources_owned,
 };
 mod sources;
 pub use sources::{resolve_outer_source_rewrites, resolve_outer_sources};

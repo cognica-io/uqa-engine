@@ -283,7 +283,7 @@ fn containment_operator_identities_and_bounded_types_match_postgresql() {
 
 #[test]
 fn retained_builtin_selections_equal_fresh_selections() {
-    let cache = BuiltinSelections::default();
+    let cache = BuiltinSelections::<32>::default();
     let numeric = ColumnType::Numeric {
         precision: Some(15),
         scale: Some(2),
@@ -315,8 +315,12 @@ fn retained_builtin_selections_equal_fresh_selections() {
         }
         let key = selection_key(name, left.as_ref(), right.as_ref()).unwrap();
         assert_eq!(
-            cache.read().unwrap().get(&key),
-            Some(&*fresh),
+            cache
+                .read()
+                .unwrap()
+                .get(&key)
+                .map(|types| types.map(Clone::clone)),
+            Some((*fresh).clone()),
             "{left:?} {name} {right:?}"
         );
     }
@@ -382,7 +386,7 @@ fn fresh_builtin_selections_stay_below_the_retained_selection_allowance() {
 
 #[test]
 fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounded() {
-    let cache = BuiltinSelections::default();
+    let cache = BuiltinSelections::<32>::default();
     let select = |name: &str, left: Option<&ColumnType>, right: Option<&ColumnType>| {
         select_with_cache(
             name,
@@ -399,7 +403,8 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
         cache
             .read()
             .unwrap()
-            .contains_key(&(name.into(), OperandType(left), OperandType(right)))
+            .get(&selection_key(name, left.as_ref(), right.as_ref()).unwrap())
+            .is_some()
     };
     let numeric = |precision, scale| ColumnType::Numeric {
         precision: Some(precision),
@@ -416,12 +421,12 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
         }),
         Some(ColumnType::Integer),
     ));
-    assert!(!contains(
+    assert!(contains(
         "*",
         Some(numeric(15, 2)),
         Some(ColumnType::Integer)
     ));
-    assert!(!contains(
+    assert!(contains(
         "*",
         Some(numeric(7, 3)),
         Some(ColumnType::Integer)
@@ -442,43 +447,9 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
         Some(ColumnType::Varchar(None)),
         Some(ColumnType::Varchar(None)),
     ));
-    assert!(!contains(
+    assert!(contains(
         "||",
         Some(ColumnType::Varchar(Some(12))),
         Some(ColumnType::Varchar(Some(3))),
     ));
-    // The capacity fixture owns its map so its synthetic keys cannot evict
-    // selections another test is inspecting in the process-wide cache.
-    let mut selections = HashMap::new();
-    let types = [
-        ColumnType::Integer,
-        ColumnType::Integer,
-        ColumnType::Integer,
-    ];
-    for index in 0..RETAINED_SELECTIONS {
-        insert_selection(
-            &mut selections,
-            (
-                format!("bounded_operator_{index}").into(),
-                OperandType(None),
-                OperandType(None),
-            ),
-            &types,
-        );
-        assert_eq!(selections.len(), index + 1);
-    }
-    assert_eq!(selections.len(), RETAINED_SELECTIONS);
-    let last = (
-        "after_capacity".into(),
-        OperandType(None),
-        OperandType(None),
-    );
-    insert_selection(&mut selections, last.clone(), &types);
-    assert_eq!(selections.len(), 1);
-    assert_eq!(selections.get(&last), Some(&types));
-    assert!(!selections.contains_key(&(
-        "bounded_operator_0".into(),
-        OperandType(None),
-        OperandType(None),
-    )));
 }

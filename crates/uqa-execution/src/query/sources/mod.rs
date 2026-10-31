@@ -29,7 +29,6 @@ use uqa_sql::{
     },
     semantics::{
         cte_names::query_cte_names_with_control,
-        join_predicates::{bind_join_sides, join_conjuncts},
         resolve_user_table_function,
         source_filters::{combine_filters, qualifier_filter, qualifier_for},
         table_function_column_types, validate_table_function_alias_count,
@@ -68,7 +67,6 @@ use source_qualification::{
 pub(crate) use streaming_subquery::try_build_streaming_subquery_operator;
 use subquery_source::build_subquery_source_operator;
 use table_source::build_table_source_operator;
-use uqa_sql::semantics::{join_using_predicate, resolve_join_using};
 use values_source::build_values_source_operator;
 
 pub(crate) use source_operator::{build_join_operator_with_bound_sources, empty_source_operator};
