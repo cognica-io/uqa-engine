@@ -42,7 +42,7 @@ use uqa_sql::{SQLError, SQLParam, ScalarExpr};
 pub fn build_relational_operator<'a, S: Clone + 'static>(
     context: RelationalContext<'a, S>,
     operator: Box<dyn PhysicalOperator + 'a>,
-    predicate: Option<ScalarExpr>,
+    predicate: Option<uqa_sql::plan::OwnedScalarExpr>,
     statement: &QueryBlockPlan,
     params: &'a [SQLParam],
     ctes: &CteScope<S>,

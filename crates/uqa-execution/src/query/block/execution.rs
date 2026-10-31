@@ -7,14 +7,13 @@
 //! Query-block validation and physical source selection.
 
 use super::{
-    binding_context, ensure_select_privileges_for_query_block, execute_query_block_operator_output,
-    expand_from_star_columns, overlay_outer_schema, projection_columns,
-    run_select_without_from_output, run_single_foreign_select_output,
-    run_single_table_select_output, validate_query_block_expression_types,
-    validate_query_block_references, validate_query_set_contexts,
-    validate_source_set_contexts_before_build, with_query_table_pseudo_columns, ComputePlan,
-    CteScope, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
-    SingleRelation, SourceContext, SourcePlan,
+    binding_context, ensure_select_privileges_for_query_block, expand_from_star_columns,
+    overlay_outer_schema, projection_columns, run_select_without_from_output,
+    run_single_foreign_select_output, run_single_table_select_output,
+    validate_query_block_expression_types, validate_query_block_references,
+    validate_query_set_contexts, validate_source_set_contexts_before_build,
+    with_query_table_pseudo_columns, ComputePlan, CteScope, QueryBlockPlan, QueryOutput,
+    QueryOutputMode, SQLError, SQLParam, ScalarExpr, SingleRelation, SourceContext, SourcePlan,
 };
 use crate::query::binding::sources::{
     bind_query_block_with_sources, ensure_select_with_sources, BoundQueryBlock, SourceBindings,
@@ -382,7 +381,7 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
             )?;
             Ok((columns, physical_filter))
         })?;
-    execute_query_block_operator_output(
+    crate::query::relational::output::execute_query_block_operator_output_owned(
         context.relational,
         operator,
         physical_filter,

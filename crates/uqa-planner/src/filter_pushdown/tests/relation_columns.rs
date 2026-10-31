@@ -51,10 +51,7 @@ fn placement(
 fn placed(entries: &[(&str, ScalarExpr)]) -> Option<QualifierFilters> {
     let mut filters = QualifierFilters::new();
     for (qualifier, predicate) in entries {
-        filters
-            .entry((*qualifier).to_string())
-            .or_default()
-            .push(predicate.clone());
+        filters.push(qualifier, predicate.clone());
     }
     (!filters.is_empty()).then_some(filters)
 }
@@ -146,7 +143,13 @@ fn aliased_and_nested_joins_expose_only_their_visible_relations() {
     let from = block.from.as_ref().unwrap();
     let fixture = Fixture::new();
     let columns = SourceColumns::new(fixture.scope(), from, &from_qualifier_set(from)).unwrap();
-    assert_eq!(columns.owners().get("x"), Some(&Some("v".into())));
+    assert_eq!(
+        columns
+            .owners()
+            .get("x")
+            .map(|owner| owner.as_ref().map(|owner| owner.as_str())),
+        Some(Some("v"))
+    );
     assert!(!columns.owners().contains_key("y"));
     let (parts, filters, residual) = placement(
         "SELECT * FROM (VALUES (1)) v(x) CROSS JOIN ((VALUES (2)) v(x) CROSS JOIN (VALUES (3)) b(y)) AS j WHERE v.x > 1 AND j.y > 2",

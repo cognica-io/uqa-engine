@@ -77,14 +77,20 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
                 .relational
                 .expressions
                 .prepare_predicate(&predicate, params, ctes)?;
-            operator.wrap(|input| match prepared {
-                Some(prepared) => Box::new(crate::Filter::with_row_predicate(input, prepared)),
-                None => Box::new(crate::Filter::with_evaluator(
+            let resources = context.ctes.production_resources()?;
+            let control = resources.control();
+            operator.attach(|input| match prepared {
+                Some(prepared) => {
+                    crate::Filter::with_row_predicate(input, prepared).into_boxed(&control)
+                }
+                None => crate::Filter::with_owned_predicate(
                     input,
                     predicate,
                     Arc::clone(&evaluator),
-                )),
-            });
+                    &control,
+                )?
+                .into_boxed(&control),
+            })?;
         }
         if !projections.is_empty() {
             let work_mem = context.relational.runtime.work_mem_bytes()?;

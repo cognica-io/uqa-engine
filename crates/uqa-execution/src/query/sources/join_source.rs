@@ -66,11 +66,14 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 path.push(1);
                 path
             });
-            let left_filters = filters.and_then(|filters| {
-                context
-                    .planning
-                    .propagated_join_filters(filters, right, left, on.as_ref())
-            });
+            let left_filters = filters
+                .map(|filters| {
+                    context
+                        .planning
+                        .propagated_join_filters(filters, right, left, on.as_ref())
+                })
+                .transpose()?
+                .flatten();
             let left_filter_ref = left_filters.as_ref().or(filters);
             let left_operator = if context.planning.join_input_is_empty(from, false) {
                 super::empty_source_operator(context, left, params, ctes, None)?
@@ -132,11 +135,14 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     SourcePlan::FunctionGroup { .. } => true,
                     _ => false,
                 };
-                let right_filters = filters.and_then(|filters| {
-                    context
-                        .planning
-                        .propagated_join_filters(filters, left, right, on.as_ref())
-                });
+                let right_filters = filters
+                    .map(|filters| {
+                        context
+                            .planning
+                            .propagated_join_filters(filters, left, right, on.as_ref())
+                    })
+                    .transpose()?
+                    .flatten();
                 let right_filter_ref = right_filters.as_ref().or(filters);
                 let lateral_input = (*lateral
                     || implicit_lateral_function

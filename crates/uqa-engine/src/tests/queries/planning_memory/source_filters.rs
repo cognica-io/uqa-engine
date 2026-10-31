@@ -83,3 +83,139 @@ fn native_source_filters_reject_wide_predicates_before_copying(#[case] provider:
     drop(batch);
     assert_eq!(memory.used(), baseline);
 }
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_predicate_placement_rejects_payloads_before_copying(#[case] provider: Provider) {
+    use uqa_execution::query::sources::context::SourcePlanning;
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("predicate-placement.db"));
+    let resources = engine.query_retention_control().unwrap();
+    let memory = resources.memory();
+    let scope = crate::capabilities::query_scope::new_for_statement(&engine, None).unwrap();
+    for placed in [true, false] {
+        let sql = format!(
+            "SELECT v.id FROM (VALUES(1)) AS v(id) WHERE {}length('{}'::text)>0",
+            if placed { "v.id+" } else { "" },
+            "x".repeat(4 << 20)
+        );
+        let UnifiedPlan::Query(query) =
+            UnifiedPlan::lower(uqa_sql::compile(&sql).unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let uqa_sql::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block")
+        };
+        let source = block.from.as_ref().unwrap();
+        let baseline = memory.used();
+        let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+        let mut state = None;
+        let allocation = allocation_counter::measure(|| {
+            state = if placed {
+                engine.qualifier_filters(block, source, &scope).err()
+            } else {
+                engine.residual_filter(block, source, None, &scope).err()
+            };
+        });
+        assert_eq!(memory.used(), baseline + occupied.bytes());
+        assert!(
+            state.as_ref().and_then(uqa_sql::SQLError::sqlstate) == Some("53200")
+                && allocation.bytes_total < 256 << 10,
+            "{provider:?}, placed={placed}: {state:?}; {allocation:?}"
+        );
+        drop(occupied);
+        assert_eq!(memory.used(), baseline);
+        resources.cancellation().cancel();
+        let cancelled = if placed {
+            engine.qualifier_filters(block, source, &scope).err()
+        } else {
+            engine.residual_filter(block, source, None, &scope).err()
+        };
+        assert_eq!(cancelled.unwrap().sqlstate(), Some("57014"));
+        assert_eq!(memory.used(), baseline);
+        resources.cancellation().reset();
+        if placed {
+            let result = engine
+                .qualifier_filters(block, source, &scope)
+                .unwrap()
+                .unwrap();
+            assert!(memory.used() > baseline + (4 << 20));
+            assert_eq!(result.get("v").unwrap().len(), 1);
+            drop(result);
+        } else {
+            let result = engine
+                .residual_filter(block, source, None, &scope)
+                .unwrap()
+                .unwrap();
+            assert!(memory.used() > baseline + (4 << 20));
+            assert_eq!(&*result, block.r#where.as_ref().unwrap());
+            drop(result);
+        }
+        assert_eq!(memory.used(), baseline);
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_physical_explain_admits_placed_predicates(#[case] provider: Provider) {
+    use uqa_execution::statement::context::PhysicalExplainPlanning;
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("physical-explain-predicates.db"));
+    let resources = engine.query_retention_control().unwrap();
+    let memory = resources.memory();
+    let invoking = uqa_core::CancellationToken::new();
+    let control =
+        uqa_core::memory::ProductionControl::new(memory, resources.cancellation(), &invoking);
+    for cte in [false, true] {
+        let sql = format!(
+            "{}SELECT v.id FROM {} v WHERE v.id+length('{}'::text)>0",
+            if cte {
+                "WITH input(id) AS (VALUES(1)) "
+            } else {
+                ""
+            },
+            if cte { "input" } else { "(SELECT 1 AS id)" },
+            "x".repeat(4 << 20)
+        );
+        let plan = UnifiedPlan::lower(uqa_sql::compile(&sql).unwrap().remove(0));
+        let baseline = memory.used();
+        let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+        let mut error = None;
+        let allocation = allocation_counter::measure(|| {
+            error = engine
+                .physical_explain_plan(&plan, &[], false, &control)
+                .err();
+        });
+        assert_eq!(memory.used(), baseline + occupied.bytes());
+        assert!(
+            error.as_ref().and_then(uqa_sql::SQLError::sqlstate) == Some("53200")
+                && allocation.bytes_total < 256 << 10,
+            "{provider:?}, cte={cte}: {error:?}; {allocation:?}"
+        );
+        drop(occupied);
+        for token in [resources.cancellation(), &invoking] {
+            token.cancel();
+            assert_eq!(
+                engine
+                    .physical_explain_plan(&plan, &[], false, &control)
+                    .unwrap_err()
+                    .sqlstate(),
+                Some("57014")
+            );
+            assert_eq!(memory.used(), baseline);
+            token.reset();
+        }
+        let output = engine
+            .physical_explain_plan(&plan, &[], false, &control)
+            .unwrap();
+        drop(output);
+        assert_eq!(memory.used(), baseline);
+    }
+}

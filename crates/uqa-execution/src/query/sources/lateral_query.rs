@@ -86,7 +86,7 @@ fn execute_lateral_query_scope<S: Clone + Send + Sync + 'static>(
         scheduled.iter().copied(),
         params,
         &mut scoped_ctes,
-        &std::collections::BTreeMap::new(),
+        &uqa_sql::plan::source_projection::CteOutputFilters::new(),
     )?;
     execute_lateral_relational_root_output(
         context,
@@ -215,8 +215,8 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
     let inherited_lock_identities = scoped_ctes.lock_identities.emit;
     let arena_resources = context.ctes.production_resources()?;
-    let mut scoped_ctes =
-        scoped_ctes.enter_query_block_with_control(stmt, &arena_resources.control())?;
+    let control = arena_resources.control();
+    let mut scoped_ctes = scoped_ctes.enter_query_block_with_control(stmt, &control)?;
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
     let row_identity_barrier = stmt.distinct
         || !stmt.distinct_on.is_empty()
@@ -225,21 +225,19 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
     scoped_ctes.lock_identities.retain_after_lock =
         inherited_lock_identities && !row_identity_barrier;
-    let (stmt, own_schema) = bind_lateral_query_block(
+    let (statement_owner, own_schema) = bind_lateral_query_block(
         context,
         stmt,
         &outer_row.schema,
         params,
         &scoped_ctes,
-        &arena_resources.control(),
+        &control,
     )?;
-    let statement_owner = stmt;
     let stmt = statement_owner.as_ref();
     let mut bound_scope;
     let scoped_ctes = if rewrite_subqueries {
-        let arena_resources = context.ctes.production_resources()?;
-        bound_scope = scoped_ctes
-            .enter_scalar_subqueries_with_control(&stmt.subqueries, &arena_resources.control())?;
+        bound_scope =
+            scoped_ctes.enter_scalar_subqueries_with_control(&stmt.subqueries, &control)?;
         &mut *bound_scope
     } else {
         &mut *scoped_ctes
@@ -260,25 +258,27 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
         local_schema,
     } = build_lateral_query_source(context, stmt, &own_schema, outer_row, params, scoped_ctes)?;
     let pending = !stmt.deferred_outer_rewrites.is_empty();
-    let (operator, rewritten) =
+    let (operator, (rewritten, residual)) =
         crate::physical::construction::OperatorBuild::run(operator, |_| {
-            statement_owner.resolve_outer_rewrites(&local_schema, &arena_resources.control())
+            let rewritten = statement_owner.resolve_outer_rewrites(&local_schema, &control)?;
+            let residual = if pending {
+                rewritten
+                    .as_ref()
+                    .r#where
+                    .as_ref()
+                    .map(|predicate| predicate.copy_for_rewrite(&control))
+                    .transpose()?
+            } else {
+                residual
+            };
+            Ok((rewritten, residual))
         })?;
     let stmt = rewritten.as_ref();
-    let residual = if pending {
-        stmt.r#where.clone()
-    } else {
-        residual
-    };
     let rewritten_scope;
     let (operator, scoped_ctes) = if rewrite_subqueries {
         let (operator, scope) =
             crate::physical::construction::OperatorBuild::run(operator, |_| {
-                let arena_resources = context.ctes.production_resources()?;
-                scoped_ctes.enter_scalar_subqueries_with_control(
-                    &stmt.subqueries,
-                    &arena_resources.control(),
-                )
+                scoped_ctes.enter_scalar_subqueries_with_control(&stmt.subqueries, &control)
             })?;
         rewritten_scope = scope;
         (operator, &*rewritten_scope)
@@ -296,7 +296,7 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
                 scoped_ctes,
             )
         })?;
-    crate::query::relational::output::execute_query_block_operator_output(
+    crate::query::relational::output::execute_query_block_operator_output_owned(
         context.relational,
         operator,
         residual,
@@ -385,7 +385,7 @@ fn bind_lateral_output_columns<S: Clone + Send + Sync + 'static>(
 
 struct LateralInput<'a> {
     operator: Box<dyn crate::PhysicalOperator + 'a>,
-    residual: Option<uqa_sql::ScalarExpr>,
+    residual: Option<uqa_sql::plan::OwnedScalarExpr>,
     local_schema: crate::RowSchema,
 }
 

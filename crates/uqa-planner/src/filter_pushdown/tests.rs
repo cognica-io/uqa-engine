@@ -130,8 +130,18 @@ fn table_range_aliases_are_the_filter_ownership_names() {
     };
     let columns = SourceColumns::new(scope, &source, &BTreeSet::from(["source".into()])).unwrap();
     let owners = columns.owners();
-    assert_eq!(owners.get("key"), Some(&Some("source".into())));
-    assert_eq!(owners.get("value"), Some(&Some("source".into())));
+    assert_eq!(
+        owners
+            .get("key")
+            .map(|owner| owner.as_ref().map(|owner| owner.as_str())),
+        Some(Some("source"))
+    );
+    assert_eq!(
+        owners
+            .get("value")
+            .map(|owner| owner.as_ref().map(|owner| owner.as_str())),
+        Some(Some("source"))
+    );
     assert!(!owners.contains_key("id"));
     assert!(!owners.contains_key("label"));
 }
@@ -195,8 +205,9 @@ fn unaliased_relations_keep_their_columns_from_the_only_named_relation() {
             SourceColumns::new(scope, &from, &from_qualifier_set(&from))
                 .unwrap()
                 .owners()
-                .get("column1"),
-            Some(&None)
+                .get("column1")
+                .map(Option::is_none),
+            Some(true)
         );
         let unqualified = greater(ScalarExpr::Column("column1".into()), one());
         let mixed = greater(
@@ -408,3 +419,5 @@ mod fixture;
 use fixture::Fixture;
 mod output_filters;
 mod relation_columns;
+
+mod production;

@@ -6,6 +6,9 @@
 
 //! Expression traversal, qualifier analysis, and safe qualification.
 
+mod qualification;
+pub use qualification::qualify_unqualified_columns_with_control;
+
 use super::collect_from_qualifiers;
 use crate::plan::SourcePlan;
 use crate::ScalarExpr;

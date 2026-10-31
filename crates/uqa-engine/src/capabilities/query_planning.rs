@@ -7,7 +7,6 @@
 //! Capture statement metadata for planner-owned predicate placement.
 
 use crate::{capabilities::query_scope::CteScope, Engine};
-use std::collections::BTreeMap;
 use uqa_planner::filter_pushdown::context::{FilterPushdownContext, FilterPushdownScope};
 use uqa_sql::{
     plan::{
@@ -17,28 +16,44 @@ use uqa_sql::{
     SQLError, ScalarExpr,
 };
 
-fn with_context<T>(engine: &Engine, action: impl FnOnce(FilterPushdownContext<'_>) -> T) -> T {
+fn with_context<T>(
+    engine: &Engine,
+    action: impl FnOnce(
+        FilterPushdownContext<'_>,
+        &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
+    let resources =
+        uqa_execution::query::relational::QueryExpressionFactory::production_resources(engine)?;
+    let control = resources.control();
     let catalog = engine.catalog_read_view();
-    let resolution = engine.session_execution_view().relation_name_resolution();
-    action(FilterPushdownContext {
-        volatility: engine,
-        correlation: uqa_sql::binding::correlation::CorrelationContext {
-            routines: engine,
-            catalog: &catalog,
-            resolution: &resolution,
-            scoped_relations: None,
+    let resolution =
+        uqa_execution::catalog::services::CatalogSession::relation_name_resolution_with_control(
+            engine, &control,
+        )?;
+    action(
+        FilterPushdownContext {
+            volatility: engine,
+            correlation: uqa_sql::binding::correlation::CorrelationContext {
+                routines: engine,
+                catalog: &catalog,
+                resolution: &resolution,
+                scoped_relations: None,
+            },
+            optimizer: &|plan| {
+                crate::capabilities::statement_planning::optimize_engine_plan(engine, plan)
+            },
         },
-        optimizer: &|plan| {
-            crate::capabilities::statement_planning::optimize_engine_plan(engine, plan)
-        },
-    })
+        &control,
+    )
 }
 fn with_scope<T>(
     ctes: &CteScope,
+    control: &uqa_core::memory::ProductionControl<'_>,
     action: impl FnOnce(FilterPushdownScope<'_>) -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
     let catalog = ctes.catalog_read_view()?;
-    let resolution = ctes.relation_name_resolution()?;
+    let resolution = ctes.relation_name_resolution_with_control(control)?;
     action(FilterPushdownScope {
         catalog: &catalog,
         resolution: &resolution,
@@ -52,9 +67,11 @@ pub(crate) fn qualifier_filters_for_stmt(
     from: &SourcePlan,
     ctes: &CteScope,
 ) -> Result<Option<QualifierFilters>, SQLError> {
-    with_context(engine, |context| {
-        with_scope(ctes, |scope| {
-            uqa_planner::filter_pushdown::qualifier_filters_for_stmt(context, stmt, from, scope)
+    with_context(engine, |context, control| {
+        with_scope(ctes, control, |scope| {
+            uqa_planner::filter_pushdown::qualifier_filters_for_stmt_with_control(
+                context, stmt, from, scope, control,
+            )
         })
     })
 }
@@ -65,11 +82,11 @@ pub(crate) fn final_filter_after_qualifier_pushdown(
     from: &SourcePlan,
     filters: Option<&QualifierFilters>,
     ctes: &CteScope,
-) -> Result<Option<ScalarExpr>, SQLError> {
-    with_context(engine, |context| {
-        with_scope(ctes, |scope| {
-            uqa_planner::filter_pushdown::final_filter_after_qualifier_pushdown(
-                context, stmt, from, filters, scope,
+) -> Result<Option<uqa_sql::plan::OwnedScalarExpr>, SQLError> {
+    with_context(engine, |context, control| {
+        with_scope(ctes, control, |scope| {
+            uqa_planner::filter_pushdown::final_filter_after_qualifier_pushdown_with_control(
+                context, stmt, from, filters, scope, control,
             )
         })
     })
@@ -79,10 +96,12 @@ pub(crate) fn cte_output_filters(
     engine: &Engine,
     plan: &QueryPlan,
     ctes: &CteScope,
-) -> Result<BTreeMap<String, (String, ScalarExpr)>, SQLError> {
-    with_context(engine, |context| {
-        with_scope(ctes, |scope| {
-            uqa_planner::filter_pushdown::cte_output_filters(context, plan, scope)
+) -> Result<uqa_sql::plan::source_projection::CteOutputFilters, SQLError> {
+    with_context(engine, |context, control| {
+        with_scope(ctes, control, |scope| {
+            uqa_planner::filter_pushdown::cte_output_filters_with_control(
+                context, plan, scope, control,
+            )
         })
     })
 }
@@ -94,7 +113,7 @@ pub(crate) fn push_output_filter_into_query_plan(
     filter: &ScalarExpr,
     output_columns_override: Option<&[String]>,
 ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
-    with_context(engine, |context| {
+    with_context(engine, |context, _control| {
         uqa_planner::filter_pushdown::push_output_filter_into_query_plan(
             context,
             plan,
@@ -122,7 +141,7 @@ pub(crate) fn push_derived_output_filter(
     filter: &ScalarExpr,
     output_columns: Option<&[String]>,
 ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
-    with_context(engine, |context| {
+    with_context(engine, |context, _control| {
         uqa_planner::filter_pushdown::push_derived_output_filter(
             context,
             plan,

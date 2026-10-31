@@ -33982,6 +33982,116 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "qualifier_collections_admit_names_slots_and_payloads_and_retire_exact_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/source_projection/qualifier_filters/tests.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Qualifier key, ordered predicate slots and a 4 MiB scalar with a 32 KiB allowance.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_qualification_preserves_separate_ordering_scopes_and_exact_lifetimes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/expression_shape/qualification/tests.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Aggregate arguments/filter and independent ordered/window binding scopes.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "placement_and_residual_producers_reject_before_copying_and_retain_exact_owners",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/production.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Placed and residual 4 MiB predicates under a 32 KiB allowance.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "necessary_disjunction_and_single_reference_cte_filters_keep_order_and_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/production.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Necessary disjunctions, residual retention and single/shared CTE consumer selection.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "equality_propagation_admits_selected_constants_without_mutating_source_filters",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/production.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Borrowed JOIN equality and a 4 MiB selected source constant.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "outer_constant_rewrites_admit_payloads_and_keep_independent_readers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/sources/lateral_query/outer_constants/tests.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Current outer-row integer binding alongside a retained 4 MiB local predicate.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_predicate_placement_rejects_payloads_before_copying",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_filters.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Placed and residual 4 MiB predicates with 64 KiB available on all four native providers.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_physical_explain_admits_placed_predicates",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/source_filters.rs",
+      "capability": "Native predicate placement ownership",
+      "workload": "Physical EXPLAIN placement and single-reference CTE predicates with 4 MiB payloads, 64 KiB available and both cancellation scopes on all four providers.",
+      "invariant": "Admit selected names, vectors and scalar payloads before construction, retain exact destination ownership, preserve ordered observations and release partial outputs on denial or cancellation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

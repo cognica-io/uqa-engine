@@ -6,74 +6,86 @@
 
 //! Statement-snapshot column ownership for filter pushdown.
 
-use std::collections::{BTreeMap, BTreeSet};
+use super::{FilterPushdownScope, SourcePlan};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+use uqa_sql::{
+    binding::production::{BindingMap, BindingNameSet},
+    semantics::{
+        query_plan_output_columns_with_control, visit_source_qualifiers_with_control,
+        DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN, XMIN_COLUMN,
+    },
+    SQLError,
+};
 
-use uqa_sql::semantics::{DOC_ID_COLUMN, SCORE_COLUMN};
-use uqa_sql::SQLError;
+pub(super) type ColumnOwners = BindingMap<Option<Produced<String>>>;
 
-use super::FilterPushdownScope;
-use uqa_sql::catalog::{analysis::AnalysisCatalog, resolution::RelationNameResolution};
-
-use super::{query_plan_output_columns, SourcePlan, TABLE_OID_COLUMN, XMIN_COLUMN};
-
-pub(super) type ColumnOwners = BTreeMap<String, Option<String>>;
-
-/// The columns that the relations of one FROM clause expose to unqualified references.
 pub(super) struct SourceColumns {
-    /// Each listed column name with its owning qualifier, or `None` when several relations, or a relation without a qualifier, expose it.
     owners: ColumnOwners,
-    /// Qualifiers whose complete column list the statement snapshot does not determine: CTE references, table functions, aliased joins, schemaless tables and derived tables with a wildcard target.
-    opaque: BTreeSet<String>,
-    /// The qualifiers that the FROM clause exposes.
-    qualifiers: BTreeSet<String>,
-    /// Whether an unaliased VALUES list or subquery exposes columns without any qualifier.
+    opaque: BindingNameSet,
+    pub(super) qualifiers: BindingNameSet,
     unqualified_relation: bool,
 }
-
 impl SourceColumns {
+    pub(super) fn new_with_control(
+        scope: FilterPushdownScope<'_>,
+        source: &SourcePlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let mut output = Self {
+            owners: BindingMap::new(),
+            opaque: BindingNameSet::new(),
+            qualifiers: BindingNameSet::new(),
+            unqualified_relation: false,
+        };
+        visit_source_qualifiers_with_control(source, control, &mut |name| {
+            output.qualifiers.insert_with_control(name, control)?;
+            Ok(())
+        })?;
+        output.collect(scope, source, control)?;
+        Ok(output)
+    }
+    #[cfg(test)]
     pub(super) fn new(
         scope: FilterPushdownScope<'_>,
         source: &SourcePlan,
-        qualifiers: &BTreeSet<String>,
+        _: &std::collections::BTreeSet<String>,
     ) -> Result<Self, SQLError> {
-        let mut columns = Self {
-            owners: ColumnOwners::new(),
-            opaque: BTreeSet::new(),
-            qualifiers: qualifiers.clone(),
-            unqualified_relation: false,
-        };
-        columns.collect(scope, source)?;
-        Ok(columns)
+        Self::new_with_control(scope, source, &ProductionControl::uncontrolled())
     }
-
-    /// Ownership of explicitly listed columns, for tests that exercise attribution without a FROM clause.
     #[cfg(test)]
-    pub(super) fn listed(owners: ColumnOwners, qualifiers: BTreeSet<String>) -> Self {
+    pub(super) fn listed(
+        owners: std::collections::BTreeMap<String, Option<String>>,
+        qualifiers: std::collections::BTreeSet<String>,
+    ) -> Self {
+        let control = ProductionControl::uncontrolled();
         Self {
-            owners,
-            opaque: BTreeSet::new(),
-            qualifiers,
+            owners: owners
+                .into_iter()
+                .map(|(name, owner)| {
+                    (
+                        name,
+                        owner.map(|owner| control.finish(owner, None).unwrap()),
+                    )
+                })
+                .collect(),
+            opaque: BindingNameSet::new(),
+            qualifiers: qualifiers.into_iter().collect(),
             unqualified_relation: false,
         }
     }
-
     pub(super) fn owners(&self) -> &ColumnOwners {
         &self.owners
     }
-
-    /// The only relation of the FROM clause. A predicate that reads no column, such as a retrieval predicate over the relation's documents, belongs to it.
     pub(super) fn only_relation(&self) -> Option<&str> {
-        let mut qualifiers = self.qualifiers.iter();
-        match (qualifiers.next(), qualifiers.next()) {
-            (Some(qualifier), None) => Some(qualifier),
+        let mut names = self.qualifiers.iter();
+        match (names.next(), names.next()) {
+            (Some(name), None) => Some(name),
             _ => None,
         }
     }
-
-    /// Whether an unqualified reference to `column` reads a column of `qualifier`. A listed column belongs only to its owner. A name that no relation lists belongs to the qualifier only when it is the only relation, no unaliased relation exposes columns beside it, its column list is not determined, and the name is not a FROM relation's name, which would make the reference a whole-row value.
     pub(super) fn reads_column_of(&self, column: &str, qualifier: &str) -> bool {
         match self.owners.get(column) {
-            Some(owner) => owner.as_deref() == Some(qualifier),
+            Some(owner) => owner.as_ref().map(|owner| owner.as_str()) == Some(qualifier),
             None => {
                 self.only_relation() == Some(qualifier)
                     && !self.unqualified_relation
@@ -82,12 +94,13 @@ impl SourceColumns {
             }
         }
     }
-
     fn collect(
         &mut self,
         scope: FilterPushdownScope<'_>,
         source: &SourcePlan,
+        control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
+        control.check()?;
         match source {
             SourcePlan::RetainedRows(_) => {}
             SourcePlan::Table {
@@ -102,27 +115,23 @@ impl SourceColumns {
                 let columns = if (scope.is_visible_cte)(name) {
                     None
                 } else if let Some(columns) = bound_columns {
-                    Some(with_table_pseudo_columns(columns.clone()))
+                    Some(table_columns(columns.iter().map(String::as_str), control)?)
                 } else {
-                    relation_source_columns(scope.catalog, scope.resolution, name)?
+                    relation_source_columns(scope, name, control)?
                 };
-                match columns {
-                    Some(mut columns) => {
-                        for (column, alias) in columns.iter_mut().zip(column_aliases) {
-                            column.clone_from(alias);
-                        }
-                        self.register(qualifier, columns);
-                    }
-                    None => self.register_opaque(qualifier, column_aliases.clone()),
+                if let Some(columns) = columns {
+                    self.register_aliases(Some(qualifier), &columns, column_aliases, control)?;
+                } else {
+                    self.register_opaque(qualifier, column_aliases, control)?;
                 }
             }
             SourcePlan::Join {
                 left, right, alias, ..
             } => match alias {
-                Some(alias) => self.register_opaque(alias, Vec::new()),
+                Some(alias) => self.register_opaque(alias, &[], control)?,
                 None => {
-                    self.collect(scope, left)?;
-                    self.collect(scope, right)?;
+                    self.collect(scope, left, control)?;
+                    self.collect(scope, right, control)?;
                 }
             },
             SourcePlan::Values {
@@ -132,18 +141,18 @@ impl SourceColumns {
                 internal_relation,
                 ..
             } => {
+                if alias.is_none() && internal_relation.is_some() {
+                    return Ok(());
+                }
+                self.unqualified_relation |= alias.is_none();
                 let width = rows.first().map_or(column_aliases.len(), Vec::len);
-                let columns = (0..width).map(|index| {
-                    column_aliases
-                        .get(index)
-                        .cloned()
-                        .unwrap_or_else(|| format!("column{}", index + 1))
-                });
-                match (alias, internal_relation) {
-                    (Some(alias), _) => self.register(alias, columns),
-                    (None, None) => self.register_unqualified(columns),
-                    // An internal carrier exposes its attributes only as internal columns.
-                    (None, Some(_)) => {}
+                for index in 0..width {
+                    if let Some(column) = column_aliases.get(index) {
+                        self.register(alias.as_deref(), column, control)?;
+                    } else {
+                        let column = control.format(format_args!("column{}", index + 1))?;
+                        self.register(alias.as_deref(), &column, control)?;
+                    }
                 }
             }
             SourcePlan::Subquery {
@@ -152,103 +161,138 @@ impl SourceColumns {
                 column_aliases,
                 ..
             } => {
-                let output = query_plan_output_columns(body)
+                let output = query_plan_output_columns_with_control(body, control)?
                     .filter(|columns| !columns.iter().any(|column| column == "*"));
                 match (alias, output) {
-                    (Some(alias), Some(mut columns)) => {
-                        for (column, alias) in columns.iter_mut().zip(column_aliases) {
-                            column.clone_from(alias);
-                        }
-                        self.register(alias, columns);
+                    (Some(alias), Some(columns)) => {
+                        self.register_aliases(Some(alias), &columns, column_aliases, control)?;
                     }
-                    (Some(alias), None) => self.register_opaque(alias, column_aliases.clone()),
-                    (None, output) => self.register_unqualified(output.unwrap_or_default()),
+                    (Some(alias), None) => self.register_opaque(alias, column_aliases, control)?,
+                    (None, output) => {
+                        self.unqualified_relation = true;
+                        if let Some(columns) = output {
+                            self.register_aliases(None, &columns, &[], control)?;
+                        }
+                    }
                 }
             }
             SourcePlan::Function { column_aliases, .. }
             | SourcePlan::FunctionGroup { column_aliases, .. } => {
                 if let Some(qualifier) = source.visible_qualifier() {
-                    self.register_opaque(qualifier, column_aliases.clone());
+                    self.register_opaque(qualifier, column_aliases, control)?;
                 }
             }
         }
         Ok(())
     }
-
-    fn register(&mut self, qualifier: &str, columns: impl IntoIterator<Item = String>) {
-        for column in columns {
-            self.owners
-                .entry(column)
-                .and_modify(|owner| *owner = None)
-                .or_insert_with(|| Some(qualifier.to_string()));
+    fn register(
+        &mut self,
+        qualifier: Option<&str>,
+        column: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        if let Some(owner) = self.owners.get_mut(column) {
+            *owner = None;
+        } else {
+            self.owners.insert_with_control(
+                column,
+                qualifier.map(|name| control.copy_text(name)).transpose()?,
+                control,
+            )?;
         }
+        Ok(())
     }
-
-    /// Register the columns known by alias for a relation whose complete column list is not determined.
-    fn register_opaque(&mut self, qualifier: &str, columns: Vec<String>) {
-        self.opaque.insert(qualifier.to_string());
-        self.register(qualifier, columns);
-    }
-
-    /// A column of a relation without a qualifier belongs to no qualifier, whichever other relation also defines its name.
-    fn register_unqualified(&mut self, columns: impl IntoIterator<Item = String>) {
-        self.unqualified_relation = true;
-        for column in columns {
-            self.owners.insert(column, None);
+    fn register_aliases(
+        &mut self,
+        qualifier: Option<&str>,
+        columns: &[String],
+        aliases: &[String],
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        for (index, column) in columns.iter().enumerate() {
+            self.register(qualifier, aliases.get(index).unwrap_or(column), control)?;
         }
+        Ok(())
+    }
+    fn register_opaque(
+        &mut self,
+        qualifier: &str,
+        aliases: &[String],
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.opaque.insert_with_control(qualifier, control)?;
+        self.register_aliases(Some(qualifier), aliases, &[], control)
     }
 }
-
-/// Complete a table's declared columns with the system and retrieval metadata columns that every table scan resolves.
-fn with_table_pseudo_columns(mut columns: Vec<String>) -> Vec<String> {
+fn table_columns<'a>(
+    columns: impl IntoIterator<Item = &'a str>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<String>>, SQLError> {
+    let mut output = ProductionVec::new(*control);
+    for column in columns {
+        output.push_produced(control.copy_text(column)?)?;
+    }
     for pseudo in [TABLE_OID_COLUMN, XMIN_COLUMN, DOC_ID_COLUMN, SCORE_COLUMN] {
-        if !columns.iter().any(|column| column == pseudo) {
-            columns.push(pseudo.to_string());
+        if !output.iter().any(|column| column == pseudo) {
+            output.push_produced(control.copy_text(pseudo)?)?;
         }
     }
-    columns
+    Ok(output.finish()?)
 }
-
-/// The complete column list of a catalog relation, or `None` when the snapshot does not determine it.
 fn relation_source_columns(
-    catalog: &dyn AnalysisCatalog,
-    resolution: &RelationNameResolution,
+    scope: FilterPushdownScope<'_>,
     name: &str,
-) -> Result<Option<Vec<String>>, SQLError> {
-    if catalog.sequence_exists(resolution, name)? {
-        return Ok(Some(vec![
-            "last_value".into(),
-            "log_cnt".into(),
-            "is_called".into(),
-        ]));
-    }
-    if let Some(table) = catalog.table_resolved(resolution, name)? {
-        // A schemaless table resolves any field name its documents carry.
-        if table.columns.is_empty() {
-            return Ok(None);
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<String>>>, SQLError> {
+    let FilterPushdownScope {
+        catalog,
+        resolution,
+        ..
+    } = scope;
+    if catalog.sequence_exists_with_control(resolution, name, control)? {
+        let mut columns = ProductionVec::new(*control);
+        for name in ["last_value", "log_cnt", "is_called"] {
+            columns.push_produced(control.copy_text(name)?)?;
         }
-        return Ok(Some(with_table_pseudo_columns(
-            table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect(),
-        )));
+        return Ok(Some(columns.finish()?));
     }
-    if let Some(view) = catalog.view_resolved(resolution, name)? {
-        return Ok(view
-            .output_columns
-            .clone()
-            .or_else(|| query_plan_output_columns(&view.query))
-            .filter(|columns| !columns.iter().any(|column| column == "*")));
+    if let Some(table) = catalog.table_resolved_with_control(resolution, name, control)? {
+        return if table.columns.is_empty() {
+            Ok(None)
+        } else {
+            table_columns(
+                table.columns.iter().map(|column| column.name.as_str()),
+                control,
+            )
+            .map(Some)
+        };
     }
-    Ok(catalog
-        .foreign_table_resolved(resolution, name)?
-        .map(|table| {
-            table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect()
-        }))
+    let mut view_found = false;
+    let mut output = None;
+    catalog.with_view_definition_with_control(resolution, name, control, &mut |view| {
+        view_found = true;
+        output = if let Some(columns) = view.output_columns {
+            let mut output = ProductionVec::new(*control);
+            for column in columns {
+                output.push_produced(control.copy_text(column)?)?;
+            }
+            Some(output.finish()?)
+        } else {
+            query_plan_output_columns_with_control(view.query, control)?
+        };
+        Ok(())
+    })?;
+    if view_found {
+        return Ok(output.filter(|columns| !columns.iter().any(|column| column == "*")));
+    }
+    catalog.with_foreign_table_columns_with_control(resolution, name, control, &mut |columns| {
+        let mut names = ProductionVec::new(*control);
+        for column in columns {
+            names.push_produced(control.copy_text(&column.name)?)?;
+        }
+        output = Some(names.finish()?);
+        Ok(())
+    })?;
+    Ok(output)
 }

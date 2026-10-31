@@ -5,8 +5,8 @@
 //
 
 use super::*;
-use std::collections::BTreeMap;
 use uqa_execution::query::cte::materialize_statement_ctes;
+use uqa_sql::plan::source_projection::CteOutputFilters;
 
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]
@@ -41,7 +41,7 @@ fn native_postponed_cte_scheduling_admits_before_copying_and_keeps_scope_atomic(
             |control| Ok(control.finish(Vec::new(), control.empty_reservation())?),
             &[],
             &mut scope,
-            &BTreeMap::new(),
+            &CteOutputFilters::new(),
         ));
     });
     assert!(
@@ -59,7 +59,7 @@ fn native_postponed_cte_scheduling_admits_before_copying_and_keeps_scope_atomic(
         |control| Ok(control.finish(Vec::new(), control.empty_reservation())?),
         &[],
         &mut scope,
-        &BTreeMap::new(),
+        &CteOutputFilters::new(),
     )
     .unwrap();
     assert!(scope.statement_commands().unwrap().modifies_with());
@@ -76,7 +76,7 @@ fn native_postponed_cte_scheduling_admits_before_copying_and_keeps_scope_atomic(
             |control| Ok(control.finish(Vec::new(), control.empty_reservation())?),
             &[],
             &mut scope,
-            &BTreeMap::new(),
+            &CteOutputFilters::new(),
         )
         .unwrap_err();
         assert_eq!(error.sqlstate(), Some("57014"));

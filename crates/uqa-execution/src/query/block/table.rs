@@ -413,7 +413,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     execute_query_block_operator_output(
         context.relational,
         source,
-        physical_filter,
+        physical_filter.as_ref(),
         stmt,
         block,
         params,

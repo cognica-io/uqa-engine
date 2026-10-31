@@ -11,7 +11,9 @@ use crate::plan::SourcePlan;
 use crate::ScalarExpr;
 use std::collections::BTreeSet;
 mod production;
-pub use production::visit_outer_join_nullable_qualifiers_with_control;
+pub use production::{
+    visit_outer_join_nullable_qualifiers_with_control, visit_source_qualifiers_with_control,
+};
 
 /// Qualifiers whose rows can be synthesized as NULLs by an outer join cannot
 /// receive an arbitrary WHERE predicate before that join. A predicate such as

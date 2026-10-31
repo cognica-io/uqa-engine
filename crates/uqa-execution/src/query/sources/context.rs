@@ -64,14 +64,14 @@ pub trait SourcePlanning<S: Clone>: Sync {
         source: &SourcePlan,
         filters: Option<&QualifierFilters>,
         scope: &CteScope<S>,
-    ) -> Result<Option<ScalarExpr>, SQLError>;
+    ) -> Result<Option<uqa_sql::plan::OwnedScalarExpr>, SQLError>;
     fn propagated_join_filters(
         &self,
         filters: &QualifierFilters,
         source: &SourcePlan,
         target: &SourcePlan,
         on: Option<&ScalarExpr>,
-    ) -> Option<QualifierFilters>;
+    ) -> Result<Option<QualifierFilters>, SQLError>;
 }
 
 pub type ForeignSourceRows<'a> = Box<dyn Iterator<Item = Result<ResultRow, String>> + Send + 'a>;

@@ -8,7 +8,8 @@
 
 use super::{visible_cte, Collector, DeferredCte, Scope};
 use crate::filter_pushdown::{
-    cte_output_filters, push_output_filter_into_query_plan, qualifier_filters_for_stmt,
+    cte_output_filters_with_control, push_output_filter_into_query_plan,
+    qualifier_filters_for_stmt_with_control,
 };
 use uqa_sql::{
     catalog::resolution::RelationLookupMode,
@@ -17,7 +18,7 @@ use uqa_sql::{
         cte_references_own_name_with_control, cte_strategy::schedule_plan_ctes_with_control,
         order_cte_plans_with_control, query_plan_output_columns,
     },
-    SQLError, ScalarExpr,
+    SQLError,
 };
 
 impl Collector<'_, '_, '_> {
@@ -188,7 +189,7 @@ impl Collector<'_, '_, '_> {
         path: &str,
     ) -> Result<(), SQLError> {
         let mut scope = outer.clone();
-        let output_filters = cte_output_filters(
+        let output_filters = cte_output_filters_with_control(
             self.context.filters,
             plan,
             self.filter_scope(&|name| {
@@ -196,6 +197,7 @@ impl Collector<'_, '_, '_> {
                     || uqa_sql::semantics::cte_reference_name(name)
                         .is_some_and(|name| plan.ctes.iter().any(|cte| cte.name == name))
             }),
+            &self.control,
         )?;
         let scheduled =
             schedule_plan_ctes_with_control(self.context.filters.volatility, plan, self.control)?;
@@ -226,26 +228,19 @@ impl Collector<'_, '_, '_> {
                 scope.try_insert(cte.name.as_str(), None)?;
             }
         }
-        match &plan.root {
+        let subqueries = match &plan.root {
             RelationalPlan::QueryBlock(block) => {
                 if let Some(from) = &block.from {
-                    let filters = qualifier_filters_for_stmt(
+                    let filters = qualifier_filters_for_stmt_with_control(
                         self.context.filters,
                         block,
                         from,
                         self.filter_scope(&|name| visible_cte(&scope, name)),
+                        &self.control,
                     )?;
                     self.source(from, filters.as_ref(), &scope, path)?;
                 }
-                for (index, subquery) in block.subqueries.iter().enumerate() {
-                    self.query(
-                        subquery,
-                        &scope,
-                        &self
-                            .control
-                            .format(format_args!("{path}/Subquery {index}"))?,
-                    )?;
-                }
+                &block.subqueries
             }
             RelationalPlan::SetOp {
                 left,
@@ -263,27 +258,18 @@ impl Collector<'_, '_, '_> {
                     &scope,
                     &self.control.format(format_args!("{path}/Right"))?,
                 )?;
-                for (index, subquery) in subqueries.iter().enumerate() {
-                    self.query(
-                        subquery,
-                        &scope,
-                        &self
-                            .control
-                            .format(format_args!("{path}/Subquery {index}"))?,
-                    )?;
-                }
+                subqueries
             }
-            RelationalPlan::Values { subqueries, .. } => {
-                for (index, subquery) in subqueries.iter().enumerate() {
-                    self.query(
-                        subquery,
-                        &scope,
-                        &self
-                            .control
-                            .format(format_args!("{path}/Subquery {index}"))?,
-                    )?;
-                }
-            }
+            RelationalPlan::Values { subqueries, .. } => subqueries,
+        };
+        for (index, subquery) in subqueries.iter().enumerate() {
+            self.query(
+                subquery,
+                &scope,
+                &self
+                    .control
+                    .format(format_args!("{path}/Subquery {index}"))?,
+            )?;
         }
         Ok(())
     }
@@ -291,7 +277,7 @@ impl Collector<'_, '_, '_> {
     fn recursive_query(
         &self,
         cte: &CtePlan,
-        filter: Option<&(String, ScalarExpr)>,
+        filter: Option<&uqa_sql::plan::source_projection::CteOutputFilter>,
     ) -> Result<Option<uqa_sql::plan::OwnedQueryPlan>, SQLError> {
         if !cte_references_own_name_with_control(cte, self.control)?
             || cte.search.is_some()

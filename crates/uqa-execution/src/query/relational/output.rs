@@ -59,7 +59,41 @@ pub fn execute_filter_physical_rows<S: Clone + 'static>(
 pub fn execute_query_block_operator_output<'a, S: Clone + 'static>(
     context: RelationalContext<'a, S>,
     operator: Box<dyn PhysicalOperator + 'a>,
-    predicate: Option<ScalarExpr>,
+    predicate: Option<&ScalarExpr>,
+    statement: &'a QueryBlockPlan,
+    original: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope<S>,
+    columns: Vec<String>,
+    output_mode: QueryOutputMode<'_>,
+) -> Result<QueryOutput, SQLError> {
+    let (operator, predicate) = OperatorBuild::run(operator, |_| {
+        let resources = context.expressions.production_resources()?;
+        Ok(predicate
+            .map(|predicate| predicate.copy_for_rewrite(&resources.control()))
+            .transpose()?)
+    })?;
+    execute_query_block_operator_output_owned(
+        context,
+        operator,
+        predicate,
+        statement,
+        original,
+        params,
+        ctes,
+        columns,
+        output_mode,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
+pub fn execute_query_block_operator_output_owned<'a, S: Clone + 'static>(
+    context: RelationalContext<'a, S>,
+    operator: Box<dyn PhysicalOperator + 'a>,
+    predicate: Option<uqa_sql::plan::OwnedScalarExpr>,
     statement: &'a QueryBlockPlan,
     original: &'a QueryBlockPlan,
     params: &'a [SQLParam],

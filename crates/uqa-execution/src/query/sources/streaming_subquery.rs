@@ -212,12 +212,17 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
                 .residual_filter(block, from, qualifier_filters.as_ref(), ctes)
         })?
     } else {
+        let residual = block
+            .r#where
+            .as_ref()
+            .map(|predicate| predicate.copy_for_rewrite(&resources.control()))
+            .transpose()?;
         (
             Box::new(crate::TableScan::from_physical_rows(
                 crate::RowSchema::default(),
                 vec![crate::PhysicalRow::default()],
             )) as Box<dyn crate::PhysicalOperator + 'a>,
-            block.r#where.clone(),
+            residual,
         )
     };
     let pending = !block.deferred_outer_rewrites.is_empty();
@@ -232,11 +237,17 @@ pub(super) fn try_build_streaming_subquery_with_sources<'a, S: Clone + Send + Sy
         })?;
     let block = rewritten.as_ref();
     let original = rewritten_original.as_ref();
-    let residual = if pending {
-        block.r#where.clone()
-    } else {
-        residual
-    };
+    let (operator, residual) = crate::physical::construction::OperatorBuild::run(operator, |_| {
+        Ok(if pending {
+            block
+                .r#where
+                .as_ref()
+                .map(|predicate| predicate.copy_for_rewrite(&resources.control()))
+                .transpose()?
+        } else {
+            residual
+        })
+    })?;
     let rewritten_scope;
     let (operator, ctes) = if rewrite_subqueries {
         let (operator, scope) =

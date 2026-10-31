@@ -38,7 +38,7 @@ fn request(
     .into_iter()
     .map(|(name, _)| name)
     .collect::<Vec<_>>();
-    let filters = BTreeMap::from([(
+    let filters = uqa_sql::plan::source_projection::QualifierFilters::from([(
         alias.into(),
         vec![ScalarExpr::And(
             names

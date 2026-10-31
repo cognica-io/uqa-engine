@@ -77,3 +77,29 @@ fn visit_nullable<'a>(
     }
     Ok(())
 }
+
+/// Visit the visible FROM namespaces in source order without allocating their names.
+pub fn visit_source_qualifiers_with_control<'a>(
+    source: &'a SourcePlan,
+    control: &ProductionControl<'_>,
+    visit: &mut dyn FnMut(&'a str) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    control.check()?;
+    match source {
+        SourcePlan::Join {
+            left,
+            right,
+            alias: None,
+            ..
+        } => {
+            visit_source_qualifiers_with_control(left, control, visit)?;
+            visit_source_qualifiers_with_control(right, control, visit)?;
+        }
+        _ => {
+            if let Some(qualifier) = source.visible_qualifier() {
+                visit(qualifier)?;
+            }
+        }
+    }
+    Ok(())
+}

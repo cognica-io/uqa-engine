@@ -12,11 +12,10 @@ use super::{
     output::{QueryOutput, QueryRows},
     CteScope,
 };
-use std::collections::BTreeMap;
 use uqa_sql::{
     plan::{CtePlan, CtePlanBody},
     semantics::{cte_references_own_name_with_control, order_cte_plans_with_control},
-    SQLError, SQLParam, ScalarExpr,
+    SQLError, SQLParam,
 };
 pub mod context;
 pub mod recursive;
@@ -34,7 +33,7 @@ pub(crate) fn install_scheduled_ctes<'a, S: Clone>(
     plans: impl IntoIterator<Item = uqa_sql::semantics::cte_strategy::ScheduledCte<'a>>,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
-    output_filters: &BTreeMap<String, (String, ScalarExpr)>,
+    output_filters: &uqa_sql::plan::source_projection::CteOutputFilters,
 ) -> Result<(), SQLError> {
     let retained = context.queries.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
@@ -67,7 +66,13 @@ pub fn materialize_plan_ctes<S: Clone>(
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<(), SQLError> {
-    materialize_plan_ctes_with_filters(context, plans, params, ctes, &BTreeMap::new())
+    materialize_plan_ctes_with_filters(
+        context,
+        plans,
+        params,
+        ctes,
+        &uqa_sql::plan::source_projection::CteOutputFilters::new(),
+    )
 }
 
 pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
@@ -75,7 +80,7 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
     plans: impl IntoIterator<Item = &'a CtePlan>,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
-    output_filters: &BTreeMap<String, (String, ScalarExpr)>,
+    output_filters: &uqa_sql::plan::source_projection::CteOutputFilters,
 ) -> Result<(), SQLError> {
     let retained = context.queries.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(

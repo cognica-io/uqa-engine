@@ -85,7 +85,7 @@ impl SourcePlanning<StatementReadSnapshot> for Engine {
         source: &SourcePlan,
         filters: Option<&QualifierFilters>,
         scope: &CteScope<StatementReadSnapshot>,
-    ) -> Result<Option<ScalarExpr>, SQLError> {
+    ) -> Result<Option<uqa_sql::plan::OwnedScalarExpr>, SQLError> {
         super::query_planning::final_filter_after_qualifier_pushdown(
             self, statement, source, filters, scope,
         )
@@ -96,8 +96,16 @@ impl SourcePlanning<StatementReadSnapshot> for Engine {
         source: &SourcePlan,
         target: &SourcePlan,
         on: Option<&ScalarExpr>,
-    ) -> Option<QualifierFilters> {
-        uqa_planner::source_filters::propagated_join_filters(filters, source, target, on)
+    ) -> Result<Option<QualifierFilters>, SQLError> {
+        let resources =
+            uqa_execution::query::relational::QueryExpressionFactory::production_resources(self)?;
+        uqa_planner::source_filters::propagated_join_filters_with_control(
+            filters,
+            source,
+            target,
+            on,
+            &resources.control(),
+        )
     }
 }
 

@@ -6,7 +6,6 @@
 
 //! Required SQL source columns and explicitly requested relation metadata.
 
-use crate::ScalarExpr;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -87,4 +86,11 @@ impl SourceProjection {
 }
 
 pub type ColumnPrune = BTreeMap<String, SourceProjection>;
-pub type QualifierFilters = BTreeMap<String, Vec<ScalarExpr>>;
+mod qualifier_filters;
+pub use qualifier_filters::QualifierFilters;
+
+pub type CteOutputFilter = (
+    uqa_core::memory::Produced<String>,
+    crate::plan::OwnedScalarExpr,
+);
+pub type CteOutputFilters = crate::binding::production::BindingMap<CteOutputFilter>;

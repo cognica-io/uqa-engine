@@ -43,7 +43,7 @@ pub fn materialize_recursive_cte<S: Clone>(
     cte: &CtePlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
-    output_filter: Option<&(String, ScalarExpr)>,
+    output_filter: Option<&uqa_sql::plan::source_projection::CteOutputFilter>,
 ) -> Result<crate::SharedSpill, SQLError> {
     let query = cte.body.query().ok_or_else(|| SQLError::Routine {
         sqlstate: "42P19".into(),
