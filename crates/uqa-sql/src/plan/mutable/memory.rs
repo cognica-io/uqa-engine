@@ -15,7 +15,11 @@ pub(crate) enum RewriteMemory {
         direct: MemoryReservation,
         fields: BudgetedVec<RewriteField>,
     },
-    Scalar(ScalarMemory),
+    Scalars {
+        direct: MemoryReservation,
+        items: BudgetedVec<Option<ScalarMemory>>,
+    },
+    Scalar(Option<ScalarMemory>),
 }
 
 #[derive(Debug)]
@@ -27,7 +31,16 @@ pub(crate) struct RewriteField {
 impl RewriteMemory {
     pub(super) fn reserved_bytes(&self) -> usize {
         match self {
-            Self::Scalar(memory) => memory.reserved_bytes(),
+            Self::Scalar(memory) => memory.as_ref().map_or(0, ScalarMemory::reserved_bytes),
+            Self::Scalars { direct, items } => {
+                direct.bytes()
+                    + items.capacity() * size_of::<Option<ScalarMemory>>()
+                    + items
+                        .iter()
+                        .flatten()
+                        .map(ScalarMemory::reserved_bytes)
+                        .sum::<usize>()
+            }
             Self::Fields { direct, fields } => {
                 direct.bytes()
                     + fields.capacity() * size_of::<RewriteField>()
@@ -40,21 +53,33 @@ impl RewriteMemory {
         }
     }
 
-    pub(crate) fn into_reservation(self) -> MemoryReservation {
+    pub(crate) fn into_reservation(self) -> Option<MemoryReservation> {
         match self {
-            Self::Scalar(memory) => memory.into_reservation(),
+            Self::Scalar(memory) => memory.map(ScalarMemory::into_reservation),
+            Self::Scalars {
+                mut direct,
+                mut items,
+            } => {
+                while let Some(memory) = items.pop() {
+                    if let Some(memory) = memory {
+                        direct.absorb(memory.into_reservation());
+                    }
+                }
+                drop(items);
+                Some(direct)
+            }
             Self::Fields {
                 mut direct,
                 mut fields,
             } => {
                 while let Some(field) = fields.pop() {
-                    if let Some(memory) = field.memory {
-                        direct.absorb(memory.into_reservation());
+                    if let Some(memory) = field.memory.and_then(Self::into_reservation) {
+                        direct.absorb(memory);
                     }
                 }
                 // Constructor records are temporary; their capacity is not executable storage.
                 drop(fields);
-                direct
+                Some(direct)
             }
         }
     }
@@ -77,7 +102,27 @@ impl RewriteMemory {
         &mut fields[index].memory
     }
 
-    pub(super) fn scalar_mut(&mut self) -> &mut Option<Self> {
-        self.field_mut("scalar")
+    pub(super) fn scalar_mut(&mut self) -> &mut Option<ScalarMemory> {
+        match self {
+            Self::Scalar(memory) => memory,
+            Self::Fields { .. } => self
+                .field_mut("scalar")
+                .as_mut()
+                .expect("scalar field")
+                .scalar_mut(),
+            Self::Scalars { .. } => panic!("scalar vector requires an item index"),
+        }
+    }
+
+    pub(super) fn scalar_item_mut(&mut self, index: usize) -> &mut Option<ScalarMemory> {
+        match self {
+            Self::Scalars { items, .. } => &mut items[index],
+            Self::Fields { .. } => self
+                .item_mut(index)
+                .as_mut()
+                .expect("scalar item")
+                .scalar_mut(),
+            Self::Scalar(_) => panic!("scalar field has no indexed items"),
+        }
     }
 }

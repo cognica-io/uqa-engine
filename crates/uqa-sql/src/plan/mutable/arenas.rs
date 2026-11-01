@@ -27,7 +27,9 @@ impl MutableQueryPlan {
                 RewriteMemory::Fields { fields, .. } => {
                     fields.iter().any(|field| field.name == "block")
                 }
-                RewriteMemory::Scalar(_) => unreachable!("query root constructor"),
+                RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                    unreachable!("query root constructor")
+                }
             };
             let root = if block {
                 root.field_mut("block").as_mut().expect("query block")
@@ -40,7 +42,9 @@ impl MutableQueryPlan {
                 .expect("scalar query arena")
             {
                 RewriteMemory::Fields { fields, .. } => fields,
-                RewriteMemory::Scalar(_) => unreachable!("query arena constructor"),
+                RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                    unreachable!("query arena constructor")
+                }
             }
         });
         super::super::subqueries::prune_query_with_retention(
@@ -85,7 +89,9 @@ impl MutableCommandPlan {
                 .expect("mutation arena");
             match arena {
                 RewriteMemory::Fields { fields, .. } => fields,
-                RewriteMemory::Scalar(_) => unreachable!("query arena constructor"),
+                RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                    unreachable!("query arena constructor")
+                }
             }
         });
         super::super::subqueries::prune_command_with_retention(

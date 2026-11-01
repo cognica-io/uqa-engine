@@ -115,11 +115,7 @@ impl MutableCommandPlan {
         let memory = self
             .memory
             .as_mut()
-            .and_then(|memory| slot.memory_mut(memory).take())
-            .map(|memory| match memory {
-                RewriteMemory::Scalar(memory) => memory,
-                RewriteMemory::Fields { .. } => unreachable!("command scalar owner"),
-            });
+            .and_then(|memory| slot.memory_mut(memory).take());
         let input = OwnedScalarExpr::from_rewrite_parts(
             std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
             memory,
@@ -130,7 +126,7 @@ impl MutableCommandPlan {
             .expression_mut(&mut self.command)
             .expect("original command scalar") = expression;
         if let Some(owner) = &mut self.memory {
-            *slot.memory_mut(owner) = memory.map(RewriteMemory::Scalar);
+            *slot.memory_mut(owner) = memory;
         }
         Ok(self)
     }
@@ -186,7 +182,7 @@ impl MutableCommandPlan {
         self.assert_owner(control);
         control.check()?;
         let Self { command, memory } = self;
-        Ok(control.finish(command, memory.map(RewriteMemory::into_reservation))?)
+        Ok(control.finish(command, memory.and_then(RewriteMemory::into_reservation))?)
     }
 
     pub(super) fn assert_owner(&self, control: &ProductionControl<'_>) {
@@ -287,7 +283,10 @@ impl CommandScalarSlot {
         }
     }
 
-    fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
+    fn memory_mut(
+        self,
+        memory: &mut RewriteMemory,
+    ) -> &mut Option<crate::plan::scalar::ScalarMemory> {
         let input = match self {
             Self::CallArgument(index) => return item(memory, "args", index).scalar_mut(),
             Self::ExecuteParameter(index) => return item(memory, "params", index).scalar_mut(),
@@ -305,11 +304,7 @@ impl CommandScalarSlot {
                 .expect("mutation predicate")
                 .scalar_mut(),
             Self::Returning(index) => item(input, "returning", index).scalar_mut(),
-            Self::InsertValue { row, column } => item(input, "rows", row)
-                .item_mut(column)
-                .as_mut()
-                .expect("insert cell")
-                .scalar_mut(),
+            Self::InsertValue { row, column } => item(input, "rows", row).scalar_item_mut(column),
             Self::ViewCheck(index) => item(input, "view_checks", index)
                 .field_mut("predicate")
                 .as_mut()

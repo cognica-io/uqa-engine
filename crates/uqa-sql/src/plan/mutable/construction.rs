@@ -56,14 +56,10 @@ impl MutableQueryPlan {
             return Ok((self, None));
         };
         let memory = self.memory.as_mut().map(|memory| {
-            let memory = super::QueryScalarSlot::Where
+            super::QueryScalarSlot::Where
                 .memory_mut(memory)
                 .take()
-                .expect("qualification owner");
-            let RewriteMemory::Scalar(memory) = memory else {
-                unreachable!("scalar qualification owner")
-            };
-            memory
+                .expect("qualification owner")
         });
         Ok((
             self,

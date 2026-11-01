@@ -101,7 +101,9 @@ impl QueryChildSlot {
                     RewriteMemory::Fields { fields, .. } => {
                         fields.iter().any(|field| field.name == "block")
                     }
-                    RewriteMemory::Scalar(_) => unreachable!("query root owner"),
+                    RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                        unreachable!("query root owner")
+                    }
                 };
                 let root = if block {
                     root.field_mut("block").as_mut().expect("query block")

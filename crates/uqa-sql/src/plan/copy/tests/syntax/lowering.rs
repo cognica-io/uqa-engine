@@ -7,6 +7,35 @@
 use super::*;
 use crate::{ast::Statement, plan::NoRegisteredAggregates};
 
+#[test]
+fn large_values_lowering_keeps_constructor_memory_bounded() {
+    use std::fmt::Write;
+    let mut sql = String::from("INSERT INTO lineitem VALUES ");
+    for id in 0..20_000 {
+        if id != 0 {
+            sql.push_str(", ");
+        }
+        write!(sql, "({id}, 'A', 'F', 1, 10000, 2, 365)").unwrap();
+    }
+    let source = crate::compile(&sql).unwrap().remove(0);
+    let budget = MemoryBudget::new(40 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut result = None;
+    let allocation = allocation_counter::measure(|| {
+        result = Some(UnifiedPlan::lower_borrowed_for_rewrite(
+            &source,
+            &NoRegisteredAggregates,
+            &control,
+        ));
+    });
+    let output = result.unwrap().unwrap();
+    assert_eq!(allocation.bytes_current, budget.used() as i64);
+    assert!(allocation.count_current < 100_000, "{allocation:?}");
+    drop(output);
+    assert_eq!(budget.used(), 0);
+}
+
 fn verify_lowered(sql: &str) {
     let source = crate::compile(sql).unwrap().remove(0);
     let expected = UnifiedPlan::lower(source.clone());

@@ -263,7 +263,8 @@ impl RelationNames {
             .item_mut(self.index)
             .take()
             .expect("rule relation name")
-            .into_reservation();
+            .into_reservation()
+            .expect("rule relation payload owner");
         self.index += 1;
         Produced::from(uqa_core::memory::Budgeted::new(value, memory))
     }

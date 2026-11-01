@@ -179,18 +179,12 @@ fn rewrite_target(
 
 fn rewrite_scalar(
     expression: &mut ScalarExpr,
-    mut memory: Option<&mut Option<RewriteMemory>>,
+    mut memory: Option<&mut Option<crate::plan::scalar::ScalarMemory>>,
     control: &ProductionControl<'_>,
     map: &mut impl FnMut(OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError>,
 ) -> Result<(), SQLError> {
     control.check()?;
-    let retained = memory
-        .as_mut()
-        .and_then(|memory| memory.take())
-        .map(|memory| match memory {
-            RewriteMemory::Scalar(memory) => memory,
-            RewriteMemory::Fields { .. } => unreachable!("assignment scalar owner"),
-        });
+    let retained = memory.as_mut().and_then(|memory| memory.take());
     let input = OwnedScalarExpr::from_rewrite_parts(
         std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
         retained,
@@ -199,7 +193,7 @@ fn rewrite_scalar(
     let (output, owner) = output.into_rewrite_parts();
     *expression = output;
     if let Some(memory) = memory {
-        *memory = owner.map(RewriteMemory::Scalar);
+        *memory = owner;
     }
     Ok(())
 }

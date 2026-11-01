@@ -26,7 +26,7 @@ impl Iterator for OwnedDeferredRewriteIter {
             .memory
             .as_mut()
             .and_then(|memory| memory.item_mut(self.index).take())
-            .map(RewriteMemory::into_reservation);
+            .and_then(RewriteMemory::into_reservation);
         self.index += 1;
         Some(match owner {
             Some(memory) => Produced::from(Budgeted::new(value, memory)),
@@ -185,7 +185,7 @@ fn arena_memory(memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
     let root = memory.field_mut("root").as_mut().expect("query root");
     let is_block = match root {
         RewriteMemory::Fields { fields, .. } => fields.iter().any(|field| field.name == "block"),
-        RewriteMemory::Scalar(_) => unreachable!(),
+        RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => unreachable!(),
     };
     let root = if is_block {
         root.field_mut("block").as_mut().expect("query block")

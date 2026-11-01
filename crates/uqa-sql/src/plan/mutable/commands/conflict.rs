@@ -69,7 +69,7 @@ fn promote_columns(
                     .item_mut(index)
                     .take()
             })
-            .map(RewriteMemory::into_reservation);
+            .and_then(RewriteMemory::into_reservation);
         names.push_produced(control.finish(name, memory)?)?;
     }
     let mut retained = 0;
@@ -95,7 +95,7 @@ fn promote_columns(
                         .scalar_mut()
                         .take()
                 })
-                .map(RewriteMemory::into_reservation);
+                .map(crate::plan::scalar::ScalarMemory::into_reservation);
             names.push_produced(control.finish(String::from(name), memory)?)?;
         } else {
             conflict.expressions.swap(retained, index);

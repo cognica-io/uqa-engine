@@ -8,8 +8,8 @@
 
 use super::super::super::copy::Copying;
 use super::{
-    empty_source, MutableSourcePlan, OwnedScalarExpr, RewriteMemory, SQLError, SourceChildSlot,
-    SourcePlan, SourceScalarSlot,
+    empty_source, MutableSourcePlan, OwnedScalarExpr, SQLError, SourceChildSlot, SourcePlan,
+    SourceScalarSlot,
 };
 use crate::{ast::JoinKind, plan::JoinExecutionStrategy};
 use uqa_core::memory::ProductionControl;
@@ -77,11 +77,7 @@ impl MutableSourcePlan {
             let memory = self
                 .memory
                 .as_mut()
-                .and_then(|memory| SourceScalarSlot::JoinOn.memory_mut(memory).take())
-                .map(|memory| match memory {
-                    RewriteMemory::Scalar(memory) => memory,
-                    RewriteMemory::Fields { .. } => unreachable!("join predicate scalar owner"),
-                });
+                .and_then(|memory| SourceScalarSlot::JoinOn.memory_mut(memory).take());
             OwnedScalarExpr::from_rewrite_parts(expression, memory)
         });
         Ok(MutableJoinParts {
@@ -124,7 +120,7 @@ impl MutableJoinShell {
             }
             Some(on) => {
                 let (expression, memory) = on.into_rewrite_parts();
-                (Some(expression), memory.map(RewriteMemory::Scalar))
+                (Some(expression), memory)
             }
             None => (None, None),
         };

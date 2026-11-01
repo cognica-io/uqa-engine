@@ -146,10 +146,6 @@ impl MutableSourcePlan {
             .memory
             .as_mut()
             .and_then(|memory| slot.memory_mut(memory).take());
-        let memory = memory.map(|memory| match memory {
-            RewriteMemory::Scalar(memory) => memory,
-            RewriteMemory::Fields { .. } => unreachable!("source scalar constructor"),
-        });
         let input = OwnedScalarExpr::from_rewrite_parts(
             std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
             memory,
@@ -160,7 +156,7 @@ impl MutableSourcePlan {
             .expression_mut(&mut self.source)
             .expect("original scalar slot") = expression;
         if let Some(owner) = &mut self.memory {
-            *slot.memory_mut(owner) = memory.map(RewriteMemory::Scalar);
+            *slot.memory_mut(owner) = memory;
         }
         Ok(self)
     }
@@ -267,18 +263,17 @@ impl SourceScalarSlot {
         }
     }
 
-    pub(super) fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
+    pub(super) fn memory_mut(
+        self,
+        memory: &mut RewriteMemory,
+    ) -> &mut Option<crate::plan::scalar::ScalarMemory> {
         match self {
             Self::JoinOn => memory
                 .field_mut("on")
                 .as_mut()
                 .expect("join predicate")
                 .scalar_mut(),
-            Self::Value { row, column } => item(memory, "rows", row)
-                .item_mut(column)
-                .as_mut()
-                .expect("source VALUES cell")
-                .scalar_mut(),
+            Self::Value { row, column } => item(memory, "rows", row).scalar_item_mut(column),
             Self::Argument(index) => item(memory, "args", index).scalar_mut(),
             Self::GroupArgument { function, argument } => {
                 item(item(memory, "functions", function), "args", argument).scalar_mut()

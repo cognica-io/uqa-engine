@@ -111,13 +111,7 @@ impl MutableQueryPlan {
             return Ok(self);
         };
         let memory_slot = self.memory.as_mut().map(|memory| slot.memory_mut(memory));
-        let scalar_memory = match memory_slot {
-            Some(memory) => match memory.take().expect("present scalar ownership") {
-                RewriteMemory::Scalar(memory) => Some(memory),
-                RewriteMemory::Fields { .. } => unreachable!("scalar root constructor"),
-            },
-            None => None,
-        };
+        let scalar_memory = memory_slot.and_then(Option::take);
         let input = OwnedScalarExpr::from_rewrite_parts(
             std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
             scalar_memory,
@@ -126,7 +120,7 @@ impl MutableQueryPlan {
         let (output, memory) = output.into_rewrite_parts();
         *expression = output;
         if let Some(owner) = &mut self.memory {
-            *slot.memory_mut(owner) = memory.map(RewriteMemory::Scalar);
+            *slot.memory_mut(owner) = memory;
         }
         Ok(self)
     }
@@ -153,7 +147,9 @@ impl MutableQueryPlan {
                 .expect("projection vector")
             {
                 RewriteMemory::Fields { fields, .. } => fields,
-                RewriteMemory::Scalar(_) => unreachable!("projection vector owner"),
+                RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                    unreachable!("projection vector owner")
+                }
             }
         });
         let mut retained = 0;
@@ -180,7 +176,7 @@ impl MutableQueryPlan {
         self.assert_owner(control);
         control.check()?;
         let Self { query, memory } = self;
-        Ok(control.finish(query, memory.map(RewriteMemory::into_reservation))?)
+        Ok(control.finish(query, memory.and_then(RewriteMemory::into_reservation))?)
     }
 
     fn assert_owner(&self, control: &ProductionControl<'_>) {
