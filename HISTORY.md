@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reduce memory required by large multi-row `INSERT` statements by compacting scalar planning storage, retiring obsolete logical plans and choosing command spill runs from retained decoded-row memory. The unchanged 20,000-row analytical fixture fits the default 64 MiB session retention allowance on memory, native SQLite, SQLite Key/Value and redb, preserving quota errors and savepoint recovery.
+- Preserve the invoking scope and deadline for nested SQL cursors. Trigger transition relations bind their current values and column types instead of reusing ordinary-table analysis; nested batch and cursor planning releases preliminary logical plans while preserving valid outer analysis.
 - Report native planning storage for `EXPLAIN (MEMORY)` in TEXT, JSON, XML and YAML before execution, including prepared and supported utility paths. Measure exposed executable and resident constant allocations, preserve option visibility and avoid reading spilled values; see the [SQL contract](docs/manual/sql/README.md). Retain the implemented join-search, constant, analysis-cache, statistics and scalar ownership corrections without claiming a complete planning-memory cap.
 - Handle active catalog-refresh failures inside the statement transaction owner. SQL, Simple Query, cursor and prepared execution now abort the current frame or savepoint on refresh failure and retain the normal transaction recovery path.
 - Count standard, whitespace and letter-tokenizer emissions before reserving their output arrays, avoiding simultaneous old and replacement arrays under a tight shared allowance. Token terms, source spans, positions, cancellation and analyzer identities are unchanged.
