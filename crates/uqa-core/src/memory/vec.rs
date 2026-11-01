@@ -25,6 +25,17 @@ impl<T> BudgetedVec<T> {
         }
     }
 
+    /// Rejoin a buffer and its original reservation without allocating or reacquiring its allowance. The reservation must cover exactly the buffer capacity; element payloads keep their separate owners.
+    pub fn from_parts(values: Vec<T>, memory: MemoryReservation) -> Self {
+        let output = Self { values, memory };
+        assert_eq!(
+            output.memory.bytes(),
+            buffer_bytes::<T>(output.values.capacity()).expect("existing vector capacity"),
+            "vector buffer and reservation must match"
+        );
+        output
+    }
+
     pub fn capacity(&self) -> usize {
         self.values.capacity()
     }
@@ -129,6 +140,36 @@ impl<T> std::ops::DerefMut for BudgetedVec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejoining_vector_parts_preserves_admission_and_original_allocation() {
+        let budget = MemoryBudget::new(32);
+        let mut source = BudgetedVec::new(&budget);
+        source.extend_from_slice(&[1_u32, 2, 3, 4]).unwrap();
+        let address = source.as_ptr();
+        let (values, memory) = source.into_parts();
+        let occupied = budget.reserve(budget.available()).unwrap();
+        let mut restored = None;
+        let allocation = allocation_counter::measure(|| {
+            restored = Some(BudgetedVec::from_parts(values, memory));
+        });
+        let mut restored = restored.unwrap();
+        assert_eq!(allocation.count_total, 0);
+        assert_eq!(restored.as_ptr(), address);
+        assert!(restored.push(5).is_err());
+        assert_eq!(&*restored, &[1, 2, 3, 4]);
+        drop(occupied);
+        drop(restored);
+        assert_eq!(budget.used(), 0);
+
+        let values = Vec::<u32>::with_capacity(4);
+        let memory = budget.reserve(4).unwrap();
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            BudgetedVec::from_parts(values, memory)
+        }))
+        .is_err());
+        assert_eq!(budget.used(), 0);
+    }
 
     #[test]
     fn extending_a_slice_reserves_before_mutating_and_preserves_failed_inputs() {

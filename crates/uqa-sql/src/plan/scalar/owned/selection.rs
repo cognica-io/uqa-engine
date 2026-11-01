@@ -8,7 +8,7 @@
 
 use super::{children, OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::schema::retention::CatalogRetentionError;
-use uqa_core::memory::{BudgetedVec, ProductionControl};
+use uqa_core::memory::ProductionControl;
 
 impl OwnedScalarExpr {
     /// Remove validated call-argument markers by transferring their value child and immediately retiring marker metadata and containers.
@@ -68,10 +68,10 @@ impl OwnedScalarExpr {
         let count = args.len();
         let mut selected_memory = self.memory.as_ref().map(|parent| ScalarMemory {
             direct: parent.direct.budget().empty_reservation(),
-            children: BudgetedVec::new(parent.direct.budget()),
+            children: Vec::new(),
         });
         if let Some(selected) = &mut selected_memory {
-            selected.children.reserve(count)?;
+            selected.reserve_children(count)?;
         }
         let arguments = std::mem::take(args);
         let selected = Self {
@@ -83,13 +83,14 @@ impl OwnedScalarExpr {
             let ScalarExpr::Or(arguments) = &selected.expression else {
                 unreachable!();
             };
-            output.direct = parent
-                .direct
-                .split(arguments.capacity() * size_of::<ScalarExpr>());
+            output.direct.absorb(
+                parent
+                    .direct
+                    .split(arguments.capacity() * size_of::<ScalarExpr>()),
+            );
             for child in &mut parent.children[..count] {
                 output
-                    .children
-                    .push(child.take())
+                    .push_child(child.take())
                     .expect("admitted selected argument slot");
             }
             parent.children.rotate_left(count);
@@ -118,9 +119,7 @@ impl OwnedScalarExpr {
         };
         let previous_count = args.len();
         if let Some(parent) = &mut self.memory {
-            parent
-                .children
-                .reserve(count.saturating_sub(previous_count))?;
+            parent.reserve_children(count.saturating_sub(previous_count))?;
         }
         let previous_bytes = args.capacity() * size_of::<ScalarExpr>();
         let Self { expression, memory } = replacement;
@@ -138,12 +137,13 @@ impl OwnedScalarExpr {
             parent.children.truncate(retained);
             for child in &mut *replacement.children {
                 parent
-                    .children
-                    .push(child.take())
+                    .push_child(child.take())
                     .expect("admitted replacement argument slot");
             }
             parent.children.rotate_right(count);
-            parent.direct.absorb(replacement.direct);
+            let (direct, children) = replacement.into_parts();
+            drop(children);
+            parent.direct.absorb(direct);
         }
         control.check()?;
         Ok(self)

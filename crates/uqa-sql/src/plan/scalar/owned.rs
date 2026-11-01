@@ -43,14 +43,61 @@ pub struct OwnedScalarExpr {
 /// Direct allocations include this node's names, types, values, child boxes and child-vector buffers. Each child's payload has its own owner; the metadata vector also admits its actual capacity before allocation.
 #[derive(Debug)]
 pub(crate) struct ScalarMemory {
+    // The direct lease includes this metadata buffer; destroy it before releasing the lease.
+    pub(super) children: Vec<Option<Self>>,
     pub(super) direct: MemoryReservation,
-    pub(super) children: BudgetedVec<Option<Self>>,
 }
 
 impl ScalarMemory {
+    pub(super) fn from_parts(
+        mut direct: MemoryReservation,
+        children: BudgetedVec<Option<Self>>,
+    ) -> Self {
+        let (children, memory) = children.into_parts();
+        direct.absorb(memory);
+        Self { children, direct }
+    }
+
+    fn into_parts(self) -> (MemoryReservation, BudgetedVec<Option<Self>>) {
+        let Self {
+            children,
+            mut direct,
+        } = self;
+        let memory = direct.split(children.capacity() * size_of::<Option<Self>>());
+        (direct, BudgetedVec::from_parts(children, memory))
+    }
+
+    fn child_buffer(&mut self) -> ScalarChildren<'_> {
+        let children = std::mem::take(&mut self.children);
+        let memory = self
+            .direct
+            .split(children.capacity() * size_of::<Option<Self>>());
+        ScalarChildren {
+            parent: self,
+            buffer: Some(BudgetedVec::from_parts(children, memory)),
+        }
+    }
+
+    pub(super) fn reserve_children(&mut self, count: usize) -> Result<()> {
+        self.child_buffer()
+            .buffer
+            .as_mut()
+            .expect("child buffer")
+            .reserve(count)?;
+        Ok(())
+    }
+
+    pub(super) fn push_child(&mut self, child: Option<Self>) -> Result<()> {
+        self.child_buffer()
+            .buffer
+            .as_mut()
+            .expect("child buffer")
+            .push(child)?;
+        Ok(())
+    }
+
     pub(crate) fn reserved_bytes(&self) -> usize {
         self.direct.bytes()
-            + self.children.capacity() * size_of::<Option<Self>>()
             + self
                 .children
                 .iter()
@@ -60,16 +107,27 @@ impl ScalarMemory {
     }
 
     pub(crate) fn into_reservation(self) -> MemoryReservation {
-        let Self {
-            mut direct,
-            mut children,
-        } = self;
+        let (mut direct, mut children) = self.into_parts();
         while let Some(child) = children.pop() {
             direct.absorb(child.expect("owned scalar child").into_reservation());
         }
         // Ownership metadata is temporary, not part of the immutable scalar allocation.
         drop(children);
         direct
+    }
+}
+
+/// Reattach metadata on success, rejection and unwinding before the parent can release its payloads.
+struct ScalarChildren<'a> {
+    parent: &'a mut ScalarMemory,
+    buffer: Option<BudgetedVec<Option<ScalarMemory>>>,
+}
+
+impl Drop for ScalarChildren<'_> {
+    fn drop(&mut self) {
+        let (children, memory) = self.buffer.take().expect("child buffer").into_parts();
+        self.parent.children = children;
+        self.parent.direct.absorb(memory);
     }
 }
 
@@ -96,7 +154,7 @@ impl OwnedScalarExpr {
         let output = Self {
             expression: ScalarExpr::Literal(value),
             memory: memory.map(|direct| ScalarMemory {
-                children: BudgetedVec::new(direct.budget()),
+                children: Vec::new(),
                 direct,
             }),
         };

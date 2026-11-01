@@ -9,7 +9,7 @@
 use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::{catalog::collations::CollationSelection, ir::ResultCollation, ColumnType};
 use uqa_core::{
-    memory::{BudgetedVec, Produced, ProductionControl},
+    memory::{Produced, ProductionControl},
     Value,
 };
 
@@ -24,11 +24,11 @@ impl OwnedScalarExpr {
         child.assert_owner(control);
         control.check()?;
         let mut memory = control.empty_reservation().map(|direct| ScalarMemory {
-            children: BudgetedVec::new(direct.budget()),
+            children: Vec::new(),
             direct,
         });
         if let Some(memory) = &mut memory {
-            memory.children.reserve(1)?;
+            memory.reserve_children(1)?;
         }
         let boxed = control.reserve(size_of::<ScalarExpr>())?;
         let (ty, type_memory) = ty.into_parts();
@@ -47,8 +47,7 @@ impl OwnedScalarExpr {
         };
         if let Some(memory) = &mut output.memory {
             memory
-                .children
-                .push(child_memory)
+                .push_child(child_memory)
                 .expect("admitted collation child");
             memory.direct.absorb(
                 control

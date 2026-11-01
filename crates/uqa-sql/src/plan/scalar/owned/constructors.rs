@@ -9,7 +9,7 @@
 use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::{ir::RetainedScalarLiteral, ColumnType};
 use uqa_core::{
-    memory::{BudgetedVec, Produced, ProductionControl},
+    memory::{Produced, ProductionControl},
     Value,
 };
 
@@ -27,7 +27,7 @@ impl OwnedScalarExpr {
         let mut output = Self {
             expression: ScalarExpr::Literal(Value::Null),
             memory: control.empty_reservation().map(|direct| ScalarMemory {
-                children: BudgetedVec::new(direct.budget()),
+                children: Vec::new(),
                 direct,
             }),
         };
@@ -66,7 +66,7 @@ impl OwnedScalarExpr {
         let output = Self {
             expression: ScalarExpr::RetainedLiteral(literal),
             memory: control.empty_reservation().map(|direct| ScalarMemory {
-                children: BudgetedVec::new(direct.budget()),
+                children: Vec::new(),
                 direct,
             }),
         };
@@ -86,12 +86,12 @@ impl OwnedScalarExpr {
         let mut output = Self {
             expression: ScalarExpr::Literal(Value::Null),
             memory: control.empty_reservation().map(|direct| ScalarMemory {
-                children: BudgetedVec::new(direct.budget()),
+                children: Vec::new(),
                 direct,
             }),
         };
         if let Some(owner) = &mut output.memory {
-            owner.children.reserve(1)?;
+            owner.reserve_children(1)?;
         }
         let boxed = control.reserve(size_of::<ScalarExpr>())?;
         let Self { expression, memory } = child;
@@ -103,10 +103,7 @@ impl OwnedScalarExpr {
         };
         let direct = control.combine(boxed, declaration_memory);
         if let Some(owner) = &mut output.memory {
-            owner
-                .children
-                .push(memory)
-                .expect("admitted cast child slot");
+            owner.push_child(memory).expect("admitted cast child slot");
             owner.direct.absorb(direct.expect("admitted cast fields"));
         }
         control.check()?;

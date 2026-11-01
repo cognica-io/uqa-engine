@@ -167,9 +167,11 @@ impl OwnedScalarExpr {
                 order_by,
                 filter,
             },
-            memory: lowering.control.map(|control| ScalarMemory {
-                direct: control.memory,
-                children: lowering.owned_children.expect("mutable call construction"),
+            memory: lowering.control.map(|control| {
+                ScalarMemory::from_parts(
+                    control.memory,
+                    lowering.owned_children.expect("mutable call construction"),
+                )
             }),
         };
         drop(self);

@@ -69,7 +69,7 @@ impl OwnedScalarExpr {
         let owner = memory.as_mut().map(|owner| {
             let direct = control.empty_reservation().expect("controlled scalar slot");
             let empty = ScalarMemory {
-                children: uqa_core::memory::BudgetedVec::new(direct.budget()),
+                children: Vec::new(),
                 direct,
             };
             std::mem::replace(*owner, empty)

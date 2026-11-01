@@ -66,9 +66,11 @@ fn lower_owned(
     let expression = lowering.expression_node(expression, aggregates, subqueries)?;
     let output = OwnedScalarExpr::from_rewrite_parts(
         expression,
-        lowering.control.map(|control| ScalarMemory {
-            direct: control.memory,
-            children: lowering.owned_children.expect("mutable scalar lowering"),
+        lowering.control.map(|control| {
+            ScalarMemory::from_parts(
+                control.memory,
+                lowering.owned_children.expect("mutable scalar lowering"),
+            )
         }),
     );
     control.check()?;
