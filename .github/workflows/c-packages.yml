@@ -52,7 +52,8 @@ jobs:
     if: needs.scope.outputs.required == 'true'
     name: C package (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Compile both release feature graphs and qualify the installed consumers.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
