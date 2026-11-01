@@ -2,6 +2,19 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "projected_aggregation_prepares_metadata_per_batch_instead_of_per_row",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/metadata.rs",
+      "capability": "Projected aggregate metadata",
+      "workload": "2,051 rows through ordered borrowed scans and borrowed or owned point projections, with and without selected metadata.",
+      "invariant": "Prepare metadata at most four times per scan, preserve every row value, document ID, score, table OID, repeated slot and missing value, and never materialize an aggregate input batch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "cold_native_snapshots_retain_the_view_without_loading_vector_payloads",

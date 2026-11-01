@@ -47,6 +47,7 @@ impl ScoredDocumentSource {
             .collect::<Vec<_>>();
         let mut last = None;
         let mut aggregate_error = None;
+        let mut metadata = self.projected_metadata()?;
         let visited = self
             .table
             .read_documents()
@@ -58,13 +59,12 @@ impl ScoredDocumentSource {
                             return Ok(());
                         }
                     }
-                    let metadata = self.row_metadata(doc_id, 0.0);
-                    let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
+                    let extras = metadata.for_row(doc_id, 0.0)?;
                     let row = crate::ProjectedRow::new(
                         &self.schema,
                         &self.projected_slots,
                         values,
-                        &extras,
+                        extras,
                     );
                     executor.consume_projected_row(&row)
                 })();
@@ -535,14 +535,14 @@ impl ScoredDocumentSource {
         executor: &mut dyn crate::AggregateExecutor,
     ) -> ExecResult<()> {
         let allow_borrowed = executor.supports_storage_borrowed_rows();
+        let mut metadata = self.projected_metadata()?;
         self.for_each_kept_entry(
             entries,
             allow_borrowed,
             &mut |doc_id, entry, _fields, values| {
-                let metadata = self.row_metadata(doc_id, entry.score);
-                let extras = [metadata.doc_id()?, metadata.score(), metadata.table_oid()];
+                let extras = metadata.for_row(doc_id, entry.score)?;
                 let row =
-                    crate::ProjectedRow::new(&self.schema, &self.projected_slots, values, &extras);
+                    crate::ProjectedRow::new(&self.schema, &self.projected_slots, values, extras);
                 executor.consume_projected_row(&row)
             },
         )
