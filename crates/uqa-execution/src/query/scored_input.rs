@@ -173,6 +173,12 @@ pub(super) struct ScoredRowMetadata {
 }
 
 impl ScoredRowMetadata {
+    fn projected_values(self) -> Result<[Option<Value>; 3], SQLError> {
+        #[cfg(test)]
+        METADATA_PREPARATIONS.with(|count| count.set(count.get() + 1));
+        Ok([self.doc_id()?, self.score(), self.table_oid()])
+    }
+
     pub(super) fn doc_id(self) -> Result<Option<Value>, SQLError> {
         self.columns
             .contains(HiddenColumn::DocId)
@@ -204,6 +210,28 @@ impl ScoredRowMetadata {
         }
         Ok(())
     }
+}
+
+/// Scalar metadata carriers belong to the input batch. Each row updates only selected variable values; immutable table metadata and absent extras are reused.
+struct ProjectedMetadata {
+    values: [Option<Value>; 3],
+}
+
+impl ProjectedMetadata {
+    fn for_row(&mut self, doc_id: DocId, score: f64) -> Result<&[Option<Value>], SQLError> {
+        if self.values[0].is_some() {
+            self.values[0] = Some(doc_id_value(doc_id)?);
+        }
+        if let Some(Value::Float(value)) = self.values[1].as_mut() {
+            *value = score;
+        }
+        Ok(&self.values)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static METADATA_PREPARATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl ScoredInput {
@@ -777,6 +805,12 @@ impl ScoredDocumentSource {
             table_oid: self.table_oid,
             columns: self.hidden_columns,
         }
+    }
+
+    fn projected_metadata(&self) -> Result<ProjectedMetadata, SQLError> {
+        Ok(ProjectedMetadata {
+            values: self.row_metadata(0, 0.0).projected_values()?,
+        })
     }
 
     fn append_metadata_attributes(

@@ -10,6 +10,7 @@ use uqa_core::ScoredEntry;
 mod borrowed;
 mod indexed;
 mod memory;
+mod metadata;
 mod projection;
 
 #[test]

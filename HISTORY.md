@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reuse row metadata values within projected aggregate batches, avoiding repeated temporary value construction while preserving requested document IDs, scores, table OIDs, stored columns with the same names and row diagnostics.
 - Reduce memory required by large multi-row `INSERT` statements by compacting scalar planning storage, retiring obsolete logical plans and choosing command spill runs from retained decoded-row memory. The unchanged 20,000-row analytical fixture fits the default 64 MiB session retention allowance on memory, native SQLite, SQLite Key/Value and redb, preserving quota errors and savepoint recovery.
 - Preserve the invoking scope and deadline for nested SQL cursors. Trigger transition relations bind their current values and column types instead of reusing ordinary-table analysis; nested batch and cursor planning releases preliminary logical plans while preserving valid outer analysis.
 - Report native planning storage for `EXPLAIN (MEMORY)` in TEXT, JSON, XML and YAML before execution, including prepared and supported utility paths. Measure exposed executable and resident constant allocations, preserve option visibility and avoid reading spilled values; see the [SQL contract](docs/manual/sql/README.md). Retain the implemented join-search, constant, analysis-cache, statistics and scalar ownership corrections without claiming a complete planning-memory cap.
