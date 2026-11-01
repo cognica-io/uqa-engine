@@ -271,7 +271,7 @@ python3 tests/parity/pg18/run_diff.py
 
 Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](docs/plans/0003-postgresql-18-compatibility.md).
 
-Current performance verification uses the [deterministic regression inventory](benchmarks/regressions/README.md) and the separate [controlled-runner protocol](benchmarks/regressions/controlled-runner.md). The [TPC-H benchmark](benchmarks/tpch/README.md) records a dated comparison of the 0.6.0 release with PostgreSQL 18; the posting and relevance measurements in the [performance design](docs/design/performance.md) are dated development snapshots, not current-release measurements.
+Current performance verification uses the [deterministic regression inventory](benchmarks/regressions/README.md) and the separate [controlled-runner protocol](benchmarks/regressions/controlled-runner.md). The [2026-11-01 controlled results](docs/design/performance.md#controlled-analytical-and-claim-qualification-2026-11-01) record all twenty accepted comparisons for source `e8abe2c88`, including Q1's calibrated interval below its unchanged 1.10 limit. The [TPC-H benchmark](benchmarks/tpch/README.md) records a dated comparison of the 0.6.0 release with PostgreSQL 18; posting and relevance measurements remain dated development snapshots in the performance design.
 
 Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
