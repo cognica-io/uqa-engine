@@ -10,6 +10,76 @@ use uqa_core::Value;
 use uqa_sql::SQLParam;
 
 #[rstest::rstest]
+#[case::memory(crate::tests::providers::Provider::Memory)]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    const QUERY: &str =
+        "SELECT id, payload, pg_typeof(payload)::text AS kind FROM changed_rows ORDER BY id";
+    fn read(engine: &Engine) -> Result<Vec<Vec<Value>>, uqa_sql::SQLError> {
+        let mut rows = Vec::new();
+        for batch in engine.sql_cursor(QUERY, &[])? {
+            for row in batch?.into_rows() {
+                rows.push(vec![
+                    row["id"].clone(),
+                    row["payload"].clone(),
+                    row["kind"].clone(),
+                ]);
+            }
+        }
+        Ok(rows)
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Arc::new(provider.open(&directory.path().join("nested-cursor-cache.db")));
+    let captured = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let output = Arc::clone(&captured);
+    let weak = Arc::downgrade(&engine);
+    engine
+        .register_scalar_function("read_transition_cursor", move |_args: &[Value]| {
+            output.lock().extend(read(&weak.upgrade().unwrap())?);
+            Ok(Value::Int(0))
+        })
+        .unwrap();
+    engine.sql("CREATE TABLE changed_rows(id integer, payload boolean); INSERT INTO changed_rows VALUES(9,true); CREATE TABLE integer_rows(id integer, payload integer); CREATE TABLE text_rows(payload text, id integer); CREATE FUNCTION capture_cursor() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM read_transition_cursor(); RETURN NULL; END $$; CREATE TRIGGER capture_integer AFTER INSERT ON integer_rows REFERENCING NEW TABLE AS changed_rows FOR EACH STATEMENT EXECUTE FUNCTION capture_cursor(); CREATE TRIGGER capture_text AFTER INSERT ON text_rows REFERENCING NEW TABLE AS changed_rows FOR EACH STATEMENT EXECUTE FUNCTION capture_cursor()", &[]).unwrap();
+    engine.sql("BEGIN", &[]).unwrap();
+    let ordinary = vec![vec![
+        Value::Int(9),
+        Value::Bool(true),
+        Value::Str("boolean".into()),
+    ]];
+    assert_eq!(read(&engine).unwrap(), ordinary);
+    let original = engine
+        .cached_sql_analysis(QUERY)
+        .expect("top-level analysis");
+    for statement in [
+        "INSERT INTO integer_rows VALUES(1,7)",
+        "INSERT INTO text_rows VALUES('second',2)",
+        "INSERT INTO integer_rows VALUES(3,11)",
+    ] {
+        engine.sql(statement, &[]).unwrap();
+        assert!(original.ptr_eq(&engine.cached_sql_analysis(QUERY).unwrap()));
+    }
+    assert_eq!(
+        *captured.lock(),
+        vec![
+            vec![Value::Int(1), Value::Int(7), Value::Str("integer".into())],
+            vec![
+                Value::Int(2),
+                Value::Str("second".into()),
+                Value::Str("text".into())
+            ],
+            vec![Value::Int(3), Value::Int(11), Value::Str("integer".into())],
+        ]
+    );
+    assert_eq!(read(&engine).unwrap(), ordinary);
+    engine.sql("COMMIT", &[]).unwrap();
+    engine.close().unwrap();
+}
+
+#[rstest::rstest]
 #[case::memory(None)]
 #[case::sqlite(Some(0))]
 #[case::sqlite_kv(Some(1))]

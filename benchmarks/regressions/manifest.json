@@ -34418,6 +34418,22 @@
       ]
     },
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/cache.rs",
+      "capability": "Statement analysis cache",
+      "workload": "A cached top-level boolean relation and nested cursor reads over integer and text trigger transition relations on all four providers.",
+      "invariant": "Bind rows and pg_typeof to each nested invocation while preserving the outer analyzed plan and avoiding nested cache publication.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "narrow_rows_spill_using_retained_bytes_beside_large_plan_owners",

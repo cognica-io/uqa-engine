@@ -215,8 +215,20 @@ impl Engine {
     /// snapshot is committed before the cursor is returned.
     pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
         let _statement = self.lock_statement_gate();
-        let (_execution, _) = SQLExecutionScope::enter(self);
-        uqa_execution::statement::cursor::execute(&self.batch_execution_context(), query, params)
+        let (_execution, nested) = SQLExecutionScope::enter(self);
+        if nested {
+            uqa_execution::statement::cursor::execute_nested(
+                &self.batch_execution_context(),
+                query,
+                params,
+            )
+        } else {
+            uqa_execution::statement::cursor::execute(
+                &self.batch_execution_context(),
+                query,
+                params,
+            )
+        }
     }
 
     /// Consume the bounded cursor synchronously without retaining batches.
