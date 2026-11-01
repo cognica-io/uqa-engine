@@ -61,6 +61,47 @@ impl uqa_sql::schema::dependencies::oid_alias::OidAliasInput for NoRoutines {
 struct UnavailableResources {
     unwind: bool,
 }
+
+#[test]
+fn retained_analysis_selection_does_not_copy_replaced_literal_input() {
+    use uqa_sql::plan::ExecutablePlanOptimizer;
+    let inputs = Inputs {
+        captured: Cell::new(false),
+        analyzed: true,
+    };
+    let context = StatementPlanningContext {
+        analysis: StatementAnalysisContext {
+            scopes: &inputs,
+            routines: &NoRoutines,
+            aliases: &NoRoutines,
+        },
+        aggregates: &|_: &str| false,
+        optimization: &UnavailableResources { unwind: false },
+        constant_evaluator: uqa_execution::scalar::eval_constant_scalar_with_control,
+    };
+    // Immutable integer input conversion retains 1 instead of the original leading-zero spelling.
+    let seed = UnifiedPlan::lower(uqa_sql::compile("SELECT 1::integer").unwrap().remove(0));
+    let control = ProductionControl::uncontrolled();
+    let cached =
+        uqa_sql::binding::statements::AnalyzedStatement::capture_with_control(&seed, &[], &control)
+            .unwrap();
+    let spelling = format!("{}1", "0".repeat(4 << 20));
+    let source = UnifiedPlan::lower(
+        uqa_sql::compile(&format!("SELECT '{spelling}'::integer"))
+            .unwrap()
+            .remove(0),
+    );
+    let source = SharedExecutablePlan::from(source);
+    let allocation = allocation_counter::measure(|| {
+        let error = context
+            .plan_retained_with_cached_analysis(source, &[], cached, &control)
+            .err()
+            .unwrap();
+        assert_eq!(error.to_string(), "request resources unavailable");
+    });
+    assert!(!inputs.captured.get());
+    assert!(allocation.bytes_total < 16 << 10, "{allocation:?}");
+}
 impl StatementOptimizationContexts for UnavailableResources {
     fn production_resources(&self) -> Result<Option<PlanningResources>, SQLError> {
         assert!(!self.unwind, "request resource unwind");

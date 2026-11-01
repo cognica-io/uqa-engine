@@ -196,7 +196,9 @@ impl MutableCommandPlan {
                 .expect("INSERT column vector")
             {
                 RewriteMemory::Fields { fields, .. } => fields,
-                RewriteMemory::Scalar(_) => unreachable!("INSERT column vector owner"),
+                RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                    unreachable!("INSERT column vector owner")
+                }
             }
         });
         let mut retained = 0;

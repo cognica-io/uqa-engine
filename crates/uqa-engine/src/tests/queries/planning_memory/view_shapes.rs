@@ -24,9 +24,10 @@ fn native_view_shape_admission_preserves_rejection_order_and_recovers(#[case] pr
     let large = "x".repeat(4 << 20);
     engine.sql(&format!("CREATE VIEW large_view AS SELECT id, '{large}'::text AS payload FROM items; CREATE VIEW rejected_view AS SELECT DISTINCT id, '{large}'::text AS payload FROM items LIMIT 1"), &[]).unwrap();
     let retention = engine.query_retention_control().unwrap();
-    let memory = retention.memory();
+    // Catalog refresh may retire independent session-cache leases. Measure this producer under the same session ceiling with its own child allowance.
+    let memory = retention.memory().child(retention.memory().available());
     let cancellation = uqa_core::CancellationToken::new();
-    let control = ProductionControl::new(memory, retention.cancellation(), &cancellation);
+    let control = ProductionControl::new(&memory, retention.cancellation(), &cancellation);
     let services = engine.view_rewrite_context();
     let before = memory.used();
     let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
@@ -94,6 +95,7 @@ fn native_view_shape_admission_preserves_rejection_order_and_recovers(#[case] pr
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);
+    assert_eq!(retention.memory().used(), 0);
     if !matches!(provider, Provider::Memory) {
         let reopened = provider.open(&path);
         assert_rows(&reopened);

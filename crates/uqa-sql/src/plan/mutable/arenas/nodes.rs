@@ -434,7 +434,7 @@ fn query_memory(memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
     let root = memory.field_mut("root").as_mut().expect("query root");
     let is_block = match root {
         RewriteMemory::Fields { fields, .. } => fields.iter().any(|field| field.name == "block"),
-        RewriteMemory::Scalar(_) => unreachable!(),
+        RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => unreachable!(),
     };
     let root = if is_block {
         root.field_mut("block").as_mut().expect("query block")

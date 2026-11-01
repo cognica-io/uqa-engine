@@ -117,7 +117,10 @@ impl MutableExpressionPlan {
         };
         let mut fields = parts.arena_memory.as_mut().map(|owner| match owner {
             super::memory::RewriteMemory::Fields { fields, .. } => fields,
-            super::memory::RewriteMemory::Scalar(_) => unreachable!("query arena constructor"),
+            super::memory::RewriteMemory::Scalar(_)
+            | super::memory::RewriteMemory::Scalars { .. } => {
+                unreachable!("query arena constructor")
+            }
         });
         crate::plan::subqueries::prune_expression_with_retention(
             &mut parts.expression,

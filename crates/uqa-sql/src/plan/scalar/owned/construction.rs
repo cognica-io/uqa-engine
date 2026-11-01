@@ -27,7 +27,7 @@ impl OwnedScalarExpr {
                 parameter_index: None,
             },
             memory: memory.map(|direct| ScalarMemory {
-                children: BudgetedVec::new(direct.budget()),
+                children: Vec::new(),
                 direct,
             }),
         };
@@ -54,11 +54,13 @@ impl OwnedScalarExpr {
         };
         let output = Self {
             expression,
-            memory: lowering.control.map(|control| ScalarMemory {
-                direct: control.memory,
-                children: lowering
-                    .owned_children
-                    .expect("mutable scalar construction"),
+            memory: lowering.control.map(|control| {
+                ScalarMemory::from_parts(
+                    control.memory,
+                    lowering
+                        .owned_children
+                        .expect("mutable scalar construction"),
+                )
             }),
         };
         control.check()?;

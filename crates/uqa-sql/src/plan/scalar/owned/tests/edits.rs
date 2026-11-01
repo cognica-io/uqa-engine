@@ -7,6 +7,39 @@
 use super::*;
 use crate::{ast::FunctionOrderSyntax, ir::ScalarOrder};
 
+#[test]
+fn scalar_child_metadata_restores_ownership_after_rejection_and_unwind() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut scalar = nested().copy_for_rewrite(&control).unwrap();
+    let original = budget.used();
+    let address = scalar.memory.as_ref().unwrap().children.as_ptr();
+    let occupied = budget.reserve(budget.available()).unwrap();
+    assert!(scalar
+        .memory
+        .as_mut()
+        .unwrap()
+        .reserve_children(1_000)
+        .is_err());
+    assert_eq!(scalar.memory.as_ref().unwrap().children.as_ptr(), address);
+    assert_eq!(scalar.reserved_bytes(), original);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _children = scalar.memory.as_mut().unwrap().child_buffer();
+        panic!("interrupted child edit");
+    }))
+    .is_err());
+    assert_eq!(scalar.memory.as_ref().unwrap().children.as_ptr(), address);
+    assert_eq!(scalar.reserved_bytes(), original);
+    assert_eq!(budget.used(), original + occupied.bytes());
+    drop(occupied);
+    let scalar = scalar.finish(&control).unwrap();
+    assert_eq!(*scalar, nested());
+    assert!(budget.used() < original);
+    drop(scalar);
+    assert_eq!(budget.used(), 0);
+}
+
 fn case(else_branch: Option<ScalarExpr>) -> ScalarExpr {
     ScalarExpr::Case {
         base: Some(Box::new(text(31))),

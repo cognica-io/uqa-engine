@@ -94,7 +94,7 @@ impl MutableSourcePlan {
             .memory
             .as_mut()
             .and_then(|owner| binding_memory(owner, None).take())
-            .map(RewriteMemory::into_reservation);
+            .and_then(RewriteMemory::into_reservation);
         drop(self);
         Ok(control.finish(binding, memory)?)
     }

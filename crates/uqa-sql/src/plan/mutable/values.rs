@@ -29,11 +29,10 @@ impl Iterator for OwnedValueRow {
     fn next(&mut self) -> Option<Self::Item> {
         let expression = self.values.next()?;
         let memory = self.memory.as_mut().map(|memory| {
-            let mut item = memory.item_mut(self.position).take().expect("VALUES item");
-            match item.scalar_mut().take().expect("VALUES scalar") {
-                RewriteMemory::Scalar(memory) => memory,
-                RewriteMemory::Fields { .. } => unreachable!("VALUES scalar owner"),
-            }
+            memory
+                .scalar_item_mut(self.position)
+                .take()
+                .expect("VALUES scalar")
         });
         self.position += 1;
         Some(OwnedScalarExpr::from_rewrite_parts(expression, memory))
@@ -84,7 +83,7 @@ impl MutableQueryPlan {
         };
         let (rows, memory) = if let Some(mut copying) = Copying::for_rewrite(*control) {
             let rows = copying.map(0..input.rows.len(), |copying, index| {
-                copying.map(map(input.take_row(index))?, Copying::take_scalar)
+                copying.scalar_values(map(input.take_row(index))?.map(Ok))
             })?;
             (rows, Some(copying.into_rewrite_memory()))
         } else {

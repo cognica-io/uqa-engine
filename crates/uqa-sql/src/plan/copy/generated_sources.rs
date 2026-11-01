@@ -71,7 +71,7 @@ impl Copying<'_> {
             lateral: false,
             rows: self.field("rows", |copying| {
                 copying.map(std::iter::once(values), |copying, values| {
-                    copying.map(values, Self::take_scalar)
+                    copying.scalar_values(values.map(Ok))
                 })
             })?,
             alias: None,

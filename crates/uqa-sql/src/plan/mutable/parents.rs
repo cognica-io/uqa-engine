@@ -7,8 +7,8 @@
 //! Read-only parent observations remain available while a child owns its moved payload.
 
 use super::{
-    memory::RewriteMemory, sources::query_source_memory, MutableQueryPlan, MutableSourcePlan,
-    OwnedScalarExpr, QueryChildSlot, QueryPlan, QueryScalarSlot, RelationalPlan,
+    sources::query_source_memory, MutableQueryPlan, MutableSourcePlan, OwnedScalarExpr,
+    QueryChildSlot, QueryPlan, QueryScalarSlot, RelationalPlan,
 };
 use crate::{SQLError, ScalarExpr};
 use uqa_core::{memory::ProductionControl, Value};
@@ -29,11 +29,7 @@ impl MutableQueryPlan {
         let memory = self
             .memory
             .as_mut()
-            .and_then(|memory| slot.memory_mut(memory).take())
-            .map(|memory| match memory {
-                RewriteMemory::Scalar(memory) => memory,
-                RewriteMemory::Fields { .. } => unreachable!("scalar owner"),
-            });
+            .and_then(|memory| slot.memory_mut(memory).take());
         let input = OwnedScalarExpr::from_rewrite_parts(
             std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
             memory,
@@ -44,7 +40,7 @@ impl MutableQueryPlan {
             .expression_mut(&mut self.query)
             .expect("original scalar slot") = expression;
         if let Some(owner) = &mut self.memory {
-            *slot.memory_mut(owner) = memory.map(RewriteMemory::Scalar);
+            *slot.memory_mut(owner) = memory;
         }
         Ok(self)
     }

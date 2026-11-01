@@ -36,6 +36,18 @@ impl Engine {
 }
 
 impl StatementCache for Engine {
+    fn retire_sql_logical_plan(
+        &self,
+        sql: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.session
+            .state
+            .write()
+            .sql_statement_cache
+            .retire_logical(sql, control)
+    }
+
     fn cached_sql_analysis(
         &self,
         sql: &str,
@@ -63,7 +75,7 @@ impl StatementCache for Engine {
         &self,
         sql: &str,
         statement: Arc<Statement>,
-        logical_plan: uqa_sql::plan::SharedExecutablePlan,
+        logical_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
         parser: uqa_sql::parser::ParserMetadata,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<(), SQLError> {

@@ -82,21 +82,14 @@ impl MutableCommandPlan {
         };
         let (predicate, queries) = predicate_and_queries(&mut self.command)?;
         let predicate = predicate.take().map(|expression| {
-            let memory = self
-                .memory
-                .as_mut()
-                .and_then(|memory| {
-                    body(memory)
-                        .field_mut(field)
-                        .as_mut()
-                        .expect("predicate constructor")
-                        .scalar_mut()
-                        .take()
-                })
-                .map(|memory| match memory {
-                    RewriteMemory::Scalar(memory) => memory,
-                    RewriteMemory::Fields { .. } => unreachable!("predicate scalar owner"),
-                });
+            let memory = self.memory.as_mut().and_then(|memory| {
+                body(memory)
+                    .field_mut(field)
+                    .as_mut()
+                    .expect("predicate constructor")
+                    .scalar_mut()
+                    .take()
+            });
             OwnedScalarExpr::from_rewrite_parts(expression, memory)
         });
         let mut arena = ScalarQueryArena {

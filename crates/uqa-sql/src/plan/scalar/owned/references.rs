@@ -7,7 +7,7 @@
 //! Generated column references retain their supplied name owners.
 
 use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl OwnedScalarExpr {
     /// Construct a generated column reference without copying its admitted name or qualification.
@@ -54,7 +54,7 @@ impl OwnedScalarExpr {
         let output = Self {
             expression,
             memory: memory.map(|direct| ScalarMemory {
-                children: BudgetedVec::new(direct.budget()),
+                children: Vec::new(),
                 direct,
             }),
         };

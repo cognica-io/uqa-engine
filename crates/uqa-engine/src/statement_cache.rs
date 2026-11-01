@@ -60,7 +60,7 @@ impl Ord for CacheKey {
 #[derive(Clone)]
 pub(crate) struct CachedSQLStatement {
     pub(crate) statement: Arc<uqa_sql::ast::Statement>,
-    pub(crate) logical_plan: uqa_sql::plan::SharedExecutablePlan,
+    pub(crate) logical_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub(crate) optimized_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub(crate) analyzed_plan: Option<uqa_sql::binding::statements::AnalyzedStatement>,
     catalog_epochs: CatalogEpochs,
@@ -71,7 +71,7 @@ pub(crate) struct CachedSQLStatement {
 
 pub(super) struct SQLStatementInput {
     statement: Arc<uqa_sql::ast::Statement>,
-    logical_plan: uqa_sql::plan::SharedExecutablePlan,
+    logical_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     catalog_epochs: CatalogEpochs,
     function_registry_revision: u64,
     parser: uqa_sql::parser::ParserMetadata,
@@ -181,6 +181,29 @@ impl SQLStatementCache {
         })
     }
 
+    pub(super) fn retire_logical(
+        &mut self,
+        sql: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        if self.state.as_ref().is_none_or(|state| {
+            state
+                .entries
+                .get(sql)
+                .is_none_or(|entry| entry.logical_plan.is_none())
+        }) {
+            return Ok(());
+        }
+        self.update(control, |state| {
+            state
+                .entries
+                .get_mut(sql)
+                .expect("selected cache entry")
+                .logical_plan = None;
+            Ok(())
+        })
+    }
+
     pub(super) fn invalidate_optimized(&mut self) {
         if !std::mem::take(&mut self.has_optimized) {
             return;
@@ -239,7 +262,11 @@ impl CacheState {
             .and_then(|entry| entry.analyzed_plan.clone());
         let cached = CachedSQLStatement {
             statement,
-            logical_plan,
+            logical_plan: if analyzed_plan.is_none() {
+                logical_plan
+            } else {
+                None
+            },
             optimized_plan: None,
             analyzed_plan,
             catalog_epochs,
@@ -343,7 +370,7 @@ impl Engine {
         &self,
         sql: &str,
         statement: Arc<uqa_sql::ast::Statement>,
-        logical_plan: uqa_sql::plan::SharedExecutablePlan,
+        logical_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
         parser: uqa_sql::parser::ParserMetadata,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
@@ -377,8 +404,20 @@ impl Engine {
 
     #[cfg(test)]
     pub(crate) fn cached_sql_plans(&self, sql: &str) -> Option<Vec<uqa_planner::UnifiedPlan>> {
-        self.cached_sql_statement(sql)
-            .map(|cached| vec![cached.logical_plan.as_ref().clone()])
+        self.cached_sql_statement(sql).and_then(|cached| {
+            cached
+                .logical_plan
+                .as_ref()
+                .map(|plan| plan.as_ref().clone())
+                .or_else(|| {
+                    cached
+                        .analyzed_plan
+                        .as_ref()
+                        .and_then(|plan| plan.plan_for(&[]))
+                        .cloned()
+                })
+                .map(|plan| vec![plan])
+        })
     }
 
     pub(crate) fn clear_sql_statement_cache(&self) {

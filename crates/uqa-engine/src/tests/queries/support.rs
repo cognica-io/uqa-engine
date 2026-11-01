@@ -12,8 +12,11 @@ pub(super) fn compile_logical_plans(
     engine: &Engine,
     sql: &str,
 ) -> Result<Vec<uqa_planner::UnifiedPlan>, SQLError> {
-    if let Some(cached) = engine.cached_sql_statement(sql) {
-        return Ok(vec![cached.logical_plan.as_ref().clone()]);
+    if let Some(plan) = engine
+        .cached_sql_statement(sql)
+        .and_then(|cached| cached.logical_plan)
+    {
+        return Ok(vec![plan.as_ref().clone()]);
     }
     let (statements, parser) =
         uqa_sql::parser::with_settings(engine.parser_settings(), || compile(sql));
@@ -28,7 +31,7 @@ pub(super) fn compile_logical_plans(
         engine.cache_sql_statement(
             sql,
             Arc::new(statements[0].clone()),
-            plans[0].clone().into(),
+            Some(plans[0].clone().into()),
             parser,
             &owner.control(),
         )?;

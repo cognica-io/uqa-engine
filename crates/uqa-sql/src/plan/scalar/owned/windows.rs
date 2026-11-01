@@ -57,9 +57,11 @@ impl OwnedWindowSpec {
                 })
                 .transpose()?,
         };
-        let memory = lowering.control.map(|control| ScalarMemory {
-            direct: control.memory,
-            children: lowering.owned_children.expect("controlled window children"),
+        let memory = lowering.control.map(|control| {
+            ScalarMemory::from_parts(
+                control.memory,
+                lowering.owned_children.expect("controlled window children"),
+            )
         });
         let output = Self { value, memory };
         control.check()?;
@@ -133,9 +135,7 @@ impl OwnedScalarExpr {
             + replacement.value.order_by.len()
             + frame_children(&replacement.value);
         if let Some(memory) = &mut self.memory {
-            memory
-                .children
-                .reserve(new_count.saturating_sub(old_count))?;
+            memory.reserve_children(new_count.saturating_sub(old_count))?;
         }
         let ScalarExpr::WindowCall { spec, .. } = &mut self.expression else {
             unreachable!()
@@ -145,13 +145,14 @@ impl OwnedScalarExpr {
         self.remove_child_owners(arguments..arguments + old_count);
         if let Some(parent) = &mut self.memory {
             drop(parent.direct.split(old_bytes));
-            let ScalarMemory { direct, children } =
-                replacement.memory.expect("controlled specification");
+            let (direct, children) = replacement
+                .memory
+                .expect("controlled specification")
+                .into_parts();
             let (children, children_memory) = children.into_parts();
             for child in children {
                 parent
-                    .children
-                    .push(child)
+                    .push_child(child)
                     .expect("window child slots admitted before replacement");
             }
             drop(children_memory);

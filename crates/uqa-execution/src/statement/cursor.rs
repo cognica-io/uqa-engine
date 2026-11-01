@@ -23,7 +23,26 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
     sql: &str,
     params: &[SQLParam],
 ) -> Result<SQLCursor, SQLError> {
-    let _statement_deadline = crate::statement::batch::context::statement_deadline(context);
+    execute_with_context(context, sql, params, false)
+}
+
+pub fn execute_nested<S: Clone + Send + Sync + 'static>(
+    context: &BatchExecutionContext<'_, S>,
+    sql: &str,
+    params: &[SQLParam],
+) -> Result<SQLCursor, SQLError> {
+    execute_with_context(context, sql, params, true)
+}
+
+fn execute_with_context<S: Clone + Send + Sync + 'static>(
+    context: &BatchExecutionContext<'_, S>,
+    sql: &str,
+    params: &[SQLParam],
+    nested_statement: bool,
+) -> Result<SQLCursor, SQLError> {
+    let _statement_deadline = (!nested_statement)
+        .then(|| crate::statement::batch::context::statement_deadline(context))
+        .flatten();
     if let Err(error) = context.runtime.cancellation.check() {
         return Err(abort_explicit_statement_error(
             context.transactions,
@@ -34,7 +53,10 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
     let _statement_thread =
         super::context::statement_thread_scope(context.statements, context.runtime.cancellation);
     let cached = context.cache.cached_sql_statement(sql);
-    if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
+    if !nested_statement
+        && !context.persistent_backend
+        && context.transactions.transaction_depth() == 0
+    {
         if let Some((plan, parser)) = cached.as_ref().and_then(|cached| {
             cached
                 .optimized_plan_for(params)
@@ -46,15 +68,16 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
                 for notice in parser.notices.iter() {
                     context.runtime.notices.push(notice.clone());
                 }
-                let executor = UnifiedPlanExecutor::new(
+                let executor = UnifiedPlanExecutor::with_nested_statement(
                     context.statements.statement_execution_context(),
                     params,
+                    nested_statement,
                 );
                 return execute_spilled(&executor, plan.as_ref());
             }
         }
     }
-    execute_uncached_or_snapshot_scoped(context, sql, params, cached)
+    execute_uncached_or_snapshot_scoped(context, sql, params, cached, nested_statement)
 }
 
 #[inline(never)]
@@ -67,6 +90,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     sql: &str,
     params: &[SQLParam],
     cached: Option<CachedStatement>,
+    nested_statement: bool,
 ) -> Result<SQLCursor, SQLError> {
     let planning_owner = context
         .planning
@@ -77,13 +101,17 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         for notice in cached.parser.notices.iter() {
             context.runtime.notices.push(notice.clone());
         }
-        let optimized = cached.optimized_plan_for(params).cloned();
-        (
-            cached.statement,
-            cached.logical_plan,
-            optimized,
-            cached.parser,
-        )
+        let optimized = if nested_statement {
+            None
+        } else {
+            cached.optimized_plan_for(params).cloned()
+        };
+        let plan = match cached.logical_plan {
+            Some(plan) => plan,
+            None => super::batch::analysis::lower(&cached.statement, context.aggregates, &control)
+                .map_err(|error| abort_explicit_statement_error(context.transactions, error))?,
+        };
+        (cached.statement, plan, optimized, cached.parser)
     } else {
         let (parsed, parser) =
             uqa_sql::parser::with_settings(context.statements.parser_settings(), || {
@@ -123,13 +151,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
         context
             .cache
-            .cache_sql_statement(
-                sql,
-                statement.clone(),
-                plan.clone(),
-                parser.clone(),
-                &control,
-            )
+            .cache_sql_statement(sql, statement.clone(), None, parser.clone(), &control)
             .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
         (statement, plan, None, parser)
     };
@@ -150,6 +172,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     let _row_lock_statement = has_row_locks.then(|| context.row_locks.begin_row_lock_statement());
 
     if context.transactions.transaction_depth() != 0 {
+        drop(initial_plan);
         return super::batch::context::with_active_transaction(context.transactions, || {
             if has_row_locks {
                 context.row_locks.statement_row_lock_cache()?;
@@ -162,7 +185,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             context.cache.cache_sql_statement(
                 sql,
                 statement.clone(),
-                plan.clone(),
+                Some(plan.clone()),
                 parser.clone(),
                 &control,
             )?;
@@ -170,23 +193,31 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 && !has_row_locks
                 && context.transactions.prepare_explicit_transaction_writer()?
             {
+                drop(plan);
                 plan = super::batch::analysis::lower(&statement, context.aggregates, &control)?;
                 query_from_plan(&plan)?;
                 context.cache.cache_sql_statement(
                     sql,
                     statement.clone(),
-                    plan.clone(),
+                    Some(plan.clone()),
                     parser.clone(),
                     &control,
                 )?;
             }
-            let optimized = context.planning.plan_owned_for_execution(
-                plan.copy_for_rewrite(&control)?,
+            let optimized = super::batch::analysis::plan(
+                context,
+                sql,
+                plan,
                 params,
+                !nested_statement,
+                false,
                 &control,
             )?;
-            let executor =
-                UnifiedPlanExecutor::new(context.statements.statement_execution_context(), params);
+            let executor = UnifiedPlanExecutor::with_nested_statement(
+                context.statements.statement_execution_context(),
+                params,
+                nested_statement,
+            );
             execute_spilled(&executor, &optimized)
         });
     }
@@ -200,24 +231,29 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         let optimized = if let Some(plan) = cached_optimized {
             plan
         } else {
-            let (plan, reusable) = context.planning.plan_owned_for_statement_cache(
-                initial_plan.copy_for_rewrite(&control)?,
-                params,
-                &control,
-            )?;
+            context.cache.retire_sql_logical_plan(sql, &control)?;
+            let plan = initial_plan.copy_for_rewrite(&control)?;
+            drop(initial_plan);
+            let (plan, reusable) = context
+                .planning
+                .plan_owned_for_statement_cache(plan, params, &control)?;
 
-            if reusable {
+            if reusable && !nested_statement {
                 context
                     .cache
                     .cache_optimized_sql_plan(sql, plan.clone(), &control)?;
             }
             plan
         };
-        let executor =
-            UnifiedPlanExecutor::new(context.statements.statement_execution_context(), params);
+        let executor = UnifiedPlanExecutor::with_nested_statement(
+            context.statements.statement_execution_context(),
+            params,
+            nested_statement,
+        );
         return execute_spilled(&executor, optimized.as_ref());
     }
 
+    drop(initial_plan);
     if has_row_locks {
         context.row_locks.statement_row_lock_cache()?;
     }
@@ -237,7 +273,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         .cache_sql_statement(
             sql,
             statement.clone(),
-            plan.clone(),
+            Some(plan.clone()),
             parser.clone(),
             &control,
         )
@@ -266,6 +302,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         {
             return rollback_after_statement_error(context.transactions, error);
         }
+        drop(plan);
         plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
             .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
         if let Err(error) = query_from_plan(&plan) {
@@ -276,7 +313,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             .cache_sql_statement(
                 sql,
                 statement.clone(),
-                plan.clone(),
+                Some(plan.clone()),
                 parser.clone(),
                 &control,
             )
@@ -291,6 +328,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     if mutating_query && context.persistent_backend && !has_row_locks {
         match context.transactions.prepare_explicit_transaction_writer() {
             Ok(true) => {
+                drop(plan);
                 plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
                     .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
                 if let Err(error) = query_from_plan(&plan) {
@@ -301,7 +339,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     .cache_sql_statement(
                         sql,
                         statement.clone(),
-                        plan.clone(),
+                        Some(plan.clone()),
                         parser.clone(),
                         &control,
                     )
@@ -311,16 +349,23 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             Err(error) => return rollback_after_statement_error(context.transactions, error),
         }
     }
-    let optimized = match plan.copy_for_rewrite(&control).and_then(|plan| {
-        context
-            .planning
-            .plan_owned_for_execution(plan, params, &control)
-    }) {
+    let optimized = match super::batch::analysis::plan(
+        context,
+        sql,
+        plan,
+        params,
+        !nested_statement,
+        false,
+        &control,
+    ) {
         Ok(plan) => plan,
         Err(error) => return rollback_after_statement_error(context.transactions, error),
     };
-    let executor =
-        UnifiedPlanExecutor::new(context.statements.statement_execution_context(), params);
+    let executor = UnifiedPlanExecutor::with_nested_statement(
+        context.statements.statement_execution_context(),
+        params,
+        nested_statement,
+    );
     let cursor = match execute_spilled(&executor, &optimized) {
         Ok(cursor) => cursor,
         Err(error) => return rollback_after_statement_error(context.transactions, error),

@@ -213,6 +213,7 @@ pub(crate) struct Copying<'a> {
     control: ProductionControl<'a>,
     memory: MemoryReservation,
     fields: Option<BudgetedVec<RewriteField>>,
+    scalar_items: Option<BudgetedVec<Option<super::scalar::ScalarMemory>>>,
     parameters: Option<&'a ParameterLookup<'a>>,
 }
 
@@ -229,6 +230,7 @@ impl<'a> Copying<'a> {
             control,
             memory,
             fields: None,
+            scalar_items: None,
             parameters: None,
         })
     }
@@ -242,9 +244,25 @@ impl<'a> Copying<'a> {
     }
 
     pub(super) fn into_rewrite_memory(self) -> RewriteMemory {
+        let mut fields = self.fields.expect("mutable copy records fields");
+        if let Some(items) = self.scalar_items {
+            assert!(fields.is_empty(), "scalar vectors have indexed ownership");
+            return RewriteMemory::Scalars {
+                direct: self.memory,
+                items,
+            };
+        }
+        // A scalar-only field already owns its complete payload. Keep that owner directly instead of retaining a second one-element field vector for every cell.
+        if self.memory.bytes() == 0 && fields.len() == 1 && fields[0].name == "scalar" {
+            return fields
+                .pop()
+                .expect("single scalar field")
+                .memory
+                .expect("scalar owner");
+        }
         RewriteMemory::Fields {
             direct: self.memory,
-            fields: self.fields.expect("mutable copy records fields"),
+            fields,
         }
     }
 
@@ -297,6 +315,9 @@ impl<'a> Copying<'a> {
         self.check()?;
         let mut output = BudgetedVec::new(self.control.budget().expect("controlled plan copy"));
         output.reserve(items.len())?;
+        if let Some(fields) = &mut self.fields {
+            fields.reserve(items.len())?;
+        }
         for item in items {
             self.check()?;
             output.push(self.field("item", |copying| copy(copying, item))?)?;
@@ -352,9 +373,7 @@ impl<'a> Copying<'a> {
                 .expect("mutable copy")
                 .push(RewriteField {
                     name: "scalar",
-                    memory: Some(RewriteMemory::Scalar(
-                        memory.expect("controlled scalar copy"),
-                    )),
+                    memory: Some(RewriteMemory::Scalar(memory)),
                 })?;
             return Ok(expression);
         }

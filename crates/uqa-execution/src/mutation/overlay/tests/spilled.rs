@@ -8,6 +8,49 @@ use super::*;
 use uqa_storage::DocumentStore;
 
 #[test]
+fn narrow_rows_spill_using_retained_bytes_beside_large_plan_owners() {
+    let control = StorageReadControl::with_limit(4 << 20);
+    let held = control.memory().reserve(3 << 20).unwrap();
+    let mut overlays = [CommandMutationOverlay::default()];
+    let fields = |id| {
+        ["a", "b", "c", "d", "e", "f", "g"]
+            .into_iter()
+            .map(|name| (name.into(), Value::Int(id as i64)))
+            .collect()
+    };
+    for _ in 0..2_000 {
+        stage(&mut overlays[0], 1, fields(1), &control);
+    }
+    assert!(
+        !spills(&overlays[0]),
+        "replacing a row does not accumulate its old reservation"
+    );
+    for id in 1..=4_000 {
+        overlays[0]
+            .stage(
+                "items",
+                id,
+                Some((Arc::new(fields(id)), DocumentMetadata::with_tuple_xmin(17))),
+                &control,
+            )
+            .unwrap_or_else(|error| panic!("stage narrow row {id}: {error}"));
+        if id == 1 {
+            assert_eq!(find_a(&mut overlays, 1, &control), Some(1));
+        }
+    }
+    assert!(spills(&overlays[0]));
+    for id in [1, 2_000, 4_000] {
+        let row = staged(&overlays[0], id);
+        assert_eq!(row.fields.len(), 7);
+        assert_eq!(row.fields.get("g"), Some(&Value::Int(id as i64)));
+        assert_eq!(row.metadata.tuple_xmin(), Some(17));
+        assert_eq!(find_a(&mut overlays, id as i64, &control), Some(id));
+    }
+    drop(overlays);
+    assert_eq!(control.memory().used(), held.bytes());
+}
+
+#[test]
 fn wide_rows_spill_with_the_original_unpressured_allowance() {
     for indexed in [false, true] {
         let control = StorageReadControl::with_limit(4 << 20);

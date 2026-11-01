@@ -256,7 +256,14 @@ impl Copying<'_> {
         rows: &[Vec<crate::ScalarExpr>],
     ) -> Result<Vec<Vec<crate::ScalarExpr>>> {
         self.map(rows.iter(), |copying, row| {
-            copying.map(row.iter(), Self::scalar)
+            if copying.fields.is_none() {
+                return copying.map(row.iter(), Self::scalar);
+            }
+            let control = copying.control;
+            copying.scalar_values(
+                row.iter()
+                    .map(|expression| Ok(expression.copy_for_rewrite(&control)?)),
+            )
         })
     }
 

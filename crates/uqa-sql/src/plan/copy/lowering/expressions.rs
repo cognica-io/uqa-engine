@@ -50,9 +50,12 @@ impl Copying<'_> {
         arena: &mut QueryArena<'_>,
     ) -> Result<Vec<Vec<ScalarExpr>>> {
         self.map(rows.iter(), |copying, row| {
-            copying.map(row.iter(), |copying, expression| {
-                copying.lower_scalar(expression, aggregates, arena)
-            })
+            let control = copying.control;
+            copying.scalar_values(row.iter().map(|expression| {
+                Ok(crate::plan::scalar::lower_scalar_with_arena(
+                    expression, aggregates, arena, control,
+                )?)
+            }))
         })
     }
 

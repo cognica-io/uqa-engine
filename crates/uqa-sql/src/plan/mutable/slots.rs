@@ -80,13 +80,18 @@ impl QueryScalarSlot {
         }
     }
 
-    pub(super) fn memory_mut(self, memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
+    pub(super) fn memory_mut(
+        self,
+        memory: &mut RewriteMemory,
+    ) -> &mut Option<crate::plan::scalar::ScalarMemory> {
         let root = memory.field_mut("root").as_mut().expect("query root");
         let has_block = match root {
             RewriteMemory::Fields { fields, .. } => {
                 fields.iter().any(|field| field.name == "block")
             }
-            RewriteMemory::Scalar(_) => unreachable!("query root owner"),
+            RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                unreachable!("query root owner")
+            }
         };
         let root = if has_block {
             root.field_mut("block").as_mut().expect("query block")
@@ -97,11 +102,9 @@ impl QueryScalarSlot {
             Self::Projection(index) => item(root, "projections", index).scalar_mut(),
             Self::Where => field(root, "where").scalar_mut(),
             Self::GroupBy(index) => item(root, "group_by", index).scalar_mut(),
-            Self::GroupingSet { set, expression } => item(root, "grouping_sets", set)
-                .item_mut(expression)
-                .as_mut()
-                .expect("grouping-set expression")
-                .scalar_mut(),
+            Self::GroupingSet { set, expression } => {
+                item(root, "grouping_sets", set).scalar_item_mut(expression)
+            }
             Self::Having => field(root, "having").scalar_mut(),
             Self::OrderBy(index) => item(root, "order_by", index).scalar_mut(),
             Self::Limit => field(root, "limit").scalar_mut(),
@@ -128,11 +131,7 @@ impl QueryScalarSlot {
                 },
             )
             .scalar_mut(),
-            Self::Value { row, column } => item(root, "rows", row)
-                .item_mut(column)
-                .as_mut()
-                .expect("VALUES cell")
-                .scalar_mut(),
+            Self::Value { row, column } => item(root, "rows", row).scalar_item_mut(column),
         }
     }
 }

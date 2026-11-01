@@ -134,15 +134,14 @@ impl OwnedScalarExpr {
             }
         } else {
             if let Some(parent) = &mut self.memory {
-                parent.children.reserve(1)?;
+                parent.reserve_children(1)?;
             }
             let boxed = control.reserve(size_of::<ScalarExpr>())?;
             let Self { expression, memory } = replacement;
             *else_branch = Some(Box::new(expression));
             if let Some(parent) = &mut self.memory {
                 parent
-                    .children
-                    .push(memory)
+                    .push_child(memory)
                     .expect("CASE fallback slot was admitted");
                 parent
                     .direct

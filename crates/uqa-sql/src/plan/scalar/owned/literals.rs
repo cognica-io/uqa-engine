@@ -74,11 +74,13 @@ impl OwnedScalarExpr {
                 composite_source,
                 collation_oid,
             },
-            memory: lowering.control.map(|control| ScalarMemory {
-                direct: control.memory,
-                children: lowering
-                    .owned_children
-                    .expect("mutable literal construction"),
+            memory: lowering.control.map(|control| {
+                ScalarMemory::from_parts(
+                    control.memory,
+                    lowering
+                        .owned_children
+                        .expect("mutable literal construction"),
+                )
             }),
         };
         drop(self);

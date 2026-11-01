@@ -180,11 +180,13 @@ pub(super) fn finish(
 ) -> Result<OwnedScalarExpr> {
     let output = OwnedScalarExpr {
         expression,
-        memory: lowering.control.map(|control| ScalarMemory {
-            direct: control.memory,
-            children: lowering
-                .owned_children
-                .expect("mutable generated expression"),
+        memory: lowering.control.map(|control| {
+            ScalarMemory::from_parts(
+                control.memory,
+                lowering
+                    .owned_children
+                    .expect("mutable generated expression"),
+            )
         }),
     };
     control.check()?;

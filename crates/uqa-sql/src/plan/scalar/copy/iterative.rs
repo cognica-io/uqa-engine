@@ -104,10 +104,9 @@ impl<'s, 'c> Frame<'s, 'c> {
         let memory = match self.lowering.control.take() {
             None => Memory::Ordinary,
             Some(control) => match self.lowering.owned_children.take() {
-                Some(children) => Memory::Mutable(ScalarMemory {
-                    direct: control.memory,
-                    children,
-                }),
+                Some(children) => {
+                    Memory::Mutable(ScalarMemory::from_parts(control.memory, children))
+                }
                 None => Memory::Immutable(control.memory),
             },
         };

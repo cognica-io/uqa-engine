@@ -30,7 +30,7 @@ pub(super) type MemoryRows = BudgetedSharedMap<DocId, StagedRow>;
 #[derive(Clone)]
 pub(super) struct StagedRows {
     pub(super) memory: MemoryRows,
-    /// The estimated bytes the memory tier holds, which decide when it spills.
+    /// Retained field reservations plus estimated tree overhead, used to select spill runs.
     resident: usize,
     pub(super) spilled: Option<SpilledRows>,
     /// The rows moved into the spilled tier, counting a row once for each move.
@@ -76,24 +76,10 @@ impl StagedRows {
 
     /// Stage `row` for `id` in the memory tier. Failure leaves both tiers unchanged.
     pub(super) fn insert(&mut self, id: DocId, row: StagedRow) -> StorageBackendResult<()> {
-        let bytes = row.as_ref().map_or(Ok(0), |row| {
-            let size = |fields: &uqa_storage::document_store::Document| {
-                crate::spill::encoded_document_size(fields)
-                    .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))
-            };
-            Ok::<_, uqa_storage::StorageBackendError>(
-                size(row.fields.as_ref())?.saturating_add(
-                    row.index_values
-                        .as_ref()
-                        .map_or(Ok(0), |values| size(values.as_ref()))?,
-                ),
-            )
-        })?;
+        let previous = self.memory.get(&id).map_or(0, resident_bytes);
+        let bytes = resident_bytes(&row);
         self.memory.try_insert(id, row)?;
-        self.resident = self
-            .resident
-            .saturating_add(bytes)
-            .saturating_add(ROW_OVERHEAD);
+        self.resident = self.resident.saturating_sub(previous).saturating_add(bytes);
         Ok(())
     }
 
@@ -137,6 +123,18 @@ impl StagedRows {
                 .map(|spilled| Arc::clone(spilled.view())),
         }
     }
+}
+
+fn resident_bytes(row: &StagedRow) -> usize {
+    // Serialized records omit decoded map entries and value layouts. Spill pressure follows the retained owners that actually consume the allowance.
+    ROW_OVERHEAD.saturating_add(row.as_ref().map_or(0, |row| {
+        row.fields
+            .reserved_bytes()
+            .saturating_add(row.index_values.as_ref().map_or(
+                0,
+                uqa_storage::document_store::RetainedDocumentFields::reserved_bytes,
+            ))
+    }))
 }
 
 /// An immutable view of the rows one command staged for one table.

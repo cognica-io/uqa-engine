@@ -49,7 +49,7 @@ impl ScalarQueryArena {
         control.check()?;
         Ok(control.finish(
             self.queries,
-            self.memory.map(RewriteMemory::into_reservation),
+            self.memory.and_then(RewriteMemory::into_reservation),
         )?)
     }
 

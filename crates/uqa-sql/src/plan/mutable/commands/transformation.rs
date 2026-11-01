@@ -385,12 +385,9 @@ fn transform_command_scope(
             )?;
             for (row, values) in plan.rows.iter_mut().enumerate() {
                 for (column, value) in values.iter_mut().enumerate() {
-                    scalar(
-                        value,
-                        item(item(field(memory.as_deref_mut(), "rows"), row), column),
-                        control,
-                        transform,
-                    )?;
+                    let memory = item(field(memory.as_deref_mut(), "rows"), row)
+                        .map(|memory| scalar_memory(memory.scalar_item_mut(column)));
+                    OwnedScalarExpr::transform_nodes_in_place(value, memory, control, transform)?;
                 }
             }
             if let Some(source) = &mut plan.source {

@@ -289,11 +289,8 @@ fn query_slot(
     action(expression, memory, control)
 }
 
-pub(super) fn scalar_memory(memory: &mut Option<RewriteMemory>) -> &mut ScalarMemory {
-    match memory.as_mut().expect("scalar owner") {
-        RewriteMemory::Scalar(memory) => memory,
-        RewriteMemory::Fields { .. } => unreachable!("scalar root constructor"),
-    }
+pub(super) fn scalar_memory(memory: &mut Option<ScalarMemory>) -> &mut ScalarMemory {
+    memory.as_mut().expect("scalar owner")
 }
 
 pub(super) fn local_source(

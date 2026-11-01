@@ -36,7 +36,9 @@ impl MutableQueryPlan {
                 .expect("grouping sets")
             {
                 RewriteMemory::Fields { fields, .. } => fields,
-                RewriteMemory::Scalar(_) => unreachable!("grouping-set vector constructor"),
+                RewriteMemory::Scalar(_) | RewriteMemory::Scalars { .. } => {
+                    unreachable!("grouping-set vector constructor")
+                }
             }
         });
         grouping.apply_with_retention(block, |sets, keep| {

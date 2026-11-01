@@ -58,6 +58,25 @@ pub trait ExecutablePlanOptimizer {
     > {
         self.plan_with_cached_analysis(ordinary_plan(plan, control)?, params, cached)
     }
+    /// Select reusable analysis before constructing mutable inputs. The preliminary owner is consumed, so its storage can retire before analysis and optimization allocate their outputs.
+    fn plan_retained_with_cached_analysis(
+        &self,
+        plan: SharedExecutablePlan,
+        params: &[SQLParam],
+        cached: Option<crate::binding::statements::AnalyzedStatement>,
+        control: &ProductionControl<'_>,
+    ) -> Result<
+        (
+            SharedExecutablePlan,
+            Option<crate::binding::statements::AnalyzedStatement>,
+        ),
+        SQLError,
+    > {
+        let mutable = plan.copy_for_rewrite(control)?;
+        drop(plan);
+        self.plan_owned_with_cached_analysis(mutable, params, cached, control)
+    }
+
     /// Reuse analysis only after the caller validates its catalog/scope in the selected snapshot. Optimization still runs for this invocation. The default retains full analysis for implementations without this capability.
     fn plan_with_cached_analysis(
         &self,

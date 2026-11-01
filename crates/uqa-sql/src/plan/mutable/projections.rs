@@ -31,14 +31,11 @@ impl Iterator for OwnedProjectionIter {
                 .item_mut(self.index)
                 .take()
                 .expect("projection owner");
-            let scalar = match item.scalar_mut().take().expect("scalar owner") {
-                RewriteMemory::Scalar(memory) => Some(memory),
-                RewriteMemory::Fields { .. } => unreachable!("projection scalar owner"),
-            };
+            let scalar = Some(item.scalar_mut().take().expect("scalar owner"));
             let alias = item
                 .field_mut("alias")
                 .take()
-                .map(RewriteMemory::into_reservation);
+                .and_then(RewriteMemory::into_reservation);
             (scalar, alias)
         } else {
             (None, None)

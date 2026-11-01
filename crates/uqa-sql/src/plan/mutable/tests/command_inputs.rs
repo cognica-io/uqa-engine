@@ -16,6 +16,68 @@ fn command(sql: &str) -> CommandPlan {
 }
 
 #[test]
+fn scalar_rows_release_partial_copies_and_rewrite_failures() {
+    for sql in [
+        "VALUES ('first'), ('second')",
+        "INSERT INTO items VALUES ('first'), ('second')",
+        "SELECT * FROM (VALUES ('first'), ('second')) AS source(value)",
+    ] {
+        let input = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        for failure in 0..4 {
+            let budget = MemoryBudget::new(1 << 20);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            let sibling = budget.reserve(37).unwrap();
+            let owned = input.copy_for_rewrite(&control).unwrap();
+            let mut visited = 0;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                owned.transform_scalar_nodes(&control, &mut |_, node| {
+                    if matches!(&*node, ScalarExpr::Literal(Value::Str(_))) {
+                        visited += 1;
+                        if visited == 2 {
+                            match failure {
+                                0 => return Err(SQLError::Internal("row rewrite failure".into())),
+                                1 => original.cancel(),
+                                2 => invoking.cancel(),
+                                _ => panic!("row rewrite unwind"),
+                            }
+                        }
+                    }
+                    Ok(node)
+                })
+            }));
+            assert_eq!(visited, 2);
+            if failure == 3 {
+                assert!(result.is_err());
+            } else {
+                assert!(result.unwrap().is_err());
+            }
+            assert_eq!(budget.used(), sibling.bytes(), "{sql}: failure {failure}");
+        }
+        let input = UnifiedPlan::lower(
+            crate::compile(
+                &sql.replace("first", &"x".repeat(16 << 10))
+                    .replace("second", &"y".repeat(16 << 10)),
+            )
+            .unwrap()
+            .remove(0),
+        );
+        let budget = MemoryBudget::new(24 << 10);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let measured = allocation_counter::measure(|| {
+            assert_eq!(
+                input.copy_for_rewrite(&control).unwrap_err().sqlstate(),
+                Some("53200")
+            );
+        });
+        assert_eq!(measured.bytes_current, 0);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn values_projection_moves_payloads_and_preserves_query_metadata_and_arenas() {
     for rows in [1, 2] {
         let literal = "x".repeat(4 * 1024 * 1024);
