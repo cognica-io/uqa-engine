@@ -18,6 +18,11 @@ use uqa_core::{
 pub struct RetainedDocumentFields(Arc<Budgeted<Arc<Document>>>);
 
 impl RetainedDocumentFields {
+    /// The admitted bytes kept by this shared field owner, including its wrappers. Cloned handles observe the same reservation.
+    pub fn reserved_bytes(&self) -> usize {
+        self.0.reserved_bytes()
+    }
+
     /// Share immutable fields under the invoking allowance. Matching readers reuse their existing lease; a different allowance admits the existing payload before allocating another reader wrapper.
     pub fn retain_with_control(&self, control: &StorageReadControl) -> StorageBackendResult<Self> {
         control.check()?;

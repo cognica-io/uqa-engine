@@ -44,12 +44,14 @@ fn shared_fields_keep_one_charge_and_original_value_addresses() {
     let original = fields();
     let retained = RetainedDocumentFields::new(Arc::clone(&original), &control).unwrap();
     let used = control.memory().used();
+    assert_eq!(retained.reserved_bytes(), used);
     assert!(used >= 8192);
     assert!(std::ptr::eq(
         &raw const original["body"],
         &raw const retained["body"]
     ));
     let sibling = retained.clone();
+    assert_eq!(sibling.reserved_bytes(), used);
     assert_eq!(control.memory().used(), used);
     drop(original);
     drop(retained);
@@ -115,6 +117,7 @@ fn budgeted_adoption_transfers_its_payload_once_and_keeps_field_addresses() {
     let Value::Map(fields) = fields else { panic!() };
     let retained =
         RetainedDocumentFields::from_budgeted(Budgeted::new(fields, memory), &control).unwrap();
+    assert_eq!(retained.reserved_bytes(), control.memory().used());
     assert!(control.memory().used() >= 8192);
     assert!(control.memory().used() < 11_000);
     let Value::Str(text) = &retained["body"] else {
