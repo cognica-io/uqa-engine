@@ -223,17 +223,124 @@ Read the [compressed VFS security contract](docs/design/compressed-vfs-security.
 | Rust facade | [`uqa`](crates/uqa) | Primary dependency re-exporting `uqa-engine` and `uqa_core::Value` |
 | Rust engine | [`uqa-engine`](crates/uqa-engine) | Direct embedded implementation API and runnable examples |
 | Rust HTTP | [`uqa-client`](crates/uqa-client) | Authenticated local and Cloud data-plane SQL, atomic batches, and NDJSON streaming |
+| C/C++ | [`uqa-ffi`](crates/uqa-ffi) | Embedded C ABI, shared/static libraries, and iOS static-library integration |
 | Python | [`uqa-python`](crates/uqa-python) | pyo3/maturin bindings, the installed `usql` command, and synchronous local and Cloud HTTP SQL |
 | Node.js | [`uqa-node`](crates/uqa-node) | Node-API bindings with asynchronous embedded and local or Cloud HTTP SQL methods |
 | Browser | [`uqa-wasm`](crates/uqa-wasm) | Emscripten embedded engine with IndexedDB persistence plus fetch-based local and Cloud HTTP SQL |
 
 Released Node.js applications install `@cognica-io/uqa` from npm; npm selects an exact-version native optional package under `@cognica-io` for the current supported platform. Browser applications install the independent `@cognica-io/uqa-wasm` package.
 
-Prebuilt Linux Python wheels target glibc 2.28 or newer.
-
 The memory foreign-data wrapper is included by default. Enable `arrow` for native Arrow IPC sources or `duckdb` for native DuckDB sources; the features are independent and disabled by default. Foreign-table definitions and catalog inspection remain available for every handler; see the [feature contract](docs/manual/reference/08-bindings-and-extensions.md#foreign-data-wrappers).
 
+## Supported platforms
+
+| Platform | Architectures | Interfaces |
+| --- | --- | --- |
+| Linux (glibc) | x86_64, ARM64 | Rust, C/C++, Python, Node.js, `usql` |
+| macOS | Intel x86_64, Apple Silicon ARM64 | Rust, C/C++, Python, Node.js, `usql` |
+| Windows (MSVC) | x86_64 | Rust, C/C++, Python, Node.js, `usql` |
+| Windows (MSVC) | ARM64 | Rust, Python, Node.js, `usql` |
+| iOS / iPadOS | ARM64 | Embedded Rust crate or C/C++ library, built from source |
+| iOS Simulator | ARM64 on Apple Silicon | Embedded Rust crate or C/C++ library, built from source |
+| Browser | WebAssembly | JavaScript through `@cognica-io/uqa-wasm` |
+
+Native Python and Node.js packages select the matching platform during installation. C/C++ packages and standalone `usql` binaries are available from [GitHub Releases](https://github.com/cognica-io/uqa-engine/releases). Linux Python wheels require glibc 2.28 or newer. iOS applications can use the Rust crate directly or link the C library as a static archive or XCFramework.
+
 ## Build and test
+
+Run source-build commands from the repository root. Use Rust 1.95 or newer for the full workspace, CLI and Python binding; embedded Rust crates require Rust 1.90 or newer. Native dependencies also require a C/C++ compiler, libclang, CMake, Make and Perl. The C package tools require CMake 3.24 or newer and Python 3.11 or newer.
+
+On Linux, install your distribution's compiler tools, libclang development package, CMake, Perl and pkg-config. On macOS, install Xcode Command Line Tools and CMake; iOS builds require full Xcode with its iOS SDKs. On Windows, use a Visual Studio developer shell with the MSVC C++ toolchain, LLVM/libclang, CMake and native Perl available on `PATH`.
+
+### Native Rust and CLI
+
+Build the embedded Rust facade or the command-line application:
+
+```sh
+cargo build --locked --release -p uqa
+cargo build --locked --release -p uqa-cli --bin usql
+```
+
+The CLI is written to `target/release/usql` (`usql.exe` on Windows). Add `--features nori,kuromoji` to the Rust facade build to include both morphological analyzers; the CLI enables them by default.
+
+### Native C/C++ libraries
+
+Select the host target: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, or `x86_64-pc-windows-msvc`. For example, on Linux x86_64:
+
+```sh
+python3 scripts/build-c-bindings.py \
+  --target x86_64-unknown-linux-gnu --profile release \
+  --prefix target/c-installed --build-directory target/c-native-build
+```
+
+On macOS, set `MACOSX_DEPLOYMENT_TARGET=11.0` before running the command with the matching Apple target. On Windows, use `python` in the MSVC developer shell. The installation contains headers, shared/static libraries, CMake targets and pkg-config metadata. Link `UQA::uqa` or `UQA::uqa_static` from CMake; see the [C/C++ consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers).
+
+### iOS and iPadOS
+
+Build on macOS with full Xcode selected by `xcode-select`. Install the device and Apple Silicon simulator Rust targets:
+
+```sh
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+```
+
+In a shell used for iOS builds, configure the deployment target and the parser's Clang targets and SDKs. These settings apply to both Rust and C/C++ builds.
+
+```sh
+unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS SDKROOT MACOSX_DEPLOYMENT_TARGET
+unset LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
+export IPHONEOS_DEPLOYMENT_TARGET=15.0
+export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios="--target=arm64-apple-ios${IPHONEOS_DEPLOYMENT_TARGET} -isysroot \"$(xcrun --sdk iphoneos --show-sdk-path)\""
+export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim="--target=arm64-apple-ios${IPHONEOS_DEPLOYMENT_TARGET}-simulator -isysroot \"$(xcrun --sdk iphonesimulator --show-sdk-path)\""
+```
+
+**Rust applications:** add the crate to your application's `Cargo.toml` and use the [Rust Engine API](#embed-it-in-rust). Enable the analyzers your application needs:
+
+```toml
+[dependencies]
+uqa = { version = "0.6.2", features = ["nori", "kuromoji"] }
+```
+
+Build from your application's directory with `cargo build --release --target aarch64-apple-ios`, or select `aarch64-apple-ios-sim` for the simulator. To build the Rust facade from this repository instead:
+
+```sh
+cargo build --locked --release -p uqa --features nori,kuromoji --target aarch64-apple-ios
+cargo build --locked --release -p uqa --features nori,kuromoji --target aarch64-apple-ios-sim
+```
+
+**C/C++ and Swift applications:** build the C ABI as static libraries using the same iOS environment:
+
+```sh
+cargo rustc --locked --release -p uqa-ffi --lib --crate-type staticlib \
+  --target aarch64-apple-ios -- --print=native-static-libs
+cargo rustc --locked --release -p uqa-ffi --lib --crate-type staticlib \
+  --target aarch64-apple-ios-sim -- --print=native-static-libs
+```
+
+The archives are `target/aarch64-apple-ios/release/libuqa.a` and `target/aarch64-apple-ios-sim/release/libuqa.a`. Both include Nori and Kuromoji by default. Combine the device and simulator libraries into one Xcode dependency:
+
+```sh
+xcodebuild -create-xcframework \
+  -library target/aarch64-apple-ios/release/libuqa.a \
+  -headers crates/uqa-ffi/include \
+  -library target/aarch64-apple-ios-sim/release/libuqa.a \
+  -headers crates/uqa-ffi/include \
+  -output target/ios/UQA.xcframework
+```
+
+Add `UQA.xcframework` to the application's linked libraries with **Do Not Embed**, because it contains static libraries. Add the system libraries/frameworks reported by `native-static-libs` to the app's linker settings, including `libiconv` and `CoreFoundation`. Include `<uqa/uqa.h>` from C/C++. For Swift, use an application bridging header and expose the macro constants your Swift code needs as typed C constants, such as `static const uqa_status app_uqa_ok = UQA_OK;`. Store persistent databases in a writable application container directory, such as Application Support, and set the app's deployment target to the library's minimum or newer.
+
+### Browser WebAssembly
+
+Install the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html), activate its environment, then build the browser package:
+
+```sh
+rustup target add wasm32-unknown-emscripten
+bash scripts/build-wasm.sh
+```
+
+The JavaScript loader and WASM binary are written under `crates/uqa-wasm/js`. See the [browser examples](examples/browser/README.md) for loading the module and using IndexedDB persistence.
+
+### Workspace tests
 
 Install the commit hook, then build and test the workspace:
 
