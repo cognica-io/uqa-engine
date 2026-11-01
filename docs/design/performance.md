@@ -1,6 +1,48 @@
 # Performance baseline
 
-This document records UQA Engine benchmark baselines measured on developer hardware and, where a section says so, on temporary cloud hosts. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
+This document records dated UQA Engine measurements, including controlled CI qualification and historical developer-machine comparisons. Each section identifies its source and measurement boundary; absolute times remain specific to the measured host. Controlled qualification uses independently authenticated host control and reference-only noise calibration. Unless a section explicitly compares another engine, its ratios compare UQA revisions. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
+
+## Controlled analytical and claim qualification (2026-11-01)
+
+Automatic [run 41282309353](https://github.com/cognica-io/uqa-engine/actions/runs/41282309353), attempt 1, measured source `e8abe2c88cc2ea442e7e886e5c917a2ea14cb186` after [PR #1315](https://github.com/cognica-io/uqa-engine/pull/1315). All twenty comparisons are accepted: four analytical workloads and sixteen claim case/phase comparisons. This is qualification of that source against the fixed UQA references; the separate PostgreSQL, SQLite and DuckDB comparisons below retain their dated results.
+
+The dedicated `c7g.4xlarge` Graviton3 host used the pinned Rust 1.90.0 toolchain, exclusive CPU partition, no swap, verified process layout and the existing [controlled-runner protocol](../../benchmarks/regressions/controlled-runner.md). Each workload retained 32 independent reference-only calibration pairs followed by eight counterbalanced candidate/reference pairs. The third-largest reference-pair error sets each noise factor, with marginal confidence 0.9904803589014115 under the protocol's exchangeability assumption. All seven signatures, 160 resource-record hashes, calibration observations and signed host-control hashes were independently verified; recomputed bounds and decisions match both signed reports. Instance stop/wait succeeded and lifecycle errors are empty.
+
+### Analytical results
+
+The unchanged [analytical fixture](../../benchmarks/analytical/manifest.json) loads 20,000 rows through one INSERT under the default 64 MiB retention allowance and uses 4 MB of query work memory. Displayed times are medians of eight Criterion slope estimates. Qualification uses the median of paired head/reference ratios, which can differ from the ratio of the displayed medians. Tables round for presentation; acceptance uses the complete unrounded signed observations and bounds.
+
+| Workload | Reference ms | Head ms | Paired ratio | Qualified head/reference interval | Limit |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Q1 grouped aggregate | 3.856450 | 3.971337 | 1.030736 | 1.018662–1.042952 | 1.10 |
+| Q6 filtered aggregate | 3.560282 | 2.527378 | 0.711769 | 0.705651–0.717941 | 1.10 |
+| Materialized result scan | 9.932089 | 8.778254 | 0.884942 | 0.866155–0.904135 | 1.15 |
+| Cursor result scan | 4.877156 | 5.190406 | 1.068569 | 1.053854–1.083489 | 1.15 |
+
+The preceding [run 41272199984](https://github.com/cognica-io/uqa-engine/actions/runs/41272199984) at `227b929c213f255e3a86cd0e37177e23e33d52a5` was inconclusive for Q1: ratio 1.106413040926809 and interval [1.0991193916759792, 1.113755090123811] crossed the unchanged 1.10 limit. PR #1315 removes metadata-value construction and destruction from every projected aggregate input row by reusing those scalar carriers within each batch. Its deterministic 2,051-row regression falls from 2,051 preparations to at most four while retaining metadata values, stored-column precedence and predicate/error order. The current Q1 interval lies wholly below 1.10. Reference executables, workload identities, inputs, limits and calibration rules are unchanged; every earlier run keeps its original decision. [#653](https://github.com/cognica-io/uqa-engine/issues/653) records current Q1 completion and retains the separate historical instruction-throughput attribution requirement.
+
+### Independent-process claim results
+
+Every process/key case preserves eight warmup rounds and 128 measured rounds per executable. The times below are medians of eight candidate estimates of the parent-observed acquisition or release completion window. Each phase is qualified separately against its own reference samples and independent noise bound. All sixteen intervals are accepted under the existing 1.15 limit; these are claim-phase measurements, not whole-SQL transaction throughput.
+
+| Processes | Keys per process | Acquire ms | Release ms | Acquire head/reference interval | Release head/reference interval |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 64 | 0.067687 | 0.076977 | 0.979482–1.012820 | 0.971076–1.011568 |
+| 2 | 64 | 0.091111 | 0.100000 | 0.985350–1.019899 | 0.979213–1.008239 |
+| 4 | 64 | 0.140272 | 0.150655 | 0.914404–1.093183 | 0.929076–1.090078 |
+| 8 | 64 | 0.299721 | 0.311728 | 0.985385–1.022970 | 0.982482–1.022550 |
+| 1 | 512 | 0.534784 | 0.620796 | 0.949891–1.031874 | 0.918180–1.046957 |
+| 2 | 512 | 0.571346 | 0.772365 | 0.970415–0.999911 | 0.932516–1.035726 |
+| 4 | 512 | 1.004439 | 1.094439 | 0.983878–1.016769 | 0.984803–1.024203 |
+| 8 | 512 | 1.967234 | 2.095782 | 0.991144–1.009119 | 0.984883–1.013710 |
+
+### Provenance and correctness
+
+- Measured source tree: `1de37838794f52ad8bfe2ffb084ac2537015d17f`; analytical reference: `0e8be6892340b2d1892e0abf68c2a9ad046f49d5`; claim reference: `eb3523590116e295dff4410aac939878e5e0fce1`.
+- [Artifact 13074733423](https://github.com/cognica-io/uqa-engine/actions/runs/41282309353/artifacts/13074733423), SHA-256 `3c6147b5e1f27864a913f691d9940fcab9b748fc61241da7cca38dbedd62adae`, retains complete observations, exact executable identities, build/environment records and signed evidence.
+- Analytical report SHA-256: `5c52b11ff3fe4cfbeab0aa73896006a33a5a035ccd6b5abeac89c142ca116759`; claims report SHA-256: `38394f7de180e8df0070b75b175356e8dde14fc2b43bc3c4b599f33f6659852a`.
+
+The identical product tree passes actual [Linux/macOS regression execution](https://github.com/cognica-io/uqa-engine/actions/runs/41278405765): 2,562 checks / 3,725 cases and eight independent-process histories per platform, with every source hash verified and no failures/errors/skips. [Workspace verification](https://github.com/cognica-io/uqa-engine/actions/runs/41278405743) passes 21,567 Linux / 21,582 macOS cases without failures, skips or retries. The unchanged analytical fixture, exact Q1/Q6/scan outputs, quota/savepoint recovery and persistent reopen also pass on memory, native SQLite, SQLite Key/Value and redb. Generated timing reports remain in artifacts and the retained evidence store; this document keeps only the measured conclusions and compact provenance.
 
 ## PostgreSQL 18 TPC-H-derived release comparison (2026-10-19)
 
