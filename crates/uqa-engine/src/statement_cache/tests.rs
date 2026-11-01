@@ -14,6 +14,49 @@ fn fixture() -> (Arc<uqa_sql::Statement>, SharedExecutablePlan) {
     (Arc::new(statement), plan)
 }
 
+#[test]
+fn logical_plan_retirement_preserves_snapshots_and_failed_publication() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let sql = format!("SELECT '{}'", "x".repeat(128 << 10));
+    let statement = Arc::new(uqa_sql::compile(&sql).unwrap().remove(0));
+    let source = UnifiedPlan::lower(statement.as_ref().clone());
+    let plan =
+        uqa_sql::plan::OwnedExecutablePlan::from(source.clone_with_control(&control).unwrap())
+            .into_shared(&control)
+            .unwrap();
+    let mut cache = SQLStatementCache::default();
+    publish(&mut cache, "payload", &statement, &plan, &control).unwrap();
+    drop(plan);
+    let snapshot = cache.clone();
+    let occupied = budget.reserve(budget.available()).unwrap();
+    assert_eq!(
+        cache
+            .retire_logical("payload", &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert!(Arc::ptr_eq(
+        cache.state.as_ref().unwrap(),
+        snapshot.state.as_ref().unwrap()
+    ));
+    assert!(cache.get("payload").unwrap().logical_plan.is_some());
+    drop(occupied);
+    cache.retire_logical("payload", &control).unwrap();
+    let entry = cache.get("payload").unwrap();
+    assert!(entry.logical_plan.is_none());
+    assert!(Arc::ptr_eq(&entry.statement, &statement));
+    assert!(snapshot.get("payload").unwrap().logical_plan.is_some());
+    assert!(budget.used() > 128 << 10);
+    drop(snapshot);
+    assert!(budget.used() < 128 << 10);
+    drop(entry);
+    cache.clear();
+    assert_eq!(budget.used(), 0);
+}
+
 fn publish(
     cache: &mut SQLStatementCache,
     sql: &str,
@@ -25,7 +68,7 @@ fn publish(
         sql,
         SQLStatementInput {
             statement: statement.clone(),
-            logical_plan: plan.clone(),
+            logical_plan: Some(plan.clone()),
             catalog_epochs: CatalogEpochs {
                 table_catalog: 1,
                 table_data: 1,
@@ -74,7 +117,13 @@ fn snapshots_share_leases_and_failed_writes_preserve_both_roots() {
         cache.state.as_ref().unwrap(),
         snapshot.state.as_ref().unwrap()
     ));
-    assert!(cache.get("one").unwrap().logical_plan.ptr_eq(&plan));
+    assert!(cache
+        .get("one")
+        .unwrap()
+        .logical_plan
+        .as_ref()
+        .unwrap()
+        .ptr_eq(&plan));
     assert!(cache.get("two").is_none());
     assert_eq!(writer_budget.used(), occupied.bytes());
     assert_eq!(budget.used(), retained);

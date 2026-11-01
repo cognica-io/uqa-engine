@@ -153,42 +153,32 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for StatementPlanningContext<'_> {
         ),
         SQLError,
     > {
-        let (plan, retained, capture) = if let Some(cached) =
-            cached.filter(|cached| cached.plan_for(params).is_some())
-        {
-            drop(plan);
-            (
-                cached
-                    .plan_for(params)
-                    .expect("matching analysis")
-                    .copy_for_rewrite(control)?,
-                Some(cached),
-                false,
-            )
-        } else {
-            let (plan, _, reusable) = uqa_sql::binding::statements::analyze_reusable_inputs_owned(
-                &self.analysis,
-                plan,
-                params,
-                control,
-            )?;
-            (plan, None, reusable)
-        };
-        with_optimizer_resources(self, plan, control, |plan, control| {
-            let retained = if capture {
-                uqa_sql::binding::statements::AnalyzedStatement::capture_ref_with_control(
-                    plan.as_plan_ref(),
-                    params,
-                    control,
-                )?
-            } else {
-                retained
-            };
-            Ok((
-                optimize_owned_with_control(self, plan, control)?.into_shared(control)?,
-                retained,
-            ))
-        })
+        self.plan_cached_inputs(|| Ok(plan), params, cached, control)
+    }
+
+    fn plan_retained_with_cached_analysis(
+        &self,
+        plan: SharedExecutablePlan,
+        params: &[SQLParam],
+        cached: Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        control: &ProductionControl<'_>,
+    ) -> Result<
+        (
+            SharedExecutablePlan,
+            Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        ),
+        SQLError,
+    > {
+        self.plan_cached_inputs(
+            move || {
+                let mutable = plan.copy_for_rewrite(control)?;
+                drop(plan);
+                Ok(mutable)
+            },
+            params,
+            cached,
+            control,
+        )
     }
 
     fn plan_with_cached_analysis(
@@ -371,3 +361,56 @@ pub fn optimize_shared_plan(
 
 #[cfg(test)]
 mod tests;
+
+impl StatementPlanningContext<'_> {
+    fn plan_cached_inputs(
+        &self,
+        prepare: impl FnOnce() -> Result<uqa_sql::plan::MutableExecutablePlan, SQLError>,
+        params: &[SQLParam],
+        cached: Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        control: &ProductionControl<'_>,
+    ) -> Result<
+        (
+            SharedExecutablePlan,
+            Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        ),
+        SQLError,
+    > {
+        let (plan, retained, capture) = if let Some(cached) =
+            cached.filter(|cached| cached.plan_for(params).is_some())
+        {
+            drop(prepare);
+            (
+                cached
+                    .plan_for(params)
+                    .expect("matching analysis")
+                    .copy_for_rewrite(control)?,
+                Some(cached),
+                false,
+            )
+        } else {
+            let (plan, _, reusable) = uqa_sql::binding::statements::analyze_reusable_inputs_owned(
+                &self.analysis,
+                prepare()?,
+                params,
+                control,
+            )?;
+            (plan, None, reusable)
+        };
+        with_optimizer_resources(self, plan, control, |plan, control| {
+            let retained = if capture {
+                uqa_sql::binding::statements::AnalyzedStatement::capture_ref_with_control(
+                    plan.as_plan_ref(),
+                    params,
+                    control,
+                )?
+            } else {
+                retained
+            };
+            Ok((
+                optimize_owned_with_control(self, plan, control)?.into_shared(control)?,
+                retained,
+            ))
+        })
+    }
+}

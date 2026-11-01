@@ -34,6 +34,7 @@ struct Inputs {
     guarded: Cell<bool>,
     snapshot: Cell<bool>,
     cached: Option<(Arc<Statement>, uqa_sql::plan::SharedExecutablePlan)>,
+    logical_publications: RefCell<Vec<bool>>,
     cancel_after_cache_lookup: bool,
     reject_snapshot: bool,
     transaction_error: Option<SQLError>,
@@ -202,7 +203,7 @@ impl StatementCache for Inputs {
             .as_ref()
             .map(|(statement, logical_plan)| CachedStatement {
                 statement: Arc::clone(statement),
-                logical_plan: logical_plan.clone(),
+                logical_plan: Some(logical_plan.clone()),
                 optimized_plan: None,
                 parser: uqa_sql::parser::ParserMetadata::default(),
             })
@@ -211,7 +212,7 @@ impl StatementCache for Inputs {
         &self,
         _: &str,
         statement: Arc<Statement>,
-        _: uqa_sql::plan::SharedExecutablePlan,
+        logical_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
         _: uqa_sql::parser::ParserMetadata,
         _: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<(), SQLError> {
@@ -221,6 +222,9 @@ impl StatementCache for Inputs {
                 "snapshot planning recopied the parsed statement"
             );
         }
+        self.logical_publications
+            .borrow_mut()
+            .push(logical_plan.is_some());
         self.record(format!("cache.write.{}", self.snapshot.get()));
         Ok(())
     }
@@ -650,8 +654,8 @@ fn autocommit_failure_rolls_back_before_releasing_the_statement_guard() {
     assert!(error.to_string().contains("injected planning failure"));
     inputs.assert_events(&[
         "cache.lookup",
-        "cache.write.false",
         "guard.enter",
+        "cache.write.false",
         "begin.statement.false",
         "snapshot.true",
         "cache.write.true",
@@ -661,6 +665,7 @@ fn autocommit_failure_rolls_back_before_releasing_the_statement_guard() {
     ]);
     assert_eq!(inputs.depth.get(), 0);
     assert!(!inputs.guarded.get());
+    assert_eq!(&*inputs.logical_publications.borrow(), &[false, true]);
 }
 
 #[test]
@@ -673,8 +678,8 @@ fn cancelled_snapshot_admission_rolls_back_before_binding_or_executing_autocommi
     assert_eq!(error.sqlstate(), Some("57014"));
     inputs.assert_events(&[
         "cache.lookup",
-        "cache.write.false",
         "guard.enter",
+        "cache.write.false",
         "begin.statement.false",
         "snapshot.true",
         "rollback.true",
@@ -682,6 +687,7 @@ fn cancelled_snapshot_admission_rolls_back_before_binding_or_executing_autocommi
     ]);
     assert_eq!(inputs.depth.get(), 0);
     assert!(!inputs.guarded.get());
+    assert_eq!(&*inputs.logical_publications.borrow(), &[false]);
 }
 
 #[test]

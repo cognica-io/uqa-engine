@@ -36,7 +36,7 @@ pub fn statement_deadline<S: Clone + 'static>(
 /// Owned cache contents after the session has validated its catalog epochs.
 pub struct CachedStatement {
     pub statement: Arc<Statement>,
-    pub logical_plan: uqa_sql::plan::SharedExecutablePlan,
+    pub logical_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub optimized_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
     pub parser: uqa_sql::parser::ParserMetadata,
 }
@@ -56,6 +56,15 @@ impl CachedStatement {
 }
 
 pub trait StatementCache {
+    /// Retire the preliminary executable once planning owns its input. Parsed syntax and matching analyzed inputs remain available for subsequent invocations.
+    fn retire_sql_logical_plan(
+        &self,
+        _sql: &str,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        Ok(())
+    }
+
     /// Look up analysis after the statement's snapshot and writer refreshes, with current catalog and scope validation. Ordinary cache implementations may decline this capability.
     fn cached_sql_analysis(
         &self,
@@ -77,7 +86,7 @@ pub trait StatementCache {
         &self,
         sql: &str,
         statement: Arc<Statement>,
-        logical_plan: uqa_sql::plan::SharedExecutablePlan,
+        logical_plan: Option<uqa_sql::plan::SharedExecutablePlan>,
         parser: uqa_sql::parser::ParserMetadata,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<(), SQLError>;

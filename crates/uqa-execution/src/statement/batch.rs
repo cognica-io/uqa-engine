@@ -450,13 +450,14 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                             ),
                         )?;
                     }
+                    drop(initial_plan);
                     // Earlier BEGIN or catalog changes precede this statement's admitted snapshot.
                     let mut plan = analysis::lower(statement, context.aggregates, &control)?;
                     if cache_single_statement {
                         context.cache.cache_sql_statement(
                             sql,
                             shared_statement(),
-                            plan.clone(),
+                            Some(plan.clone()),
                             parser.clone(),
                             &control,
                         )?;
@@ -471,12 +472,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         && !has_row_locks
                         && context.transactions.prepare_explicit_transaction_writer()?
                     {
+                        drop(plan);
                         plan = analysis::lower(statement, context.aggregates, &control)?;
                         if cache_single_statement {
                             context.cache.cache_sql_statement(
                                 sql,
                                 shared_statement(),
-                                plan.clone(),
+                                Some(plan.clone()),
                                 parser.clone(),
                                 &control,
                             )?;
@@ -512,28 +514,24 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 .planning_control()
                 .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
             let control = planning_owner.control();
+            let cache_initial_statement = cache_single_statement && cached_entry.is_none();
             let (initial_plan, cached_optimized_plan) = if is_single_statement {
                 if let Some(cached) = cached_entry.take() {
                     let optimized = cached.optimized_plan_for(params).cloned();
-                    (cached.logical_plan, optimized)
+                    (
+                        match cached.logical_plan {
+                            Some(plan) => plan,
+                            None => analysis::lower(statement, context.aggregates, &control)
+                                .map_err(|error| {
+                                    abort_explicit_statement_error(context.transactions, error)
+                                })?,
+                        },
+                        optimized,
+                    )
                 } else {
                     let plan = analysis::lower(statement, context.aggregates, &control).map_err(
                         |error| abort_explicit_statement_error(context.transactions, error),
                     )?;
-                    if cache_single_statement {
-                        context
-                            .cache
-                            .cache_sql_statement(
-                                sql,
-                                shared_statement(),
-                                plan.clone(),
-                                parser.clone(),
-                                &control,
-                            )
-                            .map_err(|error| {
-                                abort_explicit_statement_error(context.transactions, error)
-                            })?;
-                    }
                     (plan, None)
                 }
             } else {
@@ -545,6 +543,20 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 )
             };
             if is_transaction_control(initial_plan.as_ref()) {
+                if cache_initial_statement {
+                    context
+                        .cache
+                        .cache_sql_statement(
+                            sql,
+                            shared_statement(),
+                            Some(initial_plan.clone()),
+                            parser.clone(),
+                            &control,
+                        )
+                        .map_err(|error| {
+                            abort_explicit_statement_error(context.transactions, error)
+                        })?;
+                }
                 let mut execute = || {
                     let analyzed = if source.prepared.is_none() && !params.is_empty() {
                         Some(context.planning.plan_owned_for_execution(
@@ -667,17 +679,31 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             let needs_implicit_transaction = !runs_outside_transaction
                 && (context.persistent_backend || requires_statement_transaction || has_row_locks);
             if needs_implicit_transaction {
+                let sets_snapshot =
+                    uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
+                        initial_plan.as_ref(),
+                    );
+                drop(initial_plan);
+                if cache_initial_statement {
+                    // Rollback retains parsed syntax without pinning a plan from before the statement snapshot.
+                    context.cache.cache_sql_statement(
+                        sql,
+                        shared_statement(),
+                        None,
+                        parser.clone(),
+                        &control,
+                    )?;
+                }
                 if has_row_locks {
                     context.row_locks.statement_row_lock_cache()?;
                 }
                 context
                     .transactions
                     .begin_implicit_statement_transaction(is_read_query)?;
-                if let Err(error) = context.transactions.prepare_explicit_statement_snapshot(
-                    uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
-                        initial_plan.as_ref(),
-                    ),
-                ) {
+                if let Err(error) = context
+                    .transactions
+                    .prepare_explicit_statement_snapshot(sets_snapshot)
+                {
                     return rollback_after_statement_error(context.transactions, error);
                 }
                 // Catalog/table refresh intentionally invalidates cached logical
@@ -693,7 +719,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         .cache_sql_statement(
                             sql,
                             shared_statement(),
-                            plan.clone(),
+                            Some(plan.clone()),
                             parser.clone(),
                             &control,
                         )
@@ -731,13 +757,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     context
                         .transactions
                         .begin_implicit_statement_transaction(false)?;
-                    if let Err(error) = context.transactions.prepare_explicit_statement_snapshot(
-                        uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
-                            initial_plan.as_ref(),
-                        ),
-                    ) {
+                    if let Err(error) = context
+                        .transactions
+                        .prepare_explicit_statement_snapshot(sets_snapshot)
+                    {
                         return rollback_after_statement_error(context.transactions, error);
                     }
+                    drop(plan);
                     plan = analysis::lower(statement, context.aggregates, &control).or_else(
                         |error| rollback_after_statement_error(context.transactions, error),
                     )?;
@@ -747,7 +773,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                             .cache_sql_statement(
                                 sql,
                                 shared_statement(),
-                                plan.clone(),
+                                Some(plan.clone()),
                                 parser.clone(),
                                 &control,
                             )
@@ -771,6 +797,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 if mutating_query && context.persistent_backend && !has_row_locks {
                     match context.transactions.prepare_explicit_transaction_writer() {
                         Ok(true) => {
+                            drop(plan);
                             plan = analysis::lower(statement, context.aggregates, &control)
                                 .or_else(|error| {
                                     rollback_after_statement_error(context.transactions, error)
@@ -781,7 +808,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                                     .cache_sql_statement(
                                         sql,
                                         shared_statement(),
-                                        plan.clone(),
+                                        Some(plan.clone()),
                                         parser.clone(),
                                         &control,
                                     )
@@ -833,6 +860,20 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     }
                 }
             } else {
+                if cache_initial_statement {
+                    context
+                        .cache
+                        .cache_sql_statement(
+                            sql,
+                            shared_statement(),
+                            Some(initial_plan.clone()),
+                            parser.clone(),
+                            &control,
+                        )
+                        .map_err(|error| {
+                            abort_explicit_statement_error(context.transactions, error)
+                        })?;
+                }
                 // In-memory read-only queries run without a transaction snapshot.
                 // Catalog generations protect identity, while SQL analysis decides
                 // whether input constants also require a fresh message boundary.

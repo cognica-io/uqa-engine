@@ -78,12 +78,12 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             context.runtime.notices.push(notice.clone());
         }
         let optimized = cached.optimized_plan_for(params).cloned();
-        (
-            cached.statement,
-            cached.logical_plan,
-            optimized,
-            cached.parser,
-        )
+        let plan = match cached.logical_plan {
+            Some(plan) => plan,
+            None => super::batch::analysis::lower(&cached.statement, context.aggregates, &control)
+                .map_err(|error| abort_explicit_statement_error(context.transactions, error))?,
+        };
+        (cached.statement, plan, optimized, cached.parser)
     } else {
         let (parsed, parser) =
             uqa_sql::parser::with_settings(context.statements.parser_settings(), || {
@@ -123,13 +123,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
         context
             .cache
-            .cache_sql_statement(
-                sql,
-                statement.clone(),
-                plan.clone(),
-                parser.clone(),
-                &control,
-            )
+            .cache_sql_statement(sql, statement.clone(), None, parser.clone(), &control)
             .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
         (statement, plan, None, parser)
     };
@@ -150,6 +144,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     let _row_lock_statement = has_row_locks.then(|| context.row_locks.begin_row_lock_statement());
 
     if context.transactions.transaction_depth() != 0 {
+        drop(initial_plan);
         return super::batch::context::with_active_transaction(context.transactions, || {
             if has_row_locks {
                 context.row_locks.statement_row_lock_cache()?;
@@ -162,7 +157,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             context.cache.cache_sql_statement(
                 sql,
                 statement.clone(),
-                plan.clone(),
+                Some(plan.clone()),
                 parser.clone(),
                 &control,
             )?;
@@ -170,21 +165,19 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 && !has_row_locks
                 && context.transactions.prepare_explicit_transaction_writer()?
             {
+                drop(plan);
                 plan = super::batch::analysis::lower(&statement, context.aggregates, &control)?;
                 query_from_plan(&plan)?;
                 context.cache.cache_sql_statement(
                     sql,
                     statement.clone(),
-                    plan.clone(),
+                    Some(plan.clone()),
                     parser.clone(),
                     &control,
                 )?;
             }
-            let optimized = context.planning.plan_owned_for_execution(
-                plan.copy_for_rewrite(&control)?,
-                params,
-                &control,
-            )?;
+            let optimized =
+                super::batch::analysis::plan(context, sql, plan, params, true, false, &control)?;
             let executor =
                 UnifiedPlanExecutor::new(context.statements.statement_execution_context(), params);
             execute_spilled(&executor, &optimized)
@@ -200,11 +193,12 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         let optimized = if let Some(plan) = cached_optimized {
             plan
         } else {
-            let (plan, reusable) = context.planning.plan_owned_for_statement_cache(
-                initial_plan.copy_for_rewrite(&control)?,
-                params,
-                &control,
-            )?;
+            context.cache.retire_sql_logical_plan(sql, &control)?;
+            let plan = initial_plan.copy_for_rewrite(&control)?;
+            drop(initial_plan);
+            let (plan, reusable) = context
+                .planning
+                .plan_owned_for_statement_cache(plan, params, &control)?;
 
             if reusable {
                 context
@@ -218,6 +212,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         return execute_spilled(&executor, optimized.as_ref());
     }
 
+    drop(initial_plan);
     if has_row_locks {
         context.row_locks.statement_row_lock_cache()?;
     }
@@ -237,7 +232,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         .cache_sql_statement(
             sql,
             statement.clone(),
-            plan.clone(),
+            Some(plan.clone()),
             parser.clone(),
             &control,
         )
@@ -266,6 +261,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         {
             return rollback_after_statement_error(context.transactions, error);
         }
+        drop(plan);
         plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
             .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
         if let Err(error) = query_from_plan(&plan) {
@@ -276,7 +272,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             .cache_sql_statement(
                 sql,
                 statement.clone(),
-                plan.clone(),
+                Some(plan.clone()),
                 parser.clone(),
                 &control,
             )
@@ -291,6 +287,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     if mutating_query && context.persistent_backend && !has_row_locks {
         match context.transactions.prepare_explicit_transaction_writer() {
             Ok(true) => {
+                drop(plan);
                 plan = super::batch::analysis::lower(&statement, context.aggregates, &control)
                     .or_else(|error| rollback_after_statement_error(context.transactions, error))?;
                 if let Err(error) = query_from_plan(&plan) {
@@ -301,7 +298,7 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     .cache_sql_statement(
                         sql,
                         statement.clone(),
-                        plan.clone(),
+                        Some(plan.clone()),
                         parser.clone(),
                         &control,
                     )
@@ -311,14 +308,11 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             Err(error) => return rollback_after_statement_error(context.transactions, error),
         }
     }
-    let optimized = match plan.copy_for_rewrite(&control).and_then(|plan| {
-        context
-            .planning
-            .plan_owned_for_execution(plan, params, &control)
-    }) {
-        Ok(plan) => plan,
-        Err(error) => return rollback_after_statement_error(context.transactions, error),
-    };
+    let optimized =
+        match super::batch::analysis::plan(context, sql, plan, params, true, false, &control) {
+            Ok(plan) => plan,
+            Err(error) => return rollback_after_statement_error(context.transactions, error),
+        };
     let executor =
         UnifiedPlanExecutor::new(context.statements.statement_execution_context(), params);
     let cursor = match execute_spilled(&executor, &optimized) {

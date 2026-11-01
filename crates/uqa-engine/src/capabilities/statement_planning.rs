@@ -89,6 +89,27 @@ impl uqa_sql::plan::ExecutablePlanOptimizer for Engine {
             control,
         )
     }
+    fn plan_retained_with_cached_analysis(
+        &self,
+        plan: uqa_sql::plan::SharedExecutablePlan,
+        params: &[uqa_sql::SQLParam],
+        cached: Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<
+        (
+            uqa_sql::plan::SharedExecutablePlan,
+            Option<uqa_sql::binding::statements::AnalyzedStatement>,
+        ),
+        SQLError,
+    > {
+        uqa_sql::plan::ExecutablePlanOptimizer::plan_retained_with_cached_analysis(
+            &self.statement_planning_context(),
+            plan,
+            params,
+            cached,
+            control,
+        )
+    }
     fn plan_with_cached_analysis(
         &self,
         plan: uqa_sql::plan::UnifiedPlan,
