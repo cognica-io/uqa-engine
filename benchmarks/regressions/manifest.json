@@ -34348,6 +34348,113 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "large_values_lowering_keeps_constructor_memory_bounded",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/tests/syntax/lowering.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "A single 20,000-row, seven-column VALUES INSERT under a 40 MiB constructor allowance.",
+      "invariant": "Keep live constructor allocation below 40 MiB and 100,000 allocations; measured live bytes equal admitted storage and all leases retire with the plan.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_rows_release_partial_copies_and_rewrite_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/command_inputs.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "VALUES roots, INSERT rows and VALUES sources with partial-copy rejection, callback failure, both cancellation scopes and unwind.",
+      "invariant": "Release every scalar and container owner after failure while preserving independent sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "retained_analysis_selection_does_not_copy_replaced_literal_input",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/statement_planning/executable/tests.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "Reusable immutable integer input analysis beside a four-MiB original literal spelling and failed optimizer resource acquisition.",
+      "invariant": "Select matching analysis before copying discarded input; preserve resource error order with less than 16 KiB allocated.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "logical_plan_retirement_preserves_snapshots_and_failed_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/statement_cache/tests.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "A retained logical plan with a shared cache snapshot and exhausted destination allowance.",
+      "invariant": "Failed publication preserves both roots; successful retirement keeps parsed syntax and independent snapshots, and releases the payload after its last owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "analytical_fixture_single_insert_fits_default_retention",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/insert_values.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "The unchanged 20,000-row analytical fixture in one INSERT at work_mem 4MB and default 64 MiB retention on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Keep independent count, Q1/Q6 and scan results, matching cursor output, duplicate-key diagnostics, quota rejection, savepoint recovery, durable reopen and complete release at engine close.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "narrow_rows_spill_using_retained_bytes_beside_large_plan_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/overlay/tests/spilled.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "Seven-column narrow rows and cached exact keys beside a three MiB retained owner in a four MiB allowance; repeated replacement of one row before bulk staging.",
+      "invariant": "Spill according to retained field reservations, retire replaced row bytes, preserve every row and exact key, and release command storage without releasing the sibling owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "rejoining_vector_parts_preserves_admission_and_original_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/vec.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "Rejoin an admitted vector with an exhausted allowance, then reject growth and mismatched buffer ownership.",
+      "invariant": "Preserve the allocation address, original elements and reservation without new allocation; invalid adoption releases its private lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_child_metadata_restores_ownership_after_rejection_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/edits.rs",
+      "capability": "Large statement plan ownership",
+      "workload": "Edit the compact child metadata owner of a nested scalar under an exhausted allowance and interrupted mutation.",
+      "invariant": "Reattach the original child buffer and exact reservations on rejection and unwind; freezing releases only temporary metadata.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
