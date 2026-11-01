@@ -1,6 +1,6 @@
 # UQA C bindings
 
-This crate provides the embedded C ABI in UQA Engine 0.6.2, with C11/C++17 shared and static packages for Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. The [public API reference](../../docs/manual/reference/08-bindings-and-extensions.md#c-source-api) and [source headers](include/uqa/uqa.h) describe the callable interface; the [implementation ledger](../../docs/plans/0028-c-bindings.md) records the delivered scope and qualification evidence.
+This crate provides the embedded C ABI in UQA Engine 0.6.3, with C11/C++17 shared and static packages for Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. The [public API reference](../../docs/manual/reference/08-bindings-and-extensions.md#c-source-api) and [source headers](include/uqa/uqa.h) describe the callable interface; the [implementation ledger](../../docs/plans/0028-c-bindings.md) records the delivered scope and qualification evidence.
 
 The Cargo library target is `uqa`, producing `libuqa.so`/`libuqa.dylib` and `libuqa.a` on Unix, or `uqa.dll` and `uqa.lib` on Windows. It emits only C libraries; the existing Rust `uqa` facade owns the separate `libuqa.rlib`. The native distribution includes headers under `include/uqa`. CMake links the Cargo static archive with the platform's exact public-symbol list. Platform and release qualification is recorded in the implementation ledger.
 

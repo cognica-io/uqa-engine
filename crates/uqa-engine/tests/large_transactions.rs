@@ -17,28 +17,41 @@ use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorage
 /// A session allowance far smaller than the transactions below, so that they spill.
 const ALLOWANCE: usize = 4 << 20;
 
-fn engines(directory: &Path) -> Vec<(&'static str, Engine)> {
+fn native_engine(directory: &Path) -> Engine {
     let options = VersionedSessionOptions {
         retained_bytes: ALLOWANCE,
     };
-    let native = {
-        let connection = ManagedConnection::open(&directory.join("native.db")).unwrap();
-        connection.bind_native_records(options).unwrap();
-        Engine::from_persistent_provider(Arc::new(SQLiteStorageProvider::new(connection))).unwrap()
+    let connection = ManagedConnection::open(&directory.join("native.db")).unwrap();
+    connection.bind_native_records(options).unwrap();
+    Engine::from_persistent_provider(Arc::new(SQLiteStorageProvider::new(connection))).unwrap()
+}
+
+fn key_value_engine(directory: &Path) -> Engine {
+    let options = VersionedSessionOptions {
+        retained_bytes: ALLOWANCE,
     };
-    let key_value = Engine::from_persistent_provider(Arc::new(
+    Engine::from_persistent_provider(Arc::new(
         SQLiteKeyValueStorage::open_with_options(&directory.join("key-value.db"), options).unwrap(),
     ))
-    .unwrap();
-    let redb = Engine::from_persistent_provider(Arc::new(
+    .unwrap()
+}
+
+fn redb_engine(directory: &Path) -> Engine {
+    let options = VersionedSessionOptions {
+        retained_bytes: ALLOWANCE,
+    };
+    Engine::from_persistent_provider(Arc::new(
         uqa_storage_redb::RedbStorage::open_with_options(directory.join("store.redb"), options)
             .unwrap(),
     ))
-    .unwrap();
+    .unwrap()
+}
+
+fn engines(directory: &Path) -> Vec<(&'static str, Engine)> {
     vec![
-        ("native SQLite", native),
-        ("SQLite KeyValue", key_value),
-        ("redb", redb),
+        ("native SQLite", native_engine(directory)),
+        ("SQLite KeyValue", key_value_engine(directory)),
+        ("redb", redb_engine(directory)),
     ]
 }
 
@@ -273,63 +286,68 @@ fn a_volatile_function_reads_the_rows_that_a_statement_larger_than_the_session_a
     }
 }
 
-#[test]
-fn a_repeatable_read_transaction_larger_than_the_session_allowance_reads_its_own_rows() {
+#[rstest::rstest]
+#[case::sqlite_native("native SQLite", native_engine)]
+#[case::sqlite_key_value("SQLite KeyValue", key_value_engine)]
+#[case::redb("redb", redb_engine)]
+fn a_repeatable_read_transaction_larger_than_the_session_allowance_reads_its_own_rows(
+    #[case] backend: &str,
+    #[case] open: fn(&Path) -> Engine,
+) {
     let directory = tempfile::tempdir().unwrap();
-    for (backend, engine) in engines(directory.path()) {
-        exec(
-            &engine,
-            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
-        );
-        exec(&engine, "BEGIN ISOLATION LEVEL REPEATABLE READ");
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs"),
-            Value::Int(0),
-            "{backend}"
-        );
-        for chunk in 0..10 {
-            insert_rows(&engine, chunk * 2_000, 2_000, 2_000, "payload");
-            if chunk % 5 == 0 {
-                assert_eq!(
-                    scalar(&engine, "SELECT count(*) FROM docs"),
-                    Value::Int((chunk + 1) * 2_000),
-                    "{backend}"
-                );
-            }
+    let engine = open(directory.path());
+    exec(
+        &engine,
+        "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+    );
+    exec(&engine, "BEGIN ISOLATION LEVEL REPEATABLE READ");
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs"),
+        Value::Int(0),
+        "{backend}"
+    );
+    for chunk in 0..10 {
+        insert_rows(&engine, chunk * 2_000, 2_000, 2_000, "payload");
+        if chunk % 5 == 0 {
             assert_eq!(
-                scalar(
-                    &engine,
-                    &format!(
-                        "SELECT count(*) FROM docs AS d WHERE d.id = {}",
-                        (chunk + 1) * 2_000
-                    )
-                ),
-                Value::Int(1),
+                scalar(&engine, "SELECT count(*) FROM docs"),
+                Value::Int((chunk + 1) * 2_000),
                 "{backend}"
             );
         }
-        exec(
-            &engine,
-            "UPDATE docs SET body = 'updated' WHERE id % 1000 = 0",
-        );
-        exec(&engine, "DELETE FROM docs WHERE id % 1000 = 1");
         assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs"),
-            Value::Int(19_980),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'updated'"),
-            Value::Int(20),
-            "{backend}"
-        );
-        exec(&engine, "COMMIT");
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs"),
-            Value::Int(19_980),
+            scalar(
+                &engine,
+                &format!(
+                    "SELECT count(*) FROM docs AS d WHERE d.id = {}",
+                    (chunk + 1) * 2_000
+                )
+            ),
+            Value::Int(1),
             "{backend}"
         );
     }
+    exec(
+        &engine,
+        "UPDATE docs SET body = 'updated' WHERE id % 1000 = 0",
+    );
+    exec(&engine, "DELETE FROM docs WHERE id % 1000 = 1");
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs"),
+        Value::Int(19_980),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'updated'"),
+        Value::Int(20),
+        "{backend}"
+    );
+    exec(&engine, "COMMIT");
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs"),
+        Value::Int(19_980),
+        "{backend}"
+    );
 }
 
 #[test]

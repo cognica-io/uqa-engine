@@ -23,13 +23,13 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or C/C++, or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.6.2
+## New in 0.6.3
 
-Version 0.6.2 introduces the embedded C ABI and C11/C++17 shared/static library packages for Linux, macOS and Windows. It also moves project-owned code to Apache 2.0. See the [C API](docs/manual/reference/08-bindings-and-extensions.md#c-source-api), [installed-consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers) and [release history](HISTORY.md#062---2026-10-27).
+Version 0.6.3 reduces memory required by large multi-row INSERTs, transaction snapshots and native SQLite text-index mutations. It preserves nested SQL cursor scopes and deadlines, handles catalog-refresh failures inside transaction ownership, and avoids repeated metadata construction in projected aggregate batches. See the [release history](HISTORY.md#063---2026-11-01).
 
-SQL execution preserves PostgreSQL demand and diagnostics through cursors, CTEs, LATERAL inputs, aggregates and rewrite rules. Retained metadata and result ownership avoid repeated analysis and unnecessary payload copies, while native parallel workers and deadline timers retire with their owners. Native SQLite packages use SQLCipher 4.19.0 through the maintained driver packages.
+`EXPLAIN (MEMORY)` reports the selected native executable's live storage before execution in TEXT, JSON, XML and YAML. The [SQL contract](docs/manual/sql/README.md#diagnostics) describes the fields and their measurement boundary.
 
-Native temporal values preserve the PostgreSQL timestamp range and second-resolution TIMETZ offsets. These encodings require SQLite record format 67 and redb record format 63. Update all database owners together and retain a pre-upgrade backup; the [0.6.2 upgrade guide](docs/manual/reference/10-upgrading.md#062) describes storage compatibility and required Rust adapter changes.
+The [platform and build guide](#supported-platforms) covers native packages, browser WASM and iOS/iPadOS source builds using the existing Rust crate or C/C++/Swift integration. Follow the [0.6.3 upgrade guide](docs/manual/reference/10-upgrading.md#063) when updating an existing installation.
 
 ## Mathematical foundation
 
@@ -42,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.6.2
+python -m pip install uqa==0.6.3
 usql
 ```
 
@@ -94,10 +94,10 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.6.2
+cargo add uqa@0.6.3
 ```
 
-Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.6.2 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+Korean and Japanese text analysis are separate optional features that this command does not enable: `nori` adds the Korean analyzer with its embedded dictionary, and `kuromoji` the Japanese one. Enable the ones an application uses, for example `cargo add uqa@0.6.3 --features nori,kuromoji` or `features = ["nori", "kuromoji"]` on the dependency in `Cargo.toml`; `uqa-engine` takes the same features. A build without them rejects requests for those analyzers. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
@@ -297,7 +297,7 @@ export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim="--target=arm64-apple-ios$
 
 ```toml
 [dependencies]
-uqa = { version = "0.6.2", features = ["nori", "kuromoji"] }
+uqa = { version = "0.6.3", features = ["nori", "kuromoji"] }
 ```
 
 Build from your application's directory with `cargo build --release --target aarch64-apple-ios`, or select `aarch64-apple-ios-sim` for the simulator. To build the Rust facade from this repository instead:
