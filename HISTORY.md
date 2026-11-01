@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-01
+
+### Changed
+
+- Document supported native and browser platforms and source builds, including direct Rust crate use and C/C++/Swift static-library integration on iOS and iPadOS.
+
 ### Fixed
 
 - Reuse row metadata values within projected aggregate batches, avoiding repeated temporary value construction while preserving requested document IDs, scores, table OIDs, stored columns with the same names and row diagnostics.

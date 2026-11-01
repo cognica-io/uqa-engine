@@ -1,6 +1,16 @@
 # Upgrading UQA Engine
 
-This page describes UQA Engine 0.6.2 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.2/docs/manual/reference/10-upgrading.md) when installing the 0.6.2 packages.
+This page describes UQA Engine 0.6.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.3/docs/manual/reference/10-upgrading.md) when installing the 0.6.3 packages.
+
+## 0.6.3
+
+Update the Rust, Python, Node.js, browser WASM and C packages together to 0.6.3. This release retains SQLite record format 67 and redb record format 63 from 0.6.2; upgrades from earlier releases must still follow the [0.6.2 storage requirements](#062). Native SQLite retains the same SQLCipher and driver versions.
+
+Large INSERT statements, transaction-private snapshots and native SQLite text mutations release or spill retained storage earlier under the existing session allowance. Applications can continue submitting complete statements; the default allowance and transaction/savepoint recovery contracts remain in effect. Nested cursors retain their invoking scope and deadline, and catalog-refresh failures follow the transaction owner's normal abort and recovery path.
+
+`EXPLAIN (MEMORY)` reports live selected executable storage before execution in all four output formats. These fields describe the [documented observation boundary](../sql/README.md#diagnostics); they are not a total process-memory measurement or a guarantee that every planning allocation is capped.
+
+Custom Rust planning and execution adapters use the current owned and borrowed plan interfaces, including `OwnedQueryPlan`, `OwnedScalarExpr` and `RetainedQueryArena`, and carry the invoking `ProductionControl` through fallible construction. Follow the [planning ownership contract](../internals/02-planning-and-execution.md#native-planning-memory) when updating these low-level adapters.
 
 ## 0.6.2
 
@@ -52,7 +62,7 @@ Custom providers that retain B-tree indexes must implement `PersistentStorageBac
 
 Custom Execution `TableRead` adapters now pass the invoking `StorageReadControl` to index-only projection and return `Result<Option<usize>, SQLError>`; an I/O, cancellation or resource error must not become `None` and trigger a second read. `QueryTableAccess::index_read_control` supplies the selected session's allowance and cancellation. Standalone `ScoredDocumentSource` users can supply the same context through `with_index_read_control`.
 
-SQLite builds use the maintained `uqa-rusqlite` 0.39.1 and `uqa-libsqlite3-sys` 0.37.1 packages, preserving the upstream 0.39.0 API and SQLite/SQLCipher sources while removing the bundled global page-cache memory-management mutex. This changes the driver's Rust package identity, with maintainer approval; it does not change database formats or SQL behavior. Applications that name driver types can import `uqa_storage_sqlite::rusqlite` or alias the maintained package as shown below. Every native dependency must use the same package family: official and maintained sys crates both declare `links = "sqlite3"`, so a transitive dependency on official rusqlite must also be migrated. Cargo aliases preserve import spelling, not cross-package type identity.
+SQLite builds use the maintained `uqa-rusqlite` 0.39.1 and `uqa-libsqlite3-sys` 0.37.1 packages, preserving the upstream 0.39.0 API and SQLite/SQLCipher sources while removing the bundled global page-cache memory-management mutex. This changes the driver's Rust package identity; it does not change database formats or SQL behavior. Applications that name driver types can import `uqa_storage_sqlite::rusqlite` or alias the maintained package as shown below. Every native dependency must use the same package family: official and maintained sys crates both declare `links = "sqlite3"`, so a transitive dependency on official rusqlite must also be migrated. Cargo aliases preserve import spelling, not cross-package type identity.
 
 ```toml
 rusqlite = { package = "uqa-rusqlite", version = "=0.39.1", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
