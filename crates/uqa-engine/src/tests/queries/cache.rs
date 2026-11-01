@@ -19,9 +19,11 @@ fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
 ) {
     const QUERY: &str =
         "SELECT id, payload, pg_typeof(payload)::text AS kind FROM changed_rows ORDER BY id";
-    fn read(engine: &Engine) -> Result<Vec<Vec<Value>>, uqa_sql::SQLError> {
+    const NESTED_QUERY: &str =
+        "SELECT payload, id, pg_typeof(payload)::text AS kind FROM changed_rows ORDER BY id";
+    fn read(engine: &Engine, sql: &str) -> Result<Vec<Vec<Value>>, uqa_sql::SQLError> {
         let mut rows = Vec::new();
-        for batch in engine.sql_cursor(QUERY, &[])? {
+        for batch in engine.sql_cursor(sql, &[])? {
             for row in batch?.into_rows() {
                 rows.push(vec![
                     row["id"].clone(),
@@ -32,6 +34,17 @@ fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
         }
         Ok(rows)
     }
+    fn assert_syntax_only(engine: &Engine) {
+        let cached = engine
+            .cached_sql_statement(NESTED_QUERY)
+            .expect("nested parsed syntax remains reusable");
+        assert!(
+            cached.logical_plan.is_none(),
+            "preliminary plan was retained"
+        );
+        assert!(cached.analyzed_plan.is_none());
+        assert!(cached.optimized_plan.is_none());
+    }
     let directory = tempfile::tempdir().unwrap();
     let engine = Arc::new(provider.open(&directory.path().join("nested-cursor-cache.db")));
     let captured = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -39,7 +52,25 @@ fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
     let weak = Arc::downgrade(&engine);
     engine
         .register_scalar_function("read_transition_cursor", move |_args: &[Value]| {
-            output.lock().extend(read(&weak.upgrade().unwrap())?);
+            let engine = weak.upgrade().unwrap();
+            let rows = read(&engine, QUERY)?;
+            assert_eq!(read(&engine, NESTED_QUERY)?, rows);
+            assert_syntax_only(&engine);
+            let materialized = engine.sql(NESTED_QUERY, &[])?;
+            let materialized: Vec<_> = materialized
+                .rows
+                .iter()
+                .map(|row| {
+                    vec![
+                        row["id"].clone(),
+                        row["payload"].clone(),
+                        row["kind"].clone(),
+                    ]
+                })
+                .collect();
+            assert_eq!(materialized, rows);
+            assert_syntax_only(&engine);
+            output.lock().extend(rows);
             Ok(Value::Int(0))
         })
         .unwrap();
@@ -50,7 +81,7 @@ fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
         Value::Bool(true),
         Value::Str("boolean".into()),
     ]];
-    assert_eq!(read(&engine).unwrap(), ordinary);
+    assert_eq!(read(&engine, QUERY).unwrap(), ordinary);
     let original = engine
         .cached_sql_analysis(QUERY)
         .expect("top-level analysis");
@@ -74,7 +105,7 @@ fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
             vec![Value::Int(3), Value::Int(11), Value::Str("integer".into())],
         ]
     );
-    assert_eq!(read(&engine).unwrap(), ordinary);
+    assert_eq!(read(&engine, QUERY).unwrap(), ordinary);
     engine.sql("COMMIT", &[]).unwrap();
     engine.close().unwrap();
 }

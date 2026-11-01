@@ -36,6 +36,7 @@ pub(in crate::statement) fn plan<S: Clone + 'static>(
         // Prepared inference, dependency checks and optimization belong to its retained definition.
         return Ok(StatementPlan::Prepared(logical));
     }
+    context.cache.retire_sql_logical_plan(sql, control)?;
     if !cacheable {
         let plan = logical.copy_for_rewrite(control)?;
         drop(logical);
@@ -45,7 +46,6 @@ pub(in crate::statement) fn plan<S: Clone + 'static>(
             .map(StatementPlan::Optimized);
     }
     let cached = context.cache.cached_sql_analysis(sql);
-    context.cache.retire_sql_logical_plan(sql, control)?;
     let (plan, analyzed) = context
         .planning
         .plan_retained_with_cached_analysis(logical, params, cached, control)?;
