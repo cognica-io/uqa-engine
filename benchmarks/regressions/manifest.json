@@ -2,6 +2,71 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_capture_preserves_private_transactions_and_the_original_committed_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native SQLite capture ownership",
+      "workload": "Attempt unbound capture, then capture during private writes and commit those writes before consuming the image in all four file modes.",
+      "invariant": "Unbound capture cannot initialize the source; capture preserves the active transaction, exports only its original committed state and releases all retained image memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_image_preserves_evaluated_rows_and_watermarks_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native SQLite source-independent image",
+      "workload": "Export real DiskANN artifacts and 512 KiB metadata in four file modes while an independent writer advances records and allocator watermarks; delete the source before archive verification.",
+      "invariant": "Every image key, original revision, byte and watermark matches the independent raw oracle; notification delivery is excluded and retained workspace stays within 128 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_membership_uses_the_captured_generation_state_without_payload_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native DiskANN retained membership",
+      "workload": "Capture each encoded lifecycle state, change its live state and select the state and an absent payload through the original snapshot.",
+      "invariant": "Only the originally published generation is selected; membership reads the bounded native state envelope without fetching payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_image_retires_its_cut_on_completion_cancellation_and_memory_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native image terminal ownership",
+      "workload": "Interrupt a stream, skip an unread header, exhaust its allowance and complete a stream before late cancellation.",
+      "invariant": "Every failure retires mapping and snapshot resources, one-position windows remain bounded and completed advance stays complete after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_membership_rejects_missing_corrupt_and_misaddressed_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native image metadata validation",
+      "workload": "Use missing, malformed and oversized lifecycle rows plus foreign namespaces, malformed components and unknown native keys.",
+      "invariant": "Invalid source membership fails without whole-value allocation and all metadata reads stay within the original 4 KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "restore_provider_path_requires_regular_installed_names_and_retires_memory",

@@ -613,9 +613,7 @@ impl SQLiteKeyValueStorage {
         &self,
         control: &StorageReadControl,
     ) -> uqa_storage::backup::BackupResult<uqa_storage::key_value::KeyValueBackupImage> {
-        use uqa_storage::mvcc::VersionedPersistence;
-        let records = crate::mvcc::SQLiteRecordStore::for_key_value(&self.store.conn, control)?;
-        let snapshot = records.capture_backup_snapshot(control)?.ok_or(
+        let snapshot = self.store.records.capture_backup_snapshot(control)?.ok_or(
             uqa_storage::backup::BackupError::Unsupported("SQLite KV backup snapshot"),
         )?;
         uqa_storage::key_value::KeyValueBackupImage::new(

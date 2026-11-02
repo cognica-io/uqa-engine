@@ -25,6 +25,23 @@ pub(in crate::key_value) fn include(
     key: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<(bool, usize)> {
+    diskann_backup_membership(key, |state_key, bytes| {
+        let chunk = records
+            .read_value_chunk(state_key, 0, bytes, control)
+            .map_err(VersionError::into_storage_error)?
+            .ok_or_else(|| invalid("backup generation has no state"))?;
+        if chunk.total_bytes() != Some(STATE_BYTES) || chunk.copied() != STATE_BYTES {
+            return Err(invalid("backup generation state has invalid length"));
+        }
+        Ok(STATE_BYTES)
+    })
+}
+
+/// Select a record using the owning generation codec. The mapping callback reads the exact state at its retained cut into the fixed output and returns the actual source metadata bytes read, including its own envelope. No callback occurs for a nongeneration key. Invalid or missing state must fail rather than select a provisional generation.
+pub fn diskann_backup_membership(
+    key: &[u8],
+    read_state: impl FnOnce(&[u8], &mut [u8]) -> StorageBackendResult<usize>,
+) -> StorageBackendResult<(bool, usize)> {
     if !key.starts_with(ROOT) || key.get(ROOT.len()) != Some(&1) {
         return Ok((true, 0));
     }
@@ -38,16 +55,10 @@ pub(in crate::key_value) fn include(
     keys.decode(key)?;
     let state_key = keys.key(Kind::State);
     let mut bytes = [0; STATE_BYTES];
-    let chunk = records
-        .read_value_chunk(state_key.as_ref(), 0, &mut bytes, control)
-        .map_err(VersionError::into_storage_error)?
-        .ok_or_else(|| invalid("backup generation has no state"))?;
-    if chunk.total_bytes() != Some(STATE_BYTES) || chunk.copied() != STATE_BYTES {
-        return Err(invalid("backup generation state has invalid length"));
-    }
+    let read_bytes = read_state(state_key.as_ref(), &mut bytes)?;
     Ok((
         State::decode(bytes)?.status == DiskANNStageStatus::Published,
-        STATE_BYTES,
+        read_bytes,
     ))
 }
 

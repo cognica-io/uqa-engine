@@ -15,56 +15,56 @@ use std::sync::Arc;
 
 use crate::{
     backup::{
-        BackupCut, BackupError, BackupResult, ImageFormat, ImageProvider, NamespaceId,
-        RecordImageCursor, RecordImageFamily, RecordImageStep, SnapshotId, UnitAddress, UnitKind,
+        BackupCut, BackupError, BackupImageSource, BackupRecordMapping, BackupResult,
+        BackupSourceStatistics, ImageFormat, ImageProvider, MappedRecordBackupImage, NamespaceId,
     },
-    mvcc::{BackupCursorKey, CommittedBackupSnapshot, NotificationRecordLayout},
+    mvcc::{
+        BackupCursorKey, CommittedBackupSnapshot, CommittedRecordSnapshot, NotificationRecordLayout,
+    },
     read_control::StorageReadControl,
+};
+
+pub use crate::backup::{
+    BackupSourceStep as KeyValueImageStep, BackupSourceUnit as KeyValueImageUnit,
 };
 
 const NAMESPACE: [u8; 16] = *b"UQA-KV-IMAGE-001";
 const HEADER_BYTES: usize = 32;
 
-/// One complete provider image unit. Record payloads begin with their committed revision as eight big-endian bytes; allocator payloads are eight big-endian bytes. The header and all owner keys are versioned by the image format.
-pub struct KeyValueImageUnit<'a> {
-    pub address: UnitAddress<'a>,
-    pub kind: UnitKind,
-    pub decoded_bytes: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KeyValueImageStep {
-    Unit,
-    Pending,
-    Complete,
-}
-
-enum Stage {
-    Ready,
-    Header(usize),
-    Scan,
-    Unit(usize),
-    Complete,
-    Failed,
-}
-
-/// Online Key/Value mapping exporter over one already captured joint cut. This owner interprets the mapping's notification and `DiskANN` lifecycle records, while preserving catalog, evaluated data/index/resource bytes and data namespaces verbatim. Import and public Engine capability qualification are separate provider responsibilities.
-pub struct KeyValueBackupImage {
-    cut: BackupCut,
-    source: Option<Arc<dyn CommittedBackupSnapshot>>,
-    records: Option<RecordImageCursor>,
-    notification_key: BackupCursorKey,
-    control: StorageReadControl,
-    stage: Stage,
+struct Mapping {
+    provider: ImageProvider,
     header: [u8; HEADER_BYTES],
-    positions: u64,
-    copied_bytes: u64,
-    metadata_read_bytes: u64,
-    excluded_units: u64,
+    notification: BackupCursorKey,
 }
+
+impl BackupRecordMapping for Mapping {
+    fn format(&self) -> ImageFormat {
+        ImageFormat::new(self.provider, 1).expect("fixed nonzero image version")
+    }
+    fn namespace(&self) -> NamespaceId {
+        NamespaceId::from_bytes(NAMESPACE).expect("fixed nonzero namespace")
+    }
+    fn header(&self) -> &[u8] {
+        &self.header
+    }
+    fn include(
+        &self,
+        records: &dyn CommittedRecordSnapshot,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> BackupResult<(bool, usize)> {
+        if key == &*self.notification {
+            return Ok((false, 0));
+        }
+        Ok(super::diskann::backup::include(records, key, control)?)
+    }
+}
+
+/// Online Key/Value mapping exporter over one captured joint cut. The shared stream owns consumption and retirement; this mapping excludes notification delivery and unpublished/retired `DiskANN` payloads while preserving evaluated owner encodings.
+pub struct KeyValueBackupImage(MappedRecordBackupImage<Mapping>);
 
 impl KeyValueBackupImage {
-    /// The provider must supply its complete Key/Value mapping cut. Native `SQLite` and the actual memory Engine have different owners and cannot use this constructor to claim image support.
+    /// The provider supplies its complete Key/Value cut. Native `SQLite` and the actual memory Engine have separate mapping owners.
     pub fn new(
         source: Arc<dyn CommittedBackupSnapshot>,
         provider: ImageProvider,
@@ -74,272 +74,59 @@ impl KeyValueBackupImage {
             return Err(BackupError::Unsupported("Key/Value image provider"));
         }
         control.cancellation().check()?;
-        let cut = BackupCut {
-            source: source.database_id(),
-            snapshot: SnapshotId::new()?,
-            format: ImageFormat::new(provider, 1)?,
-            sequence: Some(source.records().sequence()),
-        };
         let mut header = [0; HEADER_BYTES];
         header[..8].copy_from_slice(b"UQAKVI01");
-        header[8..24].copy_from_slice(&cut.source.as_bytes());
+        header[8..24].copy_from_slice(&source.database_id().as_bytes());
         header[24..].copy_from_slice(&source.records().sequence().as_u64().to_be_bytes());
-        let notification_key = super::KeyValueNotificationRecords.key(control)?;
-        let records = RecordImageCursor::new(source.clone(), control)?;
-        Ok(Self {
-            cut,
-            source: Some(source),
-            records: Some(records),
-            notification_key,
-            control: control.clone(),
-            stage: Stage::Ready,
+        let mapping = Mapping {
+            provider,
             header,
-            positions: 0,
-            copied_bytes: 0,
-            metadata_read_bytes: 0,
-            excluded_units: 0,
-        })
-    }
-
-    pub const fn cut(&self) -> BackupCut {
-        self.cut
-    }
-
-    /// Actual scan positions, including excluded entries; this is not page I/O.
-    pub const fn visited_positions(&self) -> u64 {
-        self.positions
-    }
-
-    /// Raw source record/allocator bytes copied into caller output. Generated headers and revision prefixes are excluded.
-    pub const fn copied_source_bytes(&self) -> u64 {
-        self.copied_bytes
-    }
-
-    /// Generation-state bytes read for image membership, separately from streamed payloads. Opaque provider cache and page activity are not measured here.
-    pub const fn metadata_read_bytes(&self) -> u64 {
-        self.metadata_read_bytes
-    }
-
-    pub const fn excluded_units(&self) -> u64 {
-        self.excluded_units
-    }
-
-    pub fn current_unit(&self) -> Option<KeyValueImageUnit<'_>> {
-        let (family, key, kind, decoded_bytes) = match self.stage {
-            Stage::Header(_) => (1, &[][..], UnitKind::Metadata, HEADER_BYTES as u64),
-            Stage::Unit(_) => {
-                let unit = self.records.as_ref()?.current_unit()?;
-                match unit.family {
-                    RecordImageFamily::IdentifierWatermark => {
-                        (2, unit.key, UnitKind::Metadata, unit.decoded_bytes as u64)
-                    }
-                    RecordImageFamily::Record => {
-                        (3, unit.key, UnitKind::Record, unit.decoded_bytes as u64 + 8)
-                    }
-                }
-            }
-            _ => return None,
+            notification: super::KeyValueNotificationRecords.key(control)?,
         };
-        Some(KeyValueImageUnit {
-            address: UnitAddress {
-                namespace: NamespaceId::from_bytes(NAMESPACE).expect("fixed nonzero namespace"),
-                generation: 0,
-                family,
-                key,
-            },
-            kind,
-            decoded_bytes,
-        })
+        Ok(Self(MappedRecordBackupImage::from_mapping(
+            source, mapping, control,
+        )?))
     }
-
-    /// Inspect at most `positions` raw positions and at most one generation-state record. An excluded unit returns Pending without reading its payload. Every physical read closes before return, including when a selected unit still has unread bytes.
+    pub const fn cut(&self) -> BackupCut {
+        self.0.cut()
+    }
+    pub const fn visited_positions(&self) -> u64 {
+        self.0.visited_positions()
+    }
+    pub const fn copied_source_bytes(&self) -> u64 {
+        self.0.copied_source_bytes()
+    }
+    pub const fn metadata_read_bytes(&self) -> u64 {
+        self.0.metadata_read_bytes()
+    }
+    pub const fn excluded_units(&self) -> u64 {
+        self.0.excluded_units()
+    }
+    pub fn current_unit(&self) -> Option<KeyValueImageUnit<'_>> {
+        self.0.current_unit()
+    }
     pub fn advance(&mut self, positions: usize) -> BackupResult<KeyValueImageStep> {
-        let result = self.advance_inner(positions);
-        self.finish_call(&result);
-        result
+        self.0.advance(positions)
     }
-
-    fn advance_inner(&mut self, positions: usize) -> BackupResult<KeyValueImageStep> {
-        match self.stage {
-            Stage::Complete => return Ok(KeyValueImageStep::Complete),
-            Stage::Failed => return Err(BackupError::Finished),
-            _ => (),
-        }
-        self.control.cancellation().check()?;
-        if positions == 0 {
-            return Err(BackupError::Invalid("zero Key/Value image scan window"));
-        }
-        match self.stage {
-            Stage::Ready => {
-                self.stage = Stage::Header(0);
-                return Ok(KeyValueImageStep::Unit);
-            }
-            Stage::Header(offset) if offset != HEADER_BYTES => {
-                return Err(BackupError::Invalid(
-                    "Key/Value image header is not consumed",
-                ));
-            }
-            Stage::Unit(offset)
-                if offset < 8
-                    && self
-                        .records
-                        .as_ref()
-                        .unwrap()
-                        .current_unit()
-                        .unwrap()
-                        .family
-                        == RecordImageFamily::Record =>
-            {
-                return Err(BackupError::Invalid(
-                    "Key/Value image revision is not consumed",
-                ));
-            }
-            _ => (),
-        }
-        let records = self.records.as_mut().expect("active image owns cursor");
-        match records.advance(positions)? {
-            RecordImageStep::Complete => {
-                self.release(Stage::Complete);
-                Ok(KeyValueImageStep::Complete)
-            }
-            RecordImageStep::Pending => {
-                self.stage = Stage::Scan;
-                Ok(KeyValueImageStep::Pending)
-            }
-            RecordImageStep::Unit => {
-                let unit = records.current_unit().expect("selected raw unit");
-                let (include, bytes) = match unit.family {
-                    RecordImageFamily::IdentifierWatermark => (true, 0),
-                    RecordImageFamily::Record if unit.key == &*self.notification_key => (false, 0),
-                    RecordImageFamily::Record => super::diskann::backup::include(
-                        self.source
-                            .as_ref()
-                            .expect("active image owns cut")
-                            .records(),
-                        unit.key,
-                        &self.control,
-                    )?,
-                };
-                self.metadata_read_bytes = self
-                    .metadata_read_bytes
-                    .checked_add(bytes as u64)
-                    .ok_or(BackupError::Invalid("image counter overflow"))?;
-                if !include {
-                    records.skip_current()?;
-                    self.excluded_units = self
-                        .excluded_units
-                        .checked_add(1)
-                        .ok_or(BackupError::Invalid("image counter overflow"))?;
-                    self.stage = Stage::Scan;
-                    return Ok(KeyValueImageStep::Pending);
-                }
-                if unit.family == RecordImageFamily::Record {
-                    (unit.decoded_bytes as u64)
-                        .checked_add(8)
-                        .ok_or(BackupError::Invalid(
-                            "Key/Value image record length overflow",
-                        ))?;
-                }
-                self.stage = Stage::Unit(0);
-                Ok(KeyValueImageStep::Unit)
-            }
-        }
-    }
-
-    /// Copy the current unit into a caller-owned buffer. Errors make the image terminal and release the cut; discard the output of a failed call.
     pub fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
-        let result = self.read_inner(output);
-        self.finish_call(&result);
-        result
-    }
-
-    fn read_inner(&mut self, output: &mut [u8]) -> BackupResult<usize> {
-        if !matches!(self.stage, Stage::Header(_) | Stage::Unit(_)) {
-            return Err(BackupError::Finished);
-        }
-        self.control.cancellation().check()?;
-        match self.stage {
-            Stage::Header(ref mut offset) => {
-                let size = output.len().min(HEADER_BYTES - *offset);
-                output[..size].copy_from_slice(&self.header[*offset..*offset + size]);
-                *offset += size;
-                Ok(size)
-            }
-            Stage::Unit(ref mut offset) => {
-                let records = self.records.as_mut().expect("active image owns cursor");
-                let unit = records.current_unit().ok_or(BackupError::Finished)?;
-                let mut copied = 0;
-                if let Some(revision) = unit.revision {
-                    copied = output.len().min(8 - *offset);
-                    output[..copied].copy_from_slice(
-                        &revision.as_u64().to_be_bytes()[*offset..*offset + copied],
-                    );
-                    *offset += copied;
-                }
-                Ok(copied + records.read_current(&mut output[copied..])?)
-            }
-            _ => Err(BackupError::Finished),
-        }
-    }
-
-    fn finish_call<T>(&mut self, result: &BackupResult<T>) {
-        if let Some(records) = &self.records {
-            self.positions = records.visited_positions();
-            self.copied_bytes = records.copied_bytes();
-        }
-        if result.is_err() && !matches!(self.stage, Stage::Complete | Stage::Failed) {
-            self.release(Stage::Failed);
-        }
-    }
-
-    fn release(&mut self, stage: Stage) {
-        if let Some(records) = &self.records {
-            self.positions = records.visited_positions();
-            self.copied_bytes = records.copied_bytes();
-        }
-        self.stage = stage;
-        self.records = None;
-        self.source = None;
-        self.notification_key = BackupCursorKey::new(self.control.memory());
+        self.0.read_current(output)
     }
 }
 
-impl crate::backup::BackupImageSource for KeyValueBackupImage {
+impl BackupImageSource for KeyValueBackupImage {
     fn cut(&self) -> BackupCut {
         self.cut()
     }
-
-    fn advance(
-        &mut self,
-        maximum_positions: usize,
-    ) -> BackupResult<crate::backup::BackupSourceStep> {
-        use crate::backup::BackupSourceStep;
-        Ok(match self.advance(maximum_positions)? {
-            KeyValueImageStep::Unit => BackupSourceStep::Unit,
-            KeyValueImageStep::Pending => BackupSourceStep::Pending,
-            KeyValueImageStep::Complete => BackupSourceStep::Complete,
-        })
+    fn advance(&mut self, maximum_positions: usize) -> BackupResult<KeyValueImageStep> {
+        self.advance(maximum_positions)
     }
-
-    fn current_unit(&self) -> Option<crate::backup::BackupSourceUnit<'_>> {
-        let unit = self.current_unit()?;
-        Some(crate::backup::BackupSourceUnit {
-            address: unit.address,
-            kind: unit.kind,
-            decoded_bytes: unit.decoded_bytes,
-        })
+    fn current_unit(&self) -> Option<KeyValueImageUnit<'_>> {
+        self.current_unit()
     }
-
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
         self.read_current(output)
     }
-
-    fn statistics(&self) -> crate::backup::BackupSourceStatistics {
-        crate::backup::BackupSourceStatistics {
-            visited_positions: self.visited_positions(),
-            copied_payload_bytes: self.copied_source_bytes(),
-            metadata_read_bytes: self.metadata_read_bytes(),
-            excluded_units: self.excluded_units(),
-        }
+    fn statistics(&self) -> BackupSourceStatistics {
+        self.0.statistics()
     }
 }

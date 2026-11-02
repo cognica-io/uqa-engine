@@ -34,6 +34,7 @@ pub use backup::{KeyValueBackupImage, KeyValueImageStep, KeyValueImageUnit};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use backup::{KeyValueImageImportReader, KeyValueImportUnit};
 mod diskann;
+pub use diskann::backup::diskann_backup_membership;
 pub use diskann::identifiers as diskann_identifiers;
 pub use diskann::{
     publication, DiskANNMaintenanceStatus, DiskANNMaintenanceStep, DiskANNStageStatus,

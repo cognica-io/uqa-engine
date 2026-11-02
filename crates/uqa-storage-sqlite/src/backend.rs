@@ -56,6 +56,14 @@ impl SQLiteStorageProvider {
         Self { connection }
     }
 
+    /// Capture native evaluated records and autonomous watermarks from this provider's initialized native session without retaining a physical read between export calls. An unbound provider reports unsupported instead of initializing or migrating a source during capture. All four file modes use the same image contract; private writes are excluded and the original session transaction is unchanged.
+    pub fn capture_backup_image(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> uqa_storage::backup::BackupResult<crate::SQLiteNativeBackupImage> {
+        crate::SQLiteNativeBackupImage::capture(&self.connection, control)
+    }
+
     fn native_session(
         &self,
         cancellation: &uqa_core::CancellationToken,
