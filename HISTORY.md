@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Security
+
+- Update Parquet and Arrow to 58.4.1 with Thrift 0.23.0, and DuckDB's build-time archive dependencies to tar 0.4.46 and zip 9.0.5, addressing excessive allocation and inconsistent archive-header parsing.
+
 ## [0.6.3] - 2026-11-01
 
 ### Changed
