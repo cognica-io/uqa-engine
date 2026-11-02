@@ -15,6 +15,8 @@ use crate::backup::*;
 use super::super::Fault;
 use super::*;
 
+mod paths;
+
 struct Fixture {
     directory: tempfile::TempDir,
     repository: LocalRepository,

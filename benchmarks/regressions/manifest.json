@@ -2,6 +2,84 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_requires_regular_installed_names_and_retires_memory",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Private provider pathname admission",
+      "workload": "Supply malformed names, reserved markers, nonregular entries, cancellation and an exhausted path allowance.",
+      "invariant": "Only an existing installed regular-file name reaches the provider; native path memory is charged before use and completely retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_keeps_errors_and_rejects_nonregular_completion",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Private provider pathname completion",
+      "workload": "Fail a provider callback and separately replace its regular file with a directory.",
+      "invariant": "The original callback error is preserved; nonregular completion cannot prepare the image and retained memory is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_allows_provider_owned_regular_file_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Private provider file replacement",
+      "workload": "Replace a closed provider file inside the pinned private directory.",
+      "invariant": "Provider-owned compaction may replace the regular file without invalidating directory identity or retaining native path memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_follows_retained_directory_and_rejects_midcall_movement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Pinned directory pathname resolution",
+      "workload": "Move the retained directory before lookup and during a provider callback, replacing both former paths.",
+      "invariant": "Initial lookup follows the retained directory, midcall movement prevents successful completion and recovery resolves its current path without changing unrelated entries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_repository_restore_recovers_closed_import_and_preserves_published_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_repository.rs",
+      "capability": "SQLite repository restore publication",
+      "workload": "Remove the source, lose the completed import reply, collide with an existing target and resolve publication after later writes in four file modes.",
+      "invariant": "One import and one recovery preserve actual DiskANN state and later writes; every provider handle closes before no-replacement publication and late cancellation cannot replay the image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_repository_restore_tracks_parent_movement_before_and_during_import",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_repository.rs",
+      "capability": "SQLite restore pathname ownership",
+      "workload": "Move the pinned destination parent before import or after provider closure in all four file modes.",
+      "invariant": "Only the original parent receives the restored directory; uncertain pathname completion resumes the exact image without repeating import or modifying the replacement parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "sqlite_backup_import_preserves_every_source_and_destination_protection_combination",
@@ -48,7 +126,7 @@
       "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
       "capability": "SQLite partial image admission and resource retirement",
       "workload": "Drop or cancel import, exhaust its original memory allowance, or exceed its per-value bound across four destination modes.",
-      "invariant": "Incomplete files reject ordinary and restored opens; failed advances are terminal and release their complete allowance.",
+      "invariant": "Incomplete files reject ordinary opens, restored opens and exact-image recovery; failed advances are terminal and release their complete allowance.",
       "case_names": [
         ""
       ]
@@ -87,7 +165,7 @@
       "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
       "capability": "SQLite image history recovery",
       "workload": "Lose replies at intent, auxiliary publication and completed history boundaries across four file modes.",
-      "invariant": "The original request establishes one target history and preserves subsequent writes on every retry.",
+      "invariant": "Mismatched image roots and target identities cannot advance history; the original image/request establishes one target history and preserves subsequent writes on every retry.",
       "case_names": [
         ""
       ]
@@ -530,7 +608,9 @@
       "capability": "Bounded repository image verification",
       "workload": "Stream 512 protected units from a shared pack through seven-byte output buffers, then verify complete objects through seven-byte work windows and global frame ranges under a 128 KiB allowance.",
       "invariant": "Every unit matches its literal payload and ordered identity; whole-object byte totals are exact, each object step respects its window, completion waits for every global check, and all charged streams and spill ledgers retire immediately.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-redb",
@@ -541,7 +621,9 @@
       "capability": "redb complete Key/Value image export",
       "workload": "Capture actual DiskANN rows, exact-side data and uncovered changes, a 1 MiB record, allocator state, a live unpublished build and a delivery record; replace the selected generation and write during chunk export.",
       "invariant": "Every captured persistent record matches the independent full-read oracle with its original revision, excluded payloads are not copied, each step inspects at most three positions and one fixed metadata record, and the 4 KiB allowance retires at completion.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-sqlite",
@@ -552,7 +634,9 @@
       "capability": "SQLite KV complete mapping image export",
       "workload": "Export actual published DiskANN state and a large record in plain, encrypted, compressed and compressed-encrypted files while another connection updates between chunks.",
       "invariant": "All committed record bytes and revisions match the full-read oracle; private writes and notification delivery are absent, each scan window has at most four positions, writers progress and retained memory stays within 4 KiB.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -563,7 +647,9 @@
       "capability": "Bounded image input projection",
       "workload": "Omit selected allocator and record inputs including a 1 MiB payload without reading their bytes.",
       "invariant": "Skipping preserves ordered progress, copies zero payload bytes and releases the retained cut exactly once at completion.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -574,7 +660,9 @@
       "capability": "Snapshot-qualified artifact membership",
       "workload": "Select state and graph keys for all six generation states, then replace the live lifecycle state before classifying the retained source.",
       "invariant": "Membership reads exactly one 18-byte state from the original cut; only its Published generations are included, regardless of later publication or retirement.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",

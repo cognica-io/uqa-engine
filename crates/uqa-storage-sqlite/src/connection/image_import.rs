@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! A fresh private image holds exclusive restore admission until every physical connection closes.
+//! Private image import and recovery hold exclusive restore admission until every physical connection closes.
 
 use std::{path::Path, sync::Arc};
 
@@ -19,7 +19,7 @@ use super::{
     SQLiteError, SessionState,
 };
 
-pub(crate) struct FreshImageConnection {
+pub(crate) struct ImageConnection {
     connection: Connection,
     spec: ConnectionSpec,
     source: Option<DatabaseSource>,
@@ -27,12 +27,31 @@ pub(crate) struct FreshImageConnection {
     admission: RestoreAdmission,
 }
 
-impl FreshImageConnection {
-    pub(crate) fn open(
+impl ImageConnection {
+    pub(crate) fn create(
         path: &Path,
         compression: Option<SQLiteCompressionOptions>,
         key: Option<StorageEncryptionKey>,
         control: &StorageReadControl,
+    ) -> Result<Self> {
+        Self::open(path, compression, key, control, true)
+    }
+
+    pub(crate) fn reopen(
+        path: &Path,
+        compression: Option<SQLiteCompressionOptions>,
+        key: Option<StorageEncryptionKey>,
+        control: &StorageReadControl,
+    ) -> Result<Self> {
+        Self::open(path, compression, key, control, false)
+    }
+
+    fn open(
+        path: &Path,
+        compression: Option<SQLiteCompressionOptions>,
+        key: Option<StorageEncryptionKey>,
+        control: &StorageReadControl,
+        fresh: bool,
     ) -> Result<Self> {
         control.check()?;
         if key
@@ -47,9 +66,14 @@ impl FreshImageConnection {
             .map_err(SQLiteError::CompressedContainer)?;
         let admission = RestoreAdmission::acquire(path, control)?;
         let metadata = path.symlink_metadata()?;
-        if !metadata.is_file() || metadata.len() != 0 {
+        if !metadata.is_file() || (metadata.len() == 0) != fresh {
             return Err(SQLiteError::StorageBackend(
-                "image import requires an empty private regular file".into(),
+                if fresh {
+                    "image import requires an empty private regular file"
+                } else {
+                    "image recovery requires a populated private regular file"
+                }
+                .into(),
             ));
         }
         let owner = admission.retain(control)?;
@@ -69,7 +93,7 @@ impl FreshImageConnection {
         } else {
             ConnectionSpec::File { path, key }
         };
-        let connection = spec.open(true)?;
+        let connection = spec.open(fresh)?;
         let source = DatabaseSource::capture(&mut spec, &connection)?;
         Ok(Self {
             connection,

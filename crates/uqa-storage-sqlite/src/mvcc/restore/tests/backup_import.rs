@@ -10,7 +10,8 @@ use std::{collections::BTreeMap, fs::OpenOptions, path::Path};
 
 use uqa_storage::{
     backup::{
-        BackupError, BackupKey, BackupLimits, BackupRoot, LocalRepository, Protection, ProtectionId,
+        BackupError, BackupId, BackupKey, BackupLimits, BackupRoot, LocalRepository, Protection,
+        ProtectionId,
     },
     key_value::{
         conformance::{
@@ -32,7 +33,7 @@ use crate::{
     ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueStorage, SQLiteRecordStore,
 };
 
-fn options(mode: usize) -> SQLiteBackupImportOptions {
+pub(super) fn options(mode: usize) -> SQLiteBackupImportOptions {
     SQLiteBackupImportOptions {
         compression: (mode >= 2).then(SQLiteCompressionOptions::default),
         encryption_key: (mode % 2 == 1).then(|| StorageEncryptionKey::new("closed-backup")),
@@ -61,7 +62,7 @@ fn protection() -> Protection {
     }
 }
 
-fn capture(
+pub(super) fn capture(
     owner: &SQLiteKeyValueStorage,
     path: &Path,
     control: &StorageReadControl,
@@ -236,12 +237,12 @@ fn sqlite_backup_import_drop_cancellation_and_limits_keep_partial_files_unavaila
             empty_file(&target);
             let control = StorageReadControl::with_limit(128 << 10);
             let request = DatabaseRestore::new(root.cut().source).unwrap();
-            let mut options = options(mode);
+            let mut import_options = options(mode);
             if failure == 4 {
-                options.maximum_value_bytes = 1024;
+                import_options.maximum_value_bytes = 1024;
             }
             let mut import =
-                SQLiteKeyValueBackupImport::new(&target, &lease, request, options, &control)
+                SQLiteKeyValueBackupImport::new(&target, &lease, request, import_options, &control)
                     .unwrap();
             let occupied = (failure == 5).then(|| {
                 control
@@ -281,6 +282,15 @@ fn sqlite_backup_import_drop_cancellation_and_limits_keep_partial_files_unavaila
             }
             drop(occupied);
             assert_eq!(control.memory().used(), 0);
+            unavailable(&target, mode, request);
+            assert!(SQLiteKeyValueBackupImport::recover(
+                &target,
+                root,
+                request,
+                options(mode),
+                &setup
+            )
+            .is_err());
             unavailable(&target, mode, request);
         }
     }
@@ -463,7 +473,37 @@ fn sqlite_backup_import_uncertain_history_publication_resumes_the_original_reque
             if boundary != super::Boundary::Completed {
                 assert!(open(&target, mode).is_err());
             }
-            let connection = restored(&target, mode, request, &setup).unwrap();
+            let other_root = BackupRoot::new(
+                root.repository(),
+                BackupId::new().unwrap(),
+                root.parent(),
+                root.cut(),
+                root.inventory(),
+                root.summary(),
+            )
+            .unwrap();
+            for (root, request) in [
+                (other_root, request),
+                (root, DatabaseRestore::new(root.cut().source).unwrap()),
+            ] {
+                assert!(SQLiteKeyValueBackupImport::recover(
+                    &target,
+                    root,
+                    request,
+                    options(mode),
+                    &setup
+                )
+                .is_err());
+            }
+            if boundary != super::Boundary::Completed {
+                assert!(
+                    open(&target, mode).is_err(),
+                    "mismatched recovery must not advance history"
+                );
+            }
+            SQLiteKeyValueBackupImport::recover(&target, root, request, options(mode), &setup)
+                .unwrap();
+            let connection = open(&target, mode).unwrap();
             let records = SQLiteRecordStore::for_key_value(&connection, &setup).unwrap();
             assert_eq!(records.database_id(), request.target());
             let owner = SQLiteKeyValueStorage::from_connection(connection.clone()).unwrap();
@@ -473,10 +513,10 @@ fn sqlite_backup_import_uncertain_history_publication_resumes_the_original_reque
             );
             owner.store().put(b"later", b"preserved").unwrap();
             drop((owner, records, connection));
-            let owner = SQLiteKeyValueStorage::from_connection(
-                restored(&target, mode, request, &setup).unwrap(),
-            )
-            .unwrap();
+            SQLiteKeyValueBackupImport::recover(&target, root, request, options(mode), &setup)
+                .unwrap();
+            let owner =
+                SQLiteKeyValueStorage::from_connection(open(&target, mode).unwrap()).unwrap();
             assert_eq!(
                 owner.store().get(b"later").unwrap(),
                 Some(b"preserved".to_vec())

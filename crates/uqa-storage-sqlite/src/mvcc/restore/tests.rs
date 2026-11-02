@@ -20,6 +20,8 @@ use crate::{
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod backup_import;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_repository;
 mod diskann;
 mod failures;
 mod populations;

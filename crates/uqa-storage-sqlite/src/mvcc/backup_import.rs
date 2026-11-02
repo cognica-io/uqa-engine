@@ -18,9 +18,7 @@ use uqa_storage::{
 };
 
 use super::{admission, schema};
-use crate::{
-    connection::image_import::FreshImageConnection, SQLiteCompressionOptions, SQLiteError,
-};
+use crate::{connection::image_import::ImageConnection, SQLiteCompressionOptions, SQLiteError};
 
 /// Destination protection and per-record/repository workspace limits. The native `SQLite` page cache is separate from the original encoded-buffer allowance.
 #[derive(Clone, Debug)]
@@ -41,9 +39,9 @@ pub enum SQLiteBackupImportStep {
 
 /// Import into an already created empty private file. The enclosing restore operation must retain the exact request durably, validate the complete logical catalog/artifacts, and publish the directory only after this owner closes. This primitive does not publish a destination directory or provide Engine jobs.
 ///
-/// Each advance imports at most one record, writing its value through `SQLite`'s public incremental BLOB interface in at most 16 KiB pieces. The configured value bound limits one advance; a whole value is never copied into a UQA buffer. Interrupted input retains format zero and cannot open through either ordinary sessions or history restoration. After complete repository verification, the existing restore state machine replaces the main and auxiliary histories. Resolve an uncertain final outcome using the retained request and the matching `ManagedConnection::open_*restored` constructor; never restart image import into a populated file.
+/// Each advance imports at most one record, writing its value through `SQLite`'s public incremental BLOB interface in at most 16 KiB pieces. The configured value bound limits one advance; a whole value is never copied into a UQA buffer. Interrupted input retains format zero and cannot open through either ordinary sessions or history restoration. After complete repository verification, the existing restore state machine replaces the main and auxiliary histories. Resolve an uncertain final outcome with [`Self::recover`], which checks the exact retained image and request before entering history recovery; never restart image import into a populated file.
 pub struct SQLiteKeyValueBackupImport<'a> {
-    connection: Option<FreshImageConnection>,
+    connection: Option<ImageConnection>,
     input: Option<KeyValueImageImportReader<'a>>,
     root: BackupRoot,
     request: DatabaseRestore,
@@ -77,7 +75,7 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
             control,
         )?;
         let connection =
-            FreshImageConnection::open(path, options.compression, options.encryption_key, control)
+            ImageConnection::create(path, options.compression, options.encryption_key, control)
                 .map_err(sqlite_error)?;
         schema::backup_import::initialize(
             connection.physical().map_err(sqlite_error)?,
@@ -97,6 +95,33 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
             identifiers: 0,
             complete: false,
         })
+    }
+
+    /// Resolve a completely verified image's uncertain history transition without reading the archive again. The stored root and target must exactly match before the history owner admits recovery. Partial format-zero images remain unavailable. A completed transition preserves subsequent writes. Every physical connection closes before success; logical catalog and artifact validation still precede directory publication. Only protection options are used because recovery imports no values or repository workspace.
+    pub fn recover(
+        path: &Path,
+        root: BackupRoot,
+        request: DatabaseRestore,
+        options: SQLiteBackupImportOptions,
+        control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        control.check()?;
+        if request.source() != root.cut().source || request.target().as_bytes() == [0; 16] {
+            return Err(BackupError::Invalid("SQLite import restore identity"));
+        }
+        let connection =
+            ImageConnection::reopen(path, options.compression, options.encryption_key, control)
+                .map_err(sqlite_error)?;
+        schema::backup_import::validate_image(
+            connection.physical().map_err(sqlite_error)?,
+            root,
+            request,
+            control,
+        )
+        .map_err(physical_error)?;
+        connection
+            .publish_history(request, control)
+            .map_err(sqlite_error)
     }
 
     pub const fn imported_records(&self) -> u64 {

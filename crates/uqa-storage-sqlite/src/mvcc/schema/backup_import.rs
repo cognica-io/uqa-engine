@@ -20,6 +20,29 @@ use super::{
 
 const IMAGE: (&str, &str) = ("_uqa_backup_import", "CREATE TABLE _uqa_backup_import (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), root BLOB NOT NULL CHECK(typeof(root) = 'blob' AND length(root) = 240), target BLOB NOT NULL CHECK(typeof(target) = 'blob' AND length(target) = 16))");
 
+/// Recovery checks the immutable archive binding before the existing history owner can mutate either main or auxiliary state. No ordinary-file handle is opened beside the `SQLite` connection.
+pub(in crate::mvcc) fn validate_image(
+    connection: &Connection,
+    root: BackupRoot,
+    request: DatabaseRestore,
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    control.check().map_err(VersionError::from)?;
+    let _bindings = control
+        .memory()
+        .reserve(BackupRoot::ENCODED_BYTES + 16)
+        .map_err(VersionError::from)?;
+    let matches: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM _uqa_backup_import WHERE singleton = 1 AND root = ?1 AND target = ?2)",
+        params![root.encode().as_slice(), request.target().as_bytes().as_slice()],
+        |row| row.get(0),
+    )?;
+    if !matches {
+        return Err(VersionError::InvalidEncoding("image recovery binding mismatch").into());
+    }
+    Ok(())
+}
+
 fn metadata_definition() -> String {
     TABLES[0].1.replace(
         &format!("CHECK(format = {RECORD_FORMAT})"),

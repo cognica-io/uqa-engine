@@ -12,6 +12,9 @@ use std::path::{Component, Path};
 
 use cap_std::fs::Dir;
 
+mod location;
+pub(crate) use location::FilePath;
+
 pub(crate) const MAX_COMPONENT_BYTES: usize = 1024;
 
 pub(crate) fn component(name: &OsStr) -> io::Result<()> {

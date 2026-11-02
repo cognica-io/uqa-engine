@@ -41,6 +41,30 @@ impl RestoreDirectory<'_> {
         directory::open_file(self.directory, name, write)
     }
 
+    /// Run an installed provider against an existing private regular file using its current native pathname. The provider owns every connection it opens inside the callback and must close them before returning. The callback may not retain the pathname or access another file outside this private directory. A directory location change detected at completion makes success uncertain; recovery queries the retained directory again. No process-wide working directory changes occur.
+    pub fn with_file_path(
+        &self,
+        name: &str,
+        control: &StorageReadControl,
+        operation: impl FnOnce(&Path) -> BackupResult<()>,
+    ) -> BackupResult<()> {
+        Self::validate_name(name)?;
+        if !self.directory.symlink_metadata(name)?.is_file() {
+            return Err(BackupError::Invalid(
+                "provider path requires a private regular file",
+            ));
+        }
+        let path = native::FilePath::new(self.directory, name.as_ref(), control)?;
+        operation(path.as_path())?;
+        path.verify(self.directory)?;
+        if !self.directory.symlink_metadata(name)?.is_file() {
+            return Err(BackupError::Invalid(
+                "provider replaced its file with a nonregular entry",
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_name(name: &str) -> BackupResult<()> {
         native::component(name.as_ref())?;
         if name == MARKER {
