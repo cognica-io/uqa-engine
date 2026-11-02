@@ -37,6 +37,7 @@ BUILD = module("c_build", "build-c-bindings.py")
 METADATA = module("c_metadata", "c-bindings-metadata.py")
 LICENSES = module("c_licenses", "check-release-licenses.py")
 DEPENDENCIES = module("c_dependency_licenses", "c_bindings_licenses.py")
+NATIVE = module("c_native", "c_bindings_native.py")
 VERIFY = module("c_verify", "verify-c-package.py")
 COMMIT = "a" * 40
 TARGET = "x86_64-unknown-linux-gnu"
@@ -76,6 +77,11 @@ class CPackageVerification(unittest.TestCase):
             work = Path(temporary)
             prefix, build = work / "prefix", work / "build"
             archive, metadata = work / "uqa.lib", work / "cargo-metadata.json"
+            native_directory = work / "Cargo native libraries"
+            native_directory.mkdir()
+            build_log = work / "cargo-build.jsonl"
+            build_log.write_text(json.dumps({"reason": "build-script-executed", "package_id": "ffi",
+                                             "linked_paths": ["native=" + str(native_directory)]}) + "\n")
             metadata.write_text(json.dumps({
                 "packages": [{"id": "ffi", "name": "uqa-ffi", "version": RELEASE.version(),
                               "manifest_path": str(ROOT / "crates/uqa-ffi/Cargo.toml")}],
@@ -112,8 +118,8 @@ class CPackageVerification(unittest.TestCase):
                 source.write_text(
                     "int DllMain(void *module, unsigned long reason, void *reserved) { return 1; }"
                     if name == "native_lifecycle" else
-                    "int system_dependency(void);\n" +
-                    "\n".join(f"int {symbol}(void) {{ return system_dependency(); }}" for symbol in definitions))
+                    "int system_dependency(void); int package_dependency(void);\n" +
+                    "\n".join(f"int {symbol}(void) {{ return system_dependency() + package_dependency(); }}" for symbol in definitions))
                 run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl", str(source), "/Fo" + str(obj))
                 objects.append(str(obj))
             run("llvm-lib", "/out:" + str(archive), *objects)
@@ -122,6 +128,12 @@ class CPackageVerification(unittest.TestCase):
             run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl",
                 str(native_source), "/Fo" + str(native_obj))
             run("llvm-lib", "/out:" + str(work / "bcrypt.lib"), str(native_obj))
+            package_source, package_obj = work / "package.c", work / "package.obj"
+            package_source.write_text("int package_dependency(void) { return 0; }\n")
+            run("clang-cl", "--target=x86_64-pc-windows-msvc", "/c", "/GS-", "/Zl",
+                str(package_source), "/Fo" + str(package_obj))
+            package_library = native_directory / "windows.0.52.0.lib"
+            run("llvm-lib", "/out:" + str(package_library), str(package_obj))
             runtime_objects = []
             for name, body in (
                     ("crt_entry", "int DllMain(void *, unsigned long, void *); "
@@ -135,9 +147,15 @@ class CPackageVerification(unittest.TestCase):
             run("llvm-lib", "/out:" + str(work / "msvcrt.lib"), *runtime_objects)
             run("cmake", "-S", str(ROOT / "crates/uqa-ffi"), "-B", str(build), *toolchain,
                 "-DUQA_RUST_STATIC_LIBRARY=" + str(archive),
-                "-DUQA_NATIVE_LINK_FLAGS=bcrypt.lib /defaultlib:msvcrt", "-DUQA_SOURCE_REVISION=" + COMMIT,
+                "-DUQA_NATIVE_LINK_FLAGS=bcrypt.lib windows.0.52.0.lib /defaultlib:msvcrt", "-DUQA_SOURCE_REVISION=" + COMMIT,
                 "-DUQA_TARGET=x86_64-pc-windows-msvc", "-DUQA_CARGO_METADATA=" + str(metadata),
                 "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_INSTALL_PREFIX=" + str(prefix))
+            missing = subprocess.run(["cmake", "--build", str(build)], stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, encoding="utf-8")
+            self.assertNotEqual(missing.returncode, 0, missing.stdout)
+            self.assertIn("windows.0.52.0.lib", missing.stdout)
+            run("cmake", "-S", str(ROOT / "crates/uqa-ffi"), "-B", str(build),
+                "-DUQA_CARGO_BUILD_LOG=" + str(build_log))
             shared = run("cmake", "--build", str(build), "--", "-n", "-v")
             self.assertIn("/defaultlib:msvcrt", shared)
             self.assertIn("/INCLUDE:DllMain", shared)
@@ -151,33 +169,34 @@ class CPackageVerification(unittest.TestCase):
             names = [line.strip().removeprefix("Name: ") for line in exports.splitlines()
                      if line.strip().startswith("Name: ")]
             self.assertEqual(sorted(names), public)
-            installed = prefix / "lib/cmake/UQA"
-            installed.mkdir(parents=True)
-            shutil.copyfile(build / "UQAConfig.cmake", installed / "UQAConfig.cmake")
-            (installed / "UQATargets.cmake").write_text("add_library(UQA::uqa INTERFACE IMPORTED)\n")
-            shutil.copyfile(archive, prefix / "lib/uqa_static.lib")
-            (prefix / "include").mkdir()
+            run("cmake", "--install", str(build))
+            relocated = work / "relocated package"
+            prefix.rename(relocated)
+            prefix = relocated
+            package_library.unlink()
+            self.assertTrue((prefix / "lib/windows.0.52.0.lib").is_file())
+            manifest = json.loads((prefix / "share/uqa/uqa-build.json").read_bytes())
+            self.assertEqual(manifest["native_bundled_libraries"], [{
+                "path": "lib/windows.0.52.0.lib",
+                "sha256": RELEASE.digest(prefix / "lib/windows.0.52.0.lib")}])
             consumer = work / "consumer"
             consumer.mkdir()
-            (consumer / "main.c").write_text("int main(void) { return 0; }\n")
+            (consumer / "main.c").write_text("int uqa_library_get_abi_version(void); int main(void) { return uqa_library_get_abi_version(); }\n")
             (consumer / "CMakeLists.txt").write_text(
                 "cmake_minimum_required(VERSION 3.24)\nproject(Consumer C)\n"
                 "find_package(UQA REQUIRED CONFIG)\nadd_executable(client main.c)\n"
                 "target_link_libraries(client PRIVATE UQA::uqa_static)\n")
             run("cmake", "-S", str(consumer), "-B", str(consumer / "build"), *toolchain,
+                '-DCMAKE_EXE_LINKER_FLAGS=/manifest:no /entry:main /libpath:"' + str(work) + '"',
                 "-DCMAKE_PREFIX_PATH=" + str(prefix))
             static = run("cmake", "--build", str(consumer / "build"), "--", "-n", "-v")
             self.assertIn("/defaultlib:msvcrt", static)
             self.assertNotIn("/INCLUDE:DllMain", static)
             self.assertNotIn("msvcrt.obj", static)
+            run("cmake", "--build", str(consumer / "build"))
 
             if PKG_CONFIG:
                 directory = prefix / "lib/pkgconfig"
-                directory.mkdir()
-                for name in ("uqa", "uqa-static"):
-                    shutil.copyfile(build / (name + ".pc"), directory / (name + ".pc"))
-                shutil.copyfile(build / "uqa.lib", prefix / "lib/uqa.lib")
-                shutil.copytree(ROOT / "crates/uqa-ffi/include/uqa", prefix / "include/uqa")
                 env = dict(os.environ, PKG_CONFIG_PATH=str(directory))
                 for package in ("uqa", "uqa-static"):
                     cflags = VERIFY.compiler_flags(subprocess.check_output(
@@ -198,6 +217,53 @@ class CPackageVerification(unittest.TestCase):
                         self.assertIn("uqa_static.lib", libraries)
                         self.assertIn("bcrypt.lib", libraries)
                         self.assertIn("msvcrt.lib", libraries)
+                        self.assertIn("windows.0.52.0.lib", libraries)
+
+    def test_native_link_metadata_keeps_only_selected_cargo_libraries_and_rejects_conflicts(self):
+        metadata = {"packages": [{"id": name, "name": name} for name in ("uqa-ffi", "native", "host")],
+                    "resolve": {"nodes": [
+                        {"id": "uqa-ffi", "features": [], "deps": [
+                            {"pkg": "native", "dep_kinds": [{"kind": None}]},
+                            {"pkg": "host", "dep_kinds": [{"kind": "build"}]}]},
+                        {"id": "native", "deps": []}, {"id": "host", "deps": []}]}}
+        with tempfile.TemporaryDirectory(prefix="native libraries ") as temporary:
+            native, host, other = [Path(temporary) / name for name in ("native", "host", "other")]
+            for path in (native, host, other):
+                path.mkdir()
+            for path, contents in ((native, b"selected"), (host, b"host only"), (other, b"conflicting")):
+                (path / "windows.0.52.0.lib").write_bytes(contents)
+            messages = [{"reason": "build-script-executed", "package_id": key,
+                         "linked_paths": ["native=" + str(path)]} for key, path in (("native", native), ("host", host))]
+            messages.append({"reason": "compiler-message", "message": {"message": "native-static-libs: windows.0.52.0.lib bcrypt.lib /defaultlib:msvcrt"}})
+            output = "\n".join(json.dumps(message) for message in messages).encode()
+            flags = NATIVE.native_static_flags(output)
+            self.assertEqual(flags, "windows.0.52.0.lib bcrypt.lib /defaultlib:msvcrt")
+            self.assertEqual(NATIVE.bundled_msvc_libraries(output, metadata, set(), flags),
+                             {"windows.0.52.0.lib": (native / "windows.0.52.0.lib").resolve()})
+            messages[0]["linked_paths"].append("native=" + str(other))
+            output = "\n".join(json.dumps(message) for message in messages).encode()
+            with self.assertRaisesRegex(ValueError, "conflicting Cargo native libraries"):
+                NATIVE.bundled_msvc_libraries(output, metadata, set(), flags)
+
+    @unittest.skipUnless(shutil.which("cargo"), "Cargo is required for native build metadata verification")
+    def test_actual_cargo_json_retains_native_metadata_in_cached_builds(self):
+        with tempfile.TemporaryDirectory(prefix="uqa cargo metadata ") as temporary:
+            work = Path(temporary)
+            (work / "src").mkdir()
+            (work / "native").mkdir()
+            (work / "Cargo.toml").write_text('[package]\nname="native-metadata-fixture"\nversion="0.0.0"\nedition="2021"\n')
+            (work / "src/lib.rs").write_text('#[no_mangle]\npub extern "C" fn fixture() -> u32 { 1 }\n')
+            (work / "build.rs").write_text('fn main() { println!("cargo:rustc-link-search=native={}/native", std::env::var("CARGO_MANIFEST_DIR").unwrap()); }\n')
+            command = ["cargo", "rustc", "--offline", "--message-format=json", "--manifest-path", str(work / "Cargo.toml"),
+                       "--crate-type", "staticlib", "--", "--print=native-static-libs"]
+            for attempt in range(2):
+                result = subprocess.run(command, env=dict(os.environ, CARGO_TARGET_DIR=str(work / "target")),
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                self.assertEqual(result.returncode, 0, result.stdout.decode())
+                self.assertTrue(NATIVE.native_static_flags(result.stdout))
+                scripts = [entry for entry in NATIVE.cargo_messages(result.stdout) if entry.get("reason") == "build-script-executed"]
+                self.assertEqual(len(scripts), 1, (attempt, result.stdout))
+                self.assertEqual(scripts[0]["linked_paths"], ["native=" + str(work / "native")])
 
     @unittest.skipUnless(sys.platform == "win32", "requires the native Windows argument parser")
     def test_windows_pkgconf_output_terminators_do_not_become_arguments(self):
@@ -324,6 +390,9 @@ class CPackageVerification(unittest.TestCase):
     def test_source_features_symbols_and_license_digest_are_required(self):
         with tempfile.TemporaryDirectory() as temporary:
             manifest = fixture(Path(temporary))
+            native = Path(temporary) / "lib/windows.0.52.0.lib"
+            native.write_bytes(b"package import library fixture")
+            manifest["native_bundled_libraries"] = [{"path": "lib/windows.0.52.0.lib", "sha256": RELEASE.digest(native)}]
             entries = {path.relative_to(temporary).as_posix(): {"sha256": RELEASE.digest(path)}
                        for path in Path(temporary).rglob("*") if path.is_file()}
             RELEASE.validate_inventory(entries, manifest, TARGET, COMMIT)
@@ -336,6 +405,14 @@ class CPackageVerification(unittest.TestCase):
             changed["share/uqa/licenses/fixture.txt"]["sha256"] = "0" * 64
             with self.assertRaisesRegex(ValueError, "license"):
                 RELEASE.validate_inventory(changed, manifest, TARGET, COMMIT)
+            for missing in (True, False):
+                changed = copy.deepcopy(entries)
+                if missing:
+                    del changed["lib/windows.0.52.0.lib"]
+                else:
+                    changed["lib/windows.0.52.0.lib"]["sha256"] = "0" * 64
+                with self.assertRaisesRegex(ValueError, "native library"):
+                    RELEASE.validate_inventory(changed, manifest, TARGET, COMMIT)
 
     def test_archive_paths_and_links_cannot_escape_or_cycle(self):
         for name in ("../file", "/file", "a/../../file", "C:/file", "a\\file", "a//b", "a/./b", "."):

@@ -23,8 +23,7 @@ LEGAL = re.compile(r"(?:^|[-_])(licen[sc]e|copying|copyright|notice)(?:$|[-_.])"
 NATIVE_BUILD_SOURCES = {"openssl-sys": {"openssl-src"}}
 
 
-def collect(metadata_path: Path, features: set[str]) -> tuple[dict[str, bytes], list[dict]]:
-    metadata = json.loads(metadata_path.read_bytes())
+def selected_packages(metadata: dict, features: set[str]) -> dict[str, dict]:
     packages = {item["id"]: item for item in metadata["packages"]}
     nodes = {item["id"]: item for item in metadata["resolve"]["nodes"]}
     root = next(item["id"] for item in packages.values() if item["name"] == "uqa-ffi")
@@ -42,13 +41,18 @@ def collect(metadata_path: Path, features: set[str]) -> tuple[dict[str, bytes], 
                        if any(kind["kind"] is None or (
                            kind["kind"] == "build" and packages[dependency["pkg"]]["name"] in native_sources
                        ) for kind in dependency["dep_kinds"]))
+    return {key: packages[key] for key in selected}
+
+
+def collect(metadata_path: Path, features: set[str]) -> tuple[dict[str, bytes], list[dict]]:
+    packages = selected_packages(json.loads(metadata_path.read_bytes()), features)
     pinned = {(entry["name"], entry["version"]): entry for entry in json.loads((PINNED / "sources.json").read_bytes())}
     files, inventory = {}, []
-    for key in sorted(selected):
+    for key in sorted(packages):
         package = packages[key]
         name, version = package["name"], package["version"]
         directory = Path(package["manifest_path"]).parent
-        if key == root:
+        if name == "uqa-ffi":
             continue  # The canonical project license is already installed.
         # Include nested notices from bundled native sources, not just the Rust
         # wrapper's root license. Paths preserve each component's attribution.
