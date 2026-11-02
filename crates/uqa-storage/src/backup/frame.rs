@@ -67,6 +67,8 @@ pub enum FrameKind {
     Unit = 1,
     Inventory = 2,
     Root = 3,
+    Repository = 4,
+    Intent = 5,
 }
 
 /// Exact immutable object and byte position supplied by the owning object reader/writer, not trusted from a frame header.
@@ -100,7 +102,7 @@ fn header(
     header
 }
 
-fn encoded_bytes(
+pub(super) fn encoded_bytes(
     context: FrameContext,
     protection: &Protection,
     decoded: usize,

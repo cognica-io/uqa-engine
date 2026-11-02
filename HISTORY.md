@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add native local backup repositories with authenticated immutable packs, bounded full verification, durable publication, cancellation and prepared-image recovery. Provider capture, restore and Engine backup APIs remain in progress.
 - Add Common Storage backup image codecs with ordered streaming inventories, immutable root descriptors, bounded parsing and authenticated frames. These format primitives support the ongoing online/incremental backup implementation; they do not expose Engine capture or restore yet.
 
 ### Fixed

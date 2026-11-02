@@ -4,6 +4,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "packed_inventory_verifies_under_fixed_memory_and_encrypted_workspace_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/resources.rs",
+      "capability": "Backup repository verification",
+      "workload": "512 reverse-placed small units in one immutable data pack, a streamed inventory, and repeated full verification under a 128 KiB shared memory allowance.",
+      "invariant": "Retain exactly two installed objects, verify all unit digests and disjoint ranges, release the memory allowance, and reject exhausted encrypted verification workspace before growing its files.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "physical_allowance_follows_files_and_reopened_handles",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests/quota.rs",
+      "capability": "Encrypted temporary file space admission",
+      "workload": "Two encrypted files sharing an allowance for two framed blocks, an independently positioned reopened handle, growth rejection, truncation and final close.",
+      "invariant": "Charge the exact physical ciphertext extents once per owner, admit before growth, retain charges through reopened handles, and release only after physical truncation or final owner destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "ordered_inventory_streams_large_state_under_a_fixed_allowance",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/tests/inventories.rs",

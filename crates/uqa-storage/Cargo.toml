@@ -31,6 +31,10 @@ chacha20poly1305 = { workspace = true }
 cipher = { workspace = true }
 tempfile = "3.13"
 
+[target.'cfg(any(windows, all(unix, not(target_os = "emscripten"))))'.dependencies]
+cap-std = { workspace = true }
+cap-fs-ext = { workspace = true }
+
 [target.'cfg(all(unix, not(target_os = "emscripten")))'.dependencies]
 libc = { workspace = true }
 

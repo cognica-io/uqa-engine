@@ -118,6 +118,9 @@ hmac = { version = "0.12", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 crc32fast = "1.4"
 fs2 = "0.4"
+# Repository operations stay relative to pinned directory handles on native platforms.
+cap-std = "=4.0.3"
+cap-fs-ext = "=4.0.3"
 lz4_flex = "0.13"
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 getrandom = "0.3"

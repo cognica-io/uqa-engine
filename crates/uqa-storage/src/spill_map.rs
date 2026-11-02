@@ -63,6 +63,7 @@ pub(crate) struct Map<V> {
     resident_bytes: usize,
     max_encoded_bytes: usize,
     workspace: Option<Arc<workspace::Workspace>>,
+    file_budget: Option<crate::temporary_file::FileBudget>,
 }
 
 impl<V> Clone for Map<V> {
@@ -74,6 +75,7 @@ impl<V> Clone for Map<V> {
             resident_bytes: self.resident_bytes,
             max_encoded_bytes: self.max_encoded_bytes,
             workspace: self.workspace.clone(),
+            file_budget: self.file_budget.clone(),
         }
     }
 }
@@ -96,6 +98,19 @@ impl<V: Record> Map<V> {
             resident_bytes,
             max_encoded_bytes: 0,
             workspace: None,
+            file_budget: None,
+        }
+    }
+
+    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
+    pub(crate) fn with_file_budget(
+        memory: &MemoryBudget,
+        resident_bytes: usize,
+        budget: &crate::temporary_file::FileBudget,
+    ) -> Self {
+        Self {
+            file_budget: Some(budget.clone()),
+            ..Self::new(memory, resident_bytes)
         }
     }
 
@@ -108,7 +123,10 @@ impl<V: Record> Map<V> {
     }
 
     pub(crate) fn clear(&mut self) {
-        *self = Self::new(&self.memory, self.resident_bytes);
+        *self = Self {
+            file_budget: self.file_budget.clone(),
+            ..Self::new(&self.memory, self.resident_bytes)
+        };
     }
 
     pub(crate) fn iter(&self) -> Iter<'_, V> {
@@ -391,6 +409,7 @@ impl<V: Record> Map<V> {
             self.workspace
                 .as_ref()
                 .filter(|owner| Arc::strong_count(owner) == 1),
+            self.file_budget.as_ref(),
         )?;
         for (key, value) in resident {
             check(control)?;
