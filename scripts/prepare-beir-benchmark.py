@@ -305,7 +305,7 @@ def prepare(manifest_path: pathlib.Path, cache: pathlib.Path, output: pathlib.Pa
         trust_remote_code=False,
     )
     model.max_seq_length = embedding["max_sequence_length"]
-    if model.get_sentence_embedding_dimension() != embedding["dimensions"]:
+    if model.get_embedding_dimension() != embedding["dimensions"]:
         raise PreparationError("loaded model embedding dimension differs from the manifest")
     encode_options = {
         "batch_size": embedding["batch_size"],

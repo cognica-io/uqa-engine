@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Security
 
 - Update Parquet and Arrow to 58.4.1 with Thrift 0.23.0, and DuckDB's build-time archive dependencies to tar 0.4.46 and zip 9.0.5, addressing excessive allocation and inconsistent archive-header parsing.
+- Update the BEIR embedding dependency to sentence-transformers 6.0.0 to enforce `trust_remote_code=False` when loading local model directories. Preserve the pinned model revision and invalidate prepared embeddings produced with the previous dependency version.
 
 ## [0.6.3] - 2026-11-01
 
