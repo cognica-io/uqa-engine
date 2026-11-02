@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
+
 ### Security
 
 - Update Parquet and Arrow to 58.4.1 with Thrift 0.23.0, and DuckDB's build-time archive dependencies to tar 0.4.46 and zip 9.0.5, addressing excessive allocation and inconsistent archive-header parsing.

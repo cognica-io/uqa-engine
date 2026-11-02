@@ -9,6 +9,90 @@
 use super::*;
 
 #[test]
+fn independent_allowances_own_snapshot_retention_separately() {
+    let registry = Arc::new(SnapshotRegistry::default());
+    let first_control = StorageReadControl::with_limit(1 << 20);
+    let second_control = StorageReadControl::with_limit(1 << 20);
+    let sequence = CommitSequence::from_u64(2);
+    let first = registry.capture(&first_control, || Ok(sequence)).unwrap();
+    let second = registry.capture(&second_control, || Ok(sequence)).unwrap();
+    assert!(second_control.memory().used() > 0);
+    assert!(!Arc::ptr_eq(&first, &second));
+    let zero = StorageReadControl::with_limit(0);
+    assert!(registry.capture(&zero, || Ok(sequence)).is_err());
+    drop(first);
+    assert_eq!(first_control.memory().used(), 0);
+    assert_eq!(
+        registry.reclaim(&first_control, Ok).unwrap(),
+        Some(sequence)
+    );
+    drop(second);
+    assert_eq!(second_control.memory().used(), 0);
+}
+
+#[test]
+fn dropped_snapshot_releases_memory_while_collection_is_admitted() {
+    let registry = Arc::new(SnapshotRegistry::default());
+    let control = StorageReadControl::with_limit(1 << 20);
+    let lease = registry
+        .capture(&control, || Ok(CommitSequence::from_u64(2)))
+        .unwrap();
+    assert!(control.memory().used() > 0);
+    registry
+        .reclaim(&control, |oldest| {
+            assert_eq!(oldest, Some(CommitSequence::from_u64(2)));
+            drop(lease);
+            assert_eq!(control.memory().used(), 0);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn failed_capture_releases_a_snapshot_dropped_by_its_physical_read() {
+    let registry = Arc::new(SnapshotRegistry::default());
+    let control = StorageReadControl::with_limit(1 << 20);
+    let lease = registry
+        .capture(&control, || Ok(CommitSequence::from_u64(2)))
+        .unwrap();
+    let result = registry.capture(&control, || {
+        drop(lease);
+        assert_eq!(control.memory().used(), 0);
+        Err(VersionError::WrongDatabase)
+    });
+    assert!(matches!(result, Err(VersionError::WrongDatabase)));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn physical_reader_can_release_its_lease_while_collection_waits_for_write() {
+    use std::{sync::mpsc, time::Duration};
+    let registry = Arc::new(SnapshotRegistry::default());
+    let control = StorageReadControl::with_limit(1 << 20);
+    let physical = parking_lot::RwLock::new(());
+    let lease = registry
+        .capture(&control, || Ok(CommitSequence::from_u64(2)))
+        .unwrap();
+    let (entered, collecting) = mpsc::channel();
+    std::thread::scope(|scope| {
+        let read = physical.read();
+        let collector = scope.spawn(|| {
+            registry.reclaim(&control, |oldest| {
+                assert_eq!(oldest, Some(CommitSequence::from_u64(2)));
+                entered.send(()).unwrap();
+                let _write = physical.write();
+                Ok(())
+            })
+        });
+        collecting.recv_timeout(Duration::from_secs(30)).unwrap();
+        drop(lease);
+        assert_eq!(control.memory().used(), 0);
+        drop(read);
+        collector.join().unwrap().unwrap();
+    });
+}
+
+#[test]
 fn live_clones_retain_the_oldest_boundary_and_collection_allows_drop() {
     let registry = Arc::new(SnapshotRegistry::default());
     let control = StorageReadControl::with_limit(1 << 20);

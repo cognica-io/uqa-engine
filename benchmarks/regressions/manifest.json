@@ -2,6 +2,32 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independent_allowances_own_snapshot_retention_separately",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/retention/tests.rs",
+      "capability": "Snapshot allowance ownership",
+      "workload": "Capture the same committed sequence under independent allowances and reject a third zero-byte allowance while both leases remain live.",
+      "invariant": "Each allowance owns its reservation; dropping one final handle releases all its bytes without retiring the other allowance's retained boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "physical_reader_can_release_its_lease_while_collection_waits_for_write",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/retention/tests.rs",
+      "capability": "Snapshot retirement during reclamation",
+      "workload": "Hold a physical read while an admitted collector waits for physical write access, then release the last snapshot handle before releasing that read.",
+      "invariant": "The reader releases all lease memory before the writer can run; neither admission contention nor collection requires a later cleanup call.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "projected_aggregation_prepares_metadata_per_batch_instead_of_per_row",

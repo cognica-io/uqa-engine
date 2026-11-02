@@ -43,16 +43,20 @@ impl Drop for Admission<'_> {
 /// One registry per physical database owner, shared by every logical session and retained view. Native providers with multiple process owners supply a liveness transport; an exclusively owned database needs only this local registry.
 #[derive(Default)]
 pub struct SnapshotRegistry {
-    leases: Mutex<BTreeMap<CommitSequence, SnapshotLeaseEntry>>,
+    admission: Mutex<()>,
+    leases: Mutex<BTreeMap<SnapshotLeaseKey, SnapshotLeaseEntry>>,
     transport: Option<Arc<dyn SnapshotLeaseTransport>>,
 }
 
+// The allocation address distinguishes live leases at one sequence without extending their lifetime.
+type SnapshotLeaseKey = (CommitSequence, usize);
+
 struct SnapshotLeaseEntry {
     lease: Weak<SnapshotLease>,
-    _memory: MemoryReservation,
+    memory: MemoryReservation,
 }
 
-/// Clones of one committed sequence share its lease and allocation charge. Destruction never waits for the snapshot admission gate, so dropping a view inside a bounded physical read cannot deadlock a collector waiting for physical write admission.
+/// Captures of one committed sequence under the same allowance share its lease and allocation charge. Independent allowances retain separate leases, so another session cannot prolong the invoking session's reservation. Destruction never waits for the snapshot admission gate or physical persistence.
 pub struct SnapshotLease {
     sequence: CommitSequence,
     _native: Option<Box<dyn Send + Sync>>,
@@ -61,14 +65,11 @@ pub struct SnapshotLease {
 
 impl Drop for SnapshotLease {
     fn drop(&mut self) {
-        if let Some(mut leases) = self.registry.leases.try_lock() {
-            if leases
-                .get(&self.sequence)
-                .is_some_and(|entry| entry.lease.as_ptr() == std::ptr::from_ref(self))
-            {
-                leases.remove(&self.sequence);
-            }
-        }
+        // This mutex protects only local entries; no provider callback, admission wait or native lease operation holds it.
+        self.registry
+            .leases
+            .lock()
+            .remove(&(self.sequence, std::ptr::from_ref(self) as usize));
     }
 }
 
@@ -81,6 +82,7 @@ impl SnapshotLease {
 impl SnapshotRegistry {
     pub fn with_transport(transport: Arc<dyn SnapshotLeaseTransport>) -> Self {
         Self {
+            admission: Mutex::new(()),
             leases: Mutex::new(BTreeMap::new()),
             transport: Some(transport),
         }
@@ -89,12 +91,12 @@ impl SnapshotRegistry {
     fn admitted<T>(
         &self,
         control: &StorageReadControl,
-        operation: impl FnOnce(&mut BTreeMap<CommitSequence, SnapshotLeaseEntry>) -> VersionResult<T>,
+        operation: impl FnOnce() -> VersionResult<T>,
     ) -> VersionResult<T> {
-        let mut leases = loop {
+        let _local_admission = loop {
             control.cancellation().check()?;
-            if let Some(leases) = self.leases.try_lock() {
-                break leases;
+            if let Some(admission) = self.admission.try_lock() {
+                break admission;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         };
@@ -102,8 +104,7 @@ impl SnapshotRegistry {
             transport.acquire_admission(control)?;
         }
         let _admission = Admission(self.transport.as_deref());
-        leases.retain(|_, entry| entry.lease.strong_count() != 0);
-        operation(&mut leases)
+        operation()
     }
 
     /// Capture the provider's latest sequence and register its lease while collectors are excluded. The callback opens and closes its bounded physical read before returning.
@@ -112,19 +113,29 @@ impl SnapshotRegistry {
         control: &StorageReadControl,
         read_sequence: impl FnOnce() -> VersionResult<CommitSequence>,
     ) -> VersionResult<Arc<SnapshotLease>> {
-        self.admitted(control, |leases| {
+        self.admitted(control, || {
             let sequence = read_sequence()?;
-            if let Some(lease) = leases
-                .get(&sequence)
-                .and_then(|entry| entry.lease.upgrade())
-            {
+            let existing = {
+                let leases = self.leases.lock();
+                leases
+                    .range((sequence, 0)..=(sequence, usize::MAX))
+                    .find_map(|(_, entry)| {
+                        entry
+                            .memory
+                            .budget()
+                            .shares_allowance(control.memory())
+                            .then(|| entry.lease.upgrade())
+                            .flatten()
+                    })
+            };
+            if let Some(lease) = existing {
                 return Ok(lease);
             }
-            // Keep the lease and registry-entry charge until the weak reference is pruned too.
+            // Final lease destruction removes its entry and releases this charge without another admission.
             let memory = control.memory().reserve(
                 std::mem::size_of::<SnapshotLease>()
                     + 2 * std::mem::size_of::<usize>()
-                    + std::mem::size_of::<(CommitSequence, SnapshotLeaseEntry)>(),
+                    + std::mem::size_of::<(SnapshotLeaseKey, SnapshotLeaseEntry)>(),
             )?;
             let native = self
                 .transport
@@ -136,11 +147,11 @@ impl SnapshotRegistry {
                 _native: native,
                 registry: Arc::clone(self),
             });
-            leases.insert(
-                sequence,
+            self.leases.lock().insert(
+                (sequence, Arc::as_ptr(&lease) as usize),
                 SnapshotLeaseEntry {
                     lease: Arc::downgrade(&lease),
-                    _memory: memory,
+                    memory,
                 },
             );
             Ok(lease)
@@ -153,8 +164,8 @@ impl SnapshotRegistry {
         control: &StorageReadControl,
         remove_versions: impl FnOnce(Option<CommitSequence>) -> VersionResult<T>,
     ) -> VersionResult<T> {
-        self.admitted(control, |leases| {
-            let local = leases.keys().next().copied();
+        self.admitted(control, || {
+            let local = self.leases.lock().keys().next().map(|key| key.0);
             let remote = self
                 .transport
                 .as_deref()
