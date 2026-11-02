@@ -1,6 +1,6 @@
 # Online and incremental backup
 
-Status: proposal based on UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`). This design and its [implementation plan](../plans/0031-online-and-incremental-backup.md) are independently implementable from the released storage interfaces. No replication journal, CDC event stream, replication position, or network service is a prerequisite. The proposal does not describe a released backup API.
+Status: design established against UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`), with implementation tracked in the [plan](../plans/0031-online-and-incremental-backup.md) and [#1322](https://github.com/cognica-io/uqa-engine/issues/1322). The first Common Storage [image codecs](backup-image-format.md) have owner tests; complete Engine capture and restore remain unimplemented. No replication journal, CDC event stream, replication position, or network service is a prerequisite. This design does not describe a released backup API.
 
 ## Decision and delivery scope
 
@@ -217,4 +217,4 @@ Required acceptance includes actual memory, native SQLite, SQLite KV, and redb e
 
 Correctness requires that importing a completed root reconstructs the selected owned state, that every reused reference denotes the same image bytes, that publication cannot expose an incomplete root, and that retention cannot delete reachable content. Preservation arguments cover existing SQL values, graph carriers, decorated text postings, ranked scores, and approximate-index artifacts; matching document IDs alone is insufficient. Product feature delivery supplies the argument required by [AI_POLICY.md](../../AI_POLICY.md#prove-feature-additions) alongside owner tests.
 
-This change delivers design and planning only. Full backup, incremental comparison, fingerprint acceleration, repository retention, and public adapters are separate coherent implementation units, each subject to the 10,000-changed-line limit. No product feature, backup artifact, dependency change, or runtime verification is delivered by the proposal.
+The original design delivery established this proposal and its implementation plan. Common image codecs are now in implementation and qualification. Full backup, incremental comparison, fingerprint acceleration, repository retention, and public adapters remain separate coherent implementation units, each subject to the 10,000-changed-line limit. A format codec does not by itself establish a complete backup artifact or a verified provider capability.

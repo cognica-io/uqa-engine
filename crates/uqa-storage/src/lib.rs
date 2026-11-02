@@ -12,6 +12,7 @@ pub mod analyzer_binding;
 pub use analyzer_binding::{AnalyzerBindingOwner, BoundAnalyzerRevision, FieldAnalyzerBinding};
 
 pub mod backend;
+pub mod backup;
 pub mod block_max_index;
 pub mod btree_index;
 pub mod catalog_index_keys;
