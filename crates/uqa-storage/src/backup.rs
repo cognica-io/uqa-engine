@@ -24,7 +24,8 @@ mod types;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
     BackupCaptureReport, BackupImageReader, BackupLease, BackupOperation, BackupPack,
-    BackupReadStep, LocalRepository, PackObject, PackRange, VerifiedBackupImage,
+    BackupReadStep, BackupRestoreImporter, BackupRestoreOperation, LocalRepository, PackObject,
+    PackRange, RestoreDirectory, RestoredDatabase, VerifiedBackupImage,
 };
 
 pub use error::{BackupError, BackupResult};
@@ -35,8 +36,8 @@ pub use root::BackupRoot;
 pub use source::{BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit};
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,
-    NamespaceId, ObjectId, ObjectSpan, ProtectionId, RepositoryId, SnapshotId, UnitAddress,
-    UnitKind,
+    NamespaceId, ObjectId, ObjectSpan, ProtectionId, RepositoryId, RestoreId, SnapshotId,
+    UnitAddress, UnitKind,
 };
 
 #[cfg(test)]

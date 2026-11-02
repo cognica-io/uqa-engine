@@ -10,9 +10,13 @@ mod directory;
 mod generation;
 mod objects;
 mod operation;
+mod restore;
 mod verify;
 
 pub use operation::{BackupCaptureReport, BackupOperation, BackupPack, PackObject, PackRange};
+pub use restore::{
+    BackupRestoreImporter, BackupRestoreOperation, RestoreDirectory, RestoredDatabase,
+};
 pub use verify::{BackupImageReader, BackupReadStep, VerifiedBackupImage};
 
 use std::io::Read;
@@ -290,6 +294,13 @@ enum Fault {
     RootInstall,
     RootSync,
     CancelSync,
+    RestoreStarted,
+    RestorePrepared,
+    RestoreInstall,
+    RestoreSync,
+    RestoreComplete,
+    RestoreCancel,
+    RestoreRecordSync,
 }
 
 #[cfg(test)]

@@ -43,6 +43,10 @@ identity!(
     "Identity of one attempted snapshot, preserved through publication resolution."
 );
 identity!(
+    RestoreId,
+    "Identity of one durable restoration into a new target directory."
+);
+identity!(
     SnapshotId,
     "Provider-owned identity of jointly pinned committed data and autonomous metadata."
 );

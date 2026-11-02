@@ -2,6 +2,214 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_cannot_downgrade_uncertain_completion_after_target_removal",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore completion history monotonicity",
+      "workload": "Fail completion-record synchronization after publication, remove the target and try cancellation and recovery.",
+      "invariant": "Neither operation rewrites completed history as cancelled or recreates the removed target.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_persists_external_identity_and_preserves_later_writes_after_lost_reply",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Durable restore publication identity",
+      "workload": "Lose the final rename reply, write new target contents and resolve the same operation with a cancelled control.",
+      "invariant": "The external request remains identical, import runs once, target writes survive and all charged resources retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_recovers_provider_outcome_without_repeating_import",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore provider recovery admission",
+      "workload": "Lose a completed provider import reply before preparation and resume the operation.",
+      "invariant": "Recovery receives the original request and existing private file; fresh import is never repeated.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_prepared_images_survive_archive_loss_and_publication_faults",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Prepared restore independence",
+      "workload": "Fail image preparation, exclusive publication and completion recording, then remove the archive root.",
+      "invariant": "Each prepared image publishes without source/archive access or reimport and retires its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_cancellation_is_durable_and_cannot_reverse_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore cancellation authority",
+      "workload": "Inject cancellation failure, retry cancellation and separately cancel after an unacknowledged publication.",
+      "invariant": "Cancelled work cannot resume import/publication, while an already installed target remains complete.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_never_overwrites_empty_directories_files_or_symbolic_links",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore destination collision admission",
+      "workload": "Create an existing directory, file or symlink after private image preparation.",
+      "invariant": "Publication and a fresh restore reject every collision without modifying the existing entry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_validates_staging_identity_and_certificate_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore staging integrity",
+      "workload": "Replace the prepared image directory or truncate its protected preparation marker.",
+      "invariant": "Invalid staged images never become visible at the destination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_pins_destination_parent_and_rejects_replaced_resume_paths",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Pinned restore destination ownership",
+      "workload": "Rename the selected parent and create a replacement at the original pathname.",
+      "invariant": "Publication follows the retained parent handle; recovery rejects replacement parents and different components.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_started_intent_cannot_be_reinterpreted_as_prepared_or_fresh",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore phase separation",
+      "workload": "Exit fresh-import admission after the started record and substitute that record for a preparation marker.",
+      "invariant": "Recovery never invokes fresh import, and frame-kind substitution cannot activate a target.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "completed_restore_never_recreates_a_removed_destination",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Completed restore non-replay",
+      "workload": "Publish a target, remove its directory and reopen the original restore operation.",
+      "invariant": "Recovery rejects the missing target without recreating a database from the archive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_directory_rejects_archive_paths_and_reserved_markers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore file capability confinement",
+      "workload": "Try relative traversal, absolute/nested paths, NUL and the reserved preparation marker.",
+      "invariant": "All invalid file requests fail before writing outside the provider directory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_resolves_an_unacknowledged_cancellation_record_before_returning",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore cancellation synchronization",
+      "workload": "Fail after cancellation-record installation and resume the operation.",
+      "invariant": "Recovery synchronizes the existing record before returning terminal cancellation and releases all charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_process_exit_releases_admission_and_retains_prepared_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore process-loss recovery",
+      "workload": "Prepare in an independent process and exit without running owner destructors.",
+      "invariant": "The next process acquires admission and publishes the exact prepared contents under the original operation ID.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exclusive_directory_rename_never_replaces_an_existing_entry",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/native_file/directory/tests.rs",
+      "capability": "Atomic directory collision protection",
+      "workload": "Call the native exclusive rename directly against empty/populated directories, a file and a symlink.",
+      "invariant": "Every existing entry survives; a successful rename preserves the exact physical source identity and bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exclusive_directory_rename_rejects_paths_before_mutation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/native_file/directory/tests.rs",
+      "capability": "Native publication component admission",
+      "workload": "Supply invalid source and destination path components to the native publication owner.",
+      "invariant": "No path traversal or invalid component changes either directory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_repository_restore_recovers_closed_import_and_preserves_published_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_restore.rs",
+      "capability": "Actual redb repository restore composition",
+      "workload": "Capture actual DiskANN artifacts, delete the source, lose a closed import reply, recover/publish and write through the ordinary provider.",
+      "invariant": "A 384 KiB import allowance holds, artifacts retain their observations, one recovery replaces no data and publication retries preserve later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage-redb",
       "kind": "lib",
       "test": "redb_backup_import_rejects_invalid_requests_before_initializing_the_target",

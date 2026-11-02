@@ -52,7 +52,7 @@ fn protection() -> Protection {
     }
 }
 
-fn capture(
+pub(super) fn capture(
     owner: &RedbStorage,
     path: &Path,
     control: &StorageReadControl,
