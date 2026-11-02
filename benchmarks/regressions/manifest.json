@@ -2,6 +2,123 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_preserves_every_source_and_destination_protection_combination",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image protection conversion matrix",
+      "workload": "Capture each of four source file modes, remove the source and import it into all four destination modes.",
+      "invariant": "All sixteen source/destination pairs retain empty and opaque values, original revisions, allocator maxima and the new history identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_exhausted_verification_spill_keeps_the_target_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image verification spill admission",
+      "workload": "Import 512 mapping records under a 128 KiB allowance with no verification spill capacity across four destination modes.",
+      "invariant": "The first spill exceeds its explicit disk allowance, releases retained resources and keeps the partially imported database unavailable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_preserves_artifacts_revisions_and_allocators_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image preservation and bounded BLOB import",
+      "workload": "Restore actual DiskANN state, a 512 KiB value and allocator watermarks after source deletion across all four source/destination modes.",
+      "invariant": "Every raw revision and byte survives under a 128 KiB allowance; new history rejects old transactions and repeated restoration preserves later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_drop_cancellation_and_limits_keep_partial_files_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite partial image admission and resource retirement",
+      "workload": "Drop or cancel import, exhaust its original memory allowance, or exceed its per-value bound across four destination modes.",
+      "invariant": "Incomplete files reject ordinary and restored opens; failed advances are terminal and release their complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_empty_image_preserves_sequence_and_refuses_populated_files",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite empty image sequence and destination ownership",
+      "workload": "Import a mapping whose final record was deleted, write new data and attempt another import into the same file.",
+      "invariant": "The original cut remains exact, and populated targets retain their later data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_verifies_whole_objects_after_copying_every_record",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite full object verification before activation",
+      "workload": "Corrupt a stored object after its final record has been copied into each destination mode.",
+      "invariant": "Whole-object verification fails and neither ordinary nor restored open can activate the partial image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_uncertain_history_publication_resumes_the_original_request",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image history recovery",
+      "workload": "Lose replies at intent, auxiliary publication and completed history boundaries across four file modes.",
+      "invariant": "The original request establishes one target history and preserves subsequent writes on every retry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_invalid_options_leave_the_empty_destination_untouched",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image constructor admission",
+      "workload": "Supply zero value limits, invalid protection options and a mismatched restore source.",
+      "invariant": "Invalid construction preserves the empty destination before any physical initialization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_process_exit_keeps_partial_images_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image crash admission",
+      "workload": "Exit an independent import process after its first committed record across all four file modes.",
+      "invariant": "After OS lease release and physical journal recovery, ordinary and restored opens still reject the incomplete prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "restore_cannot_downgrade_uncertain_completion_after_target_removal",

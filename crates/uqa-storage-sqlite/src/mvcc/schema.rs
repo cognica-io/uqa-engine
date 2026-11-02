@@ -11,6 +11,9 @@ use uqa_storage::mvcc::{DatabaseId, VersionError};
 
 use super::{codec, connection_functions::ConnectionFunctions, PhysicalResult};
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) mod backup_import;
+
 /// Identifier generations share durable capture with committed records.
 pub(super) const RECORD_FORMAT: i64 = 68;
 const VERSION_METADATA_FORMAT: i64 = 55;
@@ -117,14 +120,7 @@ pub(super) struct Initialization {
 pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initialization> {
     let (present, predecessor) = validate_tables(transaction)?;
     if present == 0 {
-        for (name, sql) in TABLES {
-            transaction.execute_batch(sql)?;
-            for action in ["INSERT", "UPDATE", "DELETE"] {
-                transaction.execute_batch(&trigger(name, action).1)?;
-            }
-        }
-        super::version_metadata::create_triggers(transaction)?;
-        super::backup_metadata::initialize(transaction)?;
+        create_tables(transaction, TABLES[0].1)?;
         let mut identity = [0; 16];
         getrandom::fill(&mut identity).map_err(|error| {
             VersionError::Storage(
@@ -163,6 +159,18 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
         created: false,
         upgraded,
     })
+}
+
+fn create_tables(transaction: &Connection, metadata: &str) -> PhysicalResult<()> {
+    for (name, sql) in TABLES {
+        transaction.execute_batch(if name == TABLES[0].0 { metadata } else { sql })?;
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            transaction.execute_batch(&trigger(name, action).1)?;
+        }
+    }
+    super::version_metadata::create_triggers(transaction)?;
+    super::backup_metadata::initialize(transaction)?;
+    Ok(())
 }
 
 fn validate_guards(transaction: &Connection, predecessor: Option<i64>) -> PhysicalResult<()> {

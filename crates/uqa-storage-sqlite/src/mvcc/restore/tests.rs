@@ -18,6 +18,8 @@ use crate::{
     Catalog, SQLiteCompressionOptions, SQLiteRecordStore,
 };
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_import;
 mod diskann;
 mod failures;
 mod populations;

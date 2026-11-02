@@ -25,6 +25,8 @@ use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompres
 #[cfg(not(target_os = "emscripten"))]
 mod checkpoint;
 mod identity;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) mod image_import;
 mod logical;
 mod native;
 mod native_restore;

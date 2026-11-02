@@ -65,12 +65,17 @@ pub(super) fn initialize(
         }
         transaction.execute_batch("DROP TABLE _key_value")?;
     }
-    transaction.execute_batch(GUARD)?;
-    transaction.execute_batch(CATALOG_GUARD)?;
+    create_mapping_guards(&transaction)?;
     transaction.execute_batch("UPDATE _uqa_mvcc_metadata SET mapping = 1 WHERE singleton = 1")?;
     control.cancellation().check().map_err(VersionError::from)?;
     super::admission::commit(transaction, control)?;
     Ok(identity)
+}
+
+pub(super) fn create_mapping_guards(connection: &Connection) -> PhysicalResult<()> {
+    connection.execute_batch(GUARD)?;
+    connection.execute_batch(CATALOG_GUARD)?;
+    Ok(())
 }
 
 fn has_unrelated_tables(connection: &Connection) -> PhysicalResult<bool> {

@@ -58,4 +58,6 @@ pub use key_value::{
     SQLiteKeyValueCatalog, SQLiteKeyValueStorage, SQLiteKeyValueStorageBackend, SQLiteKeyValueStore,
 };
 pub use mvcc::SQLiteRecordStore;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use mvcc::{SQLiteBackupImportOptions, SQLiteBackupImportStep, SQLiteKeyValueBackupImport};
 pub use transaction::SQLiteTransaction;
