@@ -4,6 +4,45 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "record_chunks_preserve_large_committed_values_across_later_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/view/chunk/tests.rs",
+      "capability": "Committed record chunk retention",
+      "workload": "Read a 1 MiB plus 17-byte value through 1 KiB chunks under a 2 KiB read allowance, replacing the current value after the first chunk.",
+      "invariant": "Every chunk retains the original revision, length and bytes; EOF and overflow bounds are exact and all destination charges are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "record_chunks_bound_memory_and_close_each_redb_read_window",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/read/chunks.rs",
+      "capability": "redb bounded image payload reads",
+      "workload": "Read a 1 MiB plus 17-byte committed value under a 2 KiB allowance while an independent writer replaces and reclaims after the first chunk.",
+      "invariant": "A full-value read exceeds the allowance; each 1 KiB chunk uses one physical read window, preserves the old value and releases all snapshot and buffer charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "record_chunks_keep_large_values_and_writer_progress_in_every_mapping_and_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/chunks.rs",
+      "capability": "SQLite bounded image payload reads",
+      "workload": "Read native encoded views and KV values larger than 512 KiB in 1 KiB chunks with a 4 KiB allowance across both mappings and all four file modes.",
+      "invariant": "A full-value read exceeds the allowance; independent writers commit between chunks, old bytes and revisions survive reclamation, and every charge retires after the cut and buffer drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "ordered_inventory_streams_large_state_under_a_fixed_allowance",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/tests/inventories.rs",
