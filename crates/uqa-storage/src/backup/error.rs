@@ -32,17 +32,23 @@ pub enum BackupError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
-    Storage(#[from] crate::StorageBackendError),
+    Storage(crate::StorageBackendError),
 }
 
 pub type BackupResult<T> = Result<T, BackupError>;
 
 impl From<crate::mvcc::VersionError> for BackupError {
     fn from(error: crate::mvcc::VersionError) -> Self {
+        error.into_storage_error().into()
+    }
+}
+
+impl From<crate::StorageBackendError> for BackupError {
+    fn from(error: crate::StorageBackendError) -> Self {
         match error {
-            crate::mvcc::VersionError::Memory(error) => Self::Memory(error),
-            crate::mvcc::VersionError::Cancelled(error) => Self::Cancelled(error),
-            error => Self::Storage(error.into_storage_error()),
+            crate::StorageBackendError::Memory(error) => Self::Memory(error),
+            crate::StorageBackendError::Cancelled(error) => Self::Cancelled(error),
+            error => Self::Storage(error),
         }
     }
 }

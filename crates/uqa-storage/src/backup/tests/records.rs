@@ -13,14 +13,14 @@ use crate::mvcc::{
     MetadataEpoch, RecordWrite, VersionError, VersionResult,
 };
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicUsize, Ordering},
     Arc,
 };
 use uqa_core::memory::BudgetedVec;
 
 struct Source {
     records: MemoryRecordSnapshot,
-    fail_scan: Arc<AtomicBool>,
+    failure: Arc<AtomicUsize>,
     dropped: Arc<AtomicUsize>,
 }
 
@@ -86,10 +86,23 @@ impl CommittedBackupSnapshot for Source {
         control: &StorageReadControl,
         visit: &mut BackupRecordPositionVisitor<'_>,
     ) -> VersionResult<()> {
-        if self.fail_scan.load(Ordering::SeqCst) {
-            return Err(VersionError::InvalidEncoding(
-                "injected image source failure",
-            ));
+        match self.failure.load(Ordering::SeqCst) {
+            1 => {
+                return Err(VersionError::InvalidEncoding(
+                    "injected image source failure",
+                ))
+            }
+            2 => {
+                control.cancellation().cancel();
+                control.check()?;
+            }
+            3 => {
+                control
+                    .memory()
+                    .reserve(usize::MAX)
+                    .map_err(crate::StorageBackendError::from)?;
+            }
+            _ => (),
         }
         for key in KEYS
             .iter()
@@ -112,7 +125,7 @@ struct Fixture {
     large: Vec<u8>,
     revision: CommitSequence,
     dropped: Arc<AtomicUsize>,
-    fail_scan: Arc<AtomicBool>,
+    failure: Arc<AtomicUsize>,
 }
 
 impl Fixture {
@@ -149,12 +162,12 @@ impl Fixture {
             .unwrap();
         let control = StorageReadControl::with_limit(4096);
         let dropped = Arc::new(AtomicUsize::new(0));
-        let fail_scan = Arc::new(AtomicBool::new(false));
+        let failure = Arc::new(AtomicUsize::new(0));
         let source = retain_backup_snapshot(
             Source {
                 records: store.snapshot().unwrap(),
                 dropped: dropped.clone(),
-                fail_scan: fail_scan.clone(),
+                failure: failure.clone(),
             },
             &control,
         )
@@ -167,7 +180,7 @@ impl Fixture {
             large,
             revision,
             dropped,
-            fail_scan,
+            failure,
         }
     }
     fn cursor(&mut self) -> RecordImageCursor {
@@ -268,7 +281,7 @@ fn record_image_cursor_releases_its_cut_on_failure_or_unconsumed_advance() {
     let mut cursor = fixture.cursor();
     assert_eq!(cursor.advance(1).unwrap(), RecordImageStep::Unit);
     cursor.read_current(&mut [0; 8]).unwrap();
-    fixture.fail_scan.store(true, Ordering::SeqCst);
+    fixture.failure.store(1, Ordering::SeqCst);
     while let Ok(step) = cursor.advance(1) {
         assert_eq!(step, RecordImageStep::Pending);
     }
@@ -301,4 +314,30 @@ fn record_image_cursor_cancellation_and_failed_creation_release_retention() {
     ));
     assert_eq!(fixture.control.memory().used(), 0);
     assert_eq!(fixture.dropped.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn record_image_cursor_keeps_resource_errors_from_provider_read_boundaries() {
+    for failure in [2, 3] {
+        let mut fixture = Fixture::new();
+        let mut cursor = fixture.cursor();
+        assert_eq!(cursor.advance(1).unwrap(), RecordImageStep::Unit);
+        cursor.read_current(&mut [0; 8]).unwrap();
+        fixture.failure.store(failure, Ordering::SeqCst);
+        let error = loop {
+            match cursor.advance(1) {
+                Ok(step) => assert_eq!(step, RecordImageStep::Pending),
+                Err(error) => break error,
+            }
+        };
+        match failure {
+            2 => assert!(matches!(error, BackupError::Cancelled(_))),
+            3 => assert!(matches!(error, BackupError::Memory(_))),
+            _ => unreachable!(),
+        }
+        assert!(cursor.current_unit().is_none());
+        assert_eq!(fixture.dropped.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.control.memory().used(), 0);
+        assert!(matches!(cursor.advance(1), Err(BackupError::Finished)));
+    }
 }
