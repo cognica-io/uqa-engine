@@ -28,6 +28,32 @@
       ]
     },
     {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "large_metadata_cut_streams_under_a_fixed_retention_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata.rs",
+      "capability": "Joint backup metadata retention",
+      "workload": "Capture 4,096 allocator namespaces with a 512-byte retained allowance, then visit 32 physical positions per read window.",
+      "invariant": "Export every original watermark in order without changing the record sequence or retaining namespace-sized workspace; release all snapshot charges on final drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "watermark_history_coalesces_between_captures_and_scans_bound_absent_positions",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata.rs",
+      "capability": "Online backup metadata windows",
+      "workload": "One hundred allocator updates after capture, eight new namespaces and two-position reads interleaved with a writer on another thread.",
+      "invariant": "Keep one historical value per captured epoch, bound absent physical positions, allow writers between reads and return the original allocation without advancing the record sequence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "independent_allowances_own_snapshot_retention_separately",

@@ -262,6 +262,14 @@ pub trait VersionedPersistence: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>>;
 
+    /// Jointly retain committed records and autonomous metadata with bounded capture work. A record-only snapshot is not a fallback. Wrappers forward this exact owner capability; unsupported providers return `None`.
+    fn capture_backup_snapshot(
+        &self,
+        _control: &StorageReadControl,
+    ) -> VersionResult<Option<Arc<dyn super::CommittedBackupSnapshot>>> {
+        Ok(None)
+    }
+
     /// A value that changes whenever any session or process commits to this database, read without capturing a snapshot. Two equal values prove that no commit lies between the two reads. A provider with a monitor reads it before it captures a snapshot and reports that value through [`CommittedRecordSnapshot::commit_monitor`], which lets a session keep its snapshot instead of capturing an identical one. `None` when the provider has no monitor that may read at any time.
     fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
         Ok(None)

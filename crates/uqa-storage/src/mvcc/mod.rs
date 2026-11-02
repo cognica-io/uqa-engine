@@ -85,8 +85,8 @@ pub use resources::{
 };
 pub use restore::DatabaseRestore;
 pub use retention::{
-    verify_version_reclamation, ReclamationHorizon, SnapshotLease, SnapshotLeaseTransport,
-    SnapshotRegistry,
+    verify_version_reclamation, ReclamationHorizon, SnapshotBoundary, SnapshotLease,
+    SnapshotLeaseTransport, SnapshotRegistry,
 };
 pub use serializable::{
     admit_serializable, LocalSerializableLeases, LocalSerializableState, SafeSnapshot,
@@ -105,6 +105,10 @@ pub use tombstones::{
     verify_tombstone_reclamation_pages, TombstoneReclamationPage, TombstoneReclamationRequest,
     TombstoneReclamationStep, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE,
     TOMBSTONE_RECLAMATION_PAGE,
+};
+mod metadata;
+pub use metadata::{
+    retain_backup_snapshot, CommittedBackupSnapshot, IdentifierWatermarkVisitor, MetadataEpoch,
 };
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
