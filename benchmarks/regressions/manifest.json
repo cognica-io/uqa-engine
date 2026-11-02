@@ -4,6 +4,45 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "backup_capture_packs_streamed_units_under_fixed_memory_and_verifies_after_source_drop",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/capture.rs",
+      "capability": "Bounded complete image capture",
+      "workload": "Stream an empty unit, a 2 MiB value and 512 literal records into protected shared packs and an encrypted inventory spool, then consume the completed repository after source destruction.",
+      "invariant": "The 128 KiB allowance bounds retained capture and verification state; exact bytes, source counters and ordered inventory survive, at most 20 objects hold all 514 units, and no source is needed for complete verification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_repository_round_trip_retains_the_cut_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_image.rs",
+      "capability": "redb repository capture",
+      "workload": "Capture actual DiskANN state, 128 small records and a 1 MiB value, replace the source value, prepare and publish a protected image, delete the source and reopen the repository.",
+      "invariant": "Every original committed record and revision matches an independent full-read oracle, delivery state is excluded, source retention retires and complete object verification succeeds under a 128 KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_kv_backup_repository_round_trip_survives_source_loss_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_image.rs",
+      "capability": "SQLite KV repository capture",
+      "workload": "Capture actual DiskANN state and a 512 KiB value in all four file modes, commit a replacement through another connection, publish a protected image and remove every source file before repository verification.",
+      "invariant": "The reopened repository yields the exact original committed bytes and revisions in all four modes, excludes delivery state and releases all charged capture and verification resources under a 128 KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "backup_image_reader_streams_exact_units_and_bounds_global_verification",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/repository/tests/streaming.rs",

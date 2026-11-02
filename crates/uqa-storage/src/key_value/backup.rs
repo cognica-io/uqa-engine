@@ -298,3 +298,43 @@ impl KeyValueBackupImage {
         self.notification_key = BackupCursorKey::new(self.control.memory());
     }
 }
+
+impl crate::backup::BackupImageSource for KeyValueBackupImage {
+    fn cut(&self) -> BackupCut {
+        self.cut()
+    }
+
+    fn advance(
+        &mut self,
+        maximum_positions: usize,
+    ) -> BackupResult<crate::backup::BackupSourceStep> {
+        use crate::backup::BackupSourceStep;
+        Ok(match self.advance(maximum_positions)? {
+            KeyValueImageStep::Unit => BackupSourceStep::Unit,
+            KeyValueImageStep::Pending => BackupSourceStep::Pending,
+            KeyValueImageStep::Complete => BackupSourceStep::Complete,
+        })
+    }
+
+    fn current_unit(&self) -> Option<crate::backup::BackupSourceUnit<'_>> {
+        let unit = self.current_unit()?;
+        Some(crate::backup::BackupSourceUnit {
+            address: unit.address,
+            kind: unit.kind,
+            decoded_bytes: unit.decoded_bytes,
+        })
+    }
+
+    fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
+        self.read_current(output)
+    }
+
+    fn statistics(&self) -> crate::backup::BackupSourceStatistics {
+        crate::backup::BackupSourceStatistics {
+            visited_positions: self.visited_positions(),
+            copied_payload_bytes: self.copied_source_bytes(),
+            metadata_read_bytes: self.metadata_read_bytes(),
+            excluded_units: self.excluded_units(),
+        }
+    }
+}

@@ -21,6 +21,91 @@ use uqa_storage::{
     KeyValueStore, PersistentStorageProvider,
 };
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[test]
+fn redb_backup_repository_round_trip_retains_the_cut_after_source_loss() {
+    use uqa_storage::backup::{
+        BackupKey, BackupLimits, BackupReadStep, LocalRepository, Protection, ProtectionId,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("source.redb");
+    let owner = crate::RedbStorage::open(&path).unwrap();
+    let setup = StorageReadControl::with_limit(32 << 20);
+    let session = owner.open_session().unwrap();
+    verify_diskann_restore_source(&*session.backend).unwrap();
+    drop(session);
+    let store = owner.store();
+    let large = vec![73; (1 << 20) + 17];
+    store.put(b"large", &large).unwrap();
+    for number in 0..128_u64 {
+        store
+            .put(&number.to_be_bytes(), b"literal retained bytes")
+            .unwrap();
+    }
+    let notification = KeyValueNotificationRecords.key(&setup).unwrap();
+    store.put(&notification, b"transient delivery").unwrap();
+    let mut expected = expected_records(&owner, b"\xffunused", &notification);
+    let control = StorageReadControl::with_limit(128 * 1024);
+    let image = owner.capture_backup_image(&control).unwrap();
+    let cut = image.cut();
+    store.put(b"large", b"later replacement").unwrap();
+    let protection = || Protection::Encrypted {
+        domain: ProtectionId::from_bytes([3; 16]).unwrap(),
+        key: BackupKey::new([61; 32]),
+    };
+    let limits = BackupLimits::new(4096, 4096).unwrap();
+    let repository_path = directory.path().join("backup");
+    let repository =
+        LocalRepository::create(&repository_path, protection(), limits, &control).unwrap();
+    let mut operation = repository
+        .begin_backup(cut, None, 16 << 20, &control)
+        .unwrap();
+    let report = operation.prepare_image(image, 2 << 20, &control).unwrap();
+    assert_eq!(report.source.excluded_units, 1);
+    let root = operation.publish(&control).unwrap();
+    drop(operation);
+    drop(repository);
+    drop(store);
+    drop(owner);
+    std::fs::remove_file(path).unwrap();
+    let repository =
+        LocalRepository::open(&repository_path, protection(), limits, &control).unwrap();
+    let lease = repository.open_backup(root.backup(), &control).unwrap();
+    let mut reader = lease.read_image(2 << 20, &control).unwrap();
+    loop {
+        match reader.advance(4096).unwrap() {
+            BackupReadStep::Complete => break,
+            BackupReadStep::Pending => continue,
+            BackupReadStep::Unit => (),
+        }
+        let unit = reader.current_unit().unwrap();
+        let wanted = (unit.address().family == 3).then(|| {
+            expected
+                .remove(unit.address().key)
+                .expect("exact original record set")
+        });
+        let mut offset = 0;
+        let mut buffer = [0; 4096];
+        loop {
+            let n = reader.read_current(&mut buffer).unwrap();
+            if n == 0 {
+                break;
+            }
+            if let Some(wanted) = &wanted {
+                assert_eq!(&buffer[..n], &wanted[offset..offset + n]);
+            }
+            offset += n;
+        }
+        if let Some(wanted) = wanted {
+            assert_eq!(offset, wanted.len());
+        }
+    }
+    assert!(expected.is_empty());
+    assert_eq!(reader.verified().unwrap().root(), root);
+    assert_eq!(control.memory().used(), 0);
+    assert!(control.memory().peak() <= 128 * 1024);
+}
+
 fn generation_prefix(generation: DiskANNGeneration) -> Vec<u8> {
     let mut prefix = b"\0uqa-diskann-v1\0\x01".to_vec();
     prefix.extend_from_slice(&generation.database());

@@ -12,7 +12,7 @@ mod objects;
 mod operation;
 mod verify;
 
-pub use operation::{BackupOperation, BackupPack, PackObject, PackRange};
+pub use operation::{BackupCaptureReport, BackupOperation, BackupPack, PackObject, PackRange};
 pub use verify::{BackupImageReader, BackupReadStep, VerifiedBackupImage};
 
 use std::fs::File;

@@ -7,7 +7,9 @@
 use std::fs::File;
 use std::io::{self, Read};
 
+mod capture;
 mod pack;
+pub use capture::BackupCaptureReport;
 pub use pack::{BackupPack, PackObject, PackRange};
 
 use cap_std::fs::Dir;
