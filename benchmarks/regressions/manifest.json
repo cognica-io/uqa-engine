@@ -54,6 +54,32 @@
       ]
     },
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "large_metadata_capture_uses_fixed_retained_memory_and_bounded_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_metadata/admission.rs",
+      "capability": "SQLite backup metadata retention",
+      "workload": "Capture 4,096 allocator namespaces with a 2 KiB retained allowance and visit at most 32 physical positions per window.",
+      "invariant": "Preserve every original watermark in byte order with constant retained snapshot memory and release all charged memory after the final owner drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "independent_native_and_kv_writers_progress_between_backup_windows_in_all_file_modes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_metadata/providers.rs",
+      "capability": "SQLite online backup writer progress",
+      "workload": "Retain a joint cut while an independent native or Key/Value owner writes in plain, encrypted, compressed and compressed-encrypted mode.",
+      "invariant": "The writer completes before cut release; the snapshot keeps the old record set and watermark, while current reads observe the new publications.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "independent_allowances_own_snapshot_retention_separately",
