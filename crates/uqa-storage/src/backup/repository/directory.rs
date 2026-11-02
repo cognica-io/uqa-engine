@@ -7,7 +7,7 @@
 use std::fs::{File, TryLockError};
 use std::path::{Component, Path};
 
-use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::fs::{Dir, OpenOptions};
 
 use crate::read_control::StorageReadControl;
@@ -90,7 +90,15 @@ pub(super) fn open_file(
 
 /// A successful return certifies the platform's directory synchronization operation. Unsupported filesystems fail; no branch substitutes a no-op for durability.
 pub(super) fn synchronize(directory: &Dir) -> BackupResult<()> {
-    directory.try_clone()?.into_std_file().sync_all()?;
+    // A directory capability can be an O_PATH handle on Linux. Open an I/O handle relative to that pinned capability instead of cloning its flags.
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .maybe_dir(true)
+        .follow(FollowSymlinks::No);
+    #[cfg(windows)]
+    options.write(true);
+    directory.open_with(".", &options)?.sync_all()?;
     Ok(())
 }
 

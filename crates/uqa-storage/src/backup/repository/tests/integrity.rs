@@ -121,6 +121,39 @@ fn repositories_reject_internal_symlinks_and_pin_selected_directory_identity() {
 
 #[cfg(unix)]
 #[test]
+fn synchronization_uses_the_pinned_directory_with_a_readable_io_handle() {
+    let temporary = tempfile::tempdir().unwrap();
+    let original = temporary.path().join("original");
+    let moved = temporary.path().join("moved");
+    std::fs::create_dir(&original).unwrap();
+    std::fs::write(original.join("original-marker"), b"original").unwrap();
+    #[cfg(target_os = "linux")]
+    let capability = {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path_only = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_PATH | libc::O_DIRECTORY)
+            .open(&original)
+            .unwrap();
+        assert_eq!(
+            path_only.sync_all().unwrap_err().raw_os_error(),
+            Some(libc::EBADF)
+        );
+        cap_std::fs::Dir::from_std_file(path_only)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let capability =
+        cap_std::fs::Dir::open_ambient_dir(&original, cap_std::ambient_authority()).unwrap();
+    std::fs::rename(&original, &moved).unwrap();
+    std::fs::create_dir(&original).unwrap();
+    std::fs::write(original.join("replacement-marker"), b"replacement").unwrap();
+    directory::synchronize(&capability).unwrap();
+    assert!(capability.metadata("original-marker").is_ok());
+    assert!(capability.metadata("replacement-marker").is_err());
+}
+
+#[cfg(unix)]
+#[test]
 fn a_substituted_pipe_is_rejected_without_waiting_for_a_writer() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("backup");
