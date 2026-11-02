@@ -11,11 +11,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add online Key/Value image exporters for redb and SQLite KV. The versioned stream retains committed revisions, allocator watermarks and evaluated owner encodings, excludes notification delivery and unpublished/retired DiskANN payloads, and releases each physical read before returning. Fresh-image import, repository integration and public Engine backup APIs remain in progress.
 - Add bounded committed-record reads and a streaming record/allocator cursor for backup image adapters. Physical scan windows include excluded keys in their limit, payload reads retain exact revisions across concurrent writes, and completion or failure immediately releases the captured cut.
 - Add joint SQLite record and autonomous identifier snapshots with short read windows, cross-process retention and durable capture in both mappings and all four file modes. Complete image export/import and public Engine backup APIs remain in progress.
+- Add native local backup repositories with authenticated immutable packs, bounded full verification, durable publication, cancellation and prepared-image recovery. Complete provider coverage, fresh restore and Engine backup APIs remain in progress.
 - Add Common Storage backup image codecs with ordered streaming inventories, immutable root descriptors, bounded parsing and authenticated frames. These format primitives support the ongoing online/incremental backup implementation; they do not expose Engine capture or restore yet.
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
 
+- Preserve Cargo-supplied Windows import libraries in native C packages and resolve them from the installed location for static consumers. CMake linking uses the exact build dependency paths, and package verification checks each bundled library digest.
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
 
 ### Security

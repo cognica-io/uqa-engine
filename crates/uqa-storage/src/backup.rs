@@ -6,17 +6,24 @@
 
 //! Provider-independent backup image and immutable repository formats.
 //!
-//! These codecs do not establish a consistent source snapshot, publish a durable
-//! backup, or activate a restored database. Those operations require their owning
-//! provider and repository state machines. Decoding a root is not proof that its
-//! referenced objects exist, authenticate, or form a complete provider image.
+//! Native local repositories provide immutable packs, verified publication and
+//! prepared-image recovery. Source snapshots and restored database activation
+//! remain provider-owned operations. Decoding a root alone does not prove that
+//! its objects exist, authenticate, or form a complete provider image.
 
 mod error;
 mod frame;
 mod inventory;
 mod records;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod repository;
 mod root;
 mod types;
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use repository::{
+    BackupLease, BackupOperation, BackupPack, LocalRepository, PackObject, PackRange,
+};
 
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};

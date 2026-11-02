@@ -105,6 +105,12 @@ def validate_inventory(entries: dict[str, dict], manifest: dict, target: str, re
             path = "share/uqa/licenses/" + item["path"]
             if entries.get(path, {}).get("sha256") != item["sha256"]:
                 raise ValueError(f"Missing or altered dependency license: {path}")
+    for item in manifest.get("native_bundled_libraries", []):
+        safe_path(item["path"])
+        if not re.fullmatch(r"lib/[A-Za-z0-9_][A-Za-z0-9_.-]*\.lib", item["path"], re.I):
+            raise ValueError(f"Invalid native library inventory path: {item['path']}")
+        if entries.get(item["path"], {}).get("sha256") != item["sha256"]:
+            raise ValueError(f"Missing or altered native library: {item['path']}")
 
 
 def package(prefix: Path, target: str, output: Path) -> None:

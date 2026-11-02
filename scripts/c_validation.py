@@ -32,7 +32,7 @@ BINDINGS = (
     ".github/scripts/c-sanitizer-cc.sh",
 )
 PACKAGES = (
-    "scripts/*c-bindings*", "scripts/c_bindings_licenses.py",
+    "scripts/*c-bindings*", "scripts/c_bindings_licenses.py", "scripts/c_bindings_native.py",
     "scripts/verify-c-package.py", "scripts/tests/test_c_bindings_package.py",
     "scripts/check-release-licenses.py", "LICENSE*", "NOTICE*",
 )
