@@ -1,5 +1,7 @@
 # Implementation plans
 
+The [replication and change data capture plan](0030-replication-and-change-data-capture.md) proposes a transport-independent core. It records owner-based delivery units, journal and snapshot contracts, and four-provider source/sixteen-pair replication acceptance. Implementation has not started; networking and distributed failover remain separate work.
+
 The [embedded C binding implementation](0028-c-bindings.md) is in progress. Its ledger preserves the full approved ABI scope, native multi-statement execution, ownership boundaries, and remaining implementation and qualification work.
 
 [PR #1291](https://github.com/cognica-io/uqa-engine/pull/1291) addresses [#1290](https://github.com/cognica-io/uqa-engine/issues/1290), the [retained aggregate input correction](open-performance-corrections.md#retained-arithmetic-aggregate-inputs). Local acceptance passes 65 owner / 90 public cases, independent PostgreSQL results, strict owner Clippy and repository policies. Both actual platforms in 40139130981 independently verify 1,869 checks / 2,611 cases, 783 source hashes and eight histories each with zero failures/errors/skips; the complete qualification fingerprint is preserved. No FDW handler input changed. Local source review is complete. Delivery, cleanup and automatic controlled-main acceptance under the unchanged Q6 reference and limit remain current in the PR and issue checklists. Original performance requirements remain open.
