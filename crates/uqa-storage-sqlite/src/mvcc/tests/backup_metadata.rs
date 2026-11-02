@@ -7,6 +7,8 @@
 //! Backup cuts keep autonomous metadata and record visibility at one durable boundary.
 
 use super::*;
+
+mod positions;
 use uqa_storage::mvcc::{CommittedBackupSnapshot, IdentifierRequest, MetadataEpoch};
 
 mod admission;

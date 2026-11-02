@@ -108,7 +108,8 @@ pub use tombstones::{
 };
 mod metadata;
 pub use metadata::{
-    retain_backup_snapshot, CommittedBackupSnapshot, IdentifierWatermarkVisitor, MetadataEpoch,
+    retain_backup_snapshot, BackupCursorKey, BackupRecordPositionVisitor, CommittedBackupSnapshot,
+    IdentifierWatermarkVisitor, MetadataEpoch,
 };
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{

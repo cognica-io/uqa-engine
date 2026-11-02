@@ -6,6 +6,8 @@
 
 //! Chunk reads retain logical versions without retaining BLOB handles or physical transactions.
 
+mod images;
+
 use super::*;
 use crate::mvcc::native::{NativeRecordFamily, NativeRecordIdentity, NativeRecordOwner};
 use rusqlite::types::ValueRef;
@@ -51,44 +53,54 @@ fn replace_on_another_connection(path: &std::path::Path, mode: usize, native: bo
     writer.join().unwrap();
 }
 
+fn open_source(
+    path: &std::path::Path,
+    mode: usize,
+    native: bool,
+    definition: &str,
+    setup: &StorageReadControl,
+) -> (SQLiteRecordStore, Vec<u8>) {
+    let connection = super::reclamation::open(path, mode);
+    if native {
+        crate::Catalog::open(connection.clone()).unwrap();
+        connection
+            .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+            .unwrap();
+        save_view(&connection, definition);
+        let store = SQLiteRecordStore::for_native(&connection, setup).unwrap();
+        let key = NativeRecordIdentity::new(
+            NativeRecordFamily::Views,
+            NativeRecordOwner::Database(store.native_namespace().unwrap()),
+        )
+        .unwrap()
+        .encode_key(
+            &[ValueRef::Text(b"public"), ValueRef::Text(b"chunk_view")],
+            setup,
+        )
+        .unwrap()
+        .to_vec();
+        (store, key)
+    } else {
+        crate::key_value::SQLiteKeyValueStore::new(connection.clone())
+            .unwrap()
+            .put(b"large", definition.as_bytes())
+            .unwrap();
+        (
+            SQLiteRecordStore::for_key_value(&connection, setup).unwrap(),
+            b"large".to_vec(),
+        )
+    }
+}
+
 #[test]
 fn record_chunks_keep_large_values_and_writer_progress_in_every_mapping_and_file_mode() {
     for mode in 0..4 {
         for native in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("chunks.db");
-            let connection = super::reclamation::open(&path, mode);
             let setup = StorageReadControl::with_limit(32 << 20);
             let definition = format!("{{\"value\":\"{}\"}}", "x".repeat((512 << 10) + 17));
-            let (store, key) = if native {
-                crate::Catalog::open(connection.clone()).unwrap();
-                connection
-                    .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
-                    .unwrap();
-                save_view(&connection, &definition);
-                let store = SQLiteRecordStore::for_native(&connection, &setup).unwrap();
-                let key = NativeRecordIdentity::new(
-                    NativeRecordFamily::Views,
-                    NativeRecordOwner::Database(store.native_namespace().unwrap()),
-                )
-                .unwrap()
-                .encode_key(
-                    &[ValueRef::Text(b"public"), ValueRef::Text(b"chunk_view")],
-                    &setup,
-                )
-                .unwrap()
-                .to_vec();
-                (store, key)
-            } else {
-                crate::key_value::SQLiteKeyValueStore::new(connection.clone())
-                    .unwrap()
-                    .put(b"large", definition.as_bytes())
-                    .unwrap();
-                (
-                    SQLiteRecordStore::for_key_value(&connection, &setup).unwrap(),
-                    b"large".to_vec(),
-                )
-            };
+            let (store, key) = open_source(&path, mode, native, &definition, &setup);
             let control = StorageReadControl::with_limit(4096);
             let cut = store.capture_backup_snapshot(&control).unwrap().unwrap();
             let record = cut.records().get(&key, &setup).unwrap().unwrap();

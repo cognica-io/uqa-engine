@@ -8,6 +8,7 @@
 
 mod chunk;
 mod last;
+pub(super) use last::ceiling as key_ceiling;
 mod ordered;
 pub(crate) mod row_presence;
 pub(crate) mod table_owners;
