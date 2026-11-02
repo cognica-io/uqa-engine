@@ -4,6 +4,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "backup_leases_retire_their_description_without_unlocking_independent_readers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/directory.rs",
+      "capability": "Repository lease ownership",
+      "workload": "Retain a duplicate file description while releasing one shared lease, then retire an independently opened second reader and acquire an exclusive lease.",
+      "invariant": "Retirement unlocks the owning description despite inherited handles; another separately opened reader remains protected until its own owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "completed_cancel_releases_lease_despite_an_inherited_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/failures.rs",
+      "capability": "Durable cancellation lease retirement",
+      "workload": "Prepare an image, duplicate its operation lease descriptor, acknowledge cancellation and attempt recovery while the duplicate remains open.",
+      "invariant": "The cancelled operation immediately releases its lock and recovery reports Finished rather than Busy; the durable cancellation marker prevents publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "backup_capture_packs_streamed_units_under_fixed_memory_and_verifies_after_source_drop",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/repository/tests/capture.rs",

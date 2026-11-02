@@ -4,7 +4,6 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::fs::File;
 use std::io::{self, Read};
 
 mod capture;
@@ -105,7 +104,7 @@ pub struct BackupOperation<'a> {
     used: u64,
     maximum: u64,
     completion: StorageReadControl,
-    lease: Option<File>,
+    lease: Option<directory::Lease>,
     parent_lease: Option<BackupLease<'a>>,
 }
 
@@ -247,6 +246,11 @@ impl LocalRepository {
 }
 
 impl BackupOperation<'_> {
+    #[cfg(test)]
+    pub(super) fn duplicate_lease_for_test(&self) -> std::fs::File {
+        self.lease.as_ref().unwrap().duplicate()
+    }
+
     pub const fn id(&self) -> BackupId {
         self.intent.backup
     }
