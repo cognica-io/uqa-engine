@@ -128,6 +128,56 @@ struct Fixture {
     failure: Arc<AtomicUsize>,
 }
 
+#[test]
+fn record_image_cursor_skip_releases_unread_units_without_payload_copy() {
+    let mut fixture = Fixture::new();
+    let mut cursor = fixture.cursor();
+    let mut keys = Vec::new();
+    loop {
+        match cursor.advance(2).unwrap() {
+            RecordImageStep::Complete => break,
+            RecordImageStep::Pending => continue,
+            RecordImageStep::Unit => (),
+        }
+        keys.push(cursor.current_unit().unwrap().key.to_vec());
+        cursor.skip_current().unwrap();
+        assert!(cursor.current_unit().is_none());
+    }
+    assert_eq!(
+        keys,
+        [
+            b"ids".to_vec(),
+            b"".to_vec(),
+            b"large".to_vec(),
+            b"zero".to_vec()
+        ]
+    );
+    assert_eq!(cursor.copied_bytes(), 0);
+    assert_eq!(fixture.dropped.load(Ordering::SeqCst), 1);
+    assert!(matches!(cursor.skip_current(), Err(BackupError::Finished)));
+    assert_eq!(cursor.advance(1).unwrap(), RecordImageStep::Complete);
+}
+
+#[test]
+fn record_image_cursor_skip_misuse_or_cancellation_releases_the_cut() {
+    for cancel in [false, true] {
+        let mut fixture = Fixture::new();
+        let mut cursor = fixture.cursor();
+        if cancel {
+            assert_eq!(cursor.advance(1).unwrap(), RecordImageStep::Unit);
+            fixture.control.cancellation().cancel();
+            assert!(matches!(
+                cursor.skip_current(),
+                Err(BackupError::Cancelled(_))
+            ));
+        } else {
+            assert!(matches!(cursor.skip_current(), Err(BackupError::Finished)));
+        }
+        assert_eq!(fixture.dropped.load(Ordering::SeqCst), 1);
+        assert!(matches!(cursor.advance(1), Err(BackupError::Finished)));
+    }
+}
+
 impl Fixture {
     fn new() -> Self {
         let setup = StorageReadControl::with_limit(32 << 20);

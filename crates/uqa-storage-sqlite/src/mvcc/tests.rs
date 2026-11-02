@@ -10,6 +10,7 @@ use uqa_storage::mvcc::{CommitFailure, CommitSequence, CommitStatus, RecordWrite
 use super::*;
 
 mod admission;
+mod backup_image;
 mod backup_metadata;
 mod batch_metadata;
 mod chunks;

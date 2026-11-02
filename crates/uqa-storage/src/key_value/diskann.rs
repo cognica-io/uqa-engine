@@ -13,6 +13,8 @@ use uqa_core::memory::{Budgeted, BudgetedVec};
 
 use crate::catalog::new_nonzero_catalog_identity;
 use crate::diskann_index::format::DiskANNGeneration;
+
+pub(super) mod backup;
 use crate::mvcc::{DatabaseId, IdentifierRequest, ResourceLease, WeakResourceLease};
 use crate::read_control::StorageReadControl;
 use crate::{

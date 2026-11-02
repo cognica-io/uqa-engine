@@ -2,6 +2,50 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_image_preserves_published_artifacts_and_excludes_delivery_and_builds",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_image.rs",
+      "capability": "redb complete Key/Value image export",
+      "workload": "Capture actual DiskANN rows, exact-side data and uncovered changes, a 1 MiB record, allocator state, a live unpublished build and a delivery record; replace the selected generation and write during chunk export.",
+      "invariant": "Every captured persistent record matches the independent full-read oracle with its original revision, excluded payloads are not copied, each step inspects at most three positions and one fixed metadata record, and the 4 KiB allowance retires at completion.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_kv_backup_image_preserves_live_artifacts_and_writer_progress_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_image.rs",
+      "capability": "SQLite KV complete mapping image export",
+      "workload": "Export actual published DiskANN state and a large record in plain, encrypted, compressed and compressed-encrypted files while another connection updates between chunks.",
+      "invariant": "All committed record bytes and revisions match the full-read oracle; private writes and notification delivery are absent, each scan window has at most four positions, writers progress and retained memory stays within 4 KiB.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "record_image_cursor_skip_releases_unread_units_without_payload_copy",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/records.rs",
+      "capability": "Bounded image input projection",
+      "workload": "Omit selected allocator and record inputs including a 1 MiB payload without reading their bytes.",
+      "invariant": "Skipping preserves ordered progress, copies zero payload bytes and releases the retained cut exactly once at completion.",
+      "case_names": [""]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_image_selects_only_published_generation_at_its_own_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/diskann/backup/tests.rs",
+      "capability": "Snapshot-qualified artifact membership",
+      "workload": "Select state and graph keys for all six generation states, then replace the live lifecycle state before classifying the retained source.",
+      "invariant": "Membership reads exactly one 18-byte state from the original cut; only its Published generations are included, regardless of later publication or retirement.",
+      "case_names": [""]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "record_chunks_preserve_large_committed_values_across_later_writes",

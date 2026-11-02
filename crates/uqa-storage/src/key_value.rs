@@ -29,6 +29,8 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog;
 pub use catalog::KeyValueCatalog;
+mod backup;
+pub use backup::{KeyValueBackupImage, KeyValueImageStep, KeyValueImageUnit};
 mod diskann;
 pub use diskann::identifiers as diskann_identifiers;
 pub use diskann::{

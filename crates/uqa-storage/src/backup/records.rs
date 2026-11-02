@@ -138,6 +138,22 @@ impl RecordImageCursor {
         })
     }
 
+    /// Omit the selected raw input without reading its remaining payload. Image owners use this only after classifying the unit at this same cut. Advancing still counts every inspected physical position; omitted bytes never enter the copied-byte count. Misuse or cancellation terminates the cursor and releases its cut.
+    pub fn skip_current(&mut self) -> BackupResult<()> {
+        let result = (|| {
+            let Stage::Unit(unit) = self.stage else {
+                return Err(BackupError::Finished);
+            };
+            self.control.cancellation().check()?;
+            self.stage = Stage::Scan(unit.plane);
+            Ok(())
+        })();
+        if result.is_err() && !matches!(self.stage, Stage::Complete | Stage::Failed) {
+            self.release(Stage::Failed);
+        }
+        result
+    }
+
     /// Inspect at most `positions` physical keys, closing each source read window before returning. The caller can write a completed chunk to its repository or yield between calls. Any error terminates this cursor and releases its cut and scan buffers.
     pub fn advance(&mut self, positions: usize) -> BackupResult<RecordImageStep> {
         let result = self.advance_inner(positions);

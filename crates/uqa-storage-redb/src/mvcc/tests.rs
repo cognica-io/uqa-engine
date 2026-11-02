@@ -13,6 +13,7 @@ use redb::{backends::InMemoryBackend, StorageBackend};
 
 use super::*;
 
+mod backup_image;
 mod backup_metadata;
 mod commit;
 mod diskann;
