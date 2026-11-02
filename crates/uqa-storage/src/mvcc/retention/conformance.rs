@@ -14,6 +14,7 @@ use crate::read_control::StorageReadControl;
 
 /// Verify reclamation on fresh disposable byte-record persistence. Keep snapshots through collection, then release them; an old successful receipt must still resolve after its record version disappears.
 pub fn verify_version_reclamation(store: &dyn VersionedPersistence) -> VersionResult<()> {
+    verify_independent_snapshot_allowances(store)?;
     let control = StorageReadControl::with_limit(1 << 20);
     let empty = store.snapshot(&control)?;
     let first = PreparedRecordCommit::new(
@@ -108,6 +109,22 @@ pub fn verify_version_reclamation(store: &dyn VersionedPersistence) -> VersionRe
     ));
     assert_eq!(store.abort(stale_id, &control)?, CommitStatus::Aborted);
     verify_head_and_cancellation(store, removed_receipt.sequence, &control)
+}
+
+fn verify_independent_snapshot_allowances(store: &dyn VersionedPersistence) -> VersionResult<()> {
+    let first_control = StorageReadControl::with_limit(1 << 20);
+    let other_control = StorageReadControl::with_limit(1 << 20);
+    let first = store.snapshot(&first_control)?;
+    let other = store.snapshot(&other_control)?;
+    assert_eq!(first.sequence(), other.sequence());
+    assert!(first_control.memory().used() > 0);
+    assert!(other_control.memory().used() > 0);
+    drop(first);
+    assert_eq!(first_control.memory().used(), 0);
+    assert!(other_control.memory().used() > 0);
+    drop(other);
+    assert_eq!(other_control.memory().used(), 0);
+    Ok(())
 }
 
 fn verify_head_and_cancellation(
