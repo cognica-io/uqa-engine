@@ -22,7 +22,8 @@ mod types;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
-    BackupLease, BackupOperation, BackupPack, LocalRepository, PackObject, PackRange,
+    BackupImageReader, BackupLease, BackupOperation, BackupPack, BackupReadStep, LocalRepository,
+    PackObject, PackRange, VerifiedBackupImage,
 };
 
 pub use error::{BackupError, BackupResult};

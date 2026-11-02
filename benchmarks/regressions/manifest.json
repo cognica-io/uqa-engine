@@ -2,6 +2,17 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_image_reader_streams_exact_units_and_bounds_global_verification",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/streaming.rs",
+      "capability": "Bounded repository image verification",
+      "workload": "Stream 512 protected units from a shared pack through seven-byte output buffers, then verify complete objects through seven-byte work windows and global frame ranges under a 128 KiB allowance.",
+      "invariant": "Every unit matches its literal payload and ordered identity; whole-object byte totals are exact, each object step respects its window, completion waits for every global check, and all charged streams and spill ledgers retire immediately.",
+      "case_names": [""]
+    },
+    {
       "package": "uqa-storage-redb",
       "kind": "lib",
       "test": "redb_backup_image_preserves_published_artifacts_and_excludes_delivery_and_builds",

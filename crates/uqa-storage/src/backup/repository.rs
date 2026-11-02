@@ -13,6 +13,7 @@ mod operation;
 mod verify;
 
 pub use operation::{BackupOperation, BackupPack, PackObject, PackRange};
+pub use verify::{BackupImageReader, BackupReadStep, VerifiedBackupImage};
 
 use std::fs::File;
 use std::io::Read;
@@ -53,6 +54,15 @@ pub struct BackupLease<'a> {
 impl BackupLease<'_> {
     pub const fn root(&self) -> BackupRoot {
         self.root
+    }
+
+    /// Stream units and complete global verification under this retained root lease. Importers keep their targets private until the returned reader and provider validation complete.
+    pub fn read_image(
+        &self,
+        maximum_workspace_bytes: u64,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupImageReader<'_>> {
+        verify::reader(self.repository, self.root, maximum_workspace_bytes, control)
     }
 
     /// Authenticate every referenced frame and unit and compare the complete inventory. Provider-specific image validation remains the importing owner's responsibility.

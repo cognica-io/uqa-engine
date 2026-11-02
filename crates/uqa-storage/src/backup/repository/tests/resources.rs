@@ -6,7 +6,7 @@
 
 use super::*;
 
-fn packed_root(
+pub(super) fn packed_root(
     repository: &LocalRepository,
     control: &StorageReadControl,
     duplicate: bool,

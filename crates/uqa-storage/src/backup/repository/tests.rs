@@ -15,6 +15,7 @@ use super::*;
 mod failures;
 mod integrity;
 mod resources;
+mod streaming;
 
 fn control() -> StorageReadControl {
     StorageReadControl::with_limit(512 * 1024)

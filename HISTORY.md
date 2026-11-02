@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add a bounded repository image reader that streams authenticated units, verifies every complete object and global frame range, and exposes completion only after all checks succeed. Corruption, cancellation and incomplete unit reads release files and verification workspace immediately.
 - Add online Key/Value image exporters for redb and SQLite KV. The versioned stream retains committed revisions, allocator watermarks and evaluated owner encodings, excludes notification delivery and unpublished/retired DiskANN payloads, and releases each physical read before returning. Fresh-image import, repository integration and public Engine backup APIs remain in progress.
 - Add bounded committed-record reads and a streaming record/allocator cursor for backup image adapters. Physical scan windows include excluded keys in their limit, payload reads retain exact revisions across concurrent writes, and completion or failure immediately releases the captured cut.
 - Add joint SQLite record and autonomous identifier snapshots with short read windows, cross-process retention and durable capture in both mappings and all four file modes. Complete image export/import and public Engine backup APIs remain in progress.

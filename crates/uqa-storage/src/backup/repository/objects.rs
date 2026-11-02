@@ -150,6 +150,10 @@ impl SpanReader<'_> {
                 &self.control,
             )?;
             self.offset += remaining - bounded.limit();
+            if self.decoded.is_empty() && (self.span.frames() != 1 || self.kind != FrameKind::Unit)
+            {
+                return Err(BackupError::Invalid("noncanonical empty object frame"));
+            }
             self.frames += 1;
             self.position = 0;
         }
