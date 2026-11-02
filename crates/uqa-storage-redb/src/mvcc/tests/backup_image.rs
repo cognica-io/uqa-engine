@@ -119,7 +119,7 @@ fn generation_prefix(generation: DiskANNGeneration) -> Vec<u8> {
     prefix
 }
 
-fn expected_records(
+pub(super) fn expected_records(
     owner: &crate::RedbStorage,
     excluded: &[u8],
     notification: &[u8],

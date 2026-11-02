@@ -2,6 +2,136 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_rejects_invalid_requests_before_initializing_the_target",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Fresh redb import request admission",
+      "workload": "Request zero value allowance, a foreign source identity and a zero target identity for new empty files.",
+      "invariant": "Every invalid request fails before the native database is initialized and retains no charged state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_accepts_literal_header_allocators_and_empty_records_for_both_mappings",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value image import envelope",
+      "workload": "Read independently encoded redb and SQLite KV images with a literal header, allocator and empty record through one-byte verification windows.",
+      "invariant": "Both mappings return exact literal inputs under a 64 KiB allowance, release all charged state, and preserve completion after cancellation and a rejected later read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_rejects_authenticated_but_invalid_mapping_envelopes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value image structural admission",
+      "workload": "Prepare 22 internally authenticated but malformed header, namespace, generation, family, allocator, delivery and revision cases for each Key/Value mapping.",
+      "invariant": "All invalid mapping envelopes fail before completion and release retained parsing and verification resources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_rejects_incompatible_roots_and_unconsumed_record_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value import lifecycle",
+      "workload": "Try foreign image mappings, premature advances and empty output buffers while a record remains unread.",
+      "invariant": "No incompatible mapping or unread record can reach completion; terminal failures retire every charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_rejects_unknown_image_versions_and_absent_sequences",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value image version admission",
+      "workload": "Open valid repository roots with an unknown mapping version or no committed sequence.",
+      "invariant": "The mapping decoder rejects incompatible roots before allocating retained import state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_source",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Source-independent redb image import",
+      "workload": "Capture actual DiskANN artifacts, a large value and allocator maxima, delete the source, import a new file, execute restored artifact reads/writes and retry after target writes.",
+      "invariant": "The 384 KiB allowance and one-unit advance bound hold; exact records, revisions, sequence and allocator maxima survive, source receipts lose authority and retry preserves later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_drop_cancel_and_limits_leave_the_target_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Incomplete redb image admission",
+      "workload": "Drop imports at four boundaries and fail active imports through cancellation, per-value admission and shared-memory exhaustion.",
+      "invariant": "Every initialized incomplete file retains format zero and ordinary/restored opens reject it; all charged resources retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_empty_image_preserves_sequence_and_never_reuses_a_populated_file",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Empty redb image and destination ownership",
+      "workload": "Capture a cut after deleting its only record, import the empty image, write to the target and attempt import into the same file.",
+      "invariant": "The committed sequence survives without resurrecting the deleted record; populated files are rejected without losing later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_rejects_final_object_corruption_after_copying_all_units",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Complete-object verification before redb activation",
+      "workload": "Copy all payload units then corrupt a referenced immutable object before the whole-object verification stage.",
+      "invariant": "Activation is rejected even after all records were inserted; the target remains unavailable and retains no reader reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_synchronization_failure_cannot_expose_the_source_history",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Atomic redb import activation",
+      "workload": "Inject a native synchronization failure after all units were copied, at final history and format publication.",
+      "invariant": "Recovery yields either unavailable format zero or the complete new history; no ordinary completed database retains source-history authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "backup_leases_retire_their_description_without_unlocking_independent_readers",

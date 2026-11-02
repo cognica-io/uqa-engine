@@ -24,6 +24,8 @@ use uqa_storage::{
     PersistentStorageSession, StorageBackendError, StorageBackendResult,
 };
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use mvcc::backup_import::{RedbBackupImport, RedbBackupImportStep};
 pub use mvcc::RedbRecordStore;
 pub use uqa_storage::mvcc::{VersionedKeyValueStore as RedbKeyValueStore, VersionedSessionOptions};
 

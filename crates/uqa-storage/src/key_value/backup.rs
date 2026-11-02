@@ -6,6 +6,11 @@
 
 //! Versioned Key/Value images preserve owner encodings and project out delivery and build state.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod import;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use import::{KeyValueImageImportReader, KeyValueImportUnit};
+
 use std::sync::Arc;
 
 use crate::{

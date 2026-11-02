@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add bounded fresh-file redb image import with complete repository verification, preserved record revisions and identifier watermarks, incomplete-file admission rejection, and atomic replacement of transaction history. Repository-owned restore intent, logical format validation and destination-directory publication remain in progress.
 - Connect complete provider image streams to protected shared packs and an encrypted, quota-bound inventory spool. redb and SQLite KV archives retain their captured bytes after source writes and source removal; publication uses the existing durable operation identity.
 - Add a bounded repository image reader that streams authenticated units, verifies every complete object and global frame range, and exposes completion only after all checks succeed. Corruption, cancellation and incomplete unit reads release files and verification workspace immediately.
 - Add online Key/Value image exporters for redb and SQLite KV. The versioned stream retains committed revisions, allocator watermarks and evaluated owner encodings, excludes notification delivery and unpublished/retired DiskANN payloads, and releases each physical read before returning. Fresh-image import and public Engine backup APIs remain in progress.

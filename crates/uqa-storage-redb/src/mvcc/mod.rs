@@ -6,6 +6,8 @@
 
 //! Short redb transactions persist versioned records and authoritative commit receipts.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) mod backup_import;
 mod backup_metadata;
 mod codec;
 mod identifiers;

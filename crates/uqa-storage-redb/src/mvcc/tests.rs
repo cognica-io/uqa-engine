@@ -14,6 +14,8 @@ use redb::{backends::InMemoryBackend, StorageBackend};
 use super::*;
 
 mod backup_image;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_import;
 mod backup_metadata;
 mod commit;
 mod diskann;
