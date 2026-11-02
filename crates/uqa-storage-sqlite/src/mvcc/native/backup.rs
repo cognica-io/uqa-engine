@@ -28,6 +28,11 @@ use crate::ManagedConnection;
 const NAMESPACE: [u8; 16] = *b"UQA-NATIVE-IMG01";
 const HEADER_BYTES: usize = 56;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod import;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use import::SQLiteNativeImageImportReader;
+
 #[cfg(all(test, any(windows, all(unix, not(target_os = "emscripten")))))]
 mod tests;
 

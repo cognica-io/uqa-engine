@@ -9,6 +9,8 @@
 mod backup;
 mod capture;
 pub use backup::SQLiteNativeBackupImage;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup::SQLiteNativeImageImportReader;
 mod diskann;
 pub(crate) use row::{binary_pair_limit, variable_fields_limit, vector_row_limit};
 mod family;

@@ -4,6 +4,58 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "native_backup_import_reader_preserves_literal_namespace_revisions_and_bounded_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image input decoding",
+      "workload": "Read a literal native header, allocator and 512 KiB record through 127-byte payload reads and bounded verification windows.",
+      "invariant": "The original data namespace, committed revision, allocator and every payload byte survive under 64 KiB; completion releases the mapping and remains complete after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_reader_rejects_incompatible_roots_before_input",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image compatibility admission",
+      "workload": "Open roots selecting another provider, an unknown native image version or an absent committed sequence.",
+      "invariant": "Incompatible roots fail before input is exposed and release all retained reader memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_reader_rejects_verified_but_invalid_mapping_envelopes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image semantic envelope validation",
+      "workload": "Create complete verified archives with 22 invalid headers, mapping versions, allocator envelopes, revisions, native keys or delivery slots.",
+      "invariant": "Authenticated archive structure cannot bypass native format, namespace, key or revision validation; failure retires the reader and all charged metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_reader_retires_unread_cancelled_and_exhausted_input",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image input resource ownership",
+      "workload": "Skip an unread record, cancel an input and exhaust its original allowance before header admission.",
+      "invariant": "Every rejected operation becomes terminal, removes exposed units and namespaces, and releases all owned input memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "native_backup_capture_preserves_private_transactions_and_the_original_committed_cut",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",

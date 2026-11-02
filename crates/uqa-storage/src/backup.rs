@@ -13,6 +13,8 @@
 
 mod error;
 mod frame;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod import;
 mod inventory;
 mod mapping;
 mod records;
@@ -31,6 +33,8 @@ pub use repository::{
 
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use import::{BackupRecordImportMapping, MappedRecordImageImportReader, RecordImageImportUnit};
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};
 pub use mapping::{BackupRecordMapping, MappedRecordBackupImage};
 pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};

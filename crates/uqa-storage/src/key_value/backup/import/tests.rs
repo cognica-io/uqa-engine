@@ -7,7 +7,10 @@
 //! Independent image envelopes exercise the common importer without a provider implementation.
 
 use super::*;
-use crate::{backup::*, mvcc::DatabaseId};
+use crate::{
+    backup::*,
+    mvcc::{CommitSequence, DatabaseId, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE},
+};
 
 struct Unit {
     namespace: [u8; 16],
