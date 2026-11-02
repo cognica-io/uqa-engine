@@ -263,7 +263,10 @@ class CPackageVerification(unittest.TestCase):
                 self.assertTrue(NATIVE.native_static_flags(result.stdout))
                 scripts = [entry for entry in NATIVE.cargo_messages(result.stdout) if entry.get("reason") == "build-script-executed"]
                 self.assertEqual(len(scripts), 1, (attempt, result.stdout))
-                self.assertEqual(scripts[0]["linked_paths"], ["native=" + str(work / "native")])
+                self.assertEqual(len(scripts[0]["linked_paths"]), 1)
+                kind, separator, directory = scripts[0]["linked_paths"][0].partition("=")
+                self.assertEqual((kind, separator), ("native", "="))
+                self.assertTrue(Path(directory).samefile(work / "native"), directory)
 
     @unittest.skipUnless(sys.platform == "win32", "requires the native Windows argument parser")
     def test_windows_pkgconf_output_terminators_do_not_become_arguments(self):
