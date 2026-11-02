@@ -180,6 +180,7 @@ impl Accumulator {
         limits: BackupLimits,
         control: &StorageReadControl,
     ) -> BackupResult<()> {
+        validate_length(entry.decoded_bytes, entry.object, limits)?;
         if self
             .previous
             .as_ref()
@@ -412,7 +413,6 @@ impl<R: Read> InventoryReader<R> {
             digest: ImageDigest::from_bytes(value[9..41].try_into().unwrap()),
             object: ObjectSpan::decode(&value[41..])?,
         };
-        validate_length(entry.decoded_bytes, entry.object, self.limits)?;
         self.accumulator.admit(&entry, self.limits, &self.control)?;
         Ok(Some(entry))
     }

@@ -318,6 +318,24 @@ fn unit_lengths_cannot_exceed_the_span_or_decoded_frame_limit() {
 }
 
 #[test]
+fn writer_admission_enforces_its_own_frame_limit_before_emitting_an_entry() {
+    let control = control();
+    let entry = entry(b"alpha", &control);
+    let smaller = BackupLimits::new(4096, 2).unwrap();
+    let mut output = Vec::new();
+    let mut writer = InventoryWriter::new(&mut output, format(), smaller, &control).unwrap();
+    assert!(matches!(
+        writer.append(&entry),
+        Err(BackupError::Invalid("unit length exceeds framed span"))
+    ));
+    assert!(matches!(writer.finish(), Err(BackupError::Finished)));
+    assert_eq!(output.len(), 16);
+    let mut reader = InventoryReader::new(Cursor::new(output), smaller, &control).unwrap();
+    assert!(reader.read_next().is_err());
+    assert_eq!(reader.summary(), None);
+}
+
+#[test]
 fn partial_output_and_cancellation_cannot_be_completed_later() {
     struct Failing {
         remaining: usize,
