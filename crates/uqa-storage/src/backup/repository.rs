@@ -14,7 +14,6 @@ mod verify;
 
 pub use operation::{BackupOperation, BackupPack, PackObject, PackRange};
 
-use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
@@ -47,7 +46,7 @@ pub struct LocalRepository {
 pub struct BackupLease<'a> {
     repository: &'a LocalRepository,
     root: BackupRoot,
-    _lease: File,
+    _lease: directory::Lease,
 }
 
 impl BackupLease<'_> {
@@ -204,7 +203,7 @@ impl LocalRepository {
         }
     }
 
-    fn admission(&self, control: &StorageReadControl) -> BackupResult<File> {
+    fn admission(&self, control: &StorageReadControl) -> BackupResult<directory::Lease> {
         directory::lock(
             directory::open_file(&self.root, "admission", true)?,
             false,

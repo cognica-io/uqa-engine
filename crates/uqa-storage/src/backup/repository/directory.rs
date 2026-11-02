@@ -14,6 +14,27 @@ use crate::read_control::StorageReadControl;
 
 use super::super::{BackupError, BackupResult};
 
+/// The Rust lease owns lock retirement, not the lifetime of inherited file descriptions. Every lease has a separately opened description; no lease shares its lock with another Rust owner.
+pub(super) struct Lease(File);
+
+impl Lease {
+    pub(super) fn sync_all(&self) -> std::io::Result<()> {
+        self.0.sync_all()
+    }
+
+    #[cfg(test)]
+    pub(super) fn duplicate(&self) -> File {
+        self.0.try_clone().unwrap()
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // An unrelated fork can retain this open-file description until exec. Explicit unlock ends our lock even if that descriptor is still alive; closing our File alone does not.
+        let _ = self.0.unlock();
+    }
+}
+
 /// Only the caller-selected parent is opened with ambient authority. All repository entries use pinned relative directory capabilities and reject final-component symlinks.
 pub(super) fn parent(path: &Path) -> BackupResult<(Dir, &std::ffi::OsStr)> {
     let name = path.file_name().ok_or(BackupError::Invalid(
@@ -102,8 +123,8 @@ pub(super) fn synchronize(directory: &Dir) -> BackupResult<()> {
     Ok(())
 }
 
-/// Each lease owns a separately opened file description. Closing the final File releases its OS lock, including after process death, without process-ID liveness guesses or repeated lock calls on cloned descriptors.
-pub(super) fn lock(file: File, shared: bool, control: &StorageReadControl) -> BackupResult<File> {
+/// Acquire once on a separately opened description. The returned owner explicitly unlocks on retirement; process exit also releases OS-owned resources without process-ID liveness checks.
+pub(super) fn lock(file: File, shared: bool, control: &StorageReadControl) -> BackupResult<Lease> {
     control.cancellation().check()?;
     let result = if shared {
         file.try_lock_shared()
@@ -111,7 +132,7 @@ pub(super) fn lock(file: File, shared: bool, control: &StorageReadControl) -> Ba
         file.try_lock()
     };
     match result {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(Lease(file)),
         Err(TryLockError::WouldBlock) => Err(BackupError::Busy),
         Err(TryLockError::Error(error)) => Err(error.into()),
     }
@@ -128,4 +149,43 @@ pub(super) fn name(bytes: [u8; 16]) -> [u8; 32] {
 
 pub(super) fn text(name: &[u8; 32]) -> &str {
     std::str::from_utf8(name).expect("hexadecimal repository identity")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backup_leases_retire_their_description_without_unlocking_independent_readers() {
+        let temporary = tempfile::tempdir().unwrap();
+        let directory =
+            Dir::open_ambient_dir(temporary.path(), cap_std::ambient_authority()).unwrap();
+        let control = StorageReadControl::with_limit(1024);
+        let first = lock(create_file(&directory, "lease").unwrap(), true, &control).unwrap();
+        let inherited = first.duplicate();
+        let second = lock(
+            open_file(&directory, "lease", true).unwrap(),
+            true,
+            &control,
+        )
+        .unwrap();
+        drop(first);
+        assert!(matches!(
+            lock(
+                open_file(&directory, "lease", true).unwrap(),
+                false,
+                &control
+            ),
+            Err(BackupError::Busy)
+        ));
+        drop(second);
+        let exclusive = lock(
+            open_file(&directory, "lease", true).unwrap(),
+            false,
+            &control,
+        )
+        .unwrap();
+        drop(exclusive);
+        drop(inherited);
+    }
 }

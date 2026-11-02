@@ -189,8 +189,37 @@ fn failed_cancel_sync_remains_cancelling_and_is_retryable() {
         Err(BackupError::Finished)
     ));
     assert_eq!(operation.cancel().unwrap(), None);
-    assert!(matches!(
-        repository.resume_publication(operation.id(), 1024 * 1024, &control),
-        Err(BackupError::Finished)
-    ));
+    let result = repository.resume_publication(operation.id(), 1024 * 1024, &control);
+    assert!(
+        matches!(result, Err(BackupError::Finished)),
+        "unexpected cancellation recovery: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn completed_cancel_releases_lease_despite_an_inherited_descriptor() {
+    let directory = tempfile::tempdir().unwrap();
+    let control = control();
+    let repository = LocalRepository::create(
+        directory.path().join("backup"),
+        protected(),
+        limits(),
+        &control,
+    )
+    .unwrap();
+    let mut operation = repository
+        .begin_backup(cut(), None, 1024 * 1024, &control)
+        .unwrap();
+    prepare(&repository, &mut operation, &control);
+    // A duplicated open-file description models the interval between another thread's fork and exec. That descriptor does not own the parent operation's lifecycle.
+    let inherited = operation.duplicate_lease_for_test();
+    assert_eq!(operation.cancel().unwrap(), None);
+    let result = repository.resume_publication(operation.id(), 1024 * 1024, &control);
+    assert!(
+        matches!(result, Err(BackupError::Finished)),
+        "unexpected cancellation recovery: {:?}",
+        result.err()
+    );
+    drop(inherited);
 }
