@@ -38,6 +38,7 @@ pub mod native_file;
 pub mod notifications;
 pub mod read_control;
 mod read_only_snapshot;
+mod retained_memory;
 pub use read_only_snapshot::ReadOnlySnapshot;
 pub mod spatial_index;
 mod spill_map;

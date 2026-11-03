@@ -6,10 +6,9 @@
 
 //! Incremental live payload sizes keep shared snapshot admission independent of corpus size.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
-use parking_lot::Mutex;
-use uqa_core::memory::{MemoryError, MemoryReservation, OwnedMap};
+use uqa_core::memory::{MemoryReservation, OwnedMap};
 
 use super::{
     DocId, FieldName, IndexedFieldMetadata, MemoryDocument, MemoryFieldCounters, MemoryIndexState,
@@ -21,13 +20,13 @@ use crate::{read_control::StorageReadControl, StorageBackendResult};
 pub(super) struct RetainedPayload {
     // These sizes describe existing allocations, not requested capacities. A wide sum lets writes preserve their existing error boundary; admission checks the target-sized allowance.
     bytes: u128,
-    cached: Mutex<Weak<MemoryReservation>>,
+    cached: crate::retained_memory::RetainedMemory,
 }
 
 impl RetainedPayload {
     fn add(&mut self, bytes: u128) {
         self.bytes += bytes;
-        *self.cached.get_mut() = Weak::new();
+        self.cached.invalidate();
     }
 
     fn remove(&mut self, bytes: u128) {
@@ -35,7 +34,7 @@ impl RetainedPayload {
             .bytes
             .checked_sub(bytes)
             .expect("removed payload belongs to the tracked corpus");
-        *self.cached.get_mut() = Weak::new();
+        self.cached.invalidate();
     }
 
     pub(super) fn with_retained<T>(
@@ -43,28 +42,11 @@ impl RetainedPayload {
         control: &StorageReadControl,
         build: impl FnOnce(Arc<MemoryReservation>) -> StorageBackendResult<T>,
     ) -> StorageBackendResult<T> {
-        control.check()?;
-        let mut cached = self.cached.lock();
-        control.check()?;
-        let memory = if let Some(memory) = cached
-            .upgrade()
-            .filter(|memory| memory.budget().shares_allowance(control.memory()))
-        {
-            memory
-        } else {
-            let bytes = usize::try_from(
-                self.bytes
-                    + size_of::<MemoryIndexState>() as u128
-                    + size_of::<MemoryReservation>() as u128,
-            )
-            .map_err(|_| MemoryError::SizeOverflow)?;
-            Arc::new(control.memory().reserve(bytes)?)
-        };
-        let result = build(Arc::clone(&memory))?;
-        control.check()?;
-        // Publish only after reader construction succeeds; a late quota or cancellation failure keeps the prior cached allowance.
-        *cached = Arc::downgrade(&memory);
-        Ok(result)
+        self.cached.with_retained(
+            self.bytes + size_of::<MemoryIndexState>() as u128,
+            control,
+            build,
+        )
     }
 }
 

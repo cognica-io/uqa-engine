@@ -4,6 +4,84 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "memory_document_capture_pins_large_generations_without_a_corpus_copy",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Bounded document generation capture",
+      "workload": "Capture one and 20,000 actual memory rows, then replace, delete, clear and close the source.",
+      "invariant": "Capture allocates less than 2 KiB in fewer than ten allocations, admits retained payloads, and preserves captured fields and tuple metadata after source loss.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_retention_follows_replacement_delete_and_dormant_layouts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Memory document generation footprint",
+      "workload": "Replace overallocated payloads, delete rows, reuse and extend layouts, clone a generation and clear a shared source.",
+      "invariant": "Admission follows exposed live capacities, releases replaced rows, retains dormant layout names until clear, and preserves prior generations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_capture_rejects_limits_and_releases_failed_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Document capture admission failure",
+      "workload": "Capture nested payloads with zero, small, one-byte-short and exact allowances, and an already cancelled scope.",
+      "invariant": "Insufficient retention fails before the handle escapes, typed cancellation takes precedence and every failed or dropped capture releases its entire allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_capture_shares_only_the_same_generation_and_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Document snapshot allowance ownership",
+      "workload": "Share a captured generation between independent tokens, reject late wrapper admission in another allowance, retain a second allowance and mutate the source.",
+      "invariant": "Only the same immutable generation and allowance reuse payload admission; independent controls remain effective and all leases retire with their final readers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_retained_reads_keep_original_control_and_cannot_detach_writable_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Controlled document snapshot lifecycle",
+      "workload": "Resnapshot through retained wrappers, read with independent working memory, reject writable access and cancel inside a borrowed callback.",
+      "invariant": "Nested owners preserve original retention and cancellation, callback traversal stops after one row, and uncharged shared-row capabilities cannot detach the source payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_images_separate_source_retention_from_bounded_output_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Memory backup source and output allowances",
+      "workload": "Retain four MiB of actual document bytes, close the source and export under a separate 512-byte workspace before cancelling the original reader.",
+      "invariant": "Export allocates less than 2 KiB in requests of at most 16 KiB, source cancellation stops output before 32 KiB and the last reader releases retained payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "retained_document_image_checks_original_cancellation_between_writes",
       "cases": 1,
       "source": "crates/uqa-storage/src/read_only_snapshot/tests/images.rs",

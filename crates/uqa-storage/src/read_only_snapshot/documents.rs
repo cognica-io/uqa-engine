@@ -15,6 +15,21 @@ use crate::{DocumentStore, StorageBackendResult};
 
 use super::{read_only_error, ReadOnlySnapshot};
 
+impl ReadOnlySnapshot<dyn DocumentStore> {
+    pub(crate) fn with_document_read_control(
+        mut self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        if let Some(original) = &self.2 {
+            original.check()?;
+        } else {
+            self.2 = Some(control.clone());
+        }
+        Ok(self)
+    }
+}
+
 impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
     fn write_image_document(
         &self,
@@ -22,23 +37,9 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
         output: &mut dyn std::io::Write,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<u64>> {
-        if let Some(original) = &self.2 {
-            original.check()?;
-        }
-        let mut output = ImageOutput {
-            output,
-            original: self.2.as_ref(),
-            error: None,
-        };
-        let result = self.0.write_image_document(doc_id, &mut output, control);
-        if let Some(error) = output.error {
-            return Err(error);
-        }
-        let written = result?;
-        if let Some(original) = &self.2 {
-            original.check()?;
-        }
-        Ok(written)
+        crate::document_store::image::with_retained_control(output, self.2.as_ref(), |output| {
+            self.0.write_image_document(doc_id, output, control)
+        })
     }
 
     fn put_stored(
@@ -331,7 +332,27 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        if let Some(control) = &self.2 {
+            control.check()?;
+        }
         Ok(Arc::new(self.clone()))
+    }
+
+    fn snapshot_with_control(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        control.check()?;
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        let snapshot = self.0.snapshot_with_control(control)?;
+        Ok(Arc::new(Self(
+            snapshot,
+            self.1.as_ref().map(Arc::clone),
+            self.2.clone(),
+            None,
+        )))
     }
 
     fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {
@@ -346,24 +367,5 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
                 None,
             )) as Arc<dyn DocumentStore>
         }))
-    }
-}
-
-struct ImageOutput<'a> {
-    output: &'a mut dyn std::io::Write,
-    original: Option<&'a StorageReadControl>,
-    error: Option<crate::StorageBackendError>,
-}
-
-impl std::io::Write for ImageOutput<'_> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if let Some(error) = self.original.and_then(|control| control.check().err()) {
-            self.error = Some(error);
-            return Err(std::io::Error::other("retained document image cancelled"));
-        }
-        self.output.write(bytes)
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.output.flush()
     }
 }
