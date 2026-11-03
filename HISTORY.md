@@ -21,8 +21,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Release repository OS locks at lease retirement even when process creation retains a duplicate file description. Completed cancellation cannot leave an unrelated inherited handle holding the operation busy, and independently opened readers retain their own locks.
-- Preserve Cargo-supplied Windows import libraries in native C packages and resolve them from the installed location for static consumers. CMake linking uses the exact build dependency paths, and package verification checks each bundled library digest.
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
 
 ### Security
