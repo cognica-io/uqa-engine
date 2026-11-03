@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain system-relation, built-in routine and foreign-table authority in memory catalog captures, including absent/empty ACLs, grant paths and relation/column tuple revisions. Permission changes, rollback and same-name foreign-table replacement preserve the selected values; joint committed Engine capture remains in progress.
 - Preserve role incarnations, tuple revisions, attributes and complete membership grant paths in retained memory catalog generations. Role rename, same-name replacement, rollback and Engine closure keep the selected authority under independent capture limits; complete committed Engine capture remains in progress.
 - Preserve memory database, schema and sequence authority in captured catalog generations, including bound role incarnations, ACL absence and grant paths, exact qualified names and namespace tuple identities. Complete committed Engine capture remains under implementation.
 - Retain immutable memory graph and model images through catalog replacement, rollback and Engine closure, with explicit payload admission and original cancellation preserved by independently retained image handles. Complete committed Engine selection and public backup jobs remain in progress.

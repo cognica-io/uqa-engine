@@ -39,6 +39,21 @@ impl DurableCatalogState {
             Some(registry),
             uqa_sql::catalog::roles::capture::memberships,
         )?;
+        self.foreign_table_security = CatalogCell::capture_source(
+            self.foreign_table_security.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::security::capture::relations::tables,
+        )?;
+        self.builtin_routine_security = CatalogCell::capture_source(
+            self.builtin_routine_security.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::security::capture::relations::builtin_routines,
+        )?;
+        self.system_relation_security = CatalogCell::capture_source(
+            self.system_relation_security.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::security::capture::relations::system_relations,
+        )?;
         Ok(())
     }
 }

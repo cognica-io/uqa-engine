@@ -37578,6 +37578,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_system_authority_keeps_absent_empty_and_tombstone_acl_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/relations/tests.rs",
+      "capability": "Stored system ACL identity",
+      "workload": "Capture absent, empty and nonempty system table ACLs and empty column entries with independent tuple identities.",
+      "invariant": "Capture preserves stored tuple identity and optional states without projecting effective privileges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_and_foreign_authority_preserve_complete_tuple_and_bound_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/relations/tests.rs",
+      "capability": "Routine and foreign ACL capture",
+      "workload": "Capture exact routine OIDs, revisions and grant paths and qualified foreign authority with removed-column revisions.",
+      "invariant": "All bound identities, ACLs, exact names and revision-only entries survive source loss.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_authority_capture_rejects_denied_payload_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/relations/tests.rs",
+      "capability": "Relation authority admission",
+      "workload": "Produce large routine ACLs, late system-column names and qualified foreign names under denied and cancelled controls.",
+      "invariant": "No partial output or reservation survives failure; original cancellation is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_relation_authority_capture_keeps_acl_revisions_through_rollback_and_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/relation_authority.rs",
+      "capability": "Actual Engine relation authority",
+      "workload": "Capture SQL routine, system and foreign grants before rollback, replacement and unread Engine closure.",
+      "invariant": "Every selected ACL tuple and grant path retains its original identity and cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_relation_authority_capture_preserves_grants_and_other_capture_owners",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/relation_authority.rs",
+      "capability": "Relation authority failure isolation",
+      "workload": "Revoke system, built-in routine and foreign-column grants with independent denied and funded cuts.",
+      "invariant": "Ordinary authority publication completes and only the denied capture fails without retained leaks.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

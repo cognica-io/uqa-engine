@@ -173,11 +173,27 @@ pub(super) struct DurableCatalogState {
         CatalogCell<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
     pub(super) foreign_tables:
         CatalogCell<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, BoundTableSecurity>>,
-    pub(super) builtin_routine_security:
-        CatalogCell<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
-    pub(super) system_relation_security:
-        CatalogCell<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
+    pub(super) foreign_table_security: CatalogCell<
+        BTreeMap<RelationIdentity, BoundTableSecurity>,
+        Vec<(
+            RelationIdentity,
+            uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
+        )>,
+    >,
+    pub(super) builtin_routine_security: CatalogCell<
+        uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
+        Vec<(
+            u32,
+            uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity,
+        )>,
+    >,
+    pub(super) system_relation_security: CatalogCell<
+        uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
+        Vec<(
+            RelationIdentity,
+            uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity,
+        )>,
+    >,
     pub(super) sql_user_functions:
         CatalogCell<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
     pub(super) roles: CatalogCell<
