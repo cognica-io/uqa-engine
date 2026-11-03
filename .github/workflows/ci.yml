@@ -38,6 +38,7 @@ on:
       - ".github/actions/setup-nextest/**"
       - .config/nextest.toml
   pull_request:
+    branches: [main]
     types: [ready_for_review]
   workflow_dispatch:
     inputs:

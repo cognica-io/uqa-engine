@@ -2,6 +2,7 @@ name: HTTP carrier parity
 
 on:
   pull_request:
+    branches: [main]
     types: [ready_for_review]
     paths:
       - "crates/uqa-core/src/types/temporal.rs"

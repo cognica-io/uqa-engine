@@ -51,6 +51,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Validate stored deep models through borrowed layer views shared with runtime construction, avoiding complete weight copies while preserving shape checks and semantic diagnostics.
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
 
+### Changed
+
+- Qualify dependent PR stacks once after integration into a candidate targeting main. Intermediate stacked PRs no longer start duplicate platform matrices; existing validation commands and acceptance bounds remain unchanged.
+
 ### Security
 
 - Update Parquet and Arrow to 58.4.1 with Thrift 0.23.0, and DuckDB's build-time archive dependencies to tar 0.4.46 and zip 9.0.5, addressing excessive allocation and inconsistent archive-header parsing.

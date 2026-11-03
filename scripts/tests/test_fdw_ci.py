@@ -207,7 +207,7 @@ class ForeignHandlerWorkflowTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/fdw-features.yml").read_text()
         self.assertEqual(workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0].strip(),
-                         "pull_request:\n    types: [ready_for_review]\n  workflow_call:")
+                         "pull_request:\n    branches: [main]\n    types: [ready_for_review]\n  workflow_call:")
         main = (root / ".github/workflows/ci.yml").read_text()
         self.assertNotIn("uses: ./.github/workflows/fdw-features.yml", main)
         self.assertNotIn("test-fdw-linux", main)
