@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Preserve memory trigger definitions, bound routine identities, enable modes and constraint metadata through rollback, replacement and closure, with independently admitted WHEN literals and argument payloads.
+
 - Retain resolved memory analyzer images and independent field bindings through replacement, rollback and closure. Captures preserve exact descriptor/dictionary bytes and historical index/search revisions without retaining compiled pipelines or source import allowances.
 
 - Preserve materialized memory path indexes through graph changes, rollback, replacement and closure, retaining exact label sequences and evaluated vertex pairs under independent capture allowances.

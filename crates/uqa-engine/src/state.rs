@@ -273,8 +273,10 @@ pub(super) struct DurableCatalogState {
             super::roles::RoleMembership,
         )>,
     >,
-    pub(super) triggers:
-        CatalogCell<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
+    pub(super) triggers: CatalogCell<
+        BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>,
+        uqa_sql::catalog::definition_capture::events::CapturedTriggers,
+    >,
     pub(super) rules: CatalogCell<RuleCatalog>,
 }
 

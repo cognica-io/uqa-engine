@@ -38124,6 +38124,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_capture_preserves_complete_declarations_bound_identities_and_enable_modes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/events/tests.rs",
+      "capability": "Trigger definition capture",
+      "workload": "Capture ordinary, constraint, transition and INSTEAD OF declarations with every enable mode and legacy optional state.",
+      "invariant": "Every declaration field and allocated identity survives; measured live allocation equals admission and empty relation entries remain.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_capture_detaches_retained_condition_constants_from_cancelled_source_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/events/tests.rs",
+      "capability": "Trigger condition ownership",
+      "workload": "Capture a large retained condition literal after cancelling its source owner and then retire that source.",
+      "invariant": "The original source allowance retires independently while exact literal representation and collation remain captured.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_capture_releases_prior_definitions_on_late_argument_denial_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/events/tests.rs",
+      "capability": "Trigger definition admission",
+      "workload": "Capture an ordinary trigger followed by a 32 KiB argument under insufficient memory and cancellation.",
+      "invariant": "Denied production releases earlier definitions and all partial payload reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_trigger_capture_preserves_bound_definitions_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/triggers.rs",
+      "capability": "Memory trigger catalog lifecycle",
+      "workload": "Create actual triggers with bound WHEN routines, change enable state, roll back, replace table/routine identities and close the Engine.",
+      "invariant": "Selected definitions and original identities remain exact; retained catalog children preserve original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_trigger_capture_preserves_ordinary_ddl_and_independently_funded_definitions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/triggers.rs",
+      "capability": "Memory trigger failure isolation",
+      "workload": "Drop a trigger carrying a 64 KiB argument while denied and funded captures coexist.",
+      "invariant": "Ordinary DDL succeeds, the funded cut preserves the old definition and both allowances retire independently.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

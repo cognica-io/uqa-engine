@@ -19,6 +19,7 @@ mod paths;
 mod relation_authority;
 mod resources;
 mod roles;
+mod triggers;
 mod types;
 
 fn sql(engine: &Engine, sql: &str) {

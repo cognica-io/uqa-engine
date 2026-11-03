@@ -9,6 +9,7 @@
 use crate::{plan::copy::SyntaxProduction, SQLError};
 use uqa_core::memory::{Produced, ProductionControl};
 
+pub mod events;
 pub mod foreign;
 pub mod identities;
 pub mod types;

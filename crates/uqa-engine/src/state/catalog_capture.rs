@@ -17,6 +17,11 @@ impl DurableCatalogState {
         self.register_type_sources(registry)?;
         self.register_metadata_sources(registry)?;
         self.register_foreign_sources(registry)?;
+        self.triggers = CatalogCell::capture_source(
+            self.triggers.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::events::triggers,
+        )?;
         self.register_authority_sources(registry)
     }
 
