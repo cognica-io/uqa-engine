@@ -6,9 +6,11 @@
 
 //! Autonomous allocation history shares physical publication with the captured record boundary.
 
+mod positions;
+
 use std::{ops::Bound, sync::Arc};
 
-use redb::{ReadableDatabase, ReadableTable, TableDefinition, WriteTransaction};
+use redb::{ReadableTable, TableDefinition, WriteTransaction};
 use uqa_storage::{
     mvcc::{
         retain_backup_snapshot, retain_record_snapshot, CommitSequence, CommittedBackupSnapshot,
@@ -185,6 +187,27 @@ fn validate_epochs(created: u64, birth: u64, current: u64) -> VersionResult<()> 
 }
 
 impl CommittedBackupSnapshot for Snapshot {
+    fn record_key_ceiling(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<uqa_storage::mvcc::BackupCursorKey>> {
+        self.record_ceiling(control)
+    }
+    fn identifier_namespace_ceiling(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<uqa_storage::mvcc::BackupCursorKey>> {
+        self.identifier_ceiling(control)
+    }
+    fn visit_record_positions(
+        &self,
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::BackupRecordPositionVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.record_positions(after, limit, control, visit)
+    }
     fn records(&self) -> &dyn CommittedRecordSnapshot {
         self.records.as_ref()
     }
@@ -205,16 +228,8 @@ impl CommittedBackupSnapshot for Snapshot {
         visit: &mut IdentifierWatermarkVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        let transaction = self.database.begin_read().map_err(redb_error)?;
-        let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
-        codec::validate_metadata(&metadata, self.identity)?;
-        let current_epoch = codec::read_u64(&metadata, EPOCH)?;
+        let (transaction, current_epoch) = self.read()?;
         let epoch = self.metadata_epoch().as_u64();
-        if epoch >= current_epoch {
-            return Err(VersionError::InvalidEncoding(
-                "backup metadata boundary is not sealed",
-            ));
-        }
         let identifiers = transaction
             .open_table(identifiers::TABLE)
             .map_err(redb_error)?;

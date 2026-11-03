@@ -12,6 +12,7 @@ use super::*;
 mod admission;
 mod backup_metadata;
 mod batch_metadata;
+mod chunks;
 mod commit_cache;
 mod diskann;
 mod identifiers;

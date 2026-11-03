@@ -14,12 +14,14 @@
 mod error;
 mod frame;
 mod inventory;
+mod records;
 mod root;
 mod types;
 
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};
+pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
 pub use root::BackupRoot;
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,

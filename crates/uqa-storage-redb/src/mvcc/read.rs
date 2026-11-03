@@ -265,7 +265,7 @@ fn borrowed(sequence: u64, bytes: &[u8]) -> VersionResult<BorrowedRecord<'_>> {
     })
 }
 
-fn visit_visible(
+pub(super) fn visit_visible(
     versions: &impl ReadableTable<(&'static [u8], u64), &'static [u8]>,
     key: &[u8],
     head: u64,

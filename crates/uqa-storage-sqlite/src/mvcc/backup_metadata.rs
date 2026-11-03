@@ -7,6 +7,7 @@
 //! One durable cut retains logical records and autonomous identifier generations without a long physical read.
 
 mod history;
+mod positions;
 pub(super) use history::{initialize, reclaim, retain_previous, TABLES};
 
 use super::{admission, codec, native, read, tombstones, SQLiteRecordStore};
@@ -87,6 +88,30 @@ pub(super) fn capture(
 }
 
 impl CommittedBackupSnapshot for Snapshot {
+    fn record_key_ceiling(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<uqa_core::memory::BudgetedVec<u8>>> {
+        control.cancellation().check()?;
+        let result = self.read(|connection, _| read::key_ceiling(connection, control))?;
+        control.cancellation().check()?;
+        Ok(result)
+    }
+    fn identifier_namespace_ceiling(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<uqa_core::memory::BudgetedVec<u8>>> {
+        self.identifier_ceiling(control)
+    }
+    fn visit_record_positions(
+        &self,
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::BackupRecordPositionVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.record_positions(after, limit, control, visit)
+    }
     fn records(&self) -> &dyn CommittedRecordSnapshot {
         self.records.as_ref()
     }
@@ -106,12 +131,8 @@ impl CommittedBackupSnapshot for Snapshot {
     ) -> VersionResult<()> {
         control.cancellation().check()?;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        self.store.read(|connection| {
+        self.read(|connection, current| {
             let epoch = self.metadata_epoch().as_u64();
-            let current = history::epoch(connection)?;
-            if epoch >= current {
-                return Err(VersionError::InvalidEncoding("backup metadata boundary is not sealed").into());
-            }
             let _after = crate::read_control::reserve_bindings(control, &[after.unwrap_or_default()])?;
             let mut statement = connection.prepare_cached("SELECT i.namespace, i.watermark, e.created, e.head FROM _uqa_mvcc_identifiers AS i LEFT JOIN _uqa_mvcc_identifier_epochs AS e ON e.namespace = i.namespace WHERE i.namespace > ?1 ORDER BY i.namespace LIMIT ?2")?;
             let mut rows = statement.query(params![after.unwrap_or_default(), limit])?;

@@ -13,6 +13,7 @@ use super::*;
 
 mod frames;
 mod inventories;
+mod records;
 mod roots;
 
 fn limits() -> BackupLimits {

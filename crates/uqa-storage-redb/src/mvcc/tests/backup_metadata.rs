@@ -7,6 +7,9 @@
 //! Joint backup cuts preserve autonomous allocations while short physical reads release writers.
 
 use super::*;
+
+mod images;
+mod positions;
 use crate::mvcc::backup_metadata::{BIRTHS, EPOCH, HISTORY};
 use uqa_storage::mvcc::{CommittedBackupSnapshot, IdentifierRequest, MetadataEpoch, RecordWrite};
 
