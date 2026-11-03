@@ -134,32 +134,6 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
-      "test": "backup_leases_retire_their_description_without_unlocking_independent_readers",
-      "cases": 1,
-      "source": "crates/uqa-storage/src/backup/repository/directory.rs",
-      "capability": "Repository lease ownership",
-      "workload": "Retain a duplicate file description while releasing one shared lease, then retire an independently opened second reader and acquire an exclusive lease.",
-      "invariant": "Retirement unlocks the owning description despite inherited handles; another separately opened reader remains protected until its own owner retires.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-storage",
-      "kind": "lib",
-      "test": "completed_cancel_releases_lease_despite_an_inherited_descriptor",
-      "cases": 1,
-      "source": "crates/uqa-storage/src/backup/repository/tests/failures.rs",
-      "capability": "Durable cancellation lease retirement",
-      "workload": "Prepare an image, duplicate its operation lease descriptor, acknowledge cancellation and attempt recovery while the duplicate remains open.",
-      "invariant": "The cancelled operation immediately releases its lock and recovery reports Finished rather than Busy; the durable cancellation marker prevents publication.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-storage",
-      "kind": "lib",
       "test": "backup_capture_packs_streamed_units_under_fixed_memory_and_verifies_after_source_drop",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/repository/tests/capture.rs",
@@ -205,7 +179,9 @@
       "capability": "Bounded repository image verification",
       "workload": "Stream 512 protected units from a shared pack through seven-byte output buffers, then verify complete objects through seven-byte work windows and global frame ranges under a 128 KiB allowance.",
       "invariant": "Every unit matches its literal payload and ordered identity; whole-object byte totals are exact, each object step respects its window, completion waits for every global check, and all charged streams and spill ledgers retire immediately.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-redb",
@@ -216,7 +192,9 @@
       "capability": "redb complete Key/Value image export",
       "workload": "Capture actual DiskANN rows, exact-side data and uncovered changes, a 1 MiB record, allocator state, a live unpublished build and a delivery record; replace the selected generation and write during chunk export.",
       "invariant": "Every captured persistent record matches the independent full-read oracle with its original revision, excluded payloads are not copied, each step inspects at most three positions and one fixed metadata record, and the 4 KiB allowance retires at completion.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage-sqlite",
@@ -227,7 +205,9 @@
       "capability": "SQLite KV complete mapping image export",
       "workload": "Export actual published DiskANN state and a large record in plain, encrypted, compressed and compressed-encrypted files while another connection updates between chunks.",
       "invariant": "All committed record bytes and revisions match the full-read oracle; private writes and notification delivery are absent, each scan window has at most four positions, writers progress and retained memory stays within 4 KiB.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -238,7 +218,9 @@
       "capability": "Bounded image input projection",
       "workload": "Omit selected allocator and record inputs including a 1 MiB payload without reading their bytes.",
       "invariant": "Skipping preserves ordered progress, copies zero payload bytes and releases the retained cut exactly once at completion.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -249,7 +231,74 @@
       "capability": "Snapshot-qualified artifact membership",
       "workload": "Select state and graph keys for all six generation states, then replace the live lifecycle state before classifying the retained source.",
       "invariant": "Membership reads exactly one 18-byte state from the original cut; only its Published generations are included, regardless of later publication or retirement.",
-      "case_names": [""]
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "repository_admission_preserves_a_waiting_pack_and_observes_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/admission.rs",
+      "capability": "Backup repository admission",
+      "workload": "Hold the actual repository admission lease while a synchronized pack finalizes; release it or cancel the waiting invocation after observing real OS contention.",
+      "invariant": "Admission contention preserves the existing pack until it can publish; cancellation returns before the competing owner releases admission and leaves capture terminally failed. Live operation-lease contention remains Busy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_leases_retire_their_description_without_unlocking_independent_readers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/directory.rs",
+      "capability": "Repository lease ownership",
+      "workload": "Retain a duplicate file description while releasing one shared lease, then retire an independently opened second reader and acquire an exclusive lease.",
+      "invariant": "Retirement unlocks the owning description despite inherited handles; another separately opened reader remains protected until its own owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "completed_cancel_releases_lease_despite_an_inherited_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/failures.rs",
+      "capability": "Durable cancellation lease retirement",
+      "workload": "Prepare an image, duplicate its operation lease descriptor, acknowledge cancellation and attempt recovery while the duplicate remains open.",
+      "invariant": "The cancelled operation immediately releases its lock and recovery reports Finished rather than Busy; the durable cancellation marker prevents publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "packed_inventory_verifies_under_fixed_memory_and_encrypted_workspace_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/resources.rs",
+      "capability": "Backup repository verification",
+      "workload": "512 reverse-placed small units in one immutable data pack, a streamed inventory, and repeated full verification under a 128 KiB shared memory allowance.",
+      "invariant": "Retain exactly two installed objects, verify all unit digests and disjoint ranges, release the memory allowance, and reject exhausted encrypted verification workspace before growing its files.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "physical_allowance_follows_files_and_reopened_handles",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests/quota.rs",
+      "capability": "Encrypted temporary file space admission",
+      "workload": "Two encrypted files sharing an allowance for two framed blocks, an independently positioned reopened handle, growth rejection, truncation and final close.",
+      "invariant": "Charge the exact physical ciphertext extents once per owner, admit before growth, retain charges through reopened handles, and release only after physical truncation or final owner destruction.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-storage",
@@ -286,32 +335,6 @@
       "capability": "SQLite bounded image payload reads",
       "workload": "Read native encoded views and KV values larger than 512 KiB in 1 KiB chunks with a 4 KiB allowance across both mappings and all four file modes.",
       "invariant": "A full-value read exceeds the allowance; independent writers commit between chunks, old bytes and revisions survive reclamation, and every charge retires after the cut and buffer drop.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-storage",
-      "kind": "lib",
-      "test": "packed_inventory_verifies_under_fixed_memory_and_encrypted_workspace_limits",
-      "cases": 1,
-      "source": "crates/uqa-storage/src/backup/repository/tests/resources.rs",
-      "capability": "Backup repository verification",
-      "workload": "512 reverse-placed small units in one immutable data pack, a streamed inventory, and repeated full verification under a 128 KiB shared memory allowance.",
-      "invariant": "Retain exactly two installed objects, verify all unit digests and disjoint ranges, release the memory allowance, and reject exhausted encrypted verification workspace before growing its files.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-storage",
-      "kind": "lib",
-      "test": "physical_allowance_follows_files_and_reopened_handles",
-      "cases": 1,
-      "source": "crates/uqa-storage/src/temporary_file/tests/quota.rs",
-      "capability": "Encrypted temporary file space admission",
-      "workload": "Two encrypted files sharing an allowance for two framed blocks, an independently positioned reopened handle, growth rejection, truncation and final close.",
-      "invariant": "Charge the exact physical ciphertext extents once per owner, admit before growth, retain charges through reopened handles, and release only after physical truncation or final owner destruction.",
       "case_names": [
         ""
       ]
