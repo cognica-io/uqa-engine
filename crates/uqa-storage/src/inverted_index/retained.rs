@@ -81,6 +81,30 @@ impl RetainedInvertedIndexBuilder {
         }
         let staged = staging::stage(&self.index, doc_id, &borrowed, &self.control)?;
         drop(borrowed);
+        self.publish(doc_id, staged)
+    }
+
+    /// Append one standalone evaluated text image. Decoding and complete validation precede publication; errors leave prior documents intact. Stored occurrences, historical revisions and normalization lengths are preserved without invoking an analyzer or resource callback. The enclosing database image must separately supply and validate every referenced analyzer resource.
+    pub fn add_image_document(
+        &mut self,
+        doc_id: DocId,
+        input: &mut dyn std::io::Read,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        if self.index.state.documents.contains_key(&doc_id) {
+            return Err(StorageBackendError::Other(
+                "retained text input repeats a document".into(),
+            ));
+        }
+        let staged = super::image::read(doc_id, input, &self.control)?;
+        self.publish(doc_id, staged)
+    }
+
+    fn publish(
+        &mut self,
+        doc_id: DocId,
+        staged: Budgeted<StagedMemoryDocument>,
+    ) -> StorageBackendResult<()> {
         let plan = self.plan(doc_id, &staged.fields)?;
         let charge = charge::new_document(&self.index.state, &staged, &plan, &self.control)?;
         let new_entries = self.control.memory().reserve(charge.new_entries)?;
@@ -132,7 +156,7 @@ impl RetainedInvertedIndexBuilder {
     }
 }
 
-fn copy_name(
+pub(super) fn copy_name(
     name: &str,
     memory: &mut MemoryReservation,
     control: &StorageReadControl,

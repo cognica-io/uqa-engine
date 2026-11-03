@@ -10,6 +10,7 @@ mod access;
 mod canonical;
 mod consistency;
 mod construction;
+pub(crate) mod image;
 mod index;
 mod metric;
 mod mutation;

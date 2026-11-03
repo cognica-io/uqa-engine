@@ -20,6 +20,7 @@ mod cloning;
 mod copying;
 mod decoding;
 mod identity;
+pub mod image;
 mod nonfinite;
 mod observation;
 mod retention;

@@ -31,6 +31,7 @@ mod changes;
 mod contract;
 pub mod defaults;
 mod footprint;
+mod image;
 mod memory;
 mod metadata;
 mod read_cursor;

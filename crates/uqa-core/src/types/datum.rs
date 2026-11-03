@@ -129,7 +129,7 @@ impl DatumValue {
             })
     }
 
-    const fn retained_header_bytes() -> usize {
+    pub(in crate::types) const fn retained_header_bytes() -> usize {
         size_of::<Vec<u8>>() + 2 * size_of::<usize>()
     }
 }

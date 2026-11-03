@@ -21,6 +21,8 @@ use crate::{
     StorageBackendResult,
 };
 
+mod image;
+
 pub(super) struct Tensor {
     origin: DiskANNCanonicalOrigin,
     // Caller-owned input is admitted before this owner adopts its complete capacities.

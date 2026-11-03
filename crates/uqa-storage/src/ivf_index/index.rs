@@ -15,6 +15,14 @@ use crate::vector_index::VectorIndex;
 use crate::StorageBackendResult;
 
 impl VectorIndex for IVFIndex {
+    fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        super::image::write(self, output, control)
+    }
+
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         Ok(self.vectors.lock().contains_key(&(doc_id, 0)))
     }

@@ -21,13 +21,14 @@ impl HNSWIndex {
 
     pub(super) fn validate_controlled(&self, control: Control<'_>) -> StorageBackendResult<()> {
         check(control)?;
+        let memory = control.map_or(&self.memory, |control| control.memory());
         if self.raw_vectors.len() != self.nodes.len()
             || self.normalized_vectors.len() != self.nodes.len()
         {
             return Err(corrupt("graph and vector identity counts differ"));
         }
         let mut computed_max = 0;
-        for entry in self.nodes.iter() {
+        for entry in self.nodes.iter_with_memory(memory) {
             check(control)?;
             let (key, node) = entry?;
             if key != u128::from(node.id)
@@ -50,7 +51,8 @@ impl HNSWIndex {
                 .entry_point
                 .ok_or_else(|| corrupt("non-empty graph has no valid entry point"))?;
             let entry = self
-                .node(id)?
+                .nodes
+                .get_with_memory(u128::from(id), memory)?
                 .ok_or_else(|| corrupt("non-empty graph has no valid entry point"))?;
             if self.max_level != computed_max || entry.level != self.max_level {
                 return Err(corrupt(&format!(
@@ -64,7 +66,8 @@ impl HNSWIndex {
     }
 
     fn validate_edges(&self, control: Control<'_>) -> StorageBackendResult<()> {
-        for entry in self.nodes.iter() {
+        let memory = control.map_or(&self.memory, |control| control.memory());
+        for entry in self.nodes.iter_with_memory(memory) {
             check(control)?;
             let (_, node) = entry?;
             if node.neighbors.len() != node.level + 1 {
@@ -74,7 +77,7 @@ impl HNSWIndex {
                 )));
             }
             for (layer, neighbors) in node.neighbors.iter().enumerate() {
-                let mut unique = BudgetedVec::new(&self.memory);
+                let mut unique = BudgetedVec::new(memory);
                 unique.extend_from_slice(neighbors)?;
                 unique.sort_unstable();
                 if unique.windows(2).any(|pair| pair[0] == pair[1])
@@ -93,12 +96,15 @@ impl HNSWIndex {
                 }
                 for neighbor_id in neighbors {
                     check(control)?;
-                    let neighbor = self.node(*neighbor_id)?.ok_or_else(|| {
-                        corrupt(&format!(
-                            "node {} layer {layer} references missing node {neighbor_id}",
-                            node.id
-                        ))
-                    })?;
+                    let neighbor = self
+                        .nodes
+                        .get_with_memory(u128::from(*neighbor_id), memory)?
+                        .ok_or_else(|| {
+                            corrupt(&format!(
+                                "node {} layer {layer} references missing node {neighbor_id}",
+                                node.id
+                            ))
+                        })?;
                     if neighbor.level < layer || !neighbor.neighbors[layer].contains(&node.id) {
                         return Err(corrupt(&format!(
                             "edge {} <-> {neighbor_id} is invalid at layer {layer}",
@@ -112,11 +118,12 @@ impl HNSWIndex {
     }
 
     fn validate_reachability(&self, control: Control<'_>) -> StorageBackendResult<()> {
+        let memory = control.map_or(&self.memory, |control| control.memory());
         let Some(entry_point) = self.entry_point else {
             return Ok(());
         };
-        let mut reachable = Map::new(&self.memory, self.memory.limit() / 32);
-        let mut pending = Map::new(&self.memory, self.memory.limit() / 32);
+        let mut reachable = Map::new(memory, memory.limit() / 32);
+        let mut pending = Map::new(memory, memory.limit() / 32);
         reachable.insert(u128::from(entry_point), 0_u64, control)?;
         pending.insert(0, entry_point, control)?;
         let mut sequence = 1_u128;
@@ -130,7 +137,8 @@ impl HNSWIndex {
             pending.remove(key, control)?;
             cursor = Some(key);
             let node = self
-                .node(node_id)?
+                .nodes
+                .get_with_memory(u128::from(node_id), memory)?
                 .ok_or_else(|| corrupt("reachability references missing node"))?;
             for neighbor in &node.neighbors[0] {
                 check(control)?;

@@ -7,6 +7,7 @@
 //! Mutable memory roots share immutable pages and copy only changed canonical paths.
 
 mod build;
+pub(crate) mod image;
 mod source;
 #[cfg(test)]
 mod tests;
@@ -14,6 +15,7 @@ mod tests;
 use super::{
     build::DiskANNTemporaryBudget,
     format::{DiskANNGeneration, DiskANNManifest, DiskANNVectorVersion},
+    pages::DiskANNMemorySource,
     RetainedDiskANNIndex,
 };
 use crate::{
@@ -40,6 +42,22 @@ struct Clock {
 }
 
 impl Clock {
+    fn fresh(control: &StorageReadControl) -> StorageBackendResult<Arc<Budgeted<Self>>> {
+        control.check()?;
+        let database = DatabaseId::from_bytes(crate::catalog::new_nonzero_catalog_identity(
+            "DiskANN memory",
+            "incarnation",
+        )?);
+        Ok(Budgeted::new(
+            Self {
+                database,
+                next: AtomicU64::new(1),
+            },
+            control.memory().empty_reservation(),
+        )
+        .into_shared()?)
+    }
+
     fn allocate(&self) -> StorageBackendResult<u64> {
         uqa_core::atomic::try_update_u64(&self.next, Ordering::Relaxed, Ordering::Relaxed, |next| {
             next.checked_add(1)
@@ -60,6 +78,7 @@ impl Clock {
 /// A writable memory index over the same sealed-page search as persistent providers. Ordinary mutations replace canonical tensors and current changes atomically; explicit initialization and clear construct replacement physical generations. Writable snapshots retain independent roots under the same original allowance.
 pub struct DiskANNMemoryIndex {
     index: RetainedDiskANNIndex<Canonical>,
+    physical: DiskANNMemorySource,
     clock: Arc<Budgeted<Clock>>,
     options: DiskANNMemoryOptions,
     temporary: DiskANNTemporaryBudget,
@@ -77,19 +96,8 @@ impl DiskANNMemoryIndex {
         control.check()?;
         options.parameters.validate(dimensions)?;
         let memory = control.memory().reserve(size_of::<Self>())?;
-        let database = DatabaseId::from_bytes(crate::catalog::new_nonzero_catalog_identity(
-            "DiskANN memory",
-            "incarnation",
-        )?);
-        let clock = Budgeted::new(
-            Clock {
-                database,
-                next: AtomicU64::new(1),
-            },
-            control.memory().empty_reservation(),
-        )
-        .into_shared()?;
-        let index = build::prepare(
+        let clock = Clock::fresh(control)?;
+        let (index, physical) = build::prepare(
             Canonical::empty(dimensions, control),
             clock.generation()?,
             options,
@@ -98,6 +106,7 @@ impl DiskANNMemoryIndex {
         )?;
         Ok(Self {
             index,
+            physical,
             clock,
             options,
             temporary: temporary.clone(),
@@ -115,6 +124,7 @@ impl DiskANNMemoryIndex {
         let memory = self.control.memory().reserve(size_of::<Self>())?;
         Ok(Self {
             index: self.index.clone(),
+            physical: self.physical.clone(),
             clock: self.clock.clone(),
             options: self.options,
             temporary: self.temporary.clone(),
@@ -142,7 +152,7 @@ impl DiskANNMemoryIndex {
 
     fn rebuild(&mut self, canonical: Canonical) -> StorageBackendResult<()> {
         self.control.check()?;
-        let candidate = build::prepare(
+        let (candidate, physical) = build::prepare(
             canonical,
             self.clock.generation()?,
             self.options,
@@ -151,11 +161,34 @@ impl DiskANNMemoryIndex {
         )?;
         self.control.check()?;
         self.index = candidate;
+        self.physical = physical;
         Ok(())
     }
 }
 
 impl VectorIndex for DiskANNMemoryIndex {
+    fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        image::write(
+            &self.index,
+            &self.physical,
+            self.options,
+            &self.control,
+            output,
+            control,
+        )
+    }
+
+    fn capture_image_with_control(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::vector_index::image::VectorImageSnapshot> {
+        image::capture(self, control)
+    }
+
     fn dimensions(&self) -> u32 {
         self.index.dimensions()
     }

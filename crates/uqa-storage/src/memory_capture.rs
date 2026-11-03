@@ -1,0 +1,334 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Lazy immutable capture belongs to each source's mutation boundary.
+
+use std::{
+    any::Any,
+    ops::{Bound, Deref, DerefMut},
+    sync::{atomic::AtomicU64, atomic::Ordering, Arc, Weak},
+    time::Duration,
+};
+
+use parking_lot::{MappedRwLockWriteGuard, Mutex, RwLock, RwLockReadGuard};
+use uqa_core::memory::{Budgeted, MemoryReservation, OwnedMap};
+
+use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
+
+mod failure;
+#[cfg(test)]
+mod tests;
+
+const WAIT: Duration = Duration::from_millis(10);
+type Erased = Arc<dyn Any + Send + Sync>;
+
+/// An owning source can freeze its current value without retaining a mutable alias. The returned value must own its complete retention admission and original read control. This method may not mutate sources or reenter the capture registry. Capture work and allocation belong to this source's existing snapshot contract.
+pub trait MemoryCaptureSource: Send + Sync {
+    type Frozen: Send + Sync + 'static;
+
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen>;
+}
+
+/// A process-local capture domain. Registering a capture does not visit its sources. A source freezes on its first captured read or immediately before its first subsequent mutation. The surrounding transaction owner must register captures at a committed boundary; this registry alone does not make a sequence of separate cell writes a transaction.
+#[derive(Clone, Default)]
+pub struct MemoryCaptureRegistry(Arc<Registry>);
+
+struct Registry {
+    admission: RwLock<()>,
+    captures: Mutex<OwnedMap<u64, Weak<Capture>>>,
+    next_capture: AtomicU64,
+    next_cell: AtomicU64,
+}
+
+impl Default for Registry {
+    fn default() -> Self {
+        Self {
+            admission: RwLock::new(()),
+            captures: Mutex::default(),
+            next_capture: AtomicU64::new(1),
+            next_cell: AtomicU64::new(1),
+        }
+    }
+}
+
+impl MemoryCaptureRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register one cut without enumerating cells or copying source data. Admission waits observe the original cancellation. The returned cut is unavailable if any required source later cannot preserve it; such failure does not fail the source's ordinary write.
+    pub fn capture(&self, control: &StorageReadControl) -> StorageBackendResult<MemoryCapture> {
+        control.check()?;
+        let memory = control.memory().reserve(size_of::<Capture>())?;
+        let _admission = loop {
+            control.check()?;
+            if let Some(guard) = self.0.admission.try_write_for(WAIT) {
+                break guard;
+            }
+        };
+        control.check()?;
+        let id = allocate(&self.0.next_capture)?;
+        let capture = Arc::new(Capture {
+            registry: Arc::downgrade(&self.0),
+            id,
+            control: control.clone(),
+            state: Mutex::new(State::Active(OwnedMap::new())),
+            _memory: memory,
+        });
+        // The registration lock is gone before a failed insertion can drop the capture and retire its registration.
+        self.0
+            .captures
+            .lock()
+            .insert_budgeted(id, Arc::downgrade(&capture), control.memory())?;
+        capture.check()?;
+        Ok(MemoryCapture(capture))
+    }
+
+    /// A new cell cannot appear in cuts registered before its creation. All logical mutations of its source must use this cell's write guard; shared reads may not mutate logical state through interior mutability.
+    pub fn cell<T: MemoryCaptureSource>(
+        &self,
+        value: T,
+    ) -> StorageBackendResult<MemoryCaptureCell<T>> {
+        let _admission = self.0.admission.read_recursive();
+        Ok(MemoryCaptureCell {
+            registry: self.0.clone(),
+            id: allocate(&self.0.next_cell)?,
+            born: self.0.next_capture.load(Ordering::Relaxed),
+            value: RwLock::new(value),
+        })
+    }
+}
+
+fn allocate(next: &AtomicU64) -> StorageBackendResult<u64> {
+    uqa_core::atomic::try_update_u64(next, Ordering::Relaxed, Ordering::Relaxed, |n| {
+        n.checked_add(1)
+    })
+    .map_err(|_| StorageBackendError::Other("memory capture identity space exhausted".into()))
+}
+
+/// Clones retain the same cut and its original allowance. Dropping the last handle unregisters it and releases its archive; separately retained frozen values keep their own leases.
+#[derive(Clone)]
+pub struct MemoryCapture(Arc<Capture>);
+
+impl MemoryCapture {
+    /// Observe the first failure, including cancellation, and release the failed cut's retained archive. An invalidated cut can never collect newer values or become usable again.
+    pub fn check(&self) -> StorageBackendResult<()> {
+        self.0.check()
+    }
+}
+
+struct Capture {
+    registry: Weak<Registry>,
+    id: u64,
+    control: StorageReadControl,
+    state: Mutex<State>,
+    _memory: MemoryReservation,
+}
+
+enum State {
+    Active(OwnedMap<u64, Erased>),
+    Failed(Arc<StorageBackendError>),
+}
+
+impl Capture {
+    fn retire(&self) {
+        if let Some(registry) = self.registry.upgrade() {
+            registry.captures.lock().remove(&self.id);
+        }
+    }
+
+    fn fail(&self, state: &mut State, error: StorageBackendError) -> StorageBackendError {
+        let error = Arc::new(error);
+        *state = State::Failed(error.clone());
+        self.retire();
+        failure::reproduce(&error)
+    }
+
+    fn admit(&self, state: &mut State) -> StorageBackendResult<()> {
+        if let State::Failed(error) = state {
+            return Err(failure::reproduce(error));
+        }
+        self.control
+            .check()
+            .map_err(|error| self.fail(state, error))
+    }
+
+    fn check(&self) -> StorageBackendResult<()> {
+        self.admit(&mut self.state.lock())
+    }
+
+    fn retained<T: MemoryCaptureSource>(
+        &self,
+        id: u64,
+    ) -> StorageBackendResult<Option<Arc<Budgeted<T::Frozen>>>> {
+        let mut state = self.state.lock();
+        self.admit(&mut state)?;
+        let State::Active(values) = &*state else {
+            unreachable!("failed cuts do not admit values")
+        };
+        Ok(values.get(&id).map(|value| {
+            value
+                .clone()
+                .downcast::<Budgeted<T::Frozen>>()
+                .unwrap_or_else(|_| unreachable!("cell identities retain one frozen type"))
+        }))
+    }
+
+    fn frozen<T: MemoryCaptureSource>(
+        &self,
+        id: u64,
+        value: &T,
+    ) -> StorageBackendResult<Arc<Budgeted<T::Frozen>>> {
+        let mut state = self.state.lock();
+        self.admit(&mut state)?;
+        let State::Active(values) = &mut *state else {
+            unreachable!("failed cuts do not admit values")
+        };
+        if !values.contains_key(&id) {
+            let result = values.insert_budgeted_with(id, self.control.memory(), || {
+                let memory = self
+                    .control
+                    .memory()
+                    .reserve(size_of::<Budgeted<T::Frozen>>())?;
+                let frozen = value.freeze(&self.control)?;
+                self.control.check()?;
+                let erased: Erased = Arc::new(Budgeted::new(frozen, memory));
+                Ok::<_, StorageBackendError>(erased)
+            });
+            if let Err(error) = result {
+                return Err(self.fail(&mut state, error));
+            }
+        }
+        Ok(values[&id]
+            .clone()
+            .downcast::<Budgeted<T::Frozen>>()
+            .unwrap_or_else(|_| unreachable!("cell identities retain one frozen type")))
+    }
+}
+
+impl Drop for Capture {
+    fn drop(&mut self) {
+        self.retire();
+    }
+}
+
+/// Mutable source ownership with automatic preservation before write admission. The source's existing copy-on-write implementation determines detachment cost; writes with no active captures never invoke `freeze`.
+pub struct MemoryCaptureCell<T: MemoryCaptureSource> {
+    registry: Arc<Registry>,
+    id: u64,
+    born: u64,
+    value: RwLock<T>,
+}
+
+impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
+    pub fn read(&self) -> RwLockReadGuard<'_, T> {
+        self.value.read()
+    }
+
+    /// Preserve every applicable cut before exposing mutable state. A source freeze failure invalidates that cut and releases its archive; the caller can still perform the ordinary write. No caller-side snapshot preparation is needed.
+    pub fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
+        let value = self.value.write();
+        #[cfg(test)]
+        tests::source_locked();
+        // Recursive read admission permits ordinary nested cell guards even when a capture is waiting. The enclosing transaction boundary supplies multi-cell atomicity.
+        let admission = self.registry.admission.read_recursive();
+        let mut after = 0;
+        loop {
+            let next = {
+                let captures = self.registry.captures.lock();
+                captures
+                    .first_from(Bound::Excluded(&after))
+                    .map(|(&id, capture)| (id, capture.upgrade()))
+            };
+            let Some((id, capture)) = next else { break };
+            after = id;
+            if id >= self.born {
+                if let Some(capture) = capture {
+                    // The capture owns terminal failure handling; a failed backup cannot consume the source's write operation.
+                    drop(capture.frozen(self.id, &*value));
+                }
+            }
+        }
+        MemoryCaptureWriteGuard {
+            source_guard: parking_lot::RwLockWriteGuard::map(value, |value| value),
+            _admission: admission,
+        }
+    }
+
+    /// Retain this cell's value at the selected cut. Reading an unmodified cell performs its first freeze outside a writer; later reads reuse the same immutable owner. Foreign cuts and cells created later are rejected.
+    pub fn captured(
+        &self,
+        capture: &MemoryCapture,
+    ) -> StorageBackendResult<Arc<Budgeted<T::Frozen>>> {
+        if !Weak::ptr_eq(&capture.0.registry, &Arc::downgrade(&self.registry))
+            || capture.0.id < self.born
+        {
+            return Err(StorageBackendError::Other(
+                "cell does not belong to this memory capture".into(),
+            ));
+        }
+        let value = loop {
+            if let Some(value) = capture.0.retained::<T>(self.id)? {
+                return Ok(value);
+            }
+            if let Some(value) = self.value.try_read_for(WAIT) {
+                break value;
+            }
+            #[cfg(test)]
+            tests::source_wait();
+        };
+        capture.0.frozen(self.id, &*value)
+    }
+}
+
+/// Write admission remains held through the final mutation, including mapped guards.
+pub struct MemoryCaptureWriteGuard<'a, T: ?Sized> {
+    source_guard: MappedRwLockWriteGuard<'a, T>,
+    _admission: RwLockReadGuard<'a, ()>,
+}
+
+impl<'a, T: ?Sized> MemoryCaptureWriteGuard<'a, T> {
+    pub fn map<U: ?Sized>(
+        guard: Self,
+        map: impl FnOnce(&mut T) -> &mut U,
+    ) -> MemoryCaptureWriteGuard<'a, U> {
+        let Self {
+            source_guard,
+            _admission: admission,
+        } = guard;
+        MemoryCaptureWriteGuard {
+            source_guard: MappedRwLockWriteGuard::map(source_guard, map),
+            _admission: admission,
+        }
+    }
+}
+
+impl<T: ?Sized> Deref for MemoryCaptureWriteGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.source_guard
+    }
+}
+
+impl<T: ?Sized> DerefMut for MemoryCaptureWriteGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.source_guard
+    }
+}
+
+impl MemoryCaptureSource for Box<dyn crate::DocumentStore> {
+    type Frozen = Arc<dyn crate::DocumentStore>;
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
+        self.snapshot_with_control(control)
+    }
+}
+
+impl MemoryCaptureSource for Box<dyn crate::InvertedIndex> {
+    type Frozen = Arc<dyn crate::InvertedIndex>;
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
+        self.snapshot_with_control(control)
+    }
+}

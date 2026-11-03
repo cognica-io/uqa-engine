@@ -19,6 +19,7 @@ use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
 use crate::types::Direction;
 
 mod graphid;
+mod image;
 mod partition;
 mod store;
 mod trait_impl;

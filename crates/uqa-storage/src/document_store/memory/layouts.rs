@@ -15,13 +15,22 @@ use std::{
 
 use super::{Document, Value};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub(super) struct DocumentLayouts {
     fields: Vec<Arc<[String]>>,
     identities: HashMap<u64, Vec<usize>>,
+    field_bytes: u128,
+    candidate_bytes: u128,
 }
 
 impl DocumentLayouts {
+    pub(super) fn retained_bytes(&self) -> u128 {
+        self.field_bytes
+            + self.candidate_bytes
+            + self.fields.capacity() as u128 * size_of::<Arc<[String]>>() as u128
+            + self.identities.capacity() as u128 * size_of::<(u64, Vec<usize>)>() as u128
+    }
+
     pub(super) fn store(&mut self, document: Document) -> (usize, Vec<Value>) {
         let hash = self.hash(&document);
         if let Some(id) = self.identities.get(&hash).and_then(|candidates| {
@@ -40,8 +49,17 @@ impl DocumentLayouts {
         }
         let (fields, values): (Vec<_>, Vec<_>) = document.into_iter().unzip();
         let id = self.fields.len();
+        self.field_bytes += fields.len() as u128 * size_of::<String>() as u128
+            + fields
+                .iter()
+                .map(|field| field.capacity() as u128)
+                .sum::<u128>();
         self.fields.push(fields.into());
-        self.identities.entry(hash).or_default().push(id);
+        let candidates = self.identities.entry(hash).or_default();
+        let previous = candidates.capacity();
+        candidates.push(id);
+        self.candidate_bytes +=
+            (candidates.capacity() - previous) as u128 * size_of::<usize>() as u128;
         (id, values)
     }
 
@@ -52,6 +70,22 @@ impl DocumentLayouts {
             name.hash(&mut hasher);
         }
         hasher.finish()
+    }
+}
+
+impl Clone for DocumentLayouts {
+    fn clone(&self) -> Self {
+        let identities = self.identities.clone();
+        let candidate_bytes = identities
+            .values()
+            .map(|candidates| candidates.capacity() as u128 * size_of::<usize>() as u128)
+            .sum();
+        Self {
+            fields: self.fields.clone(),
+            identities,
+            field_bytes: self.field_bytes,
+            candidate_bytes,
+        }
     }
 }
 
