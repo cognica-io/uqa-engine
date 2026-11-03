@@ -19,6 +19,8 @@ mod paths;
 mod relation_authority;
 mod resources;
 mod roles;
+mod routines;
+mod rules;
 mod triggers;
 mod types;
 mod views;

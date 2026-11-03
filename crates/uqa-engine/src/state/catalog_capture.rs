@@ -27,6 +27,16 @@ impl DurableCatalogState {
             Some(registry),
             uqa_sql::catalog::definition_capture::events::triggers,
         )?;
+        self.sql_user_functions = CatalogCell::capture_source(
+            self.sql_user_functions.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::routines::routines,
+        )?;
+        self.rules = CatalogCell::capture_source(
+            self.rules.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::rules::rules,
+        )?;
         self.register_authority_sources(registry)
     }
 

@@ -260,8 +260,10 @@ pub(super) struct DurableCatalogState {
             uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity,
         )>,
     >,
-    pub(super) sql_user_functions:
-        CatalogCell<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
+    pub(super) sql_user_functions: CatalogCell<
+        BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>,
+        uqa_sql::catalog::definition_capture::routines::CapturedRoutines,
+    >,
     pub(super) roles: CatalogCell<
         BTreeMap<String, super::roles::RoleDefinition>,
         Vec<(
@@ -280,7 +282,8 @@ pub(super) struct DurableCatalogState {
         BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>,
         uqa_sql::catalog::definition_capture::events::CapturedTriggers,
     >,
-    pub(super) rules: CatalogCell<RuleCatalog>,
+    pub(super) rules:
+        CatalogCell<RuleCatalog, uqa_sql::catalog::definition_capture::rules::CapturedRules>,
 }
 
 #[derive(Clone)]

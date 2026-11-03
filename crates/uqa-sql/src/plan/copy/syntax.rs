@@ -13,25 +13,38 @@ pub(crate) trait SyntaxCopy: Sized {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self>;
 }
 
+macro_rules! syntax_field {
+    ($copying:ident, $value:expr) => {
+        $value.copy_syntax($copying)
+    };
+    ($copying:ident, $value:expr, $stored:expr) => {
+        if $copying.purpose == crate::plan::copy::CopyPurpose::Stored {
+            Ok($stored)
+        } else {
+            $value.copy_syntax($copying)
+        }
+    };
+}
+
 macro_rules! syntax_struct {
-    ($ty:ty { $($field:ident),* $(,)? }) => {
+    ($ty:ty { $($field:ident $(= $stored:expr)?),* $(,)? }) => {
         impl SyntaxCopy for $ty {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
-                Ok(Self { $($field: copying.field(stringify!($field), |copying| self.$field.copy_syntax(copying))?),* })
+                Ok(Self { $($field: copying.field(stringify!($field), |copying| syntax_field!(copying, self.$field $(, $stored)?))?),* })
             }
         }
     };
 }
 
 macro_rules! syntax_enum {
-    ($ty:ty { $($variant:ident $(($($item:ident),+))? $({$($field:ident),*})?),* $(,)? }) => {
+    ($ty:ty { $($variant:ident $(($($item:ident),+))? $({$($field:ident $(= $stored:expr)?),*})?),* $(,)? }) => {
         impl SyntaxCopy for $ty {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
                 Ok(match self {
                     $(Self::$variant $(($($item),+))? $({$($field),*})? =>
-                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| $field.copy_syntax(copying))?),*})?),*
+                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| syntax_field!(copying, $field $(, $stored)?))?),*})?),*
                 })
             }
         }
@@ -182,11 +195,18 @@ macro_rules! share_input {
     )+};
 }
 // These immutable descriptors already retain their payload owners; cloning only shares those handles.
-share_input!(
-    crate::ast::RetainedRowSource,
-    crate::ast::WindowDefinitionSyntax,
-    crate::RowSchema
-);
+share_input!(crate::ast::WindowDefinitionSyntax, crate::RowSchema);
+
+impl SyntaxCopy for crate::ast::RetainedRowSource {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if copying.purpose == super::CopyPurpose::Stored {
+            return Err(crate::SQLError::Internal(
+                "stored syntax contains an execution-scoped row source".into(),
+            ));
+        }
+        Ok(self.clone())
+    }
+}
 
 impl SyntaxCopy for crate::ast::RetainedInputLiteral {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {

@@ -127,7 +127,9 @@ impl SyntaxCopy for crate::ast::WindowSpec {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
         Ok(Self {
             raw_definition: copying.field("raw_definition", |copying| {
-                if copying.parameters.is_some() {
+                if copying.parameters.is_some()
+                    || copying.purpose == crate::plan::copy::CopyPurpose::Stored
+                {
                     Ok(None)
                 } else {
                     self.raw_definition.copy_syntax(copying)

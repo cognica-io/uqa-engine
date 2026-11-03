@@ -38293,6 +38293,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_preserves_overload_order_attributes_identities_and_bound_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_detaches_constants_and_discards_transient_source_window_and_parameter_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_releases_earlier_overloads_on_late_denial_or_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_rejects_execution_only_rows_in_stored_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_capture_preserves_actions_bindings_dependency_sets_and_enable_modes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/rules/tests.rs",
+      "capability": "Stored rewrite-rule capture",
+      "workload": "Capture actions, OLD/NEW condition plans, dependency sets, enable modes and retained literals with late denial and cancellation.",
+      "invariant": "Original identities and ordered sets survive without rebinding or invocation; independent payloads and failed partial entries release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_capture_detaches_condition_payloads_without_reallocating_old_new_bindings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/rules/tests.rs",
+      "capability": "Stored rewrite-rule capture",
+      "workload": "Capture actions, OLD/NEW condition plans, dependency sets, enable modes and retained literals with late denial and cancellation.",
+      "invariant": "Original identities and ordered sets survive without rebinding or invocation; independent payloads and failed partial entries release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_capture_releases_prior_entries_when_late_dependencies_are_denied_or_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/rules/tests.rs",
+      "capability": "Stored rewrite-rule capture",
+      "workload": "Capture actions, OLD/NEW condition plans, dependency sets, enable modes and retained literals with late denial and cancellation.",
+      "invariant": "Original identities and ordered sets survive without rebinding or invocation; independent payloads and failed partial entries release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_routine_capture_preserves_bound_and_unexamined_bodies_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/routines.rs",
+      "capability": "Memory routine catalog lifecycle",
+      "workload": "Exercise actual DDL, deferred invalid bodies, replacement, savepoint rollback, unread closure and denied/funded cuts.",
+      "invariant": "Selected declarations and bound SQL remain exact without source compilation; ordinary DDL and independently funded captures remain usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_routine_capture_preserves_ddl_and_independently_funded_source_bodies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/routines.rs",
+      "capability": "Memory routine catalog lifecycle",
+      "workload": "Exercise actual DDL, deferred invalid bodies, replacement, savepoint rollback, unread closure and denied/funded cuts.",
+      "invariant": "Selected declarations and bound SQL remain exact without source compilation; ordinary DDL and independently funded captures remain usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_rule_capture_preserves_bound_conditions_dependencies_and_modes_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/rules.rs",
+      "capability": "Memory rewrite-rule catalog lifecycle",
+      "workload": "Exercise actual rule actions, bound conditions, dependencies, modes, rollback, same-name replacement, unread closure and denied/funded cuts.",
+      "invariant": "Selected rules retain original OIDs and OLD/NEW references; failure cannot change ordinary DDL or another cut.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_rule_capture_preserves_ddl_and_independently_funded_actions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/rules.rs",
+      "capability": "Memory rewrite-rule catalog lifecycle",
+      "workload": "Exercise actual rule actions, bound conditions, dependencies, modes, rollback, same-name replacement, unread closure and denied/funded cuts.",
+      "invariant": "Selected rules retain original OIDs and OLD/NEW references; failure cannot change ordinary DDL or another cut.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
