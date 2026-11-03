@@ -11,8 +11,11 @@ use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::{
-    foreign::capture::ForeignTableCaptureSource, security::roles::persistence::RoleCatalogSnapshot,
-    sequence::snapshot::SequenceReadSnapshot, table_capture::TableMetadataCaptureSource,
+    comments::snapshot::{CommentCaptureSource, CommentTableSource},
+    foreign::capture::ForeignTableCaptureSource,
+    security::roles::persistence::RoleCatalogSnapshot,
+    sequence::snapshot::SequenceReadSnapshot,
+    table_capture::TableMetadataCaptureSource,
 };
 use uqa_storage::{
     memory_capture::{MemoryCaptureCell, MemoryCaptureRegistry},
@@ -28,6 +31,7 @@ pub(crate) struct SnapshotSources {
     sequences: MemoryCaptureCell<SequenceReadSnapshot>,
     foreign: MemoryCaptureCell<ForeignTableCaptureSource>,
     metadata: MemoryCaptureCell<TableMetadataCaptureSource>,
+    comments: MemoryCaptureCell<CommentCaptureSource>,
     catalogs: catalogs::CatalogSources,
     resources: resources::ResourceSources,
 }
@@ -37,6 +41,7 @@ impl SnapshotSources {
         registry: MemoryCaptureRegistry,
         tables: &BTreeMap<RelationIdentity, TableDataSnapshot>,
         durable: &DurableCatalogSnapshot,
+        temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids>,
     ) -> StorageBackendResult<Self> {
         let sequences = registry.cell(SequenceReadSnapshot {
             sequences: durable.sequences.clone(),
@@ -62,17 +67,39 @@ impl SnapshotSources {
             durable.catalog_indexes.clone(),
             durable.table_field_analyzers.clone(),
         ))?;
+        let comments = registry.cell(
+            CommentCaptureSource::new(
+                &crate::Engine::catalog_definition_snapshot(durable),
+                tables.iter().map(|(relation, table)| CommentTableSource {
+                    relation,
+                    object_id: table.object_id,
+                    catalog_oids: table.catalog_oids,
+                    persistence: table.persistence,
+                    columns: &table.columns,
+                    checks: &table.table_checks,
+                    keys: &table.key_constraints,
+                    foreign_keys: &table.foreign_keys,
+                    hierarchy: &table.hierarchy,
+                }),
+                temporary_namespace,
+            )
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend("comment catalog capture", error)
+            })?,
+        )?;
         let mut sources = Self {
             tables: SnapshotTableSources::new(registry, tables)?,
             sequences,
             foreign,
             metadata,
+            comments,
             catalogs,
             resources,
         };
         sources.tables.select(&sources.sequences.key()?)?;
         sources.tables.select(&sources.foreign.key()?)?;
         sources.tables.select(&sources.metadata.key()?)?;
+        sources.tables.select(&sources.comments.key()?)?;
         sources.catalogs.select(&mut sources.tables)?;
         sources.resources.select(&mut sources.tables)?;
         Ok(sources)
@@ -101,11 +128,19 @@ type MetadataKey = uqa_storage::memory_capture::MemoryCaptureKey<
 >;
 
 #[cfg(test)]
+type CommentKey = uqa_storage::memory_capture::MemoryCaptureKey<
+    uqa_storage::memory_capture::CapturedMemoryValue<
+        Vec<(uqa_execution::catalog::comments::CommentAddress, String)>,
+    >,
+>;
+
+#[cfg(test)]
 pub(crate) struct SnapshotCut {
     pub(crate) tables: super::SnapshotTableCut,
     pub(crate) sequences: uqa_core::memory::Budgeted<SequenceKey>,
     pub(crate) foreign: uqa_core::memory::Budgeted<ForeignKey>,
     pub(crate) metadata: uqa_core::memory::Budgeted<MetadataKey>,
+    pub(crate) comments: uqa_core::memory::Budgeted<CommentKey>,
     pub(crate) catalogs: uqa_core::memory::Budgeted<catalogs::CatalogKeys>,
     pub(crate) resources: uqa_core::memory::Budgeted<resources::ResourceKeys>,
 }
@@ -139,12 +174,17 @@ impl SnapshotSources {
         let metadata_memory = control
             .memory()
             .reserve(size_of::<MetadataKey>() + metadata.retained_source_bytes())?;
+        let comments = self.comments.key()?;
+        let comment_memory = control
+            .memory()
+            .reserve(size_of::<CommentKey>() + comments.retained_source_bytes())?;
         let tables = self.tables.capture(control)?;
         Ok(SnapshotCut {
             tables,
             sequences: uqa_core::memory::Budgeted::new(key, memory),
             foreign: uqa_core::memory::Budgeted::new(foreign, foreign_memory),
             metadata: uqa_core::memory::Budgeted::new(metadata, metadata_memory),
+            comments: uqa_core::memory::Budgeted::new(comments, comment_memory),
             catalogs,
             resources,
         })

@@ -12,6 +12,41 @@ use uqa_core::{
 };
 use uqa_sql::SQLError;
 
+/// Partition trigger ancestry from one immutable relation generation, in nearest-owner order.
+pub(crate) fn partition_trigger_sources<'a>(
+    mut current: RelationIdentity,
+    hierarchy: impl Fn(&RelationIdentity) -> Option<&'a uqa_sql::ast::TableHierarchy>,
+) -> Result<Vec<RelationIdentity>, SQLError> {
+    let mut sources = Vec::new();
+    let mut visited = std::collections::BTreeSet::new();
+    loop {
+        if !visited.insert(current.clone()) {
+            return Err(SQLError::Internal(format!(
+                "trigger partition hierarchy contains a cycle at `{}`",
+                current.qualified_name()
+            )));
+        }
+        sources.push(current.clone());
+        let hierarchy =
+            hierarchy(&current).ok_or_else(|| SQLError::UnknownTable(current.qualified_name()))?;
+        if hierarchy.partition_bound.is_none() {
+            break;
+        }
+        let Some(parent) = hierarchy.parents.first() else {
+            return Err(SQLError::Internal(format!(
+                "partition `{}` has no parent",
+                current.qualified_name()
+            )));
+        };
+        current = RelationIdentity::from_legacy_name(parent).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode query trigger partition parent `{parent}`: {error}"
+            ))
+        })?;
+    }
+    Ok(sources)
+}
+
 /// Traverse borrowed catalog identities in stable registry order. The adapter lends only table state; traversal, admission and cycle diagnostics belong to Execution.
 pub fn hierarchy_scan_entries_with_control<'a, T: 'a, I, F, C>(
     root: &'a RelationIdentity,

@@ -12,6 +12,7 @@ use uqa_storage::read_control::StorageReadControl;
 mod authority;
 mod capture;
 mod catalogs;
+mod comments;
 mod events;
 mod resources;
 mod sequences;

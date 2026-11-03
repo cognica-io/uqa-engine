@@ -46,7 +46,14 @@ impl Engine {
         }
         let durable = self.durable.snapshot();
         let sources = generation
-            .map(|registry| crate::state::SnapshotSources::new(registry, &tables, &durable))
+            .map(|registry| {
+                crate::state::SnapshotSources::new(
+                    registry,
+                    &tables,
+                    &durable,
+                    self.temporary_namespace_oids(),
+                )
+            })
             .transpose()
             .map_err(|error| Self::storage_tx_error("snapshot table source membership", &error))?;
         Ok(Some(std::sync::Arc::new(EngineDataSnapshot {

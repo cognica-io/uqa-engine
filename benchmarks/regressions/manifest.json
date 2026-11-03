@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -39196,6 +39196,46 @@
       "capability": "Transaction table metadata generations",
       "workload": "Select unread index and analyzer roots under 128 KiB beside large temporary metadata, private DDL and savepoints, then COMMIT/ROLLBACK, reuse table names and close the Engine.",
       "invariant": "Exact original index encodings, historical analyzer bytes and table data survive together; temporary payloads are excluded and raw source roots retire.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "comment_selection_excludes_original_temporary_addresses_before_payload_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/snapshot/tests.rs",
+      "capability": "Original comment eligibility",
+      "workload": "Capture temporary relation/subobject/type/namespace descriptions beside permanent, unlogged, opaque and dangling addresses; compare allocations with and without one MiB of excluded text.",
+      "invariant": "Original object addresses select exact surviving descriptions before output admission; exact budgets succeed and smaller budgets release partial output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "comment_generation_retirement_preserves_independent_capture_controls",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/snapshot/tests.rs",
+      "capability": "Comment generation retirement",
+      "workload": "Retire an unread original comment source with independent successful and cancelled cuts, then close the registry and cancel the retained result.",
+      "invariant": "Source roots retire without retaining live metadata; one cancelled capture cannot invalidate another and retained output keeps its original control.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_comment_sources_preserve_original_object_eligibility_after_closure",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/comments.rs",
+      "capability": "Transaction comment generations",
+      "workload": "Select comments across native catalog classes, including inherited partition triggers, after private comment/type replacement; COMMIT or ROLLBACK, reuse names and close the Engine.",
+      "invariant": "The original generation excludes every addressed temporary object while retaining opaque classes, dangling addresses and original committed description bytes under the same cut.",
       "case_names": [
         "case_1",
         "case_2"

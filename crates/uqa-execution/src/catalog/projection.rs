@@ -17,6 +17,10 @@ use information_schema::constraint_usage::{
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::constraints::ConstraintIdentity;
 
+pub(crate) use events::{
+    trigger_catalog_oid_for_relation, trigger_constraint_catalog_oid_for_relation,
+};
+pub(crate) use pg_catalog::attrdef_catalog_oid;
 pub use uqa_sql::catalog::domain::domain_object_oid;
 
 mod identity_claims;
