@@ -304,7 +304,7 @@ impl DeepModel {
 
     /// Validate layer ordering, tensor shapes, dimensions, and numeric parameters.
     pub fn validate(&self) -> MLResult<()> {
-        DeepFusionOperator::new(self.to_layers()?, self.alpha, self.gating_runtime()).map(|_| ())
+        crate::deep_fusion::validate_model(&self.layers, self.alpha)
     }
 
     /// Run CPU inference against an operator execution context.

@@ -6,10 +6,22 @@
 
 //! Model shape, weight, recurrent, and runtime-state validation.
 
-use super::{ForwardState, Layer, MLError, MLResult, StorageBackendError, StorageBackendResult};
+use super::{ForwardState, MLError, MLResult, StorageBackendError, StorageBackendResult};
 
-pub(super) fn validate_layers(layers: &[Layer], alpha: f64) -> MLResult<()> {
-    let Some(first) = layers.first() else {
+mod input;
+use input::ValidationLayer as Layer;
+
+pub(super) fn validate_layers(layers: &[super::Layer], alpha: f64) -> MLResult<()> {
+    validate_inputs(layers.iter().map(Layer::from), alpha)
+}
+
+pub(crate) fn validate_model(layers: &[crate::DeepLayerSpec], alpha: f64) -> MLResult<()> {
+    validate_inputs(layers.iter().map(Layer::from), alpha)
+}
+
+fn validate_inputs<'a>(layers: impl Iterator<Item = Layer<'a>>, alpha: f64) -> MLResult<()> {
+    let mut layers = layers.peekable();
+    let Some(first) = layers.peek() else {
         return Err(MLError::InvalidModel(
             "DeepFusionOperator requires at least one layer".into(),
         ));
@@ -28,17 +40,17 @@ pub(super) fn validate_layers(layers: &[Layer], alpha: f64) -> MLResult<()> {
         )));
     }
 
-    for (index, layer) in layers.iter().enumerate() {
-        validate_layer(index, layer)?;
+    for (index, layer) in layers.enumerate() {
+        validate_layer(index, &layer)?;
     }
     Ok(())
 }
 
-pub(super) fn validate_layer(index: usize, layer: &Layer) -> MLResult<()> {
+fn validate_layer(index: usize, layer: &Layer<'_>) -> MLResult<()> {
     let context = format!("deep-fusion layer {index}");
     match layer {
         Layer::Input { dimensions } => validate_input(index, *dimensions, &context),
-        Layer::Signal(signals) if signals.is_empty() => Err(MLError::InvalidModel(format!(
+        Layer::Signal(signals) if *signals == 0 => Err(MLError::InvalidModel(format!(
             "{context}: Signal requires at least one operator"
         ))),
         Layer::Embed(values) => validate_embedding(index, values, &context),
@@ -62,16 +74,9 @@ pub(super) fn validate_layer(index: usize, layer: &Layer) -> MLResult<()> {
         Layer::CNN2D { .. } => validate_cnn_2d(layer, &context),
         Layer::Conv { hop_weights, .. } => validate_hop_weights(hop_weights, &context),
         Layer::Pool { pool_size, .. } => require_nonzero(*pool_size, &context, "pool_size"),
-        Layer::RNN { .. } => validate_recurrent_spec(layer, 1, &context),
-        Layer::LSTM { .. } => validate_recurrent_spec(layer, 4, &context),
-        Layer::Signal(_)
-        | Layer::BatchNorm { .. }
-        | Layer::Dropout { .. }
-        | Layer::Propagate { .. }
-        | Layer::Flatten
-        | Layer::GlobalPool(_)
-        | Layer::Softmax
-        | Layer::Attention => Ok(()),
+        Layer::Recurrent { .. } => validate_recurrent_spec(layer, 1, &context),
+        Layer::LongShortTermMemory { .. } => validate_recurrent_spec(layer, 4, &context),
+        Layer::Signal(_) | Layer::BatchNorm { .. } | Layer::Dropout { .. } | Layer::Other => Ok(()),
     }
 }
 
@@ -118,7 +123,7 @@ pub(super) fn validate_dense(
     require_finite(bias, context, "bias")
 }
 
-pub(super) fn validate_cnn_1d(layer: &Layer, context: &str) -> MLResult<()> {
+fn validate_cnn_1d(layer: &Layer<'_>, context: &str) -> MLResult<()> {
     let Layer::CNN1D {
         weights,
         bias,
@@ -152,7 +157,7 @@ pub(super) fn validate_cnn_1d(layer: &Layer, context: &str) -> MLResult<()> {
     validate_weights_and_bias(weights, bias, expected, *output_channels, context)
 }
 
-pub(super) fn validate_cnn_2d(layer: &Layer, context: &str) -> MLResult<()> {
+fn validate_cnn_2d(layer: &Layer<'_>, context: &str) -> MLResult<()> {
     let Layer::CNN2D {
         weights,
         bias,
@@ -240,9 +245,9 @@ pub(super) fn validate_hop_weights(hop_weights: &[f64], context: &str) -> MLResu
     Ok(())
 }
 
-pub(super) fn validate_recurrent_spec(layer: &Layer, gates: usize, context: &str) -> MLResult<()> {
+fn validate_recurrent_spec(layer: &Layer<'_>, gates: usize, context: &str) -> MLResult<()> {
     let (weights_input, weights_hidden, bias, hidden_channels, input_channels) = match layer {
-        Layer::RNN {
+        Layer::Recurrent {
             weights_input,
             weights_hidden,
             bias,
@@ -250,7 +255,7 @@ pub(super) fn validate_recurrent_spec(layer: &Layer, gates: usize, context: &str
             input_channels,
             ..
         }
-        | Layer::LSTM {
+        | Layer::LongShortTermMemory {
             weights_input,
             weights_hidden,
             bias,

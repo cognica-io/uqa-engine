@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add exact stored-model backup images preserving every supported layer, parameter bit, label and gating value. Controlled private reconstruction validates the complete model and retains decoded allocation ownership; joint Engine backup integration remains under implementation.
 - Add exact analyzer-resource images that retain resolved descriptors and Korean/Japanese dictionary bytes without reopening files or consulting host caches during restore. Input validation, feature admission and retained encoded-resource memory remain explicit; joint Engine backup integration remains under implementation.
 - Add fresh native SQLite image import with dependency-ordered physical rows, exact revision/namespace/watermark preservation, bounded row verification and recovery of uncertain history publication. Partial images remain unavailable; full logical catalog validation and public Engine backup jobs remain in progress.
 - Add a bounded native SQLite image exporter preserving the stable data namespace, evaluated rows, committed revisions and autonomous watermarks in all four file modes. Capture reuses the initialized record owner without migrating the source or changing private transactions; notification delivery and unpublished/retired DiskANN payloads are excluded. Public Engine backup jobs remain in progress.
@@ -37,6 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Validate stored deep models through borrowed layer views shared with runtime construction, avoiding complete weight copies while preserving shape checks and semantic diagnostics.
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
 
 ### Security

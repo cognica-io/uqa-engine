@@ -2,6 +2,110 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_matches_literal_tags_counts_and_ieee_bits",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Exact model framing",
+      "workload": "Compare literal layer tags, field counts, signed zero and subnormal bit patterns.",
+      "invariant": "The encoded image and decoded scalar bits match the independent fixture exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_images_preserve_every_layer_variant_and_enum_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Complete stored model carrier",
+      "workload": "Round-trip every layer, direction, pool/aggregation choice, gating and recurrent flag after dropping the source.",
+      "invariant": "Every stored parameter survives and only the final shared decoded owner releases its input allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_restoration_preserves_cpu_scores_and_probabilities_without_training",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model prediction preservation",
+      "workload": "Restore a fixed dense/softmax model and predict the same independently supplied feature rows.",
+      "invariant": "Document ordering, complete CPU scores and class probabilities remain equal without retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_rejects_incomplete_invalid_and_unfunded_input_without_retention",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model image admission",
+      "workload": "Read all proper prefixes, trailing bytes, invalid tags/shapes/numbers, excessive counts and an unfunded candidate.",
+      "invariant": "Failure publishes no model, releases all candidate memory and leaves invalid-source output empty.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_large_weights_do_not_duplicate_validation_or_export_payloads",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Bounded model image allocation",
+      "workload": "Measure actual export/import allocations for two MiB of weights and repeat input under 64 KiB.",
+      "invariant": "Export does not copy weights, import retains one payload, and insufficient admission fails before payload allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_partial_io_polls_cancellation_and_retires_candidate_memory",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model image cancellation",
+      "workload": "Cancel after fixed partial writer and reader calls.",
+      "invariant": "Both directions retain cancellation kinds and retire private decoded memory without altering the source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_rejects_invalid_label_and_enum_payloads_without_a_candidate",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model semantic field parsing",
+      "workload": "Corrupt UTF-8 labels, graph/pool enums and recurrent booleans.",
+      "invariant": "Invalid field values fail before a usable model is exposed and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "borrowed_model_validation_preserves_runtime_shape_and_numeric_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Shared model validation",
+      "workload": "Compare stored and runtime validation for every valid layer and invalid shapes, counts, finite values and order.",
+      "invariant": "Borrowed specs preserve original validation acceptance and semantic diagnostics without constructing another weight corpus.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-analysis",
       "kind": "lib",
       "test": "ordinary_compiled_analyzers_have_no_external_dictionary_dependencies",

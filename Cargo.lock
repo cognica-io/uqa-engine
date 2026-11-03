@@ -4124,6 +4124,7 @@ dependencies = [
 name = "uqa-ml"
 version = "0.6.3"
 dependencies = [
+ "allocation-counter",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

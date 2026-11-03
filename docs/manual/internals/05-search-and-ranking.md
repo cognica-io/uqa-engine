@@ -116,6 +116,8 @@ Independent fusion inputs can execute concurrently on the shared parallel execut
 
 Learned fusion and attention operators consume explicit feature vectors or signal carriers and registered model specifications. Model version, input ordering, normalization, and training provenance are part of the semantic contract. A cached model is invalidated when its durable identity changes.
 
+ML owns exact evaluated `DeepModel` backup images. `write_model_image` retains the layer order, dimensions, labels, gating and original floating-point bits; `read_model_image` returns a private admitted model after complete framing and ordinary validation. Both stored specs and runtime layers use the same borrowed validator, avoiding weight copies during validation. The returned model keeps its decoded layer/vector/string allowance until its last owner closes. Model identity/provenance and joint Engine capture remain catalog responsibilities. See the [model image format and preservation argument](../../design/backup-image-format.md#evaluated-stored-model-images).
+
 ## Calibration verification
 
 Held out labels support reliability bins, expected calibration error, Brier score, log loss, deterministic bootstrap intervals, threshold transfer, and candidate-K drift checks. Training-set fit and unlabeled percentile transforms are not sufficient calibration evidence.
