@@ -203,7 +203,9 @@ impl Engine {
                 metadata.key_constraints.snapshot(),
             ),
             hierarchy: crate::state::CatalogCell::from_snapshot(metadata.hierarchy.snapshot()),
-            value_indexes: parking_lot::RwLock::new(std::collections::BTreeMap::new()),
+            value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                uqa_execution::catalog::index::value::ValueIndexes::default(),
+            ),
             doc_count_cache: std::sync::atomic::AtomicU64::new(doc_count),
             doc_count_dirty: std::sync::atomic::AtomicBool::new(doc_count_dirty),
             persistence: metadata.persistence,

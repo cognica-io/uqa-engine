@@ -132,7 +132,9 @@ impl Engine {
             foreign_keys: CatalogCell::from_snapshot(source.foreign_keys.snapshot()),
             key_constraints: CatalogCell::from_snapshot(source.key_constraints.snapshot()),
             hierarchy: CatalogCell::from_snapshot(source.hierarchy.snapshot()),
-            value_indexes: RwLock::new(std::collections::BTreeMap::new()),
+            value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                uqa_execution::catalog::index::value::ValueIndexes::default(),
+            ),
             doc_count_cache: AtomicU64::new(source.doc_count_cache.load(Ordering::Acquire)),
             doc_count_dirty: AtomicBool::new(source.doc_count_dirty.load(Ordering::Acquire)),
             persistence: source.persistence,

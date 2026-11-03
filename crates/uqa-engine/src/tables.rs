@@ -338,7 +338,7 @@ impl Engine {
             foreign_keys: crate::state::CatalogCell::new(Vec::new()),
             key_constraints: crate::state::CatalogCell::new(Vec::new()),
             hierarchy: crate::state::CatalogCell::new(uqa_sql::ast::TableHierarchy::default()),
-            value_indexes: RwLock::new(BTreeMap::new()),
+            value_indexes: self.storage.memory_value_indexes(persistence)?,
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),
             persistence,

@@ -250,7 +250,9 @@ impl Engine {
             foreign_keys: crate::state::CatalogCell::new(constraints.foreign_keys),
             key_constraints: crate::state::CatalogCell::new(constraints.key_constraints),
             hierarchy: crate::state::CatalogCell::new(constraints.hierarchy),
-            value_indexes: RwLock::new(BTreeMap::new()),
+            value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                uqa_execution::catalog::index::value::ValueIndexes::default(),
+            ),
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),
             persistence: constraints.persistence,

@@ -14,6 +14,51 @@ fn sql(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
 }
 
+#[test]
+fn memory_engine_capture_preserves_evaluated_expression_keys_after_routine_replacement() {
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE FUNCTION saved_key(x text) RETURNS text IMMUTABLE LANGUAGE SQL RETURN lower(x); CREATE TABLE docs(id integer PRIMARY KEY, body text); INSERT INTO docs VALUES(1,'Original'); CREATE INDEX saved_expression ON docs(saved_key(body))");
+        let field = engine
+            .value_indexable_fields("docs")
+            .unwrap()
+            .into_iter()
+            .find(|field| matches!(field, uqa_storage::ValueIndexKey::Index(_)))
+            .unwrap();
+        let table = engine.table("docs").unwrap().unwrap();
+        let key = table.value_indexes.key().unwrap();
+        sql(&engine, "CREATE OR REPLACE FUNCTION saved_key(x text) RETURNS text IMMUTABLE LANGUAGE SQL RETURN upper(x)");
+        let control = StorageReadControl::with_limit(1 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        assert!(key.retained(&cut).unwrap().is_none());
+        if mutate {
+            sql(&engine, "BEGIN; UPDATE docs SET body='Private'; SAVEPOINT retained; TRUNCATE docs; ROLLBACK TO retained; ROLLBACK");
+            sql(
+                &engine,
+                "DROP TABLE docs; CREATE TABLE docs(replacement integer)",
+            );
+        }
+        drop((table, engine));
+        let captured = key.retained(&cut).unwrap().unwrap();
+        let index = captured.get(&field).unwrap().unwrap();
+        assert_eq!(
+            index.value(1).unwrap(),
+            Some(&crate::Value::Row(
+                vec![crate::Value::Str("original".into())].into()
+            ))
+        );
+        assert_eq!(index.len().unwrap(), 1);
+        drop((captured, cut));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
 fn document_image(source: &dyn uqa_storage::DocumentStore) -> Vec<u8> {
     let mut image = Vec::new();
     assert!(source
@@ -249,6 +294,7 @@ fn memory_engine_capture_excludes_temporary_source_retention() {
     assert!(table.document_store.key().is_err());
     assert!(table.inverted_index.key().is_err());
     assert!(table.vector_indexes.key().is_err());
+    assert!(table.value_indexes.key().is_err());
     let control = StorageReadControl::with_limit(4096);
     let cut = engine
         .storage

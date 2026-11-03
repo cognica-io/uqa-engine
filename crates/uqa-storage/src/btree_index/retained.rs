@@ -8,7 +8,10 @@
 
 use crate::{mvcc::PrivateRecordChanges, read_control::StorageReadControl, StorageBackendResult};
 use std::ops::Bound;
-use uqa_core::{memory::MemoryBudget, DocId, Value};
+use uqa_core::{
+    memory::{Budgeted, MemoryBudget},
+    DocId, Value,
+};
 
 mod records;
 mod tree;
@@ -178,6 +181,18 @@ impl RetainedValueIndex {
         let _scope = records.read_scope()?;
         let snapshot = records.snapshot()?;
         records.visit_values(&snapshot, visit)
+    }
+
+    /// Transfer each decoded value together with its original invoking allowance. Private-run workspace keeps the index's separate fixed budget; decoded payloads never escape the caller's admission.
+    pub fn visit_values_owned(
+        &self,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(DocId, Budgeted<Value>) -> StorageBackendResult<bool>,
+    ) -> StorageBackendResult<()> {
+        let records = Records::new(&self.records, &self.memory, control);
+        let _scope = records.read_scope()?;
+        let snapshot = records.snapshot()?;
+        records.visit_values_owned(&snapshot, visit)
     }
 }
 

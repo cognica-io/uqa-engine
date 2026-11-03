@@ -639,7 +639,9 @@ pub(crate) struct TableState {
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
-    value_indexes: RwLock<BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>>,
+    value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
+    >,
     /// Cached `document_store.len()`. Persistent stores answer `len`
     /// with a `COUNT(*)` query, which used to run once per SQL
     /// statement for planner row estimates; the cache is invalidated

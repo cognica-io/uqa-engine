@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain evaluated named value-index keys and their original eligibility state through memory Engine mutation, rollback and closure, with explicit capture limits and cancellation. Expressions are not reevaluated; complete Engine backup remains under implementation.
 - Register actual non-temporary memory Engine documents, text and vector indexes in their owning capture domain. Preserve unread sources on final closure and exact vector identities through replacement, removal and rollback, including IVF query retraining; share table membership roots without copying rows or names. Complete committed backup selection and public jobs remain in progress.
 
 - Preserve memory IVF state before every registered capture-domain mutation, including query-triggered retraining and probe changes. Export-only captures retain the original training state and controls after source closure; complete Engine backup integration remains under implementation.
@@ -41,6 +42,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Stream temporary value-index payloads through the exact evaluated-value codec instead of JSON and a complete intermediate buffer. Tag-shaped maps keep their type, and owned reads retain decoded payload admission through their final consumer.
 - Retain immutable transaction and savepoint generations during error recovery instead of copying the complete table catalog. Table definitions share their existing immutable roots through capture and rollback; later DDL detaches only the changed definition.
 - Share immutable stored-model owners across Engine catalog generations so publishing another model does not copy previously retained weights. Owned model results and transaction rollback keep their existing behavior.
 - Validate stored deep models through borrowed layer views shared with runtime construction, avoiding complete weight copies while preserving shape checks and semantic diagnostics.

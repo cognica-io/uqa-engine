@@ -109,6 +109,20 @@ impl StorageContext {
         );
         self.memory_cell(indexes, persistence)
     }
+
+    pub(super) fn memory_value_indexes(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::StorageBackendResult<
+        uqa_storage::memory_capture::MemoryCaptureCell<
+            uqa_execution::catalog::index::value::ValueIndexes,
+        >,
+    > {
+        self.memory_cell(
+            uqa_execution::catalog::index::value::ValueIndexes::default(),
+            persistence,
+        )
+    }
 }
 
 pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};

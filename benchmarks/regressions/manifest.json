@@ -37058,6 +37058,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_images_preserve_tag_shaped_maps_and_float_bits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Exact temporary index carriers",
+      "workload": "Store tag-shaped ordinary maps, payload-specific NaNs and positional records through resident and spilled temporary index owners.",
+      "invariant": "Owned visits preserve original carrier types, float bits, positional fields and full payload ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_large_images_stream_and_keep_decoded_allowances",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded temporary index image I/O",
+      "workload": "Write a one-MiB value with a 64-KiB invoking allowance, reject an unfunded decode, and retain an admitted value after source closure.",
+      "invariant": "Write allocation peaks below 512 KiB without a complete encoded buffer; failed reads invoke no visitor and successful values retain their payload allowance until release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_value_indexes_preserve_resident_and_spilled_keys_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Evaluated value-index generations",
+      "workload": "Capture resident and spilled search/carried keys with removed temporal values, then clear, change and drop the source.",
+      "invariant": "Original identities, values, NULL/absence, role and eligibility remain unchanged; final retirement releases the complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "value_index_capture_admission_keeps_membership_and_isolates_failed_cuts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Value-index membership and failure isolation",
+      "workload": "Capture a named expression index and a large derived column cache under independent small and sufficient allowances, then clear the source.",
+      "invariant": "Named keys survive, derived caches consume no image retention, an underfunded cut fails independently and ordinary mutation progresses.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_value_index_limits_and_original_cancellation_are_preserved",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Value-index capture controls",
+      "workload": "Reject an unfunded capture and cancel from the first callback of resident and spilled snapshots.",
+      "invariant": "No second callback runs, all later observations reject the original cancellation, leases retire and the ordinary source stays usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_preserves_evaluated_expression_keys_after_routine_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Actual Engine stored expression capture",
+      "workload": "Replace the defining function, capture existing keys and exercise UPDATE, TRUNCATE, savepoints, rollback, same-name table replacement and unread source closure.",
+      "invariant": "The original lowercase key remains stored without reevaluating the newer uppercase function; source retirement and rollback preserve the selected identity and allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
