@@ -62,7 +62,7 @@ impl Engine {
                 .storage
                 .tables
                 .write()
-                .insert(relation.clone(), Arc::clone(&table));
+                .insert(relation.clone(), Arc::clone(&table))?;
             let vector_fields = source
                 .vector_indexes
                 .read()

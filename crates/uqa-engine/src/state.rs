@@ -18,17 +18,19 @@ mod catalog_capture;
 mod catalog_cell;
 mod resource_capture;
 mod table_capture;
+mod table_membership;
 pub(crate) use catalog_cell::CatalogCell;
+pub(crate) use table_membership::{MembershipSnapshot, TableRegistry};
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
     BayesianBM25Params, CommandMutationOverlay, DeepModel, RelationIdentity, SQLStatementCache,
-    SequenceState, TableFieldAnalyzerRegistry, TableState, TransactionFrame,
+    SequenceState, TableFieldAnalyzerRegistry, TransactionFrame,
 };
 
 pub(super) struct StorageContext {
-    pub(super) tables: Arc<CatalogCell<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    pub(super) tables: Arc<TableRegistry>,
     pub(super) memory_capture: Option<uqa_storage::memory_capture::MemoryCaptureRegistry>,
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
@@ -44,9 +46,13 @@ pub(crate) use uqa_execution::catalog::security::{
 
 impl StorageContext {
     pub(super) fn memory() -> Self {
+        let registry = uqa_storage::memory_capture::MemoryCaptureRegistry::new();
         Self {
-            tables: Arc::new(CatalogCell::new(BTreeMap::new())),
-            memory_capture: Some(uqa_storage::memory_capture::MemoryCaptureRegistry::new()),
+            tables: Arc::new(
+                table_membership::TableRegistry::memory(&registry)
+                    .expect("fresh memory capture domain"),
+            ),
+            memory_capture: Some(registry),
             catalog: None,
             backend: None,
             provider: None,
@@ -60,7 +66,7 @@ impl StorageContext {
         provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
     ) -> Self {
         Self {
-            tables: Arc::new(CatalogCell::new(BTreeMap::new())),
+            tables: Arc::new(table_membership::TableRegistry::persistent()),
             memory_capture: None,
             catalog: Some(catalog),
             backend: Some(backend),

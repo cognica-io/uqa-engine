@@ -354,7 +354,7 @@ impl Engine {
         let analyzer_bindings =
             self.initialize_table_analyzer_bindings(name, &table_arc, default_revision)?;
         self.note_prepared_table_change(&table_arc);
-        self.storage.tables.write().insert(relation, table_arc);
+        self.storage.tables.write().insert(relation, table_arc)?;
         self.durable
             .table_field_analyzers
             .write()

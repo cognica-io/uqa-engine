@@ -11,6 +11,9 @@ use std::{cmp::Ordering, sync::Arc};
 use super::{Budgeted, Entry, Link, MemoryBudget, MemoryError, Node, SharedNode, MAX_HEIGHT};
 use crate::memory::MemoryReservation;
 
+mod removal;
+pub(super) use removal::remove;
+
 pub(super) fn insert<K: Ord, V>(
     root: &mut Link<K, V>,
     key: K,

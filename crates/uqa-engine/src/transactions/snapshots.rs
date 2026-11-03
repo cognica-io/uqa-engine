@@ -80,6 +80,7 @@ impl Engine {
         }
         Ok(Some(std::sync::Arc::new(EngineDataSnapshot {
             tables,
+            memory_membership: self.storage.tables.memory_snapshot(),
             durable: self.durable.snapshot(),
             foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
         })))
@@ -94,16 +95,28 @@ impl Engine {
         snapshot: &EngineDataSnapshot,
     ) -> Result<(), SQLError> {
         self.clear_bayesian_params_cache();
-        {
+        if let Some(membership) = &snapshot.memory_membership {
+            self.storage.tables.restore_memory(
+                membership,
+                snapshot
+                    .tables
+                    .iter()
+                    .map(|(name, table)| (name.clone(), table.state.clone())),
+            );
+        } else {
             let mut tables = self.storage.tables.write();
-            tables.retain(|name, table| {
-                snapshot.tables.contains_key(name)
-                    || (self.storage.backend.is_some()
-                        && table.persistence != uqa_sql::ast::RelationPersistence::Temporary)
-            });
+            tables
+                .retain(|name, table| {
+                    snapshot.tables.contains_key(name)
+                        || (self.storage.backend.is_some()
+                            && table.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+                })
+                .map_err(|err| Self::storage_tx_error("ROLLBACK table membership", &err))?;
             for (name, table_snapshot) in &snapshot.tables {
                 // DROP followed by same-name CREATE installs another object; undo must restore the captured incarnation as well as its contents.
-                tables.insert(name.clone(), table_snapshot.state.clone());
+                tables
+                    .insert(name.clone(), table_snapshot.state.clone())
+                    .map_err(|err| Self::storage_tx_error("ROLLBACK table membership", &err))?;
             }
         }
         for table_snapshot in snapshot.tables.values() {

@@ -70,7 +70,7 @@ impl Engine {
         for (schema, security) in schemas {
             let relation = schema.relation.clone();
             let table = Self::load_session_table(catalog, backend, schema, security, &names)?;
-            self.storage.tables.write().insert(relation, table);
+            self.storage.tables.write().insert(relation, table)?;
         }
         self.synchronize_partition_identity_watermarks()?;
         if mode.allows_migration() {

@@ -38527,6 +38527,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "immutable_deletions_and_insertions_preserve_every_retained_root",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Immutable map composition",
+      "workload": "Compose inserts, removals and retained roots against an independent ordered-map oracle.",
+      "invariant": "Every current and retained root preserves exact entries, cardinality and AVL balance; final retirement releases all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "deletion_rotations_preserve_order_and_retire_unreachable_nodes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Immutable deletion rotations",
+      "workload": "Insert and delete 128 keys in each forward/reverse order while retaining predecessor roots.",
+      "invariant": "Each predecessor stays unchanged and the surviving root owns exactly its structural payload after predecessor retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "deletion_admission_failure_and_absent_keys_preserve_the_original_root",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Immutable deletion admission",
+      "workload": "Deny deletion admission at varied limits and remove an absent key with no available storage.",
+      "invariant": "Denied successors preserve the original entries and allowance; absent keys allocate zero bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "borrowed_removal_and_empty_successors_need_no_additional_storage",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Borrowed-key removal",
+      "workload": "Remove a string entry through a borrowed key while all remaining allowance is held.",
+      "invariant": "The empty successor allocates nothing, and the original root remains readable until its final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "large_immutable_removal_and_snapshot_iteration_have_bounded_work_and_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Bounded immutable deletion",
+      "workload": "Remove one key from 32768 entries and iterate the retained original root.",
+      "invariant": "Removal allocates at most 8192 bytes and performs at most 64 comparisons; snapshot iteration allocates zero bytes and returns every original entry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_membership_preserves_unread_incarnations_without_retaining_live_tables",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Memory table membership lifetime",
+      "workload": "Capture actual SQL tables, optionally rename/drop/recreate them and close Engine before reading the selected sources.",
+      "invariant": "Original names, object/OID identities, columns and rows survive without retaining TableState; all 22 source wrappers use the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_membership_rollback_restores_the_original_root_without_another_live_map_owner",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Memory table membership rollback",
+      "workload": "Create/drop/replace tables inside a transaction and savepoint, then roll both back.",
+      "invariant": "Undo restores the original membership entry identity and table contents while retaining no extra live table-map owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_membership_capture_does_not_copy_the_relation_corpus_or_temporary_payloads",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Constant-work table membership capture",
+      "workload": "Capture 1 and 128 durable tables alongside a temporary table with one MiB of metadata.",
+      "invariant": "Both captures allocate the same fixed bytes below 4096, retain only durable membership and release all capture admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_table_membership_retention_does_not_consume_publication_or_an_independent_cut",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Table membership failure isolation",
+      "workload": "Retain the same membership with insufficient and sufficient controls before creating another table.",
+      "invariant": "Only the denied cut fails; publication and the funded cut remain valid, cancellation stops reads and final retirement releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_membership_retention_keeps_unique_maps_in_place",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Persistent table membership retention",
+      "workload": "Retain 127 of 128 table handles through the unregistered persistent registry owner.",
+      "invariant": "A unique live map allocates zero bytes, visits each predicate once and preserves retained table identities.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

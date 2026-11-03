@@ -99,7 +99,6 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         Ok(Self(cell))
     }
 
-    #[cfg(test)]
     pub(crate) fn key(
         &self,
     ) -> StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureKey<CapturedMemoryValue<F>>>
@@ -128,13 +127,6 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
 impl<T: Clone + Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
         MemoryCaptureWriteGuard::map(self.0.write(), |root| Arc::make_mut(&mut root.value))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn try_write(&self) -> Option<MemoryCaptureWriteGuard<'_, T>> {
-        self.0
-            .try_write()
-            .map(|guard| MemoryCaptureWriteGuard::map(guard, |root| Arc::make_mut(&mut root.value)))
     }
 }
 

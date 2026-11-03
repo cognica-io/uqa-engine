@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Preserve admitted non-temporary memory table membership through creation, deletion, rename, rollback and Engine closure without retaining mutable table owners or copying the relation corpus at capture. Immutable map deletion preserves earlier roots with logarithmic allocation. Complete committed Engine backup remains under implementation.
+
 - Read captured memory sources through stable weak identities, including unchanged vector indexes, without borrowing current table/index membership. Retain selected images across source retirement and same-name replacement, admit weak source storage and release future mutable payloads on closure.
 
 - Preserve memory routine and rewrite-rule generations with exact source/bound bodies, attributes, identities, OLD/NEW conditions and dependencies. Captures retain independent constants without compiling deferred bodies or invoking routines; rollback, replacement and closure preserve selected definitions.

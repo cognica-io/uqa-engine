@@ -25,7 +25,7 @@ struct Node<K, V> {
     height: u8,
 }
 
-/// A persistent ordered map with logarithmic lookup and insertion. Cloning shares a root without copying entries or allocating. Updates reserve the complete insertion before mutation, reuse unique nodes and copy shared paths; unchanged entries and subtrees keep their original reservations until their last root is dropped. Keys and values retain their separately owned payloads.
+/// A persistent ordered map with logarithmic lookup, insertion and deletion. Cloning shares a root without copying entries or allocating. Updates reserve their complete path construction before mutation. Insertion reuses unique nodes; immutable deletion copies the affected paths and rotation pivots. Unchanged entries and subtrees keep their original reservations until their last root is dropped. Keys and values retain their separately owned payloads.
 pub struct BudgetedSharedMap<K, V> {
     root: Link<K, V>,
     len: usize,
@@ -54,6 +54,20 @@ impl<K, V> BudgetedSharedMapSnapshot<K, V> {
 
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    /// Requested node and entry layouts reachable from this root, excluding separately owned key/value payloads and reference-count bookkeeping. Each entry occurs once within one root, even when other roots share it.
+    pub fn structural_bytes(&self) -> Result<usize, MemoryError> {
+        self.len
+            .checked_mul(size_of::<Budgeted<Node<K, V>>>() + size_of::<Budgeted<(K, V)>>())
+            .ok_or(MemoryError::SizeOverflow)
+    }
+
+    /// Borrow entries in key order without allocating or retaining a mutable map.
+    pub fn iter(&self) -> BudgetedSharedMapIter<'_, K, V> {
+        let mut iter = BudgetedSharedMapIter::empty();
+        iter.push_left(self.root.as_ref().map(|node| &***node));
+        iter
     }
 }
 
@@ -162,6 +176,19 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
         Ok(candidate)
     }
 
+    /// Return an immutable successor without the selected key. Unchanged entries and subtrees retain their original leases. Missing keys allocate nothing; removal reserves a logarithmic path and its rotations before constructing the successor, leaving this root unchanged on failure.
+    pub fn with_remove<Q: Ord + ?Sized>(&self, key: &Q) -> Result<Self, MemoryError>
+    where
+        K: Borrow<Q>,
+    {
+        let (root, removed) = tree::remove(&self.root, key, &self.memory)?;
+        Ok(Self {
+            root,
+            len: self.len - usize::from(removed),
+            memory: self.memory.clone(),
+        })
+    }
+
     /// Reserve the complete insertion before changing this root, reusing unique nodes and copying only shared paths. Reservation failure preserves this root; existing clones remain unchanged. Matching keys and values are replaced together without requiring `Clone`.
     pub fn try_insert(&mut self, key: K, value: V) -> Result<(), MemoryError> {
         let added = tree::insert(&mut self.root, key, value, &self.memory)?;
@@ -244,6 +271,15 @@ impl<'a, K, V> Iterator for BudgetedSharedMapIter<'a, K, V> {
 impl<K, V> std::iter::FusedIterator for BudgetedSharedMapIter<'_, K, V> {}
 
 impl<'a, K, V> IntoIterator for &'a BudgetedSharedMap<K, V> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = BudgetedSharedMapIter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a BudgetedSharedMapSnapshot<K, V> {
     type Item = (&'a K, &'a V);
     type IntoIter = BudgetedSharedMapIter<'a, K, V>;
 

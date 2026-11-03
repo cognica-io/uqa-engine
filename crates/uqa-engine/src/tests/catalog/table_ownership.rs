@@ -261,7 +261,8 @@ impl TableOwnerRegistry for ReplacingTables<'_> {
             .tables
             .try_write()
             .expect("binding releases the real registry guard")
-            .insert(relation.clone(), self.replacement.clone());
+            .insert(relation.clone(), self.replacement.clone())
+            .unwrap();
         selected
     }
 }
