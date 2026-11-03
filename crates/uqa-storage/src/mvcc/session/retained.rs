@@ -24,6 +24,14 @@ pub struct CommittedReadBoundary {
 }
 
 impl VersionedKeyValueStore {
+    /// Capture the persistence owner's current committed records and autonomous metadata independently of this session's private or retained view. This operation neither completes nor changes the session transaction; the persistence owner admits and retains the joint cut under the supplied control.
+    pub fn capture_backup_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> super::super::VersionResult<Option<Arc<dyn super::super::CommittedBackupSnapshot>>> {
+        self.persistence.capture_backup_snapshot(control)
+    }
+
     /// Retain only the committed input of the current transaction. Later private writes and savepoint branches can be attached explicitly through `new_read_session_with_private_changes`.
     pub fn capture_committed_read_boundary(
         &self,

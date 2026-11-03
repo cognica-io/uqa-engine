@@ -7,6 +7,38 @@
 use super::*;
 
 #[test]
+fn captured_statistics_maintenance_keeps_all_inline_state_without_payload_allocation() {
+    let source = StatisticsMaintenance {
+        object_id: Some([7; 16]),
+        generation: 8,
+        changes: 9,
+        dirty_since_ms: 10,
+        analyzed_rows: Some(11),
+        statistics_format: 12,
+        analyzed_at: Some(13),
+        analysis_generation: Some(14),
+    };
+    let memory = uqa_core::memory::MemoryBudget::new(0);
+    let cancellation = uqa_core::CancellationToken::new();
+    let control = uqa_core::memory::ProductionControl::new(&memory, &cancellation, &cancellation);
+    let allocation = allocation_counter::measure(|| {
+        let captured = source
+            .clone_with_control(&control)
+            .unwrap()
+            .into_budgeted()
+            .unwrap();
+        assert_eq!(&*captured, &source);
+        assert_eq!(captured.reserved_bytes(), 0);
+    });
+    assert_eq!(allocation.bytes_max, 0);
+    cancellation.cancel();
+    assert!(matches!(
+        source.clone_with_control(&control),
+        Err(uqa_core::ValueRetentionError::Cancelled(_))
+    ));
+}
+
+#[test]
 fn automatic_refresh_covers_first_use_threshold_and_small_idle_changes() {
     assert!(StatisticsMaintenance::default().due(true, 0, 1));
     let mut state = StatisticsMaintenance {

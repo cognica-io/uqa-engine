@@ -10,17 +10,45 @@ use std::sync::Arc;
 
 use uqa_core::{DocId, PostingList};
 
-use super::state::IVFIndex;
+use super::IVFIndex;
+use crate::memory_capture::MemoryCaptureSource;
 use crate::vector_index::VectorIndex;
 use crate::StorageBackendResult;
 
 impl VectorIndex for IVFIndex {
+    fn into_memory_capture(
+        mut self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        self.register_memory_capture(registry)?;
+        Ok(self)
+    }
+
+    fn memory_capture(&self) -> Option<&dyn crate::vector_index::VectorIndexCapture> {
+        Some(self)
+    }
+
+    fn capture_image_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::vector_index::image::VectorImageSnapshot> {
+        self.data.read_with_control(control)?.freeze(control)
+    }
+
+    fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        super::image::write(&*self.data.read_with_control(control)?, output, control)
+    }
+
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
-        Ok(self.vectors.lock().contains_key(&(doc_id, 0)))
+        Ok(self.data.read().vectors.contains_key(&(doc_id, 0)))
     }
 
     fn dimensions(&self) -> u32 {
-        self.dimensions
+        self.data.read().dimensions
     }
 
     fn index_kind(&self) -> &'static str {
@@ -28,19 +56,21 @@ impl VectorIndex for IVFIndex {
     }
 
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
-        self.replace_document_vectors(doc_id, vec![vector])
+        self.data
+            .write()
+            .replace_document_vectors(doc_id, vec![vector])
     }
 
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        self.replace_document_vectors(doc_id, vectors)
+        self.data.write().replace_document_vectors(doc_id, vectors)
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.delete_document(doc_id)
+        self.data.write().delete_document(doc_id)
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.clear_index();
+        self.data.write().clear_index();
         Ok(())
     }
 
@@ -71,7 +101,7 @@ impl VectorIndex for IVFIndex {
     }
 
     fn count(&self) -> StorageBackendResult<usize> {
-        Ok(self.vectors.lock().len())
+        Ok(self.data.read().vectors.len())
     }
 
     fn initialize(&mut self) -> StorageBackendResult<()> {

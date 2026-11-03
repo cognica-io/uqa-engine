@@ -68,7 +68,7 @@ class OwnershipTests(unittest.TestCase):
 
     def test_distribution_and_license_inputs_schedule_packages(self):
         for path in ("scripts/build-c-bindings.py", "scripts/c-bindings-metadata.py",
-                     "scripts/c-bindings-release.py", "scripts/c_bindings_licenses.py",
+                     "scripts/c-bindings-release.py", "scripts/c_bindings_licenses.py", "scripts/c_bindings_native.py",
                      "scripts/c-bindings/licenses/sources.json", "scripts/verify-c-package.py",
                      "scripts/tests/test_c_bindings_package.py", "LICENSE", "NOTICE"):
             with self.subTest(path=path):

@@ -90,17 +90,19 @@ impl Builder {
         self.map.path()
     }
 
+    #[cfg(test)]
     pub(super) fn new(memory: &MemoryBudget) -> StorageBackendResult<Self> {
-        Self::with_workspace(memory, None)
+        Self::with_workspace(memory, None, None)
     }
 
     pub(super) fn with_workspace(
         memory: &MemoryBudget,
         owner: Option<&Arc<Workspace>>,
+        file_budget: Option<&crate::temporary_file::FileBudget>,
     ) -> StorageBackendResult<Self> {
         let mut workspace =
             Reservation::reserve(memory, owner, size_of::<[Header; 128]>() + BLOCK_BYTES)?;
-        let map = Map::with_workspace(memory, owner)?;
+        let map = Map::with_workspace(memory, owner, file_budget)?;
         let mut writer =
             BufWriter::with_capacity(BLOCK_BYTES, map.file.lock().file.reopen().map_err(io)?);
         workspace.grow(writer.capacity() - BLOCK_BYTES)?;
@@ -246,6 +248,7 @@ impl Map {
     fn with_workspace(
         memory: &MemoryBudget,
         owner: Option<&Arc<Workspace>>,
+        file_budget: Option<&crate::temporary_file::FileBudget>,
     ) -> StorageBackendResult<Self> {
         let slots = Self::cache_slots(memory);
         let reservation = Reservation::reserve(
@@ -253,7 +256,11 @@ impl Map {
             owner,
             size_of::<Pages>() + slots * size_of::<Cache>(),
         )?;
-        let file = BlockTemporaryFile::new().map_err(io)?;
+        let file = match file_budget {
+            Some(budget) => BlockTemporaryFile::with_file_budget(budget),
+            None => BlockTemporaryFile::new(),
+        }
+        .map_err(io)?;
         Ok(Self {
             file: Arc::new(Mutex::new(Pages {
                 file,
@@ -538,7 +545,8 @@ impl Map {
         if bytes <= self.logical_bytes.saturating_mul(4).max(1024 * 1024) {
             return Ok(());
         }
-        let mut replacement = Builder::new(memory)?;
+        let file_budget = self.file.lock().file.file_budget();
+        let mut replacement = Builder::with_workspace(memory, None, file_budget.as_ref())?;
         let mut after = None;
         while let Some((key, value)) = self.next::<V>(after, memory)? {
             super::check(control)?;

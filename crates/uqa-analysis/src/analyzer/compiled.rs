@@ -25,6 +25,10 @@ pub struct CompiledAnalyzer {
     tokenizer: PreparedTokenizer,
     token_filters: Vec<PreparedTokenFilter<'static>>,
     normalization: crate::normalization::PreparedNormalization,
+    #[cfg(feature = "nori")]
+    pub(super) nori_dictionaries: Vec<Arc<crate::nori::ResolvedDictionary>>,
+    #[cfg(feature = "kuromoji")]
+    pub(super) kuromoji_dictionaries: Vec<Arc<crate::kuromoji::ResolvedDictionary>>,
 }
 
 impl Analyzer {
@@ -116,6 +120,10 @@ impl CompiledAnalyzer {
             tokenizer,
             token_filters,
             normalization,
+            #[cfg(feature = "nori")]
+            nori_dictionaries: nori.dictionaries,
+            #[cfg(feature = "kuromoji")]
+            kuromoji_dictionaries: kuromoji.dictionaries,
         })
     }
 

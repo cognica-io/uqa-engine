@@ -9,6 +9,7 @@
 //! provider-neutral catalog and transaction contracts.
 
 pub mod analyzer_binding;
+pub mod analyzer_image;
 pub use analyzer_binding::{AnalyzerBindingOwner, BoundAnalyzerRevision, FieldAnalyzerBinding};
 
 pub mod backend;
@@ -25,12 +26,14 @@ pub mod document_store;
 pub mod encryption_key;
 pub use encryption_key::StorageEncryptionKey;
 pub mod hnsw_index;
+pub mod image_io;
 pub mod index_abc;
 pub mod index_manager;
 pub mod index_types;
 pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
+pub mod memory_capture;
 pub mod mvcc;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 #[allow(unsafe_code)]
@@ -39,6 +42,7 @@ pub mod native_file;
 pub mod notifications;
 pub mod read_control;
 mod read_only_snapshot;
+mod retained_memory;
 pub use read_only_snapshot::ReadOnlySnapshot;
 pub mod spatial_index;
 mod spill_map;

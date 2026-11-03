@@ -20,7 +20,7 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 struct HierarchyTables<'a>(
-    parking_lot::RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+    parking_lot::MappedRwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
 );
 impl HierarchyDropCatalog for Engine {
     fn tables(&self) -> Box<dyn HierarchyDropTables + '_> {

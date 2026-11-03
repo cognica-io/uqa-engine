@@ -28,6 +28,7 @@ mod controlled_presence;
 pub use controlled_presence::read_field_presence;
 pub mod decoding;
 pub mod identifiers;
+pub mod image;
 mod retained;
 pub use retained::{RetainedDocumentFields, RetainedStoredDocument};
 mod retained_store;
@@ -181,6 +182,18 @@ impl SharedDocumentRow {
 
 /// Mutating methods are fallible: persistent backends surface their write failures so callers (engine DML, upserts, referential rewrites) can abort the enclosing transaction instead of silently committing a partially-applied statement. A rewrite that deletes a row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
+    /// Stream an evaluated document image from this exact read view, returning `None` for an absent document. Only owners with a lossless image codec implement this method; the default does not collect or re-evaluate fields. This primitive does not capture a committed Engine backup cut.
+    fn write_image_document(
+        &self,
+        _doc_id: DocId,
+        _output: &mut dyn std::io::Write,
+        _control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        Err(StorageBackendError::Other(
+            "document image export is unsupported by this owner".into(),
+        ))
+    }
+
     /// Persist one typed storage record. Every backend owns the physical representation of tuple metadata and must keep it outside the public field map.
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()>;
 
@@ -636,10 +649,18 @@ pub trait DocumentStore: Send + Sync {
         Ok(Box::new(rows.into_iter()))
     }
 
-    /// Read-only handle suitable for an `ExecutionContext`. Persistent
-    /// backends share their connection; memory backends deep-clone so the
-    /// snapshot is isolated from later mutations.
+    /// Read-only handle suitable for an `ExecutionContext`. Persistent backends may share a connection; memory stores share immutable generations isolated from later writes.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>>;
+
+    /// Capture an immutable generation under the supplied retention allowance and cancellation. Unsupported owners return an error without collecting or reopening their data. Repeated captures of an already controlled owner keep its original retention and cancellation scope.
+    fn snapshot_with_control(
+        &self,
+        _control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        Err(StorageBackendError::Other(
+            "controlled document snapshots are not supported by this backend".into(),
+        ))
+    }
 
     /// Share an already immutable retained view, preserving its selected rows, allocation owners and cancellation boundary. This capability must not capture a new live view or copy row payloads. The default reports that controlled copying is required without invoking the legacy `snapshot` method, whose persistent implementations may share a mutable connection.
     fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {

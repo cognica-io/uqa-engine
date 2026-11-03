@@ -101,7 +101,7 @@ fn failed_conversion_returns_reserved_workspace_to_the_resident_root() {
     }
     let sibling = memory.reserve(memory.available()).unwrap();
     let before = memory.used();
-    let mut builder = disk::Builder::with_workspace(&memory, map.workspace.as_ref()).unwrap();
+    let mut builder = disk::Builder::with_workspace(&memory, map.workspace.as_ref(), None).unwrap();
     for (key, value) in map.iter().map(Result::unwrap) {
         builder.push(key, &*value, &memory).unwrap();
     }

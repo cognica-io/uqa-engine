@@ -649,7 +649,7 @@ impl Engine {
             .tables
             .read()
             .values()
-            .map(|table| (table.storage_generation(), *table.next_id.lock()))
+            .map(|table| (table.storage_generation(), *table.next_id.read()))
             .collect::<BTreeMap<_, _>>();
         if let Err(error) = backend.rollback_transaction() {
             let failure = Self::storage_tx_error(action, &error);
@@ -709,7 +709,7 @@ impl Engine {
         }
         for table in self.storage.tables.read().values() {
             if let Some(reserved) = reservations.get(&table.storage_generation()) {
-                let mut next = table.next_id.lock();
+                let mut next = table.next_id.write();
                 *next = (*next).max(*reserved);
             }
         }

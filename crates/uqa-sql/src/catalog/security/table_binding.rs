@@ -13,7 +13,7 @@ use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_role::BoundAclEntry;
 
 mod production;
-pub use production::CapturedTablePrivileges;
+pub use production::{CapturedTablePrivileges, CapturedTableSecurity};
 
 pub type BoundTableAclEntry = BoundAclEntry<TablePrivileges>;
 

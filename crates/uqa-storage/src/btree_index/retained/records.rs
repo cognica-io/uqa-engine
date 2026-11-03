@@ -11,7 +11,12 @@ use crate::{
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
-use uqa_core::{memory::MemoryBudget, DocId, Value};
+use uqa_core::{
+    memory::{Budgeted, MemoryBudget},
+    DocId, Value,
+};
+
+mod value_io;
 
 #[cfg(test)]
 thread_local! {
@@ -77,6 +82,7 @@ impl Node {
 pub(super) struct Records<'a> {
     changes: &'a PrivateRecordChanges,
     pub control: StorageReadControl,
+    payload: StorageReadControl,
 }
 
 impl<'a> Records<'a> {
@@ -88,6 +94,7 @@ impl<'a> Records<'a> {
         Self {
             changes,
             control: StorageReadControl::new(memory, control.cancellation()),
+            payload: control.clone(),
         }
     }
     pub fn snapshot(&self) -> StorageBackendResult<PrivateRecordSnapshot> {
@@ -152,63 +159,33 @@ impl<'a> Records<'a> {
         view: &PrivateRecordSnapshot,
         id: DocId,
     ) -> StorageBackendResult<Option<Value>> {
+        Ok(self.get_owned(view, id)?.map(|value| value.into_parts().0))
+    }
+    pub fn get_owned(
+        &self,
+        view: &PrivateRecordSnapshot,
+        id: DocId,
+    ) -> StorageBackendResult<Option<Budgeted<Value>>> {
         #[cfg(test)]
         VALUE_READS.with(|reads| reads.set(reads.get() + 1));
         let Some(node) = self.node_at(view, id)? else {
             return Ok(None);
         };
-        let count = usize::try_from(node.bytes)
-            .map_err(|_| invalid("value length outside address space"))?;
-        let mut bytes = Vec::new();
-        let mut cursor = view
-            .cursor(&key(VALUE, id), None, &self.control)
-            .map_err(failure)?;
-        let mut ordinal = 0_u64;
-        while let Some(entry) = cursor.next(&self.control).map_err(failure)? {
-            if !entry.metadata().live {
-                continue;
-            }
-            if entry.key() != chunk_key(id, ordinal) {
-                return Err(invalid("unordered value chunk"));
-            }
-            let record = entry.read(&self.control).map_err(failure)?;
-            let chunk = record
-                .value()
-                .ok_or_else(|| invalid("missing value chunk"))?;
-            let remaining = count.saturating_sub(bytes.len());
-            if chunk.len() != remaining.min(CHUNK) || remaining == 0 {
-                return Err(invalid("invalid value chunk length"));
-            }
-            bytes.try_reserve(chunk.len()).map_err(|error| {
-                StorageBackendError::backend("retained value allocation", error)
-            })?;
-            bytes.extend_from_slice(chunk);
-            ordinal += 1;
-        }
-        if bytes.len() != count {
-            return Err(invalid("truncated retained value"));
-        }
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(StorageBackendError::from)
+        value_io::read(self, view, id, node.bytes).map(Some)
     }
     pub fn put_value(&self, id: DocId, value: &Value) -> StorageBackendResult<u64> {
-        let bytes = serde_json::to_vec(value)?;
-        for (ordinal, chunk) in bytes.chunks(CHUNK).enumerate() {
-            self.control.check()?;
-            self.write(&chunk_key(id, ordinal as u64), Some(chunk))?;
-        }
+        let bytes = value_io::write(self, id, value)?;
         self.set_node(
             id,
             Node {
                 left: None,
                 right: None,
                 height: 1,
-                bytes: bytes.len() as u64,
+                bytes,
                 count: 1,
             },
         )?;
-        Ok(bytes.len() as u64)
+        Ok(bytes)
     }
     pub fn remove_value(&self, id: DocId) -> StorageBackendResult<()> {
         let node = self.node(id)?;
@@ -222,6 +199,14 @@ impl<'a> Records<'a> {
         view: &PrivateRecordSnapshot,
         visit: &mut dyn FnMut(DocId, Value) -> StorageBackendResult<bool>,
     ) -> StorageBackendResult<()> {
+        self.visit_values_owned(view, &mut |id, value| visit(id, value.into_parts().0))
+    }
+
+    pub fn visit_values_owned(
+        &self,
+        view: &PrivateRecordSnapshot,
+        visit: &mut dyn FnMut(DocId, Budgeted<Value>) -> StorageBackendResult<bool>,
+    ) -> StorageBackendResult<()> {
         let mut cursor = view.cursor(&[NODE], None, &self.control).map_err(failure)?;
         while let Some(entry) = cursor.next(&self.control).map_err(failure)? {
             if !entry.metadata().live {
@@ -229,12 +214,13 @@ impl<'a> Records<'a> {
             }
             let id = decode_id(entry.key())?;
             let value = self
-                .get(view, id)?
+                .get_owned(view, id)?
                 .ok_or_else(|| invalid("missing retained value"))?;
             if !visit(id, value)? {
                 break;
             }
         }
+        self.payload.check()?;
         Ok(())
     }
 }

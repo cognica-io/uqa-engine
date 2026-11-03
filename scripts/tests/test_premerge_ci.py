@@ -86,6 +86,9 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
                 continue
             actual.add(path.name)
             with self.subTest(workflow=path.name):
+                branches = re.search(r"(?m)^    branches: \[([^\]]+)\]$", event[1])
+                self.assertIsNotNone(branches, "intermediate stacked PRs must not start CI")
+                self.assertEqual({name.strip() for name in branches[1].split(",")}, {"main"})
                 declared = re.search(r"(?m)^    types: \[([^\]]+)\]$", event[1])
                 self.assertIsNotNone(declared, "default PR events rerun CI on every push")
                 events = {name.strip() for name in declared[1].split(",")}

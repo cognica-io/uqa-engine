@@ -41,6 +41,7 @@ pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::{
     RelationIdentity, RelationName, RelationReference, RelationReferenceError,
 };
+pub use types::value_image;
 pub use types::{
     compare_bytes_with_control, fixed_char_comparison_text_with_control, jsonb_equality_key,
     jsonb_equality_key_with_control, write_jsonb_comparison_key, write_jsonb_equality_key,

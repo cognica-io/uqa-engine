@@ -38,7 +38,7 @@ mod unicode;
 
 pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
-    CompiledAnalyzer,
+    AnalyzerResource, AnalyzerResourceKind, CompiledAnalyzer,
 };
 pub use char_filter::CharFilter;
 pub use descriptor::{AnalyzerDescriptor, AnalyzerFingerprint, AnalyzerLimits, TokenLengthPolicy};
@@ -51,7 +51,9 @@ pub use registry::{
     builtin_analyzer_names, drop_analyzer, get_analyzer, is_builtin_analyzer, list_analyzers,
     register_analyzer, DEFAULT_ANALYZER_NAME,
 };
-pub use resources::{AnalyzerCacheStats, AnalyzerResources, AnalyzerResourcesBuilder};
+pub use resources::{
+    AnalyzerCacheStats, AnalyzerResourceInput, AnalyzerResources, AnalyzerResourcesBuilder,
+};
 pub use source::{FilteredText, SourceOffsets, TextCoordinates};
 pub use term::TokenTerm;
 pub use token::{AnalysisToken, AnalyzedText};

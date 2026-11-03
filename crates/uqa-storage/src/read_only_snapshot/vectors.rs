@@ -28,6 +28,16 @@ impl<T: VectorIndex + ?Sized> ReadOnlySnapshot<T> {
 }
 
 impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
+    fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        crate::image_io::with_retained_control(output, self.2.as_ref(), |output| {
+            self.0.write_image(output, control)
+        })
+    }
+
     fn dimensions(&self) -> u32 {
         self.0.dimensions()
     }

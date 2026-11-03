@@ -262,7 +262,7 @@ impl uqa_execution::schema::publication::SchemaWriteTransaction for Engine {
 }
 
 struct SchemaColumnWrite<'a> {
-    columns: parking_lot::MappedRwLockWriteGuard<'a, Vec<ColumnDef>>,
+    columns: uqa_storage::memory_capture::MemoryCaptureWriteGuard<'a, Vec<ColumnDef>>,
 }
 impl uqa_execution::schema::publication::columns::ColumnSchemaWrite for SchemaColumnWrite<'_> {
     fn columns(&self) -> &[ColumnDef] {

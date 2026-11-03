@@ -161,37 +161,27 @@ impl Engine {
             lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
             object_id: metadata.object_id(),
             security: crate::state::CatalogCell::new(metadata.security()),
-            storage_generation: parking_lot::RwLock::new(metadata.storage_generation()),
-            document_store: parking_lot::RwLock::new(document_store),
-            inverted_index: parking_lot::RwLock::new(inverted_index),
-            vector_indexes: parking_lot::RwLock::new(vector_indexes),
+            storage_generation: crate::state::CatalogCell::new(metadata.storage_generation()),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(document_store),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inverted_index),
+            vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vector_indexes),
             fts_fields: crate::state::CatalogCell::from_snapshot(metadata.fts_fields.snapshot()),
             columns: crate::state::CatalogCell::from_snapshot(metadata.columns.snapshot()),
             columns_declared: crate::state::CatalogCell::from_snapshot(
                 metadata.columns_declared.snapshot(),
             ),
-            next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
-            maps_integer_keys: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .maps_integer_keys
-                    .load(std::sync::atomic::Ordering::Acquire),
-            ),
+            next_id: crate::state::CatalogCell::new(*metadata.next_id.read()),
+            maps_integer_keys: crate::state::CatalogCell::new(*metadata.maps_integer_keys.read()),
             analyzer: crate::state::CatalogCell::from_snapshot(metadata.analyzer.snapshot()),
             column_stats: crate::state::CatalogCell::from_snapshot(
                 metadata.column_stats.snapshot(),
             ),
-            column_stats_loaded: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_loaded
-                    .load(std::sync::atomic::Ordering::Acquire),
+            column_stats_loaded: crate::state::CatalogCell::new(
+                *metadata.column_stats_loaded.read(),
             ),
-            column_stats_dirty: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_dirty
-                    .load(std::sync::atomic::Ordering::Acquire),
-            ),
-            statistics_maintenance: parking_lot::Mutex::new(
-                metadata.statistics_maintenance.lock().clone(),
+            column_stats_dirty: crate::state::CatalogCell::new(*metadata.column_stats_dirty.read()),
+            statistics_maintenance: crate::state::CatalogCell::new(
+                metadata.statistics_maintenance.read().clone(),
             ),
             table_checks: crate::state::CatalogCell::from_snapshot(
                 metadata.table_checks.snapshot(),
@@ -203,7 +193,9 @@ impl Engine {
                 metadata.key_constraints.snapshot(),
             ),
             hierarchy: crate::state::CatalogCell::from_snapshot(metadata.hierarchy.snapshot()),
-            value_indexes: parking_lot::RwLock::new(std::collections::BTreeMap::new()),
+            value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                uqa_execution::catalog::index::value::ValueIndexes::default(),
+            ),
             doc_count_cache: std::sync::atomic::AtomicU64::new(doc_count),
             doc_count_dirty: std::sync::atomic::AtomicBool::new(doc_count_dirty),
             persistence: metadata.persistence,

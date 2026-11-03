@@ -12,6 +12,7 @@ use schema_production::CatalogColumnType::{self, Array, Domain, Inline};
 
 pub mod access_methods;
 pub mod collations;
+pub mod definition_capture;
 pub mod expression_text;
 pub mod foreign_relations;
 pub mod languages;

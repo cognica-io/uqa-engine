@@ -11,7 +11,9 @@ use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
 
 impl Engine {
-    pub(super) fn snapshot_transaction_data(&self) -> Result<Option<EngineDataSnapshot>, SQLError> {
+    pub(super) fn snapshot_transaction_data(
+        &self,
+    ) -> Result<Option<std::sync::Arc<EngineDataSnapshot>>, SQLError> {
         let mut tables = BTreeMap::new();
         for (name, table) in self.storage.tables.read().iter() {
             if self.storage.backend.is_some()
@@ -40,7 +42,7 @@ impl Engine {
                 name.clone(),
                 TableDataSnapshot {
                     state: table.clone(),
-                    security: table.security(),
+                    security: table.security.snapshot(),
                     storage_generation: table.storage_generation(),
                     document_store,
                     inverted_index,
@@ -52,25 +54,21 @@ impl Engine {
                         .filter(|(key, _)| matches!(key, uqa_storage::ValueIndexKey::Index(_)))
                         .map(|(key, index)| (key.clone(), index.clone()))
                         .collect(),
-                    fts_fields: table.fts_fields.read().clone(),
-                    columns: table.columns.read().clone(),
+                    fts_fields: table.fts_fields.snapshot(),
+                    columns: table.columns.snapshot(),
                     columns_declared: *table.columns_declared.read(),
-                    next_id: *table.next_id.lock(),
-                    analyzer: table.analyzer.read().clone(),
-                    column_stats: table.column_stats.read().clone(),
-                    column_stats_loaded: table
-                        .column_stats_loaded
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    column_stats_dirty: table
-                        .column_stats_dirty
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    statistics_maintenance: table.statistics_maintenance.lock().clone(),
-                    table_checks: table.table_checks.read().clone(),
-                    foreign_keys: table.foreign_keys.read().clone(),
-                    key_constraints: table.key_constraints.read().clone(),
-                    hierarchy: table.hierarchy.read().clone(),
-                    row_type_array_name: table.row_type_array_name.read().clone(),
-                    dropped_attributes: table.dropped_attributes.read().clone(),
+                    next_id: *table.next_id.read(),
+                    analyzer: table.analyzer.snapshot(),
+                    column_stats: table.column_stats.snapshot(),
+                    column_stats_loaded: *table.column_stats_loaded.read(),
+                    column_stats_dirty: *table.column_stats_dirty.read(),
+                    statistics_maintenance: table.statistics_maintenance.read().clone(),
+                    table_checks: table.table_checks.snapshot(),
+                    foreign_keys: table.foreign_keys.snapshot(),
+                    key_constraints: table.key_constraints.snapshot(),
+                    hierarchy: table.hierarchy.snapshot(),
+                    row_type_array_name: table.row_type_array_name.snapshot(),
+                    dropped_attributes: table.dropped_attributes.snapshot(),
                     doc_count_cache: table
                         .doc_count_cache
                         .load(std::sync::atomic::Ordering::Acquire),
@@ -80,11 +78,11 @@ impl Engine {
                 },
             );
         }
-        Ok(Some(EngineDataSnapshot {
+        Ok(Some(std::sync::Arc::new(EngineDataSnapshot {
             tables,
             durable: self.durable.snapshot(),
             foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
-        }))
+        })))
     }
 
     /// Memory-engine rollback path: snapshots only exist when no persistent
@@ -110,75 +108,32 @@ impl Engine {
         }
         for table_snapshot in snapshot.tables.values() {
             let table = &table_snapshot.state;
-            table.security.write().clone_from(&table_snapshot.security);
-            let document_store = table_snapshot
-                .document_store
-                .writable_snapshot()
-                .map_err(|err| Self::storage_tx_error("ROLLBACK document restore", &err))?;
-            let inverted_index = table_snapshot
-                .inverted_index
-                .writable_snapshot()
-                .map_err(|err| Self::storage_tx_error("ROLLBACK FTS restore", &err))?;
-            let mut vector_indexes = BTreeMap::new();
-            for (field, index) in &table_snapshot.vector_indexes {
-                vector_indexes.insert(
-                    field.clone(),
-                    index
-                        .writable_snapshot()
-                        .map_err(|err| Self::storage_tx_error("ROLLBACK vector restore", &err))?,
-                );
-            }
-            *table.document_store.write() = document_store;
-            *table.storage_generation.write() = table_snapshot.storage_generation;
-            *table.inverted_index.write() = inverted_index;
-            *table.vector_indexes.write().live_mut().map_err(|error| {
-                Self::storage_tx_error("ROLLBACK vector registrations", &error)
-            })? = vector_indexes;
-            table
-                .fts_fields
-                .write()
-                .clone_from(&table_snapshot.fts_fields);
-            table.columns.write().clone_from(&table_snapshot.columns);
+            table.security.restore(&table_snapshot.security);
+            table_snapshot.restore_stores()?;
+            table.fts_fields.restore(&table_snapshot.fts_fields);
+            table.columns.restore(&table_snapshot.columns);
             *table.columns_declared.write() = table_snapshot.columns_declared;
-            *table.next_id.lock() = table_snapshot.next_id;
-            *table.analyzer.write() = table_snapshot.analyzer.clone();
-            *table.column_stats.write() = table_snapshot.column_stats.clone();
-            table.column_stats_loaded.store(
-                table_snapshot.column_stats_loaded,
-                std::sync::atomic::Ordering::Release,
-            );
-            table.column_stats_dirty.store(
-                table_snapshot.column_stats_dirty,
-                std::sync::atomic::Ordering::Release,
-            );
+            *table.next_id.write() = table_snapshot.next_id;
+            table.analyzer.restore(&table_snapshot.analyzer);
+            table.column_stats.restore(&table_snapshot.column_stats);
+            *table.column_stats_loaded.write() = table_snapshot.column_stats_loaded;
+            *table.column_stats_dirty.write() = table_snapshot.column_stats_dirty;
             table
                 .statistics_maintenance
-                .lock()
+                .write()
                 .clone_from(&table_snapshot.statistics_maintenance);
-            table
-                .table_checks
-                .write()
-                .clone_from(&table_snapshot.table_checks);
-            table
-                .foreign_keys
-                .write()
-                .clone_from(&table_snapshot.foreign_keys);
+            table.table_checks.restore(&table_snapshot.table_checks);
+            table.foreign_keys.restore(&table_snapshot.foreign_keys);
             table
                 .key_constraints
-                .write()
-                .clone_from(&table_snapshot.key_constraints);
-            table
-                .hierarchy
-                .write()
-                .clone_from(&table_snapshot.hierarchy);
+                .restore(&table_snapshot.key_constraints);
+            table.hierarchy.restore(&table_snapshot.hierarchy);
             table
                 .row_type_array_name
-                .write()
-                .clone_from(&table_snapshot.row_type_array_name);
+                .restore(&table_snapshot.row_type_array_name);
             table
                 .dropped_attributes
-                .write()
-                .clone_from(&table_snapshot.dropped_attributes);
+                .restore(&table_snapshot.dropped_attributes);
             table
                 .value_indexes
                 .write()
@@ -195,6 +150,39 @@ impl Engine {
         self.durable.restore(&snapshot.durable);
         self.clear_regtype_output_cache();
         *self.extensions.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
+        Ok(())
+    }
+}
+
+impl TableDataSnapshot {
+    fn restore_stores(&self) -> Result<(), SQLError> {
+        let table = &self.state;
+        let document_store = self
+            .document_store
+            .writable_snapshot()
+            .map_err(|err| Engine::storage_tx_error("ROLLBACK document restore", &err))?;
+        let inverted_index = self
+            .inverted_index
+            .writable_snapshot()
+            .map_err(|err| Engine::storage_tx_error("ROLLBACK FTS restore", &err))?;
+        let mut vector_indexes = BTreeMap::new();
+        for (field, index) in &self.vector_indexes {
+            vector_indexes.insert(
+                field.clone(),
+                index
+                    .writable_snapshot()
+                    .map_err(|err| Engine::storage_tx_error("ROLLBACK vector restore", &err))?,
+            );
+        }
+        *table.document_store.write() = document_store;
+        *table.storage_generation.write() = self.storage_generation;
+        *table.inverted_index.write() = inverted_index;
+        table
+            .vector_indexes
+            .write()
+            .live_mut()
+            .and_then(|mut indexes| indexes.replace(vector_indexes))
+            .map_err(|error| Engine::storage_tx_error("ROLLBACK vector registrations", &error))?;
         Ok(())
     }
 }

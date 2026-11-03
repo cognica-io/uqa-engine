@@ -2,6 +2,2008 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_matches_literal_tags_counts_and_ieee_bits",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Exact model framing",
+      "workload": "Compare literal layer tags, field counts, signed zero and subnormal bit patterns.",
+      "invariant": "The encoded image and decoded scalar bits match the independent fixture exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_images_preserve_every_layer_variant_and_enum_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Complete stored model carrier",
+      "workload": "Round-trip every layer, direction, pool/aggregation choice, gating and recurrent flag after dropping the source.",
+      "invariant": "Every stored parameter survives and only the final shared decoded owner releases its input allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_restoration_preserves_cpu_scores_and_probabilities_without_training",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model prediction preservation",
+      "workload": "Restore a fixed dense/softmax model and predict the same independently supplied feature rows.",
+      "invariant": "Document ordering, complete CPU scores and class probabilities remain equal without retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_rejects_incomplete_invalid_and_unfunded_input_without_retention",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model image admission",
+      "workload": "Read all proper prefixes, trailing bytes, invalid tags/shapes/numbers, excessive counts and an unfunded candidate.",
+      "invariant": "Failure publishes no model, releases all candidate memory and leaves invalid-source output empty.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_large_weights_do_not_duplicate_validation_or_export_payloads",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Bounded model image allocation",
+      "workload": "Measure actual export/import allocations for two MiB of weights and repeat input under 64 KiB.",
+      "invariant": "Export does not copy weights, import retains one payload, and insufficient admission fails before payload allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_partial_io_polls_cancellation_and_retires_candidate_memory",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model image cancellation",
+      "workload": "Cancel after fixed partial writer and reader calls.",
+      "invariant": "Both directions retain cancellation kinds and retire private decoded memory without altering the source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_rejects_invalid_label_and_enum_payloads_without_a_candidate",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Model semantic field parsing",
+      "workload": "Corrupt UTF-8 labels, graph/pool enums and recurrent booleans.",
+      "invariant": "Invalid field values fail before a usable model is exposed and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "borrowed_model_validation_preserves_runtime_shape_and_numeric_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests.rs",
+      "capability": "Shared model validation",
+      "workload": "Compare stored and runtime validation for every valid layer and invalid shapes, counts, finite values and order.",
+      "invariant": "Borrowed specs preserve original validation acceptance and semantic diagnostics without constructing another weight corpus.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "ordinary_compiled_analyzers_have_no_external_dictionary_dependencies",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources.rs",
+      "capability": "Inline analyzer dependencies",
+      "workload": "Compile the standard English pipeline and inspect its resource closure.",
+      "invariant": "No external dictionary is retained and stemmed output remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_restores_inline_inputs_without_resolving_a_resource",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests.rs",
+      "capability": "Resolved analyzer image",
+      "workload": "Restore an ordinary descriptor with no dictionary artifacts.",
+      "invariant": "Canonical descriptor bytes and complete token observations remain equal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_preserves_resolved_synonyms_after_file_and_owner_loss",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests.rs",
+      "capability": "Resolved synonym image",
+      "workload": "Delete a synonym file and source owner before restoring the descriptor.",
+      "invariant": "Restored tokens retain the resolved synonyms while fresh path-based compilation fails.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_rejects_duplicate_resources_before_reconstruction",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests.rs",
+      "capability": "Analyzer identity admission",
+      "workload": "Supply duplicate language/hash identities.",
+      "invariant": "Duplicates fail before reconstruction or publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_never_uses_the_original_cache_or_resolver_for_missing_artifacts",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Isolated analyzer restoration",
+      "workload": "Restore with a warm source cache and host resolver, first omitting and then supplying the exact artifact.",
+      "invariant": "Missing inputs cannot use host resolution; complete images return independent compiled revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_validates_hash_complete_resource_closure_and_destination_limits",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Analyzer closure validation",
+      "workload": "Supply corrupt bytes, an unused valid artifact and a dictionary above the destination limit.",
+      "invariant": "Each failure is private and returns all charged input memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_korean_image_retains_exact_artifact_after_source_and_cache_loss",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Korean analyzer image retention",
+      "workload": "Drop source and cache owners and restore from admitted captured bytes.",
+      "invariant": "Exact dictionary bytes and token observations survive; the final restored handle retires the input reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_korean_image_deduplicates_shared_tokenizer_and_profile_artifacts",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Shared dictionary identity",
+      "workload": "Compile a tokenizer and normalization profile sharing one artifact.",
+      "invariant": "The dependency closure contains the shared artifact exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_japanese_image_retains_exact_artifact_after_source_and_cache_loss",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/resources/tests/images.rs",
+      "capability": "Japanese analyzer image retention",
+      "workload": "Drop source and cache owners and restore from admitted captured bytes.",
+      "invariant": "Exact dictionary bytes and token observations survive; the final restored handle retires the input reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "japanese_expanded_stop_sets_require_no_original_dictionary_in_the_image",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/resources/tests/images.rs",
+      "capability": "Expanded stop-set closure",
+      "workload": "Freeze Japanese defaults and reconstruct with a resolver rejecting every call.",
+      "invariant": "Explicit descriptor sets need no original model and retain complete token observations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_matches_independent_outer_fields_and_restores_complete_token_observations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer image framing",
+      "workload": "Check literal outer fields, drop the source and restore an English pipeline.",
+      "invariant": "Descriptor framing, complete tokens and re-encoded bytes match exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_rejects_every_prefix_trailing_data_and_unfunded_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer input completeness",
+      "workload": "Read every proper prefix, trailing bytes, invalid magic, unfunded input and an excessive descriptor.",
+      "invariant": "Invalid inputs never publish a revision and release reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_rejects_invalid_resource_headers_before_payload_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer resource header limits",
+      "workload": "Supply excessive counts, unknown tags, oversized payload lengths and unordered or duplicate identities.",
+      "invariant": "Header admission rejects before dictionary preparation and releases temporary memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_output_polls_between_short_writes_and_retains_cancellation_kind",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer image cancellation",
+      "workload": "Cancel after five three-byte partial writes and attempt input with the cancelled owner.",
+      "invariant": "Attempts stay within 4 KiB, stop at cancellation and retain its typed error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_dictionary_images_preserve_enabled_languages_and_release_import_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer dictionary lifetime",
+      "workload": "Round-trip Korean/Japanese resources, omit required artifacts and close cloned restored handles.",
+      "invariant": "Tokens and bytes survive; missing images cannot use installed dictionaries, and final close releases input memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_reader_preserves_literal_namespace_revisions_and_bounded_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image input decoding",
+      "workload": "Read a literal native header, allocator and 512 KiB record through 127-byte payload reads and bounded verification windows.",
+      "invariant": "The original data namespace, committed revision, allocator and every payload byte survive under 64 KiB; completion releases the mapping and remains complete after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_reader_rejects_incompatible_roots_before_input",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image compatibility admission",
+      "workload": "Open roots selecting another provider, an unknown native image version or an absent committed sequence.",
+      "invariant": "Incompatible roots fail before input is exposed and release all retained reader memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_reader_rejects_verified_but_invalid_mapping_envelopes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image semantic envelope validation",
+      "workload": "Create complete verified archives with 22 invalid headers, mapping versions, allocator envelopes, revisions, native keys or delivery slots.",
+      "invariant": "Authenticated archive structure cannot bypass native format, namespace, key or revision validation; failure retires the reader and all charged metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_reader_retires_unread_cancelled_and_exhausted_input",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/import/tests.rs",
+      "capability": "Native image input resource ownership",
+      "workload": "Skip an unread record, cancel an input and exhaust its original allowance before header admission.",
+      "invariant": "Every rejected operation becomes terminal, removes exposed units and namespaces, and releases all owned input memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_capture_preserves_private_transactions_and_the_original_committed_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native SQLite capture ownership",
+      "workload": "Attempt unbound capture, then capture during private writes and commit those writes before consuming the image in all four file modes.",
+      "invariant": "Unbound capture cannot initialize the source; capture preserves the active transaction, exports only its original committed state and releases all retained image memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_image_preserves_evaluated_rows_and_watermarks_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native SQLite source-independent image",
+      "workload": "Export real DiskANN artifacts and 512 KiB metadata in four file modes while an independent writer advances records and allocator watermarks; delete the source before archive verification.",
+      "invariant": "Every image key, original revision, byte and watermark matches the independent raw oracle; notification delivery is excluded and retained workspace stays within 128 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_membership_uses_the_captured_generation_state_without_payload_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native DiskANN retained membership",
+      "workload": "Capture each encoded lifecycle state, change its live state and select the state and an absent payload through the original snapshot.",
+      "invariant": "Only the originally published generation is selected; membership reads the bounded native state envelope without fetching payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_image_retires_its_cut_on_completion_cancellation_and_memory_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native image terminal ownership",
+      "workload": "Interrupt a stream, skip an unread header, exhaust its allowance and complete a stream before late cancellation.",
+      "invariant": "Every failure retires mapping and snapshot resources, one-position windows remain bounded and completed advance stays complete after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_membership_rejects_missing_corrupt_and_misaddressed_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/tests.rs",
+      "capability": "Native image metadata validation",
+      "workload": "Use missing, malformed and oversized lifecycle rows plus foreign namespaces, malformed components and unknown native keys.",
+      "invariant": "Invalid source membership fails without whole-value allocation and all metadata reads stay within the original 4 KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_requires_regular_installed_names_and_retires_memory",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Private provider pathname admission",
+      "workload": "Supply malformed names, reserved markers, nonregular entries, cancellation and an exhausted path allowance.",
+      "invariant": "Only an existing installed regular-file name reaches the provider; native path memory is charged before use and completely retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_keeps_errors_and_rejects_nonregular_completion",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Private provider pathname completion",
+      "workload": "Fail a provider callback and separately replace its regular file with a directory.",
+      "invariant": "The original callback error is preserved; nonregular completion cannot prepare the image and retained memory is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_allows_provider_owned_regular_file_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Private provider file replacement",
+      "workload": "Replace a closed provider file inside the pinned private directory.",
+      "invariant": "Provider-owned compaction may replace the regular file without invalidating directory identity or retaining native path memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_provider_path_follows_retained_directory_and_rejects_midcall_movement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths.rs",
+      "capability": "Pinned directory pathname resolution",
+      "workload": "Move the retained directory before lookup and during a provider callback, replacing both former paths.",
+      "invariant": "Initial lookup follows the retained directory, midcall movement prevents successful completion and recovery resolves its current path without changing unrelated entries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_repository_restore_recovers_closed_import_and_preserves_published_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_repository.rs",
+      "capability": "SQLite repository restore publication",
+      "workload": "Remove the source, lose the completed import reply, collide with an existing target and resolve publication after later writes in four file modes.",
+      "invariant": "One import and one recovery preserve actual DiskANN state and later writes; every provider handle closes before no-replacement publication and late cancellation cannot replay the image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_repository_restore_tracks_parent_movement_before_and_during_import",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_repository.rs",
+      "capability": "SQLite restore pathname ownership",
+      "workload": "Move the pinned destination parent before import or after provider closure in all four file modes.",
+      "invariant": "Only the original parent receives the restored directory; uncertain pathname completion resumes the exact image without repeating import or modifying the replacement parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_preserves_every_source_and_destination_protection_combination",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image protection conversion matrix",
+      "workload": "Capture each of four source file modes, remove the source and import it into all four destination modes.",
+      "invariant": "All sixteen source/destination pairs retain empty and opaque values, original revisions, allocator maxima and the new history identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_exhausted_verification_spill_keeps_the_target_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image verification spill admission",
+      "workload": "Import 512 mapping records under a 128 KiB allowance with no verification spill capacity across four destination modes.",
+      "invariant": "The first spill exceeds its explicit disk allowance, releases retained resources and keeps the partially imported database unavailable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_preserves_artifacts_revisions_and_allocators_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image preservation and bounded BLOB import",
+      "workload": "Restore actual DiskANN state, a 512 KiB value and allocator watermarks after source deletion across all four source/destination modes.",
+      "invariant": "Every raw revision and byte survives under a 128 KiB allowance; new history rejects old transactions and repeated restoration preserves later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_drop_cancellation_and_limits_keep_partial_files_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite partial image admission and resource retirement",
+      "workload": "Drop or cancel import, exhaust its original memory allowance, or exceed its per-value bound across four destination modes.",
+      "invariant": "Incomplete files reject ordinary opens, restored opens and exact-image recovery; failed advances are terminal and release their complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_empty_image_preserves_sequence_and_refuses_populated_files",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite empty image sequence and destination ownership",
+      "workload": "Import a mapping whose final record was deleted, write new data and attempt another import into the same file.",
+      "invariant": "The original cut remains exact, and populated targets retain their later data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_verifies_whole_objects_after_copying_every_record",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite full object verification before activation",
+      "workload": "Corrupt a stored object after its final record has been copied into each destination mode.",
+      "invariant": "Whole-object verification fails and neither ordinary nor restored open can activate the partial image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_uncertain_history_publication_resumes_the_original_request",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image history recovery",
+      "workload": "Lose replies at intent, auxiliary publication and completed history boundaries across four file modes.",
+      "invariant": "Mismatched image roots and target identities cannot advance history; the original image/request establishes one target history and preserves subsequent writes on every retry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_invalid_options_leave_the_empty_destination_untouched",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image constructor admission",
+      "workload": "Supply zero value limits, invalid protection options and a mismatched restore source.",
+      "invariant": "Invalid construction preserves the empty destination before any physical initialization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_backup_import_process_exit_keeps_partial_images_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "SQLite image crash admission",
+      "workload": "Exit an independent import process after its first committed record across all four file modes.",
+      "invariant": "After OS lease release and physical journal recovery, ordinary and restored opens still reject the incomplete prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_cannot_downgrade_uncertain_completion_after_target_removal",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore completion history monotonicity",
+      "workload": "Fail completion-record synchronization after publication, remove the target and try cancellation and recovery.",
+      "invariant": "Neither operation rewrites completed history as cancelled or recreates the removed target.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_persists_external_identity_and_preserves_later_writes_after_lost_reply",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Durable restore publication identity",
+      "workload": "Lose the final rename reply, write new target contents and resolve the same operation with a cancelled control.",
+      "invariant": "The external request remains identical, import runs once, target writes survive and all charged resources retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_recovers_provider_outcome_without_repeating_import",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore provider recovery admission",
+      "workload": "Lose a completed provider import reply before preparation and resume the operation.",
+      "invariant": "Recovery receives the original request and existing private file; fresh import is never repeated.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_prepared_images_survive_archive_loss_and_publication_faults",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Prepared restore independence",
+      "workload": "Fail image preparation, exclusive publication and completion recording, then remove the archive root.",
+      "invariant": "Each prepared image publishes without source/archive access or reimport and retires its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_cancellation_is_durable_and_cannot_reverse_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore cancellation authority",
+      "workload": "Inject cancellation failure, retry cancellation and separately cancel after an unacknowledged publication.",
+      "invariant": "Cancelled work cannot resume import/publication, while an already installed target remains complete.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_never_overwrites_empty_directories_files_or_symbolic_links",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore destination collision admission",
+      "workload": "Create an existing directory, file or symlink after private image preparation.",
+      "invariant": "Publication and a fresh restore reject every collision without modifying the existing entry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_validates_staging_identity_and_certificate_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore staging integrity",
+      "workload": "Replace the prepared image directory or truncate its protected preparation marker.",
+      "invariant": "Invalid staged images never become visible at the destination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_pins_destination_parent_and_rejects_replaced_resume_paths",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Pinned restore destination ownership",
+      "workload": "Rename the selected parent and create a replacement at the original pathname.",
+      "invariant": "Publication follows the retained parent handle; recovery rejects replacement parents and different components.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_started_intent_cannot_be_reinterpreted_as_prepared_or_fresh",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore phase separation",
+      "workload": "Exit fresh-import admission after the started record and substitute that record for a preparation marker.",
+      "invariant": "Recovery never invokes fresh import, and frame-kind substitution cannot activate a target.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "completed_restore_never_recreates_a_removed_destination",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Completed restore non-replay",
+      "workload": "Publish a target, remove its directory and reopen the original restore operation.",
+      "invariant": "Recovery rejects the missing target without recreating a database from the archive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_directory_rejects_archive_paths_and_reserved_markers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore file capability confinement",
+      "workload": "Try relative traversal, absolute/nested paths, NUL and the reserved preparation marker.",
+      "invariant": "All invalid file requests fail before writing outside the provider directory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_resolves_an_unacknowledged_cancellation_record_before_returning",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore cancellation synchronization",
+      "workload": "Fail after cancellation-record installation and resume the operation.",
+      "invariant": "Recovery synchronizes the existing record before returning terminal cancellation and releases all charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restore_process_exit_releases_admission_and_retains_prepared_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Restore process-loss recovery",
+      "workload": "Prepare in an independent process and exit without running owner destructors.",
+      "invariant": "The next process acquires admission and publishes the exact prepared contents under the original operation ID.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exclusive_directory_rename_never_replaces_an_existing_entry",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/native_file/directory/tests.rs",
+      "capability": "Atomic directory collision protection",
+      "workload": "Call the native exclusive rename directly against empty/populated directories, a file and a symlink.",
+      "invariant": "Every existing entry survives; a successful rename preserves the exact physical source identity and bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exclusive_directory_rename_rejects_paths_before_mutation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/native_file/directory/tests.rs",
+      "capability": "Native publication component admission",
+      "workload": "Supply invalid source and destination path components to the native publication owner.",
+      "invariant": "No path traversal or invalid component changes either directory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_repository_restore_recovers_closed_import_and_preserves_published_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_restore.rs",
+      "capability": "Actual redb repository restore composition",
+      "workload": "Capture actual DiskANN artifacts, delete the source, lose a closed import reply, recover/publish and write through the ordinary provider.",
+      "invariant": "A 384 KiB import allowance holds, artifacts retain their observations, one recovery replaces no data and publication retries preserve later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_rejects_invalid_requests_before_initializing_the_target",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Fresh redb import request admission",
+      "workload": "Request zero value allowance, a foreign source identity and a zero target identity for new empty files.",
+      "invariant": "Every invalid request fails before the native database is initialized and retains no charged state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_accepts_literal_header_allocators_and_empty_records_for_both_mappings",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value image import envelope",
+      "workload": "Read independently encoded redb and SQLite KV images with a literal header, allocator and empty record through one-byte verification windows.",
+      "invariant": "Both mappings return exact literal inputs under a 64 KiB allowance, release all charged state, and preserve completion after cancellation and a rejected later read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_rejects_authenticated_but_invalid_mapping_envelopes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value image structural admission",
+      "workload": "Prepare 22 internally authenticated but malformed header, namespace, generation, family, allocator, delivery and revision cases for each Key/Value mapping.",
+      "invariant": "All invalid mapping envelopes fail before completion and release retained parsing and verification resources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_rejects_incompatible_roots_and_unconsumed_record_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value import lifecycle",
+      "workload": "Try foreign image mappings, premature advances and empty output buffers while a record remains unread.",
+      "invariant": "No incompatible mapping or unread record can reach completion; terminal failures retire every charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_import_rejects_unknown_image_versions_and_absent_sequences",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/backup/import/tests.rs",
+      "capability": "Key/Value image version admission",
+      "workload": "Open valid repository roots with an unknown mapping version or no committed sequence.",
+      "invariant": "The mapping decoder rejects incompatible roots before allocating retained import state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_source",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Source-independent redb image import",
+      "workload": "Capture actual DiskANN artifacts, a large value and allocator maxima, delete the source, import a new file, execute restored artifact reads/writes and retry after target writes.",
+      "invariant": "The 384 KiB allowance and one-unit advance bound hold; exact records, revisions, sequence and allocator maxima survive, source receipts lose authority and retry preserves later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_drop_cancel_and_limits_leave_the_target_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Incomplete redb image admission",
+      "workload": "Drop imports at four boundaries and fail active imports through cancellation, per-value admission and shared-memory exhaustion.",
+      "invariant": "Every initialized incomplete file retains format zero and ordinary/restored opens reject it; all charged resources retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_empty_image_preserves_sequence_and_never_reuses_a_populated_file",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Empty redb image and destination ownership",
+      "workload": "Capture a cut after deleting its only record, import the empty image, write to the target and attempt import into the same file.",
+      "invariant": "The committed sequence survives without resurrecting the deleted record; populated files are rejected without losing later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_rejects_final_object_corruption_after_copying_all_units",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Complete-object verification before redb activation",
+      "workload": "Copy all payload units then corrupt a referenced immutable object before the whole-object verification stage.",
+      "invariant": "Activation is rejected even after all records were inserted; the target remains unavailable and retains no reader reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_synchronization_failure_cannot_expose_the_source_history",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Atomic redb import activation",
+      "workload": "Inject a native synchronization failure after all units were copied, at final history and format publication.",
+      "invariant": "Recovery yields either unavailable format zero or the complete new history; no ordinary completed database retains source-history authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_capture_packs_streamed_units_under_fixed_memory_and_verifies_after_source_drop",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/capture.rs",
+      "capability": "Bounded complete image capture",
+      "workload": "Stream an empty unit, a 2 MiB value and 512 literal records into protected shared packs and an encrypted inventory spool, then consume the completed repository after source destruction.",
+      "invariant": "The 128 KiB allowance bounds retained capture and verification state; exact bytes, source counters and ordered inventory survive, at most 20 objects hold all 514 units, and no source is needed for complete verification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_repository_round_trip_retains_the_cut_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_image.rs",
+      "capability": "redb repository capture",
+      "workload": "Capture actual DiskANN state, 128 small records and a 1 MiB value, replace the source value, prepare and publish a protected image, delete the source and reopen the repository.",
+      "invariant": "Every original committed record and revision matches an independent full-read oracle, delivery state is excluded, source retention retires and complete object verification succeeds under a 128 KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_kv_backup_repository_round_trip_survives_source_loss_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_image.rs",
+      "capability": "SQLite KV repository capture",
+      "workload": "Capture actual DiskANN state and a 512 KiB value in all four file modes, commit a replacement through another connection, publish a protected image and remove every source file before repository verification.",
+      "invariant": "The reopened repository yields the exact original committed bytes and revisions in all four modes, excludes delivery state and releases all charged capture and verification resources under a 128 KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_image_reader_streams_exact_units_and_bounds_global_verification",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/streaming.rs",
+      "capability": "Bounded repository image verification",
+      "workload": "Stream 512 protected units from a shared pack through seven-byte output buffers, then verify complete objects through seven-byte work windows and global frame ranges under a 128 KiB allowance.",
+      "invariant": "Every unit matches its literal payload and ordered identity; whole-object byte totals are exact, each object step respects its window, completion waits for every global check, and all charged streams and spill ledgers retire immediately.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_image_preserves_published_artifacts_and_excludes_delivery_and_builds",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_image.rs",
+      "capability": "redb complete Key/Value image export",
+      "workload": "Capture actual DiskANN rows, exact-side data and uncovered changes, a 1 MiB record, allocator state, a live unpublished build and a delivery record; replace the selected generation and write during chunk export.",
+      "invariant": "Every captured persistent record matches the independent full-read oracle with its original revision, excluded payloads are not copied, each step inspects at most three positions and one fixed metadata record, and the 4 KiB allowance retires at completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_kv_backup_image_preserves_live_artifacts_and_writer_progress_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_image.rs",
+      "capability": "SQLite KV complete mapping image export",
+      "workload": "Export actual published DiskANN state and a large record in plain, encrypted, compressed and compressed-encrypted files while another connection updates between chunks.",
+      "invariant": "All committed record bytes and revisions match the full-read oracle; private writes and notification delivery are absent, each scan window has at most four positions, writers progress and retained memory stays within 4 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "record_image_cursor_skip_releases_unread_units_without_payload_copy",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/records.rs",
+      "capability": "Bounded image input projection",
+      "workload": "Omit selected allocator and record inputs including a 1 MiB payload without reading their bytes.",
+      "invariant": "Skipping preserves ordered progress, copies zero payload bytes and releases the retained cut exactly once at completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_backup_image_selects_only_published_generation_at_its_own_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/diskann/backup/tests.rs",
+      "capability": "Snapshot-qualified artifact membership",
+      "workload": "Select state and graph keys for all six generation states, then replace the live lifecycle state before classifying the retained source.",
+      "invariant": "Membership reads exactly one 18-byte state from the original cut; only its Published generations are included, regardless of later publication or retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "repository_admission_preserves_a_waiting_pack_and_observes_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/admission.rs",
+      "capability": "Backup repository admission",
+      "workload": "Hold the actual repository admission lease while a synchronized pack finalizes; release it or cancel the waiting invocation after observing real OS contention.",
+      "invariant": "Admission contention preserves the existing pack until it can publish; cancellation returns before the competing owner releases admission and leaves capture terminally failed. Live operation-lease contention remains Busy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_leases_retire_their_description_without_unlocking_independent_readers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/directory.rs",
+      "capability": "Repository lease ownership",
+      "workload": "Retain a duplicate file description while releasing one shared lease, then retire an independently opened second reader and acquire an exclusive lease.",
+      "invariant": "Retirement unlocks the owning description despite inherited handles; another separately opened reader remains protected until its own owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "completed_cancel_releases_lease_despite_an_inherited_descriptor",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/failures.rs",
+      "capability": "Durable cancellation lease retirement",
+      "workload": "Prepare an image, duplicate its operation lease descriptor, acknowledge cancellation and attempt recovery while the duplicate remains open.",
+      "invariant": "The cancelled operation immediately releases its lock and recovery reports Finished rather than Busy; the durable cancellation marker prevents publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "packed_inventory_verifies_under_fixed_memory_and_encrypted_workspace_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/resources.rs",
+      "capability": "Backup repository verification",
+      "workload": "512 reverse-placed small units in one immutable data pack, a streamed inventory, and repeated full verification under a 128 KiB shared memory allowance.",
+      "invariant": "Retain exactly two installed objects, verify all unit digests and disjoint ranges, release the memory allowance, and reject exhausted encrypted verification workspace before growing its files.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "physical_allowance_follows_files_and_reopened_handles",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/temporary_file/tests/quota.rs",
+      "capability": "Encrypted temporary file space admission",
+      "workload": "Two encrypted files sharing an allowance for two framed blocks, an independently positioned reopened handle, growth rejection, truncation and final close.",
+      "invariant": "Charge the exact physical ciphertext extents once per owner, admit before growth, retain charges through reopened handles, and release only after physical truncation or final owner destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_empty_image_composes_existing_manifest_with_independent_wire_fields",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN outer wire identity",
+      "workload": "Decode independently assembled envelope and empty-owner fields around the existing manifest codec.",
+      "invariant": "Byte-identical output preserves the empty selected generation and releases all decoded admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_images_preserve_physical_metadata_changes_tensor_scores_and_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN physical and canonical fidelity",
+      "workload": "Capture a sealed graph with tensors, exact-side overflow, deletion, replacement and uncovered documents; close the source.",
+      "invariant": "Physical bytes, selected metadata, nearest/threshold scores and tensor support survive without rebuilding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_restore_retains_build_options_but_establishes_independent_future_origins",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN restored mutation lineage",
+      "workload": "Restore evaluated state, apply identical mutations to both writers, rebuild and retain the preceding image.",
+      "invariant": "Build options and query observations match while future origin and generation identities remain independent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_capture_is_constant_size_and_retains_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN retained image admission",
+      "workload": "Compare capture admission for one and 1024 documents, clear/close the source, export with source allowance fully reserved and cancel each retained participant.",
+      "invariant": "Capture cost is corpus-independent, output uses invoking workspace and final owners retire all retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_rejects_truncated_corrupt_and_unfunded_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN private import retirement",
+      "workload": "Reject every empty-image prefix, selected physical/canonical corruption, trailing bytes and partial memory limits.",
+      "invariant": "No incomplete or unfunded owner escapes and each failure releases the complete candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_restore_uses_the_destination_temporary_budget_without_import_rebuilds",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN destination build allowance",
+      "workload": "Import a populated image with zero temporary-file allowance and attempt explicit initialization afterward.",
+      "invariant": "Import performs no build; the later unfunded rebuild fails atomically and preserves the selected image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_images_reject_self_consistent_counts_with_missing_origin_changes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN canonical coverage validation",
+      "workload": "Remove every change entry while correcting its declared population and separately invalidate the construction record limit.",
+      "invariant": "Canonical/base origin comparison rejects hidden uncovered changes and invalid construction configuration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "export_only_vector_captures_keep_exact_ivf_and_hnsw_state_after_live_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Export-only evaluated vector capture",
+      "workload": "Retain exact, IVF and HNSW images before live query training, clear and source closure.",
+      "invariant": "Captured output remains byte-identical and capture allowance cannot escape through a queryable handle.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exact_image_matches_independent_tensor_bytes_and_preserves_coordinate_bits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Exact tensor wire identity",
+      "workload": "Decode independent document/tensor bytes and compare literal nearest IDs, signed-zero coordinates and byte-identical export.",
+      "invariant": "Exact carriers and tensor order survive, and final destruction releases decoded admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "images_preserve_search_tensor_reduction_and_future_mutations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector query and mutation preservation",
+      "workload": "Compare exact, IVF and HNSW KNN/threshold results including overflow, zero vectors, ties, tensors and subsequent replacement/deletion.",
+      "invariant": "Result support and score bits match and successor physical images remain identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_images_survive_source_changes_and_observe_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Retained vector image ownership",
+      "workload": "Export retained exact, IVF and HNSW sources after source changes/closure with their original allowance exhausted.",
+      "invariant": "Invoking workspace remains independent; original cancellation fails before bytes and final owners release retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "every_truncated_image_and_trailing_data_rejects_without_retained_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector image input completeness",
+      "workload": "Reject every truncated exact/IVF/HNSW fixture prefix, trailing data and unknown envelopes.",
+      "invariant": "No partial candidate escapes and every failed prefix releases all admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_import_admission_releases_every_partial_candidate",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector image import admission",
+      "workload": "Decode all three owners at zero and selected partial-capacity limits, including the spillable HNSW representation.",
+      "invariant": "Every failure is a typed memory error, zero capacity rejects and final owners release all partial retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "large_coordinates_use_bounded_chunks_without_a_full_export_cache",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Bounded vector coordinate I/O",
+      "workload": "Export a two-MiB exact vector without dynamic scratch and restore it through a reader enforcing 4-KiB windows.",
+      "invariant": "Coordinate bits survive, calls remain bounded and export never materializes a full-map cache.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_io_failures_and_midstream_cancellation_preserve_typed_errors",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector image failure isolation",
+      "workload": "Cancel input during exact/IVF/HNSW decoding and fail output after a partial prefix.",
+      "invariant": "Original typed cancellation propagates, partial candidates release memory and source images remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "empty_and_zero_dimension_images_preserve_the_owners_existing_carriers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Empty vector image carriers",
+      "workload": "Restore empty and populated zero-dimension exact, IVF and HNSW indexes.",
+      "invariant": "Existing count, query and encoding behavior remains intact without imposing a new dimension restriction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exact_image_rejects_wrong_counts_nonfinite_values_and_unordered_documents",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Exact image structure",
+      "workload": "Corrupt tensor/document counts, arity, finite-coordinate restrictions and document ordering.",
+      "invariant": "Malformed state never escapes and each rejection returns all admitted bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independent_stale_training_fixture_preserves_exact_values_and_defers_training",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF evaluated training image",
+      "workload": "Decode independent stale-state bytes with exact norms, negative zero, assignments and original probe count.",
+      "invariant": "Import/export does not retrain; the next query performs the existing below-threshold transition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "actual_training_states_and_reconstructed_sorted_lists_preserve_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF list reconstruction",
+      "workload": "Capture untrained, trained and stale owners after out-of-order insertions and deletions.",
+      "invariant": "Ordered assignments reconstruct exact centroid-list order and retain metadata and query results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "malformed_training_metadata_and_source_indexes_never_escape_as_images",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF image structural admission",
+      "workload": "Reject invalid configuration/state tags and a source centroid list with a nonexistent member.",
+      "invariant": "Invalid input retains no candidate; corrupt source validation produces no image bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "training_lock_wait_observes_cancellation_before_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF image publication admission",
+      "workload": "Keep the training publication lock held while cancelling an image export.",
+      "invariant": "Cancellation finishes without acquiring the held lock or emitting output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independent_graph_fixture_preserves_identity_norms_topology_and_pending_delta",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "HNSW evaluated graph wire identity",
+      "workload": "Decode an independent single-node graph with original normalization, sparse node identity and pending dirty state.",
+      "invariant": "Re-export preserves every byte; persistence deltas and the next allocated node retain their original identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tombstones_neighbor_order_and_future_graph_deltas_survive_images",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "HNSW graph successor preservation",
+      "workload": "Capture changed tensor graphs with tombstones and cleared/full pending deltas, then apply equivalent later edits.",
+      "invariant": "Topology, adjacency order, tombstones, dirty state and future persistence deltas remain identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "invalid_graph_metadata_and_edges_reject_before_candidate_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "HNSW image structural validation",
+      "workload": "Corrupt flags, entry/level/counter metadata, ordinals, coordinate/norm data, dirty identities and adjacency.",
+      "invariant": "Invalid images and corrupt source state never publish a candidate or retain partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_graph_images_use_the_invoking_workspace_and_restore_below_corpus_size",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "Bounded HNSW image transfer",
+      "workload": "Export a spilled graph while the source allowance is exhausted, then restore a larger-than-memory corpus under 64 KiB.",
+      "invariant": "Original results/topology survive with separate working admission and all source/target retention releases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_match_independent_wire_and_empty_allocation_fixtures",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Memory graph wire identity",
+      "workload": "Decode independently assembled empty and populated graph bytes and compare literal membership, adjacency and original allocation counters.",
+      "invariant": "Re-encoding is byte-identical and dropping reconstructed owners returns all admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_preserve_evaluated_properties_memberships_and_algebra",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Evaluated graph reconstruction",
+      "workload": "Round-trip shared graphs, union/intersection/difference, loops, parallel edges, unattached records and exact property carriers.",
+      "invariant": "Properties, signed-zero/NaN bits, opaque datums, membership, degree and adjacency observations survive source destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_preserve_unused_ids_registry_merges_and_future_allocation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph allocation history",
+      "workload": "Retain unused counter and label reservations, registry aliases, merged tombstones, legacy kinds and metadata preceding graph creation.",
+      "invariant": "Subsequent source/restored allocations and complete image bytes match without replay or registry migration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_keep_label_drop_edges_and_empty_index_observations",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph label-drop images",
+      "workload": "Drop a vertex label while retaining incident edges, then restore and allocate the old name again.",
+      "invariant": "Dangling endpoint payloads, label tombstones, empty index observations and future label identity remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_reject_truncation_order_membership_and_counter_corruption",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image admission",
+      "workload": "Reject every truncated fixture prefix, trailing bytes, unknown version, invalid UTF-8/value carrier, unordered entities/memberships, absent references and regressed counters.",
+      "invariant": "No invalid candidate escapes and every failed decode releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_reject_corrupt_derived_sources_before_output",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph source integrity",
+      "workload": "Corrupt primary entities, reverse memberships, label indexes and each adjacency direction.",
+      "invariant": "The source owner rejects inconsistent primary/derived state before writing any bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_admit_private_candidates_and_release_every_failure",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image memory admission",
+      "workload": "Sweep every insufficient allowance, admit the exact successful payload and reject overflowing advertised cardinality.",
+      "invariant": "All limits preserve typed memory failures, peak remains within allowance, and every candidate releases its complete charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_stream_large_borrowed_properties_with_bounded_io",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Bounded graph image output",
+      "workload": "Stream a two-MiB property under a one-byte scratch allowance and attempt small/sufficient reconstruction.",
+      "invariant": "Export uses zero admitted dynamic scratch and at-most-16-KiB I/O; underfunded import fails without leaking and sufficient import is byte-identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_keep_typed_cancellation_between_io_attempts",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image cancellation",
+      "workload": "Cancel during partial and interrupted reads and writes.",
+      "invariant": "The original typed cancellation stops before another I/O attempt and all scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_propagate_partial_io_failures_without_publishing_a_candidate",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image I/O failure",
+      "workload": "Fail output after a known byte prefix and attempt to reconstruct it.",
+      "invariant": "Partial bytes match the independent prefix but cannot become a candidate; the original source remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_keep_wire_identity_duplicates_raw_terms_and_historical_metadata",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Evaluated text wire identity",
+      "workload": "Import independent emitted/overlap fixtures containing a raw UTF-16 key, duplicate graph edges and historical field metadata.",
+      "invariant": "Output bytes, exact occurrences and counters match the independent fixture; final ownership releases the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_preserve_lazy_cuts_and_corpus_statistics_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Memory text capture images",
+      "workload": "Capture a real synonym index, replace rows and search bindings, remove documents and close the source before reconstruction.",
+      "invariant": "Selected images, empty-field membership, Unicode/overlap metadata and corpus statistics remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_image_rejection_is_atomic_for_malformed_and_truncated_units",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text image input admission",
+      "workload": "Reject invalid tags, metadata, order, repeated fields/terms, extreme lengths, invalid occurrences, trailing bytes and every truncated prefix.",
+      "invariant": "Every rejected unit preserves prior documents and exact retained allowance; no partial document is published.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_image_admission_preserves_prior_documents_and_exact_retention",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text image memory admission",
+      "workload": "Import with zero through sufficient remaining allowance, then attempt a duplicate document.",
+      "invariant": "Underfunded input fails with its memory error without changing previous state or leaking scratch; successful owners retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_stream_large_occurrence_lists_without_export_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Bounded text image output",
+      "workload": "Export a real document with 32,768 occurrences to an observing writer under a zero-byte scratch allowance.",
+      "invariant": "Export allocates no heap scratch, writes over 1 MiB in calls of at most 4 KiB and rejects underfunded reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_keep_original_cancellation_between_io_attempts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text image cancellation",
+      "workload": "Cancel during the first partial or interrupted read/write, including a retained source with a separate output allowance.",
+      "invariant": "Only one underlying I/O attempt occurs; the original typed cancellation and existing retained state survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_do_not_resolve_or_run_deferred_analyzers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Evaluated text reconstruction",
+      "workload": "Import and export exact historical postings with an unresolved analyzer configuration that fails compilation.",
+      "invariant": "Data reconstruction succeeds without resolving or running the analyzer; explicit later resolution still reports its error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_validate_original_offsets_and_graph_edges_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text source coordinates",
+      "workload": "Corrupt original UTF-8/UTF-16 bounds and graph edge length/position in an actual Unicode image.",
+      "invariant": "Invalid units publish no document and release scratch; the valid original image remains byte-identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_image_publication_retains_exact_corpus_nodes_and_buffer_capacities",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/retained/tests.rs",
+      "capability": "Text image retention transfer",
+      "workload": "Append three evaluated documents with shared posting keys and inspect independently enumerated corpus capacities.",
+      "invariant": "The retained charge equals every live map node and actual buffer capacity, excluding retired staging and duplicate global keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_registration_does_not_visit_sources_and_writes_preserve_each_cut_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture registration and generations",
+      "workload": "Compare one and 8,192 sources, make repeated writes, then retain independent cuts and close them.",
+      "invariant": "Registration allocates the same bytes and visits no source; each changed cell freezes once per cut and retains the original value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_reads_reuse_frozen_values_while_the_source_write_guard_is_live",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Retained memory observation",
+      "workload": "Retain a source, mutate it while holding its write guard, then close the source and cut.",
+      "invariant": "Captured reads reuse the original immutable value without waiting for the live source and retain their allowance after cut destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_waiting_reads_select_a_newly_archived_value_before_the_writer_finishes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory read/write capture interleaving",
+      "workload": "Pause a writer after locking the source, observe the reader waiting, then preserve and mutate while retaining the write guard.",
+      "invariant": "The waiting reader reselects the archived old value and finishes before the writer releases its source lock.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_registration_rejects_incomplete_admission_without_retained_leases",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory cut admission",
+      "workload": "Register with zero, partial, one-byte-short and exact capture-object/index allowances.",
+      "invariant": "Only complete admission succeeds; rejected and dropped cuts release every registration and memory lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_retention_failure_is_terminal_without_consuming_the_source_write",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory cut failure ownership",
+      "workload": "Exhaust a cut during source preservation after retaining another source, then cancel and observe it repeatedly.",
+      "invariant": "The original memory error stays terminal, archived owners retire, and the ordinary source write completes without repeated freeze attempts.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_cancellation_retires_the_archive_and_preserves_other_cuts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Independent memory capture cancellation",
+      "workload": "Retain two cuts, cancel one, mutate, reset its cancellation token and inspect both.",
+      "invariant": "Only the cancelled cut becomes terminal; its archive retires and the other cut preserves its own original state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_rejects_foreign_and_later_cells_without_invalidating_its_sources",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture membership",
+      "workload": "Read cells from another registry and cells created after the cut, then mutate those cells and read an original source.",
+      "invariant": "Invalid membership cannot expose a newer value or invalidate the original cut, and later cells do not trigger preservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_registration_waits_for_mapped_writes_and_observes_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture admission waits",
+      "workload": "Hold a mapped write guard and observe capture admission, with cancellation or normal release.",
+      "invariant": "Cancellation returns while the writer remains locked; successful registration occurs only after the final mapped mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_nested_cell_writes_keep_registration_outside_the_complete_guard_scope",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Nested memory write ownership",
+      "workload": "Begin capture admission while a writer holds its first cell, then acquire and mutate a second cell.",
+      "invariant": "Nested writes finish without a waiting-capture deadlock; the cut observes both completed mutations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_last_handle_can_close_during_write_preservation_without_leaking_registration",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture retirement race",
+      "workload": "Pause an actual freeze callback, drop the last external cut handle, then finish the source write.",
+      "invariant": "Final internal retirement cannot deadlock on registration ownership and releases every cut lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_real_document_and_text_sources_keep_original_values_and_retention",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Actual memory document and text preservation",
+      "workload": "Register actual controlled document and inverted-index sources, replace them and close every source before reading the captured state.",
+      "invariant": "Original fields and term frequencies survive source replacement/loss; reads retain their original cancellation and release all charges at final close.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_capture_pins_large_generations_without_a_corpus_copy",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Bounded document generation capture",
+      "workload": "Capture one and 20,000 actual memory rows, then replace, delete, clear and close the source.",
+      "invariant": "Capture allocates less than 2 KiB in fewer than ten allocations, admits retained payloads, and preserves captured fields and tuple metadata after source loss.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_retention_follows_replacement_delete_and_dormant_layouts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Memory document generation footprint",
+      "workload": "Replace overallocated payloads, delete rows, reuse and extend layouts, clone a generation and clear a shared source.",
+      "invariant": "Admission follows exposed live capacities, releases replaced rows, retains dormant layout names until clear, and preserves prior generations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_capture_rejects_limits_and_releases_failed_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Document capture admission failure",
+      "workload": "Capture nested payloads with zero, small, one-byte-short and exact allowances, and an already cancelled scope.",
+      "invariant": "Insufficient retention fails before the handle escapes, typed cancellation takes precedence and every failed or dropped capture releases its entire allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_capture_shares_only_the_same_generation_and_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Document snapshot allowance ownership",
+      "workload": "Share a captured generation between independent tokens, reject late wrapper admission in another allowance, retain a second allowance and mutate the source.",
+      "invariant": "Only the same immutable generation and allowance reuse payload admission; independent controls remain effective and all leases retire with their final readers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_retained_reads_keep_original_control_and_cannot_detach_writable_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Controlled document snapshot lifecycle",
+      "workload": "Resnapshot through retained wrappers, read with independent working memory, reject writable access and cancel inside a borrowed callback.",
+      "invariant": "Nested owners preserve original retention and cancellation, callback traversal stops after one row, and uncharged shared-row capabilities cannot detach the source payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_images_separate_source_retention_from_bounded_output_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
+      "capability": "Memory backup source and output allowances",
+      "workload": "Retain four MiB of actual document bytes, close the source and export under a separate 512-byte workspace before cancelling the original reader.",
+      "invariant": "Export allocates less than 2 KiB in requests of at most 16 KiB, source cancellation stops output before 32 KiB and the last reader releases retained payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_image_headers_keep_typed_cancellation_between_io_attempts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests.rs",
+      "capability": "Document image header cancellation",
+      "workload": "Cancel on the first partial or interrupted input/output attempt while reading or writing a document image header.",
+      "invariant": "The header stops before a second I/O attempt and returns the original typed cancellation without retaining memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_document_image_checks_original_cancellation_between_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/read_only_snapshot/tests/images.rs",
+      "capability": "Retained document image cancellation",
+      "workload": "Cancel the original retained reader during image output under an independent invoking allowance.",
+      "invariant": "Output stops before 32 KiB, preserves the original typed cancellation, leaves the invoking signal live and retires all codec memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_image_export_streams_large_borrowed_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests.rs",
+      "capability": "Bounded memory document export",
+      "workload": "Four MiB of actual retained document payload under a 512-byte encoding allowance.",
+      "invariant": "Export allocates less than 2 KiB without materializing another field map; an underfunded decode fails and releases its allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_images_preserve_captured_rows_metadata_and_future_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests.rs",
+      "capability": "Memory document image identity",
+      "workload": "Actual memory store snapshot after source replacement, clearing and closure, with private tuple metadata, tag-shaped maps and opaque values.",
+      "invariant": "Decode preserves the selected fields and tuple xmin; ordinary future writes work, empty documents differ from absence, and temporary admission retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_admission_and_cancellation_retire_every_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests.rs",
+      "capability": "Value image admission",
+      "workload": "Nested values under six allowances, cancelled readers/writers and maximum-width forged lengths.",
+      "invariant": "Admission precedes allocation, peaks remain within the chosen allowance, typed errors survive and every failed or dropped result retires its charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_streams_large_payloads_without_encoding_a_second_copy",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests.rs",
+      "capability": "Bounded value image export",
+      "workload": "Six MiB of borrowed strings, bytes and opaque tuple backing under a 512-byte encoding allowance.",
+      "invariant": "Every output request is at most 16 KiB; measured allocations remain below 2 KiB, and underfunded import fails without leaked admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_images_preserve_all_carriers_and_opaque_metadata",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests.rs",
+      "capability": "Evaluated value image identity",
+      "workload": "Every carrier, temporal subtype, descriptor and array/legacy-vector metadata, including source byte identity.",
+      "invariant": "Decode preserves exact carriers and opaque metadata; all decoded payloads retain their admitted bytes and release them on drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "record_chunks_preserve_large_committed_values_across_later_writes",
@@ -34702,6 +36704,812 @@
       "capability": "sqlite bounded backup positions",
       "workload": "Visit an empty key, live record and tombstone surrounded by 180 post-capture keys, then add a key beyond the initial ceiling.",
       "invariant": "Every seven-position window includes excluded keys in its limit, all 184 physical positions are accounted for and only the three original captured positions have visible revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_preserves_projection_history_artifacts_and_allocators",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests.rs",
+      "capability": "Native SQLite fresh image preservation",
+      "workload": "Restore actual DiskANN artifacts, standalone graph scopes, sequence state and a 512 KiB row after deleting the source, across all sixteen source/destination protection combinations.",
+      "invariant": "Every row and revision, stable namespace and allocator maximum matches the captured source; restored queries/writes and repeated recovery preserve later commits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_interrupted_and_underfunded_projection_remains_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests.rs",
+      "capability": "Native SQLite image admission and bounded memory",
+      "workload": "Drop before input, during projection and before publication; cancel input/projection or exhaust value and original row-buffer limits.",
+      "invariant": "Only verified complete imports enter history publication; every partial file rejects ordinary open and image recovery and releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_rejects_valid_archives_with_invalid_physical_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests.rs",
+      "capability": "Native SQLite physical image integrity",
+      "workload": "Import ten structurally valid archives containing invalid rows, mismatched keys, absent or changed owners, aliased physical keys, missing sequence pairs/schema marker and invalid DiskANN states.",
+      "invariant": "Archive authentication alone cannot activate an inconsistent physical image; typed projection, owner and dependency checks retain the unavailable format on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_recovers_exact_image_after_each_history_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "Native SQLite image history recovery",
+      "workload": "Lose replies after intent, coordinator and completed history publication in all four file modes; attempt mismatched roots/targets, then resume and write new data.",
+      "invariant": "Only the exact verified image and retained target enter the owning history transition; recovery never reimports rows or overwrites later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_sqlite_repository_restore_publishes_verified_private_images_once",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_repository.rs",
+      "capability": "Native SQLite private repository restore",
+      "workload": "Import actual DiskANN state after source deletion into pinned private files in all four destination modes, lose the import reply, resume, reject an existing destination and retry after later writes.",
+      "invariant": "The original root and history request recover the closed verified image; exclusive directory publication occurs once and completed resolution never reimports or replaces later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_unregistered_owners_allocate_no_domain_and_join_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Unregistered source admission",
+      "workload": "Create and mutate an unregistered source, attach it after an earlier cut, repeat registration and reject a foreign domain.",
+      "invariant": "Construction and ordinary mutation allocate no domain; birth identity excludes earlier cuts and remains stable through repeated registration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_controlled_read_and_write_waits_cancel_without_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Cancellable source admission",
+      "workload": "Hold the owning write guard until both controlled readers and writers have entered their lock wait, then cancel.",
+      "invariant": "Both waits terminate before the guard is released, without observing or changing source data or retaining allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_preserves_probe_training_and_canonical_generations_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF capture generation ownership",
+      "workload": "Capture around probe changes, canonical replacement, deletion, training and clear; export after source and cut handles are dropped.",
+      "invariant": "Each cut preserves its exact pre-transition image and original allowance until its final independently retained owner is dropped.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_precedes_query_retraining_and_ignores_rejected_or_empty_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF query mutation admission",
+      "workload": "Capture a stale index, execute invalid and empty queries, then race two queries that require retraining.",
+      "invariant": "Rejected, empty and threshold queries do not preserve or train a generation; successful training retains the original image and deterministic ranked results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_failure_retires_only_the_archive_and_preserves_ordinary_progress",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF archive failure isolation",
+      "workload": "Exhaust a capture allowance before probe publication, continue ordinary writes, and cancel a separately retained image.",
+      "invariant": "Retention failure cannot consume ordinary source operations; failed cuts cannot revive and cancelled export writes no bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_registration_rejects_foreign_and_earlier_cuts_without_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF source identity",
+      "workload": "Attach after an existing cut, repeat the same registration, attempt transfer and a foreign cut, then clear.",
+      "invariant": "Only cuts registered after the same domain attachment can retain the original image; re-registration never changes source identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "model_catalog_publication_shares_retained_weights_without_payload_copies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/tests.rs",
+      "capability": "Retained model catalog memory",
+      "workload": "Retain a catalog with two MiB of weights, publish a separate small model, replace the original and close the Engine.",
+      "invariant": "Catalog capture allocates zero bytes, separate publication allocates less than 64 KiB, and retained weights share identity until replacement and survive source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "model_catalog_generations_preserve_rollback_and_owned_public_results",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/tests.rs",
+      "capability": "Model catalog transaction ownership",
+      "workload": "Replace and create models in an explicit transaction, roll back, mutate an owned public result and drop the live model.",
+      "invariant": "Rollback restores the original immutable owner; private names and caller mutations cannot change a retained catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "model_catalog_generations_preserve_all_provider_publication_and_reopen",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/tests.rs",
+      "capability": "Model catalog provider ownership",
+      "workload": "Exercise model publication, rollback and retained values on memory, native SQLite, SQLite KV and redb, including peer refresh and reopen for every persistent provider.",
+      "invariant": "Retained model values survive source replacement and closure; rollback removes private names, and restored or refreshed models preserve predictions and durable removal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_keys_preserve_retired_sources_without_retaining_live_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Retired memory source identity",
+      "workload": "Retain source keys through failed try-write admission, independent cuts, source mutation and destruction.",
+      "invariant": "Keys reject foreign and earlier cuts; source retirement preserves exact values and final release returns every allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_source_retirement_observes_original_limits_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Controlled memory source retirement",
+      "workload": "Drop live sources with independently successful, underfunded and cancelled captures.",
+      "invariant": "Retirement preserves the successful cut while failed cuts remain terminal and release all owned charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_preserves_all_owners_across_replacement_and_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Memory vector membership generations",
+      "workload": "Capture exact, IVF, HNSW and DiskANN fields, retain a removed owner, reuse its name, replace all membership and close the source.",
+      "invariant": "Each original physical image survives under its own allowance; mismatched cuts cannot resolve the captured membership and all charges retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_retains_ivf_query_transitions_before_collection_preservation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Vector query and membership ordering",
+      "workload": "Query a stale IVF index after capture but before the collection itself freezes, then clear its live data.",
+      "invariant": "The query preserves its original ranked result and the archive retains the pre-training image at its original cut.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_rejects_foreign_registration_without_changing_current_state",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Vector registration failure isolation",
+      "workload": "Reject an index already registered in another domain and exhaust backup retention before another normal mutation.",
+      "invariant": "Failed registration preserves existing membership; archive failure does not prevent source mutation, removal or final allowance retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_preserves_physical_sources_across_rollback_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Actual Engine physical capture adapters",
+      "workload": "Capture documents, text and each vector kind; run UPDATE, TRUNCATE, savepoint rollback, transaction rollback and same-name table replacement on another thread.",
+      "invariant": "Selected evaluated images and original table identities survive mutation and Engine closure, and final capture release returns its complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_retains_unread_sources_before_the_last_engine_owner_closes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Unread Engine source retirement",
+      "workload": "Close the final actual memory Engine and table owner before reading any selected source.",
+      "invariant": "Registered source retirement retains exact documents, text and reconstructable vectors without keeping the mutable Engine alive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_membership_registration_has_no_relation_or_document_copy",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Bounded Engine membership registration",
+      "workload": "Capture actual one-table and 128-table engines with eight-KiB rows, then publish another relation.",
+      "invariant": "Registration allocates less than four KiB and shares the immutable membership root without copying names, rows or table metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_failure_preserves_transaction_progress_and_other_cuts",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Engine archive failure isolation",
+      "workload": "Capture a 64-KiB row under small and sufficient independent allowances, then update and roll back a later deletion.",
+      "invariant": "The underfunded archive fails terminally while the other preserves exact original bytes and ordinary transaction progress remains intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_excludes_temporary_source_retention",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Temporary source capture exclusion",
+      "workload": "Capture while a large temporary table exists, then update, truncate, drop it and close the Engine.",
+      "invariant": "Temporary document, text and vector owners stay unregistered; their mutation and retirement add no backup retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_recovery_retains_large_catalog_generations_without_metadata_copies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/failure/tests.rs",
+      "capability": "Shared transaction recovery generations",
+      "workload": "Build one-table and 64-table catalogs, then retain recovery states before and after a savepoint.",
+      "invariant": "Both recovery paths share the exact selected generation and allocate less than 64 KiB independent of retained table metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_generations_preserve_private_savepoint_and_failed_statement_state",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/failure/tests.rs",
+      "capability": "Immutable transaction generation isolation",
+      "workload": "Retain begin and savepoint generations through failed SQL, DDL, same-name table replacement, rollback, commit and Engine closure.",
+      "invariant": "Each retained generation preserves its original document image and column definitions while ordinary failed-transaction admission and savepoint recovery remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_generations_share_large_table_metadata_and_restore_original_roots",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/failure/tests.rs",
+      "capability": "Shared table definition roots",
+      "workload": "Capture a table with a 512-KiB default, alter its columns and default inside a transaction, then roll back and insert using the restored default.",
+      "invariant": "Capture allocates less than 64 KiB, metadata roots remain shared, rollback restores the original root and the complete original default is observed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_images_preserve_tag_shaped_maps_and_float_bits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Exact temporary index carriers",
+      "workload": "Store tag-shaped ordinary maps, payload-specific NaNs and positional records through resident and spilled temporary index owners.",
+      "invariant": "Owned visits preserve original carrier types, float bits, positional fields and full payload ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_value_index_large_images_stream_and_keep_decoded_allowances",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/tests.rs",
+      "capability": "Bounded temporary index image I/O",
+      "workload": "Write a one-MiB value with a 64-KiB invoking allowance, reject an unfunded decode, and retain an admitted value after source closure.",
+      "invariant": "Write allocation peaks below 512 KiB without a complete encoded buffer; failed reads invoke no visitor and successful values retain their payload allowance until release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_value_indexes_preserve_resident_and_spilled_keys_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Evaluated value-index generations",
+      "workload": "Capture resident and spilled search/carried keys with removed temporal values, then clear, change and drop the source.",
+      "invariant": "Original identities, values, NULL/absence, role and eligibility remain unchanged; final retirement releases the complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "value_index_capture_admission_keeps_membership_and_isolates_failed_cuts",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Value-index membership and failure isolation",
+      "workload": "Capture a named expression index and a large derived column cache under independent small and sufficient allowances, then clear the source.",
+      "invariant": "Named keys survive, derived caches consume no image retention, an underfunded cut fails independently and ordinary mutation progresses.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_value_index_limits_and_original_cancellation_are_preserved",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Value-index capture controls",
+      "workload": "Reject an unfunded capture and cancel from the first callback of resident and spilled snapshots.",
+      "invariant": "No second callback runs, all later observations reject the original cancellation, leases retire and the ordinary source stays usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_preserves_evaluated_expression_keys_after_routine_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Actual Engine stored expression capture",
+      "workload": "Replace the defining function, capture existing keys and exercise UPDATE, TRUNCATE, savepoints, rollback, same-name table replacement and unread source closure.",
+      "invariant": "The original lowercase key remains stored without reevaluating the newer uppercase function; source retirement and rollback preserve the selected identity and allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "captured_memory_values_keep_their_original_allowance_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Captured payload ownership",
+      "workload": "Attempt foreign-allowance rebinding and cancel a detached captured payload after source loss.",
+      "invariant": "Rebinding is rejected, original cancellation remains authoritative and the final payload release returns its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "captured_statistics_maintenance_keeps_all_inline_state_without_payload_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/tests.rs",
+      "capability": "Exact statistics maintenance state",
+      "workload": "Capture every statistics-maintenance field under a zero-byte payload allowance and repeat after cancellation.",
+      "invariant": "All inline counters and flags are identical without payload allocation; cancellation returns no candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "configuration_capture_keeps_deferred_errors_and_unresolved_source_paths",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/diagnostics/tests.rs",
+      "capability": "Unresolved analyzer configuration capture",
+      "workload": "Encode an invalid regular expression and a nonexistent synonym resource path without compiling or resolving either.",
+      "invariant": "Original configuration survives unchanged and capture performs no external file access or deferred validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "configuration_capture_admits_large_output_and_releases_interrupted_encoding",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/diagnostics/tests.rs",
+      "capability": "Bounded analyzer configuration encoding",
+      "workload": "Encode a one-MiB configuration with insufficient and sufficient allowances, then interrupt encoding.",
+      "invariant": "Output capacity is admitted before growth, successful bytes retain their lease and failure or cancellation releases partial output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_columns_detach_retained_literal_payloads_into_the_capture_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Independent retained catalog constants",
+      "workload": "Capture a one-MiB retained constant with independent allowances while an unrelated SQL statement is cancelled.",
+      "invariant": "Insufficient admission fails; successful capture owns exact value/type/declaration/collation independently, follows only its capture controls and retires all payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "definition_capture_rejects_query_expressions_outside_stored_column_invariants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Stored definition capture domain",
+      "workload": "Attempt to capture a column default containing a query expression.",
+      "invariant": "Invalid stored-definition input returns an error and releases its complete partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_columns_keep_nested_value_representations_and_catalog_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Exact table column generations",
+      "workload": "Capture identity/default/check metadata, tag-shaped maps and payload-specific floating-point values, then destroy the source.",
+      "invariant": "Column identities, physical positions, expressions and exact evaluated representations survive independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_definitions_preserve_constraints_partitions_and_dropped_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Complete table definition components",
+      "workload": "Capture checks, foreign and unique keys, partition bounds, dropped attributes and optional names.",
+      "invariant": "Each component preserves its original stored definition and releases its complete admission after retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "definition_capture_admits_large_payloads_before_copying_and_releases_failed_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Catalog payload admission",
+      "workload": "Attempt a one-MiB column name under four KiB, retry with sufficient admission and cancel an empty capture.",
+      "invariant": "Failed admission allocates below 64 KiB, complete output retains its name payload and all terminal paths release their allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_table_security_keeps_full_acl_tuple_identity_and_releases_failed_copies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests.rs",
+      "capability": "Full table authority generations",
+      "workload": "Capture relation and column privileges with relation/column ACL revisions including a removed-column tombstone.",
+      "invariant": "Privilege paths, owners and every ACL tuple identity remain exact; failed admission releases partial authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_capture_preserves_the_displaced_root_before_snapshot_restoration",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/catalog_cell.rs",
+      "capability": "Catalog rollback capture boundary",
+      "workload": "Capture a private metadata root, restore its predecessor and destroy the cell and registry.",
+      "invariant": "Restoration preserves the displaced selected root before replacement; detached output survives and retires its complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_table_definition_capture_preserves_ddl_rollback_and_unread_source_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Actual Engine table metadata capture",
+      "workload": "Capture table definitions and inline lifecycle metadata before DDL, insertion, TRUNCATE, savepoint/transaction rollback, replacement and unread Engine closure.",
+      "invariant": "All selected metadata, analyzer configuration, generation and allocation/statistics state preserve their original values through final source loss.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_table_definition_capture_failure_does_not_interrupt_schema_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Table capture failure isolation",
+      "workload": "Capture a one-MiB column value with independent insufficient and sufficient limits, then publish a column rename.",
+      "invariant": "Only the underfunded cut fails; DDL completes, the funded cut preserves the old name/value and original cancellation controls retained output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_table_capture_keeps_authority_and_statistics_before_later_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Actual Engine authority and statistics capture",
+      "workload": "Capture GRANT and ANALYZE output, then REVOKE, update and analyze again before Engine closure.",
+      "invariant": "Stored owner/ACL revisions, counts, histogram/MCV values and frequency bits retain their captured meaning and release their complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_graph_images_keep_immutable_sources_and_release_their_complete_allowance",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Immutable graph resource images",
+      "workload": "Retain the same graph with independent controls, mutate its live successor and release the original source.",
+      "invariant": "Exact image bytes survive and each lease retires only after its final image handle.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_capture_rejects_insufficient_payload_allowance_without_retaining_source_records",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Graph source retention admission",
+      "workload": "Capture a one-MiB graph under insufficient and sufficient allowances.",
+      "invariant": "Denied capture retains no source or reservation; admitted capture shares the original immutable allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_graph_output_checks_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Graph image cancellation ownership",
+      "workload": "Cancel output through the invoking control and then the original control at the first write.",
+      "invariant": "Typed cancellation stops output, and a new invoking control cannot revive original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "retained_graph_payload_admission_counts_unused_source_capacity",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/capture.rs",
+      "capability": "Graph capacity retention bounds",
+      "workload": "Retain a one-byte graph property with one MiB of unused owned capacity.",
+      "invariant": "The original capacity is admitted; a four-KiB budget rejects without leaking its partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "captured_model_images_preserve_every_layer_after_source_replacement_and_loss",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/capture.rs",
+      "capability": "Immutable model resource images",
+      "workload": "Capture every layer variant, detach the live model and drop its source.",
+      "invariant": "All original image bytes survive without training or parameter reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_capture_admits_buffer_capacity_without_copying_weights_and_retires_independent_leases",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/capture.rs",
+      "capability": "Model source retention bounds",
+      "workload": "Capture a model with over two MiB of unused weight capacity under denied and independent admitted allowances.",
+      "invariant": "Capture allocates less than four KiB, admits original capacity and releases each lease with its final image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "captured_model_output_observes_both_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/capture.rs",
+      "capability": "Model image cancellation ownership",
+      "workload": "Cancel either original or invoking control at the first output write and retry with a fresh invocation.",
+      "invariant": "Both stop after one write; only an invocation cancellation permits a later independent output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_resource_capture_preserves_rollback_replacement_and_unread_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/resources.rs",
+      "capability": "Actual Engine graph and model capture",
+      "workload": "Capture large resources before savepoint/transaction rollback, replacement, later names and unread Engine closure.",
+      "invariant": "Selected images preserve their exact names and contents, and extracted children retain admission after catalog retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_resource_capture_failure_preserves_writes_and_independent_capture_allowances",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/resources.rs",
+      "capability": "Resource capture failure isolation",
+      "workload": "Capture large Engine resources with independent insufficient and sufficient allowances before ordinary replacement.",
+      "invariant": "Only the underfunded cut fails; writes complete and the funded cut preserves exact original images.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_resource_children_keep_original_cancellation_after_registry_and_engine_loss",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/resources.rs",
+      "capability": "Engine resource child cancellation",
+      "workload": "Extract graph and model images, destroy Engine and the capture, then cancel the original control.",
+      "invariant": "Both images report typed cancellation before output and release their remaining payload admission on final drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_catalog_authority_preserves_acl_absence_grant_paths_and_namespace_tuple_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/tests.rs",
+      "capability": "Exact captured catalog authority",
+      "workload": "Capture absent, empty and multiple-path database/schema/sequence ACLs with explicit namespace tuple identities.",
+      "invariant": "All role incarnations, masks, grantors, optional states and namespace identities remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_authority_capture_rejects_unfunded_or_cancelled_payload_without_partial_retention",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/tests.rs",
+      "capability": "Authority payload admission",
+      "workload": "Copy a 32,768-entry ACL under denied and sufficient allowances, then cancel capture.",
+      "invariant": "Denial and cancellation publish no partial value or leaked reservation; admitted output owns its complete ACL payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_authority_registries_preserve_exact_names_order_and_independent_payload_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/tests.rs",
+      "capability": "Authority registry identity",
+      "workload": "Capture mixed-case, dotted and non-ASCII schema names and qualified sequence names before source loss.",
+      "invariant": "Registry order and exact name components survive without reparsing or role rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_catalog_authority_preserves_rollback_drop_and_unread_source_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/catalog_authority.rs",
+      "capability": "Actual Engine authority generations",
+      "workload": "Capture SQL grants before revoke, savepoint/transaction rollback, object drop and unread Engine closure.",
+      "invariant": "Database/schema/sequence authority preserves its original names, role incarnations and tuple identities under original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_catalog_authority_capture_does_not_change_grant_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/catalog_authority.rs",
+      "capability": "Authority capture failure isolation",
+      "workload": "Revoke a real schema grant with independent insufficient and sufficient capture limits.",
+      "invariant": "The grant mutation completes, only the unfunded cut fails and the other capture retains the original authority.",
       "case_names": [
         ""
       ]

@@ -45,7 +45,7 @@ pub use cross_paradigm::{
 };
 pub use delta::{DeltaOp, GraphDelta};
 pub use embedding::{GraphEmbedding, MAX_GRAPH_EMBEDDING_DIMENSIONS, MAX_GRAPH_EMBEDDING_LAYERS};
-pub use handle::GraphStoreHandle;
+pub use handle::{GraphImageSnapshot, GraphStoreHandle};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{LabelIndex, PathIndex, VertexPropertyIndex};
 pub use memory_store::{

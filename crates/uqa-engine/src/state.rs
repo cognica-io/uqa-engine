@@ -14,7 +14,10 @@ use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
+mod catalog_capture;
 mod catalog_cell;
+mod resource_capture;
+mod table_capture;
 pub(crate) use catalog_cell::CatalogCell;
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
@@ -25,7 +28,8 @@ use super::{
 };
 
 pub(super) struct StorageContext {
-    pub(super) tables: Arc<RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    pub(super) tables: Arc<CatalogCell<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    pub(super) memory_capture: Option<uqa_storage::memory_capture::MemoryCaptureRegistry>,
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
@@ -41,7 +45,8 @@ pub(crate) use uqa_execution::catalog::security::{
 impl StorageContext {
     pub(super) fn memory() -> Self {
         Self {
-            tables: Arc::new(RwLock::new(BTreeMap::new())),
+            tables: Arc::new(CatalogCell::new(BTreeMap::new())),
+            memory_capture: Some(uqa_storage::memory_capture::MemoryCaptureRegistry::new()),
             catalog: None,
             backend: None,
             provider: None,
@@ -55,7 +60,8 @@ impl StorageContext {
         provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
     ) -> Self {
         Self {
-            tables: Arc::new(RwLock::new(BTreeMap::new())),
+            tables: Arc::new(CatalogCell::new(BTreeMap::new())),
+            memory_capture: None,
             catalog: Some(catalog),
             backend: Some(backend),
             provider,
@@ -66,11 +72,59 @@ impl StorageContext {
     pub(super) fn shared_from(source: &Self) -> Self {
         Self {
             tables: Arc::clone(&source.tables),
+            memory_capture: source.memory_capture.clone(),
             catalog: source.catalog.clone(),
             backend: source.backend.clone(),
             provider: source.provider.clone(),
             document_identity_reader: Mutex::new(None),
         }
+    }
+
+    pub(super) fn memory_cell<T: uqa_storage::memory_capture::MemoryCaptureSource>(
+        &self,
+        value: T,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureCell<T>> {
+        match self.table_capture_registry(persistence) {
+            Some(registry) => registry.cell(value),
+            None => Ok(uqa_storage::memory_capture::MemoryCaptureCell::new(value)),
+        }
+    }
+
+    pub(super) fn table_capture_registry(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> Option<&uqa_storage::memory_capture::MemoryCaptureRegistry> {
+        self.memory_capture
+            .as_ref()
+            .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary)
+    }
+
+    pub(super) fn memory_vector_indexes(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::StorageBackendResult<
+        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
+    > {
+        let indexes = self.table_capture_registry(persistence).map_or_else(
+            uqa_storage::vector_index::VectorIndexes::default,
+            uqa_storage::vector_index::VectorIndexes::memory,
+        );
+        self.memory_cell(indexes, persistence)
+    }
+
+    pub(super) fn memory_value_indexes(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::StorageBackendResult<
+        uqa_storage::memory_capture::MemoryCaptureCell<
+            uqa_execution::catalog::index::value::ValueIndexes,
+        >,
+    > {
+        self.memory_cell(
+            uqa_execution::catalog::index::value::ValueIndexes::default(),
+            persistence,
+        )
     }
 }
 
@@ -83,14 +137,21 @@ pub(super) struct DurableCatalogState {
     pub(super) shells: CatalogCell<uqa_execution::catalog::shell_type::ShellRegistry>,
     pub(super) comments: CatalogCell<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: CatalogCell<uqa_execution::catalog::composite_type::CompositeRegistry>,
-    pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
+    pub(super) graphs: CatalogCell<
+        BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>,
+        resource_capture::CapturedResources<uqa_graph::GraphImageSnapshot>,
+    >,
+    pub(super) models: CatalogCell<
+        BTreeMap<String, Arc<DeepModel>>,
+        resource_capture::CapturedResources<uqa_ml::model_image::ModelImageSnapshot>,
+    >,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
     pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes:
         CatalogCell<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
-    pub(super) schemas: CatalogCell<BTreeMap<String, BoundSchemaSecurity>>,
+    pub(super) schemas:
+        CatalogCell<BTreeMap<String, BoundSchemaSecurity>, Vec<(String, BoundSchemaSecurity)>>,
     pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
@@ -101,7 +162,10 @@ pub(super) struct DurableCatalogState {
         CatalogCell<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
     pub(super) sequence_persistence:
         CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
+    pub(super) sequence_security: CatalogCell<
+        BTreeMap<RelationIdentity, BoundSequenceSecurity>,
+        Vec<(RelationIdentity, BoundSequenceSecurity)>,
+    >,
     pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
     pub(super) foreign_wrappers: CatalogCell<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
@@ -133,7 +197,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) comments: Arc<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub(super) models: Arc<BTreeMap<String, DeepModel>>,
+    pub(super) models: Arc<BTreeMap<String, Arc<DeepModel>>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
@@ -726,5 +790,7 @@ impl EpochCoordinator {
     }
 }
 
+#[cfg(test)]
+mod memory_capture_tests;
 #[cfg(test)]
 mod tests;

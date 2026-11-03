@@ -24,6 +24,8 @@ use uqa_storage::{
     PersistentStorageSession, StorageBackendError, StorageBackendResult,
 };
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use mvcc::backup_import::{RedbBackupImport, RedbBackupImportStep};
 pub use mvcc::RedbRecordStore;
 pub use uqa_storage::mvcc::{VersionedKeyValueStore as RedbKeyValueStore, VersionedSessionOptions};
 
@@ -111,6 +113,22 @@ impl RedbStorage {
     /// Share the record persistence used by this owner's Key/Value and catalog sessions.
     pub fn record_store(&self) -> uqa_storage::mvcc::VersionResult<RedbRecordStore> {
         Ok((*self.records).clone())
+    }
+
+    /// Capture an online Key/Value image through this already-open owner. Each export call closes its physical read window before returning; independent sessions continue to write. Repository publication, fresh import and public Engine backup admission are separate lifecycle owners.
+    pub fn capture_backup_image(
+        &self,
+        control: &StorageReadControl,
+    ) -> uqa_storage::backup::BackupResult<uqa_storage::key_value::KeyValueBackupImage> {
+        use uqa_storage::mvcc::VersionedPersistence;
+        let snapshot = self.records.capture_backup_snapshot(control)?.ok_or(
+            uqa_storage::backup::BackupError::Unsupported("redb backup snapshot"),
+        )?;
+        uqa_storage::key_value::KeyValueBackupImage::new(
+            snapshot,
+            uqa_storage::backup::ImageProvider::Redb,
+            control,
+        )
     }
 }
 

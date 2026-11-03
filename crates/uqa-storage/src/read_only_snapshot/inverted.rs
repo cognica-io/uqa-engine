@@ -59,6 +59,17 @@ impl<T: InvertedIndex + ?Sized> ReadOnlySnapshot<T> {
 }
 
 impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
+    fn write_image_document(
+        &self,
+        doc_id: DocId,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        crate::image_io::with_retained_control(output, self.2.as_ref(), |output| {
+            self.0.write_image_document(doc_id, output, control)
+        })
+    }
+
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
         self.check_inverted_read()?;
         self.0.source_rebuild_required()

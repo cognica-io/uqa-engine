@@ -50,6 +50,19 @@ impl std::str::FromStr for AnalyzerPhase {
 }
 
 pub trait InvertedIndex: Send + Sync {
+    /// Write one evaluated memory text document without analyzing source text or resolving analyzer resources. The enclosing image owns document identity and the referenced analyzer descriptors. Unsupported providers must reject this capability before writing bytes.
+    fn write_image_document(
+        &self,
+        _doc_id: DocId,
+        _output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "evaluated text images are not supported by this backend".into(),
+        ))
+    }
+
     /// Whether persisted positional data must be rebuilt from original sources before this index can be read or mutated. The owning engine performs this after restoring exact analyzer revisions, in the same initial-open transaction.
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
         Ok(false)

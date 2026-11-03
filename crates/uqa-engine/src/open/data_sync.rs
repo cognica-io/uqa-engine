@@ -242,12 +242,8 @@ impl Engine {
                     )?
                     .invalidates_existing_statistics();
                 *table.column_stats.write() = stats.into();
-                table
-                    .column_stats_loaded
-                    .store(true, std::sync::atomic::Ordering::Release);
-                table
-                    .column_stats_dirty
-                    .store(stats_dirty, std::sync::atomic::Ordering::Release);
+                *table.column_stats_loaded.write() = true;
+                *table.column_stats_dirty.write() = stats_dirty;
             }
         }
         self.synchronize_partition_identity_watermarks()?;

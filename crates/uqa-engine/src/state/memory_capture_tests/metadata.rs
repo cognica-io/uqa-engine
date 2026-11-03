@@ -1,0 +1,205 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+use super::{sql, Engine, StorageReadControl};
+use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
+
+fn verify<T: serde::Serialize + Send + Sync + 'static>(
+    saved: &(MemoryCaptureKey<CapturedMemoryValue<T>>, serde_json::Value),
+    cut: &MemoryCapture,
+) {
+    let captured = saved.0.retained(cut).unwrap().unwrap();
+    assert_eq!(
+        serde_json::to_value(captured.get().unwrap()).unwrap(),
+        saved.1
+    );
+}
+
+#[test]
+fn memory_table_definition_capture_preserves_ddl_rollback_and_unread_source_closure() {
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE TABLE parent(id integer PRIMARY KEY); CREATE TABLE child(id integer PRIMARY KEY, ref integer REFERENCES parent(id), old text DEFAULT 'original', CONSTRAINT positive CHECK(id>0)); INSERT INTO parent VALUES(1); INSERT INTO child(id, ref) VALUES(7,1); ALTER TABLE child DROP COLUMN old");
+        let table = engine.table("child").unwrap().unwrap();
+        let analyzer = (
+            table.analyzer.key().unwrap(),
+            serde_json::to_value(&*table.analyzer.snapshot()).unwrap(),
+        );
+        macro_rules! remember {
+            ($($field:ident),*) => {$ (
+                let $field = (
+                    table.$field.key().unwrap(),
+                    serde_json::to_value(&*table.$field.snapshot()).unwrap(),
+                );
+            )*};
+        }
+        remember!(
+            columns,
+            table_checks,
+            foreign_keys,
+            key_constraints,
+            hierarchy,
+            fts_fields,
+            row_type_array_name,
+            dropped_attributes,
+            columns_declared,
+            storage_generation,
+            next_id,
+            maps_integer_keys,
+            column_stats_loaded,
+            column_stats_dirty,
+            statistics_maintenance
+        );
+        let control = StorageReadControl::with_limit(1 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine, "BEGIN; ALTER TABLE child ADD COLUMN private text DEFAULT 'private'; INSERT INTO child(id, ref) VALUES(9,1); SAVEPOINT saved; TRUNCATE child; ALTER TABLE child RENAME COLUMN id TO replaced; ROLLBACK TO saved; ROLLBACK");
+            sql(
+                &engine,
+                "DROP TABLE child; CREATE TABLE child(replacement text)",
+            );
+        }
+        drop((table, engine));
+        verify(&columns, &cut);
+        verify(&table_checks, &cut);
+        verify(&foreign_keys, &cut);
+        verify(&key_constraints, &cut);
+        verify(&hierarchy, &cut);
+        verify(&fts_fields, &cut);
+        verify(&row_type_array_name, &cut);
+        verify(&dropped_attributes, &cut);
+        verify(&columns_declared, &cut);
+        verify(&storage_generation, &cut);
+        verify(&next_id, &cut);
+        verify(&maps_integer_keys, &cut);
+        verify(&column_stats_loaded, &cut);
+        verify(&column_stats_dirty, &cut);
+        verify(&statistics_maintenance, &cut);
+        let encoded = analyzer.0.retained(&cut).unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(encoded.get().unwrap()).unwrap(),
+            analyzer.1
+        );
+        drop(encoded);
+        drop(cut);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn memory_table_definition_capture_failure_does_not_interrupt_schema_publication() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE metadata(payload text)");
+    let table = engine.table("metadata").unwrap().unwrap();
+    table.columns.write()[0].missing_value = Some(crate::Value::Str("x".repeat(1 << 20)));
+    let key = table.columns.key().unwrap();
+    let registry = engine.storage.memory_capture.as_ref().unwrap();
+    let small = StorageReadControl::with_limit(32 << 10);
+    let good = StorageReadControl::with_limit(4 << 20);
+    let failed = registry.capture(&small).unwrap();
+    let cut = registry.capture(&good).unwrap();
+    sql(
+        &engine,
+        "ALTER TABLE metadata RENAME COLUMN payload TO changed",
+    );
+    assert!(failed.check().is_err());
+    assert_eq!(table.columns.read()[0].name, "changed");
+    let captured = key.retained(&cut).unwrap().unwrap();
+    assert_eq!(captured.get().unwrap()[0].name, "payload");
+    assert!(
+        matches!(&captured.get().unwrap()[0].missing_value, Some(crate::Value::Str(value)) if value.len() == 1 << 20)
+    );
+    drop((failed, cut, table, engine));
+    assert_eq!(small.memory().used(), 0);
+    assert!(good.memory().used() >= 1 << 20);
+    good.cancellation().cancel();
+    assert!(captured.get().is_err());
+    drop(captured);
+    assert_eq!(good.memory().used(), 0);
+}
+
+#[test]
+fn memory_table_capture_keeps_authority_and_statistics_before_later_publication() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE ROLE reader; CREATE TABLE metrics(id integer, value text); INSERT INTO metrics VALUES (1,'old'), (2,'old'), (3,'last'); GRANT SELECT(id) ON metrics TO reader; ANALYZE metrics");
+    let table = engine.table("metrics").unwrap().unwrap();
+    let authority = table.security.snapshot();
+    let expected = authority
+        .capture_security(&uqa_core::memory::ProductionControl::uncontrolled())
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap();
+    let before = table.column_stats.snapshot();
+    assert!(!before.is_empty());
+    let security = table.security.key().unwrap();
+    let statistics = table.column_stats.key().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(
+        &engine,
+        "REVOKE SELECT(id) ON metrics FROM reader; UPDATE metrics SET value='new'; ANALYZE metrics",
+    );
+    drop((table, engine));
+    assert_eq!(
+        security.retained(&cut).unwrap().unwrap().get().unwrap(),
+        &expected
+    );
+    let retained = statistics.retained(&cut).unwrap().unwrap();
+    let captured = retained.get().unwrap();
+    assert_eq!(captured.len(), before.len());
+    for (name, old) in before.iter() {
+        let saved = captured.get(name).unwrap();
+        assert_eq!(
+            (saved.row_count, saved.null_count, saved.distinct_count),
+            (old.row_count, old.null_count, old.distinct_count)
+        );
+        assert_eq!(
+            saved
+                .mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>(),
+            old.mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>()
+        );
+        for (left, right) in [
+            (&saved.min_value, &old.min_value),
+            (&saved.max_value, &old.max_value),
+        ] {
+            assert_eq!(left.is_some(), right.is_some());
+            if let (Some(left), Some(right)) = (left, right) {
+                assert!(left.has_same_representation(right));
+            }
+        }
+        for (left, right) in [
+            (&saved.histogram, &old.histogram),
+            (&saved.mcv_values, &old.mcv_values),
+        ] {
+            assert_eq!(left.len(), right.len());
+            assert!(left
+                .iter()
+                .zip(right)
+                .all(|(left, right)| left.has_same_representation(right)));
+        }
+    }
+    drop(retained);
+    drop(cut);
+    assert_eq!(control.memory().used(), 0);
+}

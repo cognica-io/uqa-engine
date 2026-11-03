@@ -13,6 +13,7 @@ use crate::diskann_index::{
 };
 use crate::vector_index::DiskANNIndexParams;
 
+mod images;
 mod metadata;
 mod reports;
 mod selection;

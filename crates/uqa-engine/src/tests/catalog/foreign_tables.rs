@@ -26,7 +26,7 @@ use uqa_execution::schema::{
 
 struct ServerWrite<'a> {
     guard: Option<
-        parking_lot::MappedRwLockWriteGuard<
+        uqa_storage::memory_capture::MemoryCaptureWriteGuard<
             'a,
             BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
         >,

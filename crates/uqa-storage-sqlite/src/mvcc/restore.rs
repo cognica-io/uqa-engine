@@ -12,6 +12,7 @@ mod tests;
 
 use rusqlite::{params, Connection};
 use uqa_storage::{
+    backup::BackupRoot,
     mvcc::{DatabaseId, DatabaseRestore, VersionError, VersionResult},
     read_control::StorageReadControl,
 };
@@ -51,15 +52,30 @@ pub(crate) fn publish(
     request: DatabaseRestore,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
-    publish_in(connection, request, control).map_err(Error::into_version)
+    publish_in(connection, request, None, control).map_err(Error::into_version)
+}
+
+/// A current-format image with the exact retained root and pending target has already passed its import owner's row validation. Its history transition shares the ordinary restore owner without re-running baseline conversion or scanning the complete image.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) fn publish_image(
+    connection: &ManagedConnection,
+    root: BackupRoot,
+    request: DatabaseRestore,
+    control: &StorageReadControl,
+) -> VersionResult<()> {
+    publish_in(connection, request, Some(root), control).map_err(Error::into_version)
 }
 
 fn publish_in(
     connection: &ManagedConnection,
     request: DatabaseRestore,
+    image: Option<BackupRoot>,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let main = connection.lease_connection_with_control(control)?;
+    if let Some(root) = image {
+        schema::image_binding::validate_image(&main, root, request, control)?;
+    }
     let before = preflight(&main, request)?;
     let auxiliary = SQLiteSerializableAdmission::for_restore(
         connection,
@@ -76,7 +92,7 @@ fn publish_in(
     if preflight(&transaction, request)? != before {
         return Err(VersionError::WrongDatabase.into());
     }
-    validate_mapping(&transaction, &before, control)?;
+    validate_mapping(&transaction, &before, image.is_some(), control)?;
     if !request.needs_restore(before.identity)? {
         auxiliary
             .graph()
@@ -153,11 +169,14 @@ fn preflight(connection: &Connection, request: DatabaseRestore) -> PhysicalResul
 fn validate_mapping(
     connection: &Connection,
     state: &State,
+    image: bool,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     if state.pending {
         if native::present(connection)? {
-            native::initialize_restoration(connection, control)?;
+            if !image {
+                native::initialize_restoration(connection, control)?;
+            }
         } else {
             schema::initialize_restoration(connection)?;
         }

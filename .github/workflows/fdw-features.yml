@@ -2,6 +2,7 @@ name: Foreign handler features
 
 on:
   pull_request:
+    branches: [main]
     types: [ready_for_review]
   workflow_call:
 

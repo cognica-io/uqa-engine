@@ -29,7 +29,7 @@ fn save_view(connection: &ManagedConnection, definition: &str) {
         .unwrap();
 }
 
-fn replace_on_another_connection(path: &std::path::Path, mode: usize, native: bool) {
+pub(super) fn replace_on_another_connection(path: &std::path::Path, mode: usize, native: bool) {
     let writer_path = path.to_path_buf();
     let (send, receive) = std::sync::mpsc::channel();
     let writer = std::thread::spawn(move || {

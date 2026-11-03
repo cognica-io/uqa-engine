@@ -17,6 +17,8 @@ pub enum BackupError {
     Integrity,
     #[error("backup operation is no longer writable or readable")]
     Finished,
+    #[error("backup repository operation is busy")]
+    Busy,
     #[error("backup {resource} requires {required} bytes, exceeding limit {limit}")]
     Limit {
         resource: &'static str,
@@ -30,25 +32,55 @@ pub enum BackupError {
     #[error(transparent)]
     Cancelled(#[from] uqa_core::QueryCancelled),
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
     #[error(transparent)]
     Storage(crate::StorageBackendError),
 }
 
 pub type BackupResult<T> = Result<T, BackupError>;
 
-impl From<crate::mvcc::VersionError> for BackupError {
-    fn from(error: crate::mvcc::VersionError) -> Self {
-        error.into_storage_error().into()
+impl From<std::io::Error> for BackupError {
+    fn from(error: std::io::Error) -> Self {
+        if error
+            .get_ref()
+            .is_some_and(<dyn std::error::Error + Send + Sync>::is::<Self>)
+        {
+            *error
+                .into_inner()
+                .expect("owned backup stream error")
+                .downcast::<Self>()
+                .expect("checked backup error type")
+        } else {
+            Self::Io(error)
+        }
     }
 }
 
 impl From<crate::StorageBackendError> for BackupError {
     fn from(error: crate::StorageBackendError) -> Self {
+        if let crate::StorageBackendError::Backend { source, .. } = &error {
+            if let Some(limit) = source
+                .downcast_ref::<std::io::Error>()
+                .and_then(std::io::Error::get_ref)
+                .and_then(|error| error.downcast_ref::<crate::temporary_file::FileLimit>())
+            {
+                return Self::Limit {
+                    resource: "verification workspace",
+                    required: limit.required,
+                    limit: limit.limit,
+                };
+            }
+        }
         match error {
             crate::StorageBackendError::Memory(error) => Self::Memory(error),
             crate::StorageBackendError::Cancelled(error) => Self::Cancelled(error),
             error => Self::Storage(error),
         }
+    }
+}
+
+impl From<crate::mvcc::VersionError> for BackupError {
+    fn from(error: crate::mvcc::VersionError) -> Self {
+        error.into_storage_error().into()
     }
 }

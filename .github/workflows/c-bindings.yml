@@ -2,6 +2,7 @@ name: C bindings
 
 on:
   pull_request:
+    branches: [main]
     types: [ready_for_review]
   push:
     branches: [main]

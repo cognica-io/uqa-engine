@@ -150,7 +150,7 @@ fn invalid_replacement_preserves_existing_vectors() {
 fn delete_counter_overflow_preserves_vector_and_assignments() {
     let mut index = IVFIndex::with_params(2, 1, 1, 1);
     index.add(1, vec![1.0, 0.0]).unwrap();
-    *index.deletes_since_train.lock() = usize::MAX;
+    index.data.write().deletes_since_train = usize::MAX;
     let before = index.metadata_snapshot();
     assert!(index
         .delete(1)

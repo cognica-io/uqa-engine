@@ -7,6 +7,8 @@
 //! `SQLite` persistence for shared logical records, with short physical transactions and durable receipts.
 
 mod admission;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_import;
 mod backup_metadata;
 mod codec;
 mod commit_cache;
@@ -33,6 +35,10 @@ mod tombstones;
 mod version_metadata;
 mod write;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup_import::{
+    SQLiteBackupImportOptions, SQLiteBackupImportStep, SQLiteKeyValueBackupImport,
+};
 pub(crate) use schema::WritePermit;
 pub use serializable::SQLiteSerializableAdmission;
 

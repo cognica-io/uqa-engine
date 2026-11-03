@@ -8,14 +8,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Preserve memory database, schema and sequence authority in captured catalog generations, including bound role incarnations, ACL absence and grant paths, exact qualified names and namespace tuple identities. Complete committed Engine capture remains under implementation.
+- Retain immutable memory graph and model images through catalog replacement, rollback and Engine closure, with explicit payload admission and original cancellation preserved by independently retained image handles. Complete committed Engine selection and public backup jobs remain in progress.
+- Preserve non-temporary memory table definitions, complete ACL identities, statistics, analyzer configuration and allocation state through captured generations. Metadata mutation, rollback and source closure retain the original values under the backup's own limits; complete committed Engine selection and public backup jobs remain in progress.
+- Retain evaluated named value-index keys and their original eligibility state through memory Engine mutation, rollback and closure, with explicit capture limits and cancellation. Expressions are not reevaluated; complete Engine backup remains under implementation.
+- Register actual non-temporary memory Engine documents, text and vector indexes in their owning capture domain. Preserve unread sources on final closure and exact vector identities through replacement, removal and rollback, including IVF query retraining; share table membership roots without copying rows or names. Complete committed backup selection and public jobs remain in progress.
+
+- Preserve memory IVF state before every registered capture-domain mutation, including query-triggered retraining and probe changes. Export-only captures retain the original training state and controls after source closure; complete Engine backup integration remains under implementation.
+- Add exact stored-model backup images preserving every supported layer, parameter bit, label and gating value. Controlled private reconstruction validates the complete model and retains decoded allocation ownership; joint Engine backup integration remains under implementation.
+- Add exact analyzer-resource images that retain resolved descriptors and Korean/Japanese dictionary bytes without reopening files or consulting host caches during restore. Input validation, feature admission and retained encoded-resource memory remain explicit; joint Engine backup integration remains under implementation.
+- Add fresh native SQLite image import with dependency-ordered physical rows, exact revision/namespace/watermark preservation, bounded row verification and recovery of uncertain history publication. Partial images remain unavailable; full logical catalog validation and public Engine backup jobs remain in progress.
+- Add a bounded native SQLite image exporter preserving the stable data namespace, evaluated rows, committed revisions and autonomous watermarks in all four file modes. Capture reuses the initialized record owner without migrating the source or changing private transactions; notification delivery and unpublished/retired DiskANN payloads are excluded. Public Engine backup jobs remain in progress.
+- Add fresh-file SQLite Key/Value image import for plain, encrypted, compressed and encrypted-compressed destinations. Bounded BLOB writes preserve captured records and allocator watermarks; incomplete images remain unavailable until full verification and the existing history-restoration transition complete. Repository restore adapters can open private provider paths through pinned directories, and SQLite recovery checks the exact image and target before resuming without replaying data. Logical catalog validation and public Engine backup integration remain in progress.
+- Add repository-owned restore intents, private target directories and atomic destination publication without replacement. Recovery retains the original history request, preserves later writes after a lost publication reply and can publish a prepared image after archive loss. Complete logical format validation and public Engine backup jobs remain in progress.
+- Add bounded fresh-file redb image import with complete repository verification, preserved record revisions and identifier watermarks, incomplete-file admission rejection, and atomic replacement of transaction history. Complete logical format validation and public Engine integration remain in progress.
+- Connect complete provider image streams to protected shared packs and an encrypted, quota-bound inventory spool. redb and SQLite KV archives retain their captured bytes after source writes and source removal; publication uses the existing durable operation identity.
+- Add a bounded repository image reader that streams authenticated units, verifies every complete object and global frame range, and exposes completion only after all checks succeed. Corruption, cancellation and incomplete unit reads release files and verification workspace immediately.
+- Add online Key/Value image exporters for redb and SQLite KV. The versioned stream retains committed revisions, allocator watermarks and evaluated owner encodings, excludes notification delivery and unpublished/retired DiskANN payloads, and releases each physical read before returning. Fresh-image import and public Engine backup APIs remain in progress.
+
+- Add evaluated memory DiskANN images that retain sealed graphs, quantization, exact-side records and uncovered canonical changes without rebuilding. Export-only vector captures survive source mutation and closure; restored writers use independent future change identities. Complete Engine backup integration remains under implementation.
+- Add controlled evaluated memory vector images for exact, IVF and HNSW indexes, preserving tensor bits, trained state, graph topology and pending persistence without rebuilding indexes. Complete Engine backup integration remains under implementation.
+- Add evaluated memory graph images with controlled fresh reconstruction, preserving exact properties, named memberships, label allocation history and unused IDs. Derived graph indexes are validated and reconstructed by Graph; complete Engine backup integration remains under implementation.
+
+- Add evaluated memory text-document image output and controlled reconstruction, preserving duplicate token graph edges, raw UTF-16 terms, original offsets, historical analyzer revisions and normalization lengths without reanalysis. Complete Engine backup integration remains under implementation.
+
+- Add a Common Storage memory-capture owner that preserves an immutable source before its first subsequent write, without walking sources at capture registration. Each cut retains its own allowance and terminal failure; a failed backup does not consume an ordinary source write. Complete Engine transaction integration remains under implementation.
+
+- Add controlled memory-document snapshots that admit a retained generation without scanning or copying its rows. Snapshots preserve original cancellation and memory ownership through source replacement, clearing and closure; image output uses a separate bounded working allowance.
+
+- Add versioned evaluated-value and memory-document image codecs for backup construction, preserving exact floating-point bits, opaque SQL datums, collection types, descriptor identities and tuple metadata. Large borrowed strings and binary payloads stream without another payload-sized allocation; decoded state remains under an explicit memory allowance. Complete Engine backup remains under implementation.
 - Add bounded committed-record reads and a streaming record/allocator cursor for backup image adapters. Physical scan windows include excluded keys in their limit, payload reads retain exact revisions across concurrent writes, and completion or failure immediately releases the captured cut.
 - Add joint SQLite record and autonomous identifier snapshots with short read windows, cross-process retention and durable capture in both mappings and all four file modes. Complete image export/import and public Engine backup APIs remain in progress.
+- Add native local backup repositories with authenticated immutable packs, bounded full verification, durable publication, cancellation and prepared-image recovery. Complete provider coverage, fresh restore and Engine backup APIs remain in progress.
 - Add Common Storage backup image codecs with ordered streaming inventories, immutable root descriptors, bounded parsing and authenticated frames. These format primitives support the ongoing online/incremental backup implementation; they do not expose Engine capture or restore yet.
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
 
+- Stream temporary value-index payloads through the exact evaluated-value codec instead of JSON and a complete intermediate buffer. Tag-shaped maps keep their type, and owned reads retain decoded payload admission through their final consumer.
+- Retain immutable transaction and savepoint generations during error recovery instead of copying the complete table catalog. Table definitions share their existing immutable roots through capture and rollback; later DDL detaches only the changed definition.
+- Share immutable stored-model owners across Engine catalog generations so publishing another model does not copy previously retained weights. Owned model results and transaction rollback keep their existing behavior.
+- Validate stored deep models through borrowed layer views shared with runtime construction, avoiding complete weight copies while preserving shape checks and semantic diagnostics.
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
+
+### Changed
+
+- Qualify dependent PR stacks once after integration into a candidate targeting main. Intermediate stacked PRs no longer start duplicate platform matrices; existing validation commands and acceptance bounds remain unchanged.
 
 ### Security
 

@@ -21,6 +21,7 @@ set(UQA_SOURCE_REVISION "" CACHE STRING "Source revision embedded in the Rust li
 set(UQA_FEATURES "" CACHE STRING "Explicit comma-separated enabled Cargo features")
 set(UQA_TARGET "" CACHE STRING "Rust target triple of the supplied archive")
 set(UQA_CARGO_METADATA "" CACHE FILEPATH "cargo metadata JSON for the same target and features")
+set(UQA_CARGO_BUILD_LOG "" CACHE FILEPATH "Cargo JSON output from the matching staticlib build")
 if(NOT EXISTS "${UQA_RUST_STATIC_LIBRARY}")
   message(FATAL_ERROR "Supply the Cargo-built archive as UQA_RUST_STATIC_LIBRARY")
 endif()
@@ -36,6 +37,7 @@ execute_process(
     --output "${CMAKE_CURRENT_BINARY_DIR}/metadata" --target "${UQA_TARGET}"
     --revision "${UQA_SOURCE_REVISION}" --features "${UQA_FEATURES}"
     --cargo-metadata "${UQA_CARGO_METADATA}"
+    "--cargo-build-log=${UQA_CARGO_BUILD_LOG}"
     "--minimum-os=${CMAKE_OSX_DEPLOYMENT_TARGET}"
     "--native-link-flags=${UQA_NATIVE_LINK_FLAGS}"
   COMMAND_ERROR_IS_FATAL ANY)
@@ -54,13 +56,13 @@ target_include_directories(uqa PUBLIC
 if(WIN32)
   # exports.def selects every public ABI entry point. Normal archive resolution
   # coalesces Rust's repeated import records and excludes native DLL resources.
-  target_link_libraries(uqa PRIVATE "${UQA_RUST_STATIC_LIBRARY}" ${UQA_NATIVE_LIBRARIES})
+  target_link_libraries(uqa PRIVATE "${UQA_RUST_STATIC_LIBRARY}" ${UQA_BUILD_NATIVE_LIBRARIES})
   # Resolve the archive's native cleanup entry point before the CRT can select
   # its fallback DllMain while resolving references introduced by a library.
   target_link_options(uqa PRIVATE "LINKER:/INCLUDE:DllMain")
 else()
   target_link_libraries(uqa PRIVATE
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,${UQA_RUST_STATIC_LIBRARY}>" ${UQA_NATIVE_LIBRARIES})
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,${UQA_RUST_STATIC_LIBRARY}>" ${UQA_BUILD_NATIVE_LIBRARIES})
 endif()
 target_link_options(uqa PRIVATE ${UQA_NATIVE_LINK_OPTIONS})
 if(APPLE)
@@ -95,6 +97,9 @@ else()
 endif()
 install(FILES "${UQA_RUST_STATIC_LIBRARY}"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}" RENAME "${UQA_STATIC_FILENAME}")
+if(UQA_BUNDLED_NATIVE_LIBRARIES)
+  install(FILES ${UQA_BUNDLED_NATIVE_LIBRARIES} DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+endif()
 install(DIRECTORY include/uqa DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(EXPORT UQATargets NAMESPACE UQA:: DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/UQA")
 configure_package_config_file(cmake/UQAConfig.cmake.in

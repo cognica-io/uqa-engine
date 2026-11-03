@@ -68,6 +68,7 @@ impl<V: Record> Builder<V> {
                     .workspace
                     .as_ref()
                     .filter(|owner| std::sync::Arc::strong_count(owner) == 1),
+                self.map.file_budget.as_ref(),
             )?;
             for entry in self.map.iter() {
                 check(control)?;

@@ -39,8 +39,8 @@ fn controlled_capture_preserves_training_metadata_and_defers_stale_retraining_to
         assert_eq!(snapshot.metadata_snapshot(), before);
         assert_eq!(snapshot.nprobe(), 1);
         assert_eq!(
-            *snapshot.inverted_lists.lock(),
-            *source.inverted_lists.lock()
+            snapshot.data.read().inverted_lists,
+            source.data.read().inverted_lists
         );
         let expected = source.detached_clone();
         assert_eq!(
@@ -419,8 +419,9 @@ fn restored_stale_generation_reserves_resident_capacity_after_query_training() {
         *cluster = 0;
     }
     let vectors = source
+        .data
+        .read()
         .vectors
-        .lock()
         .values()
         .map(|vector| {
             (
@@ -448,11 +449,12 @@ fn restored_stale_generation_reserves_resident_capacity_after_query_training() {
         .search_knn_with_control(&[1.0, 0.0, 0.0], 2, &control)
         .unwrap();
     assert_eq!(restored.state(), IVFState::Trained);
-    assert_eq!(restored.centroids.lock().len(), 7);
+    assert_eq!(restored.data.read().centroids.len(), 7);
     assert_eq!(control.memory().used(), retained);
-    let vectors = restored.vectors.lock();
-    let centroids = restored.centroids.lock();
-    let lists = restored.inverted_lists.lock();
+    let data = restored.data.read();
+    let vectors = &data.vectors;
+    let centroids = &data.centroids;
+    let lists = &data.inverted_lists;
     let payload = vectors.len() * size_of::<(VectorKey, StoredVector)>()
         + vectors
             .values()
@@ -471,7 +473,7 @@ fn restored_stale_generation_reserves_resident_capacity_after_query_training() {
             .map(|list| list.capacity() * size_of::<(u64, u32)>())
             .sum::<usize>();
     assert!(payload <= retained);
-    drop((vectors, centroids, lists));
+    drop(data);
     drop(restored);
     assert_eq!(control.memory().used(), 0);
 }

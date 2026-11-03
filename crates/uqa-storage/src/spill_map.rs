@@ -63,6 +63,7 @@ pub(crate) struct Map<V> {
     resident_bytes: usize,
     max_encoded_bytes: usize,
     workspace: Option<Arc<workspace::Workspace>>,
+    file_budget: Option<crate::temporary_file::FileBudget>,
 }
 
 impl<V> Clone for Map<V> {
@@ -74,6 +75,7 @@ impl<V> Clone for Map<V> {
             resident_bytes: self.resident_bytes,
             max_encoded_bytes: self.max_encoded_bytes,
             workspace: self.workspace.clone(),
+            file_budget: self.file_budget.clone(),
         }
     }
 }
@@ -96,6 +98,19 @@ impl<V: Record> Map<V> {
             resident_bytes,
             max_encoded_bytes: 0,
             workspace: None,
+            file_budget: None,
+        }
+    }
+
+    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
+    pub(crate) fn with_file_budget(
+        memory: &MemoryBudget,
+        resident_bytes: usize,
+        budget: &crate::temporary_file::FileBudget,
+    ) -> Self {
+        Self {
+            file_budget: Some(budget.clone()),
+            ..Self::new(memory, resident_bytes)
         }
     }
 
@@ -108,12 +123,20 @@ impl<V: Record> Map<V> {
     }
 
     pub(crate) fn clear(&mut self) {
-        *self = Self::new(&self.memory, self.resident_bytes);
+        *self = Self {
+            file_budget: self.file_budget.clone(),
+            ..Self::new(&self.memory, self.resident_bytes)
+        };
     }
 
     pub(crate) fn iter(&self) -> Iter<'_, V> {
+        self.iter_with_memory(&self.memory)
+    }
+
+    pub(crate) fn iter_with_memory<'a>(&'a self, memory: &'a MemoryBudget) -> Iter<'a, V> {
         Iter {
             map: self,
+            memory,
             after: None,
             done: false,
         }
@@ -391,6 +414,7 @@ impl<V: Record> Map<V> {
             self.workspace
                 .as_ref()
                 .filter(|owner| Arc::strong_count(owner) == 1),
+            self.file_budget.as_ref(),
         )?;
         for (key, value) in resident {
             check(control)?;
@@ -421,6 +445,7 @@ impl<V: Record> Map<V> {
 
 pub(crate) struct Iter<'a, V> {
     map: &'a Map<V>,
+    memory: &'a MemoryBudget,
     after: Option<u128>,
     done: bool,
 }
@@ -431,7 +456,7 @@ impl<'a, V: Record> Iterator for Iter<'a, V> {
         if self.done {
             return None;
         }
-        match self.map.next(self.after) {
+        match self.map.next_with_memory(self.after, self.memory) {
             Ok(Some((key, value))) => {
                 self.after = Some(key);
                 Some(Ok((key, value)))

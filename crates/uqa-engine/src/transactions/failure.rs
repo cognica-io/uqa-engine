@@ -12,6 +12,9 @@ use super::{
     TransactionDirtyState, TransactionFrame, TransactionStatus,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
     payload
         .downcast_ref::<&str>()
@@ -23,7 +26,7 @@ pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
 struct StatementAbortSnapshot {
     storage_savepoint: Option<StorageSavepointId>,
     session: SessionStateSnapshot,
-    data: Option<EngineDataSnapshot>,
+    data: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty: TransactionDirtyState,
     keep_mark: Option<u32>,
     /// The length the frame's row changes return to.

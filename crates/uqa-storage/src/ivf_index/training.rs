@@ -8,22 +8,22 @@
 
 use super::math::{kmeans, nearest_centroid_controlled};
 use super::prepare::{check, workspace_bytes};
-use super::state::{IVFIndex, IVFState, VectorKey};
+use super::state::{IVFData, IVFState, VectorKey};
 use crate::read_control::StorageReadControl;
 use crate::{StorageBackendError, StorageBackendResult};
 
 pub(super) const STALE_DENOMINATOR: usize = 5;
 
-impl IVFIndex {
+impl IVFData {
     pub(super) fn train_for_query(
-        &self,
+        &mut self,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
         // Every reader retains its own training workspace. The cached generation's construction lease cannot cover scratch used by concurrent queries.
         let _workspace = if let Some(control) = control {
             control.check()?;
-            let count = self.vectors.lock().len();
-            let clusters = self.centroids.lock().len().max(self.nlist.min(count));
+            let count = self.vectors.len();
+            let clusters = self.centroids.len().max(self.nlist.min(count));
             Some(
                 control
                     .memory()
@@ -35,19 +35,18 @@ impl IVFIndex {
         self.train_controlled(control)
     }
 
-    pub fn train(&self) -> StorageBackendResult<()> {
+    pub fn train(&mut self) -> StorageBackendResult<()> {
         self.train_controlled(None)
     }
 
     pub(super) fn train_controlled(
-        &self,
+        &mut self,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
         check(control)?;
         let training_vectors = {
-            let vectors = self.vectors.lock();
+            let vectors = &mut self.vectors;
             if vectors.len() < self.train_threshold {
-                drop(vectors);
                 self.transition_to_untrained(control)?;
                 return Ok(());
             }
@@ -71,7 +70,7 @@ impl IVFIndex {
             10,
             control,
         )?;
-        let mut vectors = self.vectors.lock();
+        let vectors = &mut self.vectors;
         let mut inverted_lists = vec![Vec::new(); centroids.len()];
         let mut assignments = Vec::with_capacity(vectors.len());
         for vector in vectors.values() {
@@ -80,52 +79,52 @@ impl IVFIndex {
             inverted_lists[centroid].push(vector.key);
         }
         check(control)?;
-        // Publish only after all allocation, numerical evaluation and cancellation checks succeed.
+        // The exclusive owner publishes only after allocation, evaluation and cancellation succeed.
         for (vector, centroid) in vectors.values_mut().zip(assignments) {
             vector.centroid = Some(centroid);
         }
-        *self.centroids.lock() = centroids;
-        *self.inverted_lists.lock() = inverted_lists;
-        *self.trained_size.lock() = vectors.len();
-        *self.deletes_since_train.lock() = 0;
-        *self.state.lock() = IVFState::Trained;
+        self.centroids = centroids;
+        self.inverted_lists = inverted_lists;
+        self.trained_size = vectors.len();
+        self.deletes_since_train = 0;
+        self.state = IVFState::Trained;
         Ok(())
     }
 
     fn transition_to_untrained(
-        &self,
+        &mut self,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
-        let mut vectors = self.vectors.lock();
+        let vectors = &mut self.vectors;
         for _ in vectors.values() {
             check(control)?;
         }
         for vector in vectors.values_mut() {
             vector.centroid = None;
         }
-        self.centroids.lock().clear();
-        self.inverted_lists.lock().clear();
-        *self.trained_size.lock() = 0;
-        *self.deletes_since_train.lock() = 0;
-        *self.state.lock() = IVFState::Untrained;
+        self.centroids.clear();
+        self.inverted_lists.clear();
+        self.trained_size = 0;
+        self.deletes_since_train = 0;
+        self.state = IVFState::Untrained;
         Ok(())
     }
 
-    pub(super) fn maybe_mark_stale(&self) {
-        let trained = *self.trained_size.lock();
-        if trained > 0 && *self.deletes_since_train.lock() > trained / STALE_DENOMINATOR {
-            *self.state.lock() = IVFState::Stale;
+    pub(super) fn maybe_mark_stale(&mut self) {
+        let trained = self.trained_size;
+        if trained > 0 && self.deletes_since_train > trained / STALE_DENOMINATOR {
+            self.state = IVFState::Stale;
         }
     }
 
-    pub(super) fn remove_from_inverted_list(&self, centroid: usize, key: VectorKey) {
-        if let Some(list) = self.inverted_lists.lock().get_mut(centroid) {
+    pub(super) fn remove_from_inverted_list(&mut self, centroid: usize, key: VectorKey) {
+        if let Some(list) = self.inverted_lists.get_mut(centroid) {
             list.retain(|candidate| *candidate != key);
         }
     }
 
-    pub(super) fn add_to_inverted_list(&self, centroid: usize, key: VectorKey) {
-        if let Some(list) = self.inverted_lists.lock().get_mut(centroid) {
+    pub(super) fn add_to_inverted_list(&mut self, centroid: usize, key: VectorKey) {
+        if let Some(list) = self.inverted_lists.get_mut(centroid) {
             if let Err(position) = list.binary_search(&key) {
                 list.insert(position, key);
             }

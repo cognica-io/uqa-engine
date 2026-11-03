@@ -6,8 +6,6 @@
 
 //! Whether each table's single integer primary key names its rows' identities, and the one-time check of the tables an earlier version wrote.
 
-use std::sync::atomic::Ordering;
-
 use super::{CatalogFacade, Engine, PersistentStorageBackend, StorageBackendResult};
 use uqa_sql::semantics::key_identity::{is_key_document_id, key_document_id};
 use uqa_storage::ValueIndexKey;
@@ -85,7 +83,7 @@ impl Engine {
             if !mapped {
                 catalog.set_metadata(&indexed_key(table.object_id()), "true")?;
             }
-            table.maps_integer_keys.store(mapped, Ordering::Release);
+            *table.maps_integer_keys.write() = mapped;
         }
         catalog.set_metadata(VERIFIED_KEY, "true")
     }

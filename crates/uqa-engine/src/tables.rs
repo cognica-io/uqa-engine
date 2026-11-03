@@ -5,13 +5,13 @@
 //
 
 use super::{
-    standard_analyzer, Analyzer, Arc, AtomicBool, BTreeMap, DocId, Document, DocumentStore, Engine,
+    standard_analyzer, Analyzer, AtomicBool, BTreeMap, DocId, Document, DocumentStore, Engine,
     FieldName, HNSWIndex, IVFIndex, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex,
-    MemoryVectorIndex, RelationIdentity, RwLock, SQLError, StorageBackendError,
-    StorageBackendResult, TableSchema, TableState, VectorFieldSchema, VectorIndex,
-    VectorIndexOpenMode, VectorIndexSpec,
+    MemoryVectorIndex, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
+    TableSchema, TableState, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
-use crate::state::BoundTableSecurity;
+use crate::state::{BoundTableSecurity, CatalogCell};
+use crate::statistics::MaintenanceState;
 use uqa_execution::catalog::definition_revision::TablePublicationKind;
 
 impl Engine {
@@ -319,35 +319,35 @@ impl Engine {
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
-            security: crate::state::CatalogCell::new(BoundTableSecurity::owner(owner.identity())),
-            storage_generation: RwLock::new(crate::new_table_storage_generation()?),
-            document_store: RwLock::new(docs),
-            inverted_index: RwLock::new(inv),
-            vector_indexes: RwLock::new(uqa_storage::vector_index::VectorIndexes::default()),
-            fts_fields: crate::state::CatalogCell::new(fts_fields),
-            columns: crate::state::CatalogCell::new(Vec::new()),
-            columns_declared: crate::state::CatalogCell::new(false),
-            next_id: parking_lot::Mutex::new(1),
-            maps_integer_keys: AtomicBool::new(true),
-            analyzer: crate::state::CatalogCell::new(analyzer),
-            column_stats: crate::state::CatalogCell::new(uqa_planner::ColumnStatistics::default()),
-            column_stats_loaded: AtomicBool::new(true),
-            column_stats_dirty: AtomicBool::new(true),
-            statistics_maintenance: parking_lot::Mutex::default(),
-            table_checks: crate::state::CatalogCell::new(Vec::new()),
-            foreign_keys: crate::state::CatalogCell::new(Vec::new()),
-            key_constraints: crate::state::CatalogCell::new(Vec::new()),
-            hierarchy: crate::state::CatalogCell::new(uqa_sql::ast::TableHierarchy::default()),
-            value_indexes: RwLock::new(BTreeMap::new()),
+            security: CatalogCell::new(BoundTableSecurity::owner(owner.identity())),
+            storage_generation: CatalogCell::new(crate::new_table_storage_generation()?),
+            document_store: self.storage.memory_cell(docs, persistence)?,
+            inverted_index: self.storage.memory_cell(inv, persistence)?,
+            vector_indexes: self.storage.memory_vector_indexes(persistence)?,
+            fts_fields: CatalogCell::new(fts_fields),
+            columns: CatalogCell::new(Vec::new()),
+            columns_declared: CatalogCell::new(false),
+            next_id: CatalogCell::new(1),
+            maps_integer_keys: CatalogCell::new(true),
+            analyzer: CatalogCell::new(analyzer),
+            column_stats: CatalogCell::new(uqa_planner::ColumnStatistics::default()),
+            column_stats_loaded: CatalogCell::new(true),
+            column_stats_dirty: CatalogCell::new(true),
+            statistics_maintenance: CatalogCell::new(MaintenanceState::default()),
+            table_checks: CatalogCell::new(Vec::new()),
+            foreign_keys: CatalogCell::new(Vec::new()),
+            key_constraints: CatalogCell::new(Vec::new()),
+            hierarchy: CatalogCell::new(uqa_sql::ast::TableHierarchy::default()),
+            value_indexes: self.storage.memory_value_indexes(persistence)?,
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),
             persistence,
             on_commit,
             catalog_oids: Some(catalog_oids),
-            row_type_array_name: crate::state::CatalogCell::new(Some(row_type_array_name)),
-            dropped_attributes: crate::state::CatalogCell::new(Vec::new()),
+            row_type_array_name: CatalogCell::new(Some(row_type_array_name)),
+            dropped_attributes: CatalogCell::new(Vec::new()),
         };
-        let table_arc = Arc::new(table);
+        let table_arc = self.storage.table_state(table)?;
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {
             self.try_save_table_schema(name, &table_arc)?;
         }
@@ -454,7 +454,7 @@ impl Engine {
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
         let field = field.into();
         let idx = self.build_vector_index_for_restore(table, &field, dimensions, spec)?;
-        t.vector_indexes.write().live_mut()?.insert(field, idx);
+        t.vector_indexes.write().live_mut()?.insert(field, idx)?;
         Ok(true)
     }
 
@@ -527,14 +527,14 @@ impl Engine {
             .vector_indexes
             .write()
             .live_mut()?
-            .insert(field.clone(), idx);
+            .insert(field.clone(), idx)?;
         if persist_schema && self.is_persistent() {
             if let Err(err) = self.try_save_table_schema(&table_name, &t) {
                 let mut vectors = t.vector_indexes.write();
-                let indexes = vectors.live_mut()?;
+                let mut indexes = vectors.live_mut()?;
                 indexes.remove(&field);
                 if let Some(old) = old {
-                    indexes.insert(field, old);
+                    indexes.insert(field, old)?;
                 }
                 return Err(err);
             }
@@ -685,7 +685,7 @@ impl Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let mut registrations = t.vector_indexes.write();
-        let idxs = registrations.live_mut().map_err(|error| {
+        let mut idxs = registrations.live_mut().map_err(|error| {
             uqa_execution::storage_errors::storage_error("write vector registrations", &error)
         })?;
         let Some(idx) = idxs.get_mut(field) else {
@@ -698,12 +698,11 @@ impl Engine {
             table,
             &t.columns.snapshot(),
             field,
-            idx.as_ref(),
+            &*idx,
             doc_id,
             uqa_execution::serializable::vector::VectorChange::Single(&vector),
         )?;
-        idx.as_mut()
-            .add(doc_id, vector)
+        idx.add(doc_id, vector)
             .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
         drop(registrations);
         self.note_table_data_changed();
@@ -740,7 +739,7 @@ impl Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let mut registrations = t.vector_indexes.write();
-        let idxs = registrations.live_mut().map_err(|error| {
+        let mut idxs = registrations.live_mut().map_err(|error| {
             uqa_execution::storage_errors::storage_error("write vector registrations", &error)
         })?;
         let Some(idx) = idxs.get_mut(field) else {
@@ -753,12 +752,11 @@ impl Engine {
             table,
             &t.columns.snapshot(),
             field,
-            idx.as_ref(),
+            &*idx,
             doc_id,
             uqa_execution::serializable::vector::VectorChange::Tensor(&vectors),
         )?;
-        idx.as_mut()
-            .add_many(doc_id, vectors)
+        idx.add_many(doc_id, vectors)
             .map_err(|error| SQLError::Internal(format!("index document vectors: {error}")))?;
         drop(registrations);
         self.note_table_data_changed();

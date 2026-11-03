@@ -138,7 +138,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
 use uqa_core::{DocId, FieldName, Value};
 use uqa_ml::{DeepLearnOutput, DeepModel, LearnOptions, TrainingSet};
@@ -349,7 +348,7 @@ struct TransactionFrame {
     xid_levels: Vec<Option<u32>>,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
-    data_snapshot: Option<EngineDataSnapshot>,
+    data_snapshot: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty_at_begin: TransactionDirtyState,
     prepared_changes: uqa_execution::statement::prepared::invalidation::PreparedInvalidationLog,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
@@ -422,7 +421,7 @@ struct TransactionSavepoint {
     storage_savepoint: StorageSavepointId,
     characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
-    data_snapshot: Option<EngineDataSnapshot>,
+    data_snapshot: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty: TransactionDirtyState,
     prepared_change_mark:
         uqa_execution::statement::prepared::invalidation::PreparedInvalidationMark,
@@ -556,41 +555,39 @@ impl Default for SessionRandomState {
     }
 }
 
-#[derive(Clone)]
 struct EngineDataSnapshot {
     tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
     durable: DurableCatalogSnapshot,
     foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>,
 }
 
-#[derive(Clone)]
 #[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
     state: Arc<TableState>,
-    security: state::BoundTableSecurity,
+    security: Arc<state::BoundTableSecurity>,
     storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
     vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
     value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>,
-    fts_fields: Vec<FieldName>,
-    columns: Vec<uqa_sql::ast::ColumnDef>,
+    fts_fields: Arc<Vec<FieldName>>,
+    columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: bool,
     /// One-past-the-last allocated document id. `u128` is intentional: it
     /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
     /// available final id and can never wrap or issue a duplicate.
     next_id: u128,
-    analyzer: Analyzer,
-    column_stats: uqa_planner::ColumnStatistics,
+    analyzer: Arc<Analyzer>,
+    column_stats: Arc<uqa_planner::ColumnStatistics>,
     column_stats_loaded: bool,
     column_stats_dirty: bool,
     statistics_maintenance: statistics::MaintenanceState,
-    table_checks: Vec<uqa_sql::ast::TableCheck>,
-    foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
-    key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
-    hierarchy: uqa_sql::ast::TableHierarchy,
-    row_type_array_name: Option<String>,
-    dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
+    table_checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
+    foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
+    key_constraints: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    hierarchy: Arc<uqa_sql::ast::TableHierarchy>,
+    row_type_array_name: Arc<Option<String>>,
+    dropped_attributes: Arc<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
     doc_count_cache: u64,
     doc_count_dirty: bool,
 }
@@ -601,29 +598,34 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: state::CatalogCell<state::BoundTableSecurity>,
+    security: state::CatalogCell<
+        state::BoundTableSecurity,
+        uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
+    >,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
-    storage_generation: RwLock<[u8; 16]>,
-    pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
-    inverted_index: RwLock<Box<dyn InvertedIndex>>,
-    vector_indexes: RwLock<uqa_storage::vector_index::VectorIndexes>,
+    storage_generation: state::CatalogCell<[u8; 16]>,
+    pub(crate) document_store:
+        uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
+    vector_indexes:
+        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
     fts_fields: state::CatalogCell<Vec<FieldName>>,
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
     columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: state::CatalogCell<bool>,
     /// Retained document-ID floor. Capable persistent backends reserve from the storage-owned durable namespace; temporary, memory and serialized backends use this local state. `u128` preserves the exhausted `u64::MAX + 1` value.
-    next_id: parking_lot::Mutex<u128>,
+    next_id: state::CatalogCell<u128>,
     /// Whether the table's single integer primary key, if it has one, names its rows' identities (see `MutationIdentifiers::maps_integer_keys`). A table an earlier version wrote with a row at an identity its key does not name resolves its keys through the key's index instead.
-    maps_integer_keys: AtomicBool,
-    analyzer: state::CatalogCell<Analyzer>,
+    maps_integer_keys: state::CatalogCell<bool>,
+    analyzer: state::CatalogCell<Analyzer, Vec<u8>>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.
     column_stats: state::CatalogCell<uqa_planner::ColumnStatistics>,
-    column_stats_loaded: AtomicBool,
-    column_stats_dirty: AtomicBool,
+    column_stats_loaded: state::CatalogCell<bool>,
+    column_stats_dirty: state::CatalogCell<bool>,
     /// Changes since the last analysis of a table that no catalog tracks: tables of a memory-only engine and temporary tables. Their lazy analysis follows the maintenance policy of durable tables instead of re-analyzing after every write.
-    statistics_maintenance: parking_lot::Mutex<statistics::MaintenanceState>,
+    statistics_maintenance: state::CatalogCell<statistics::MaintenanceState>,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
     table_checks: state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,
@@ -639,7 +641,9 @@ pub(crate) struct TableState {
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
-    value_indexes: RwLock<BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>>,
+    value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
+    >,
     /// Cached `document_store.len()`. Persistent stores answer `len`
     /// with a `COUNT(*)` query, which used to run once per SQL
     /// statement for planner row estimates; the cache is invalidated

@@ -17,6 +17,9 @@ use crate::{
     read_control::StorageReadControl, ReadOnlySnapshot, StorageBackendError, StorageBackendResult,
 };
 
+mod capture;
+pub use capture::{CapturedVectorIndexes, LiveVectorIndexesMut};
+
 type LiveIndexes = BTreeMap<FieldName, Box<dyn VectorIndex>>;
 type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, Box<dyn VectorIndex>>>>;
 
@@ -24,7 +27,10 @@ type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, Box<dyn VectorIndex>>
 pub struct VectorIndexes(Contents);
 
 enum Contents {
-    Live(LiveIndexes),
+    Live {
+        indexes: LiveIndexes,
+        registry: Option<crate::memory_capture::MemoryCaptureRegistry>,
+    },
     Retained {
         indexes: Option<RetainedIndexes>,
         control: StorageReadControl,
@@ -33,20 +39,23 @@ enum Contents {
 
 impl Default for VectorIndexes {
     fn default() -> Self {
-        Self(Contents::Live(BTreeMap::new()))
+        Self::from(BTreeMap::new())
     }
 }
 
 impl From<LiveIndexes> for VectorIndexes {
     fn from(indexes: LiveIndexes) -> Self {
-        Self(Contents::Live(indexes))
+        Self(Contents::Live {
+            indexes,
+            registry: None,
+        })
     }
 }
 
 impl VectorIndexes {
-    pub fn live_mut(&mut self) -> StorageBackendResult<&mut LiveIndexes> {
+    pub fn live_mut(&mut self) -> StorageBackendResult<LiveVectorIndexesMut<'_>> {
         match &mut self.0 {
-            Contents::Live(indexes) => Ok(indexes),
+            Contents::Live { indexes, registry } => Ok(LiveVectorIndexesMut { indexes, registry }),
             Contents::Retained { control, .. } => {
                 control.check()?;
                 Err(StorageBackendError::Other(
@@ -61,7 +70,7 @@ impl VectorIndexes {
         FieldName: Borrow<Q>,
     {
         let index = match &self.0 {
-            Contents::Live(indexes) => indexes.get(field),
+            Contents::Live { indexes, .. } => indexes.get(field),
             Contents::Retained { indexes, .. } => {
                 indexes.as_ref().and_then(|indexes| indexes.get(field))
             }
@@ -78,7 +87,7 @@ impl VectorIndexes {
 
     pub fn len(&self) -> usize {
         match &self.0 {
-            Contents::Live(indexes) => indexes.len(),
+            Contents::Live { indexes, .. } => indexes.len(),
             Contents::Retained { indexes, .. } => {
                 indexes.as_ref().map_or(0, |indexes| indexes.len())
             }
@@ -91,7 +100,7 @@ impl VectorIndexes {
 
     pub fn iter(&self) -> VectorIndexesIter<'_> {
         VectorIndexesIter(match &self.0 {
-            Contents::Live(indexes) => Entries::Live(indexes.iter()),
+            Contents::Live { indexes, .. } => Entries::Live(indexes.iter()),
             Contents::Retained { indexes, .. } => indexes
                 .as_ref()
                 .map_or(Entries::Empty, |indexes| Entries::Retained(indexes.iter())),
@@ -115,7 +124,7 @@ impl VectorIndexes {
         if let Some(retained) = source.retained_collection()? {
             match &retained.0 {
                 Contents::Retained { control, .. } => control.check()?,
-                Contents::Live(_) => {
+                Contents::Live { .. } => {
                     return Err(StorageBackendError::Other(
                         "vector provider returned live registrations as a retained collection"
                             .into(),
@@ -226,7 +235,7 @@ impl VectorIndexSource for VectorIndexes {
 
     fn retained_collection(&self) -> StorageBackendResult<Option<VectorIndexes>> {
         match &self.0 {
-            Contents::Live(_) => Ok(None),
+            Contents::Live { .. } => Ok(None),
             Contents::Retained { indexes, control } => {
                 control.check()?;
                 Ok(Some(Self(Contents::Retained {

@@ -146,6 +146,35 @@ impl ManagedConnection {
             .is_some_and(|session| session.native.is_some())
     }
 
+    pub(crate) fn capture_native_backup_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> uqa_storage::backup::BackupResult<(
+        uqa_storage::mvcc::DatabaseId,
+        Arc<dyn uqa_storage::mvcc::CommittedBackupSnapshot>,
+    )> {
+        control.cancellation().check()?;
+        self.surface_cleanup_failure()
+            .map_err(uqa_storage::StorageBackendError::from)?;
+        let _gate = self.session.gate.read();
+        let logical =
+            self.session
+                .logical
+                .get()
+                .ok_or(uqa_storage::backup::BackupError::Unsupported(
+                    "unbound native SQLite session",
+                ))?;
+        let namespace = logical
+            .native
+            .ok_or(uqa_storage::backup::BackupError::Invalid(
+                "native SQLite session mapping",
+            ))?;
+        let snapshot = logical.capture_backup_snapshot(control)?.ok_or(
+            uqa_storage::backup::BackupError::Unsupported("native SQLite backup snapshot"),
+        )?;
+        Ok((namespace, snapshot))
+    }
+
     /// Bind a new or existing native catalog or recognized standalone graph file to shared logical record transactions, initializing/upgrading and converting its physical format atomically if needed. Document/B-tree stores, exact/IVF/HNSW vectors, occurrences and catalog operations share this session. Native provider factories publish a legacy catalog restore and its baseline together before attaching this session; direct callers must bind before opening a catalog on an already converted file. Standalone graph handles retain their scoped records, including handles opened before binding. Direct physical access is rejected.
     pub fn bind_native_records(&self, options: VersionedSessionOptions) -> Result<()> {
         self.surface_cleanup_failure()?;

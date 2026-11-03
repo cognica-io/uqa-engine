@@ -6,10 +6,7 @@
 
 //! Bind maintenance to retained table generations, session locks and provider transactions.
 use crate::{Engine, TableState};
-use std::{
-    collections::BTreeSet,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{collections::BTreeSet, sync::Arc};
 use uqa_core::DocId;
 use uqa_execution::{
     maintenance::analyze::{
@@ -169,12 +166,8 @@ impl VacuumStatistics for SavedVacuumStatistics<'_> {
     }
     fn restore(&self) {
         *self.table.column_stats.write() = self.statistics.clone();
-        self.table
-            .column_stats_loaded
-            .store(self.loaded, Ordering::Release);
-        self.table
-            .column_stats_dirty
-            .store(self.dirty, Ordering::Release);
+        *self.table.column_stats_loaded.write() = self.loaded;
+        *self.table.column_stats_dirty.write() = self.dirty;
     }
     fn persist(&self, table: &str) -> StorageBackendResult<()> {
         if let Some(catalog) = self.engine.storage.catalog.as_ref() {
@@ -210,8 +203,8 @@ impl VacuumRelations for Engine {
 impl VacuumTable for VacuumTableBinding<'_> {
     fn statistics(&self) -> Box<dyn VacuumStatistics + '_> {
         let statistics = self.table.column_stats.read().clone();
-        let loaded = self.table.column_stats_loaded.load(Ordering::Acquire);
-        let dirty = self.table.column_stats_dirty.load(Ordering::Acquire);
+        let loaded = *self.table.column_stats_loaded.read();
+        let dirty = *self.table.column_stats_dirty.read();
         Box::new(SavedVacuumStatistics {
             engine: self.engine,
             table: &self.table,

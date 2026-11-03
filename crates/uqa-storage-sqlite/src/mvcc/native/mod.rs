@@ -6,7 +6,11 @@
 
 //! Native `SQLite` row mapping, atomic baseline conversion and evaluated commit materialization. The record adapter preserves existing physical tables while shared storage owns private changes and visibility; native catalog/store session routing remains separate.
 
+mod backup;
 mod capture;
+pub use backup::SQLiteNativeBackupImage;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup::{SQLiteNativeBackupImport, SQLiteNativeImageImportReader};
 mod diskann;
 pub(crate) use row::{binary_pair_limit, variable_fields_limit, vector_row_limit};
 mod family;

@@ -354,7 +354,7 @@ impl Engine {
             t.vector_indexes
                 .write()
                 .live_mut()?
-                .insert(to.into(), index);
+                .insert(to.into(), index)?;
         } else if let Some(dimensions) = vector_dimensions {
             self.create_vector_field(&table_name, to, dimensions)?;
         }

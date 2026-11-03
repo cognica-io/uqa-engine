@@ -7,6 +7,79 @@
 use super::*;
 use std::collections::BTreeMap;
 
+#[test]
+fn retained_value_index_images_preserve_tag_shaped_maps_and_float_bits() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let values = [
+        Value::Map(
+            [
+                ("$uqa_type".into(), Value::Str("bytes".into())),
+                ("hex".into(), Value::Str("00ff".into())),
+            ]
+            .into(),
+        ),
+        Value::Float(f64::from_bits(0xfff8_0000_0000_0001)),
+        Value::Record(
+            vec![
+                ("same".into(), Value::Int(1)),
+                ("same".into(), Value::Int(2)),
+            ]
+            .into(),
+        ),
+    ];
+    for allowance in [0, 64 * 1024] {
+        let mut index = RetainedValueIndex::new(allowance);
+        for (id, value) in values.iter().enumerate() {
+            index.replace(id as u64, Some(value), &control).unwrap();
+        }
+        let mut seen = 0;
+        index
+            .visit_values_owned(&control, &mut |id, value| {
+                assert!(value.has_same_representation(&values[id as usize]));
+                seen += 1;
+                Ok(true)
+            })
+            .unwrap();
+        assert_eq!(seen, values.len());
+    }
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn retained_value_index_large_images_stream_and_keep_decoded_allowances() {
+    let source = Value::Bytes(vec![0x5a; 1 << 20]);
+    let write = StorageReadControl::with_limit(64 * 1024);
+    let mut index = RetainedValueIndex::new(0);
+    let allocated =
+        allocation_counter::measure(|| index.replace(7, Some(&source), &write).unwrap());
+    assert!(allocated.bytes_max < 512 * 1024, "{allocated:?}");
+    let small = StorageReadControl::with_limit(1024);
+    let mut called = false;
+    assert!(matches!(
+        index.visit_values_owned(&small, &mut |_, _| {
+            called = true;
+            Ok(true)
+        }),
+        Err(crate::StorageBackendError::Memory(_))
+    ));
+    assert!(!called);
+    assert_eq!(small.memory().used(), 0);
+    let control = StorageReadControl::with_limit(2 << 20);
+    let mut saved = None;
+    index
+        .visit_values_owned(&control, &mut |id, value| {
+            assert_eq!(id, 7);
+            saved = Some(value);
+            Ok(true)
+        })
+        .unwrap();
+    assert!(control.memory().used() >= 1 << 20);
+    drop(index);
+    assert!(saved.as_ref().unwrap().has_same_representation(&source));
+    drop(saved);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn ordered(index: &RetainedValueIndex, control: &StorageReadControl) -> Vec<(Value, DocId)> {
     let mut result = Vec::new();
     index

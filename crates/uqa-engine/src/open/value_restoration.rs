@@ -7,7 +7,6 @@
 //! Retained table-state adapters for initial typed-value restoration.
 
 use super::{Engine, StorageBackendError, StorageBackendResult};
-use std::sync::atomic::Ordering;
 
 impl uqa_execution::catalog::value_restoration::ValueRestorationSession for Engine {
     fn index_build_context(&self) -> uqa_execution::schema::indexes::IndexBuildContext<'_> {
@@ -23,8 +22,8 @@ impl uqa_execution::catalog::value_restoration::ValueRestorationSession for Engi
         })?;
         state.value_indexes.write().clear();
         *state.column_stats.write() = uqa_planner::ColumnStatistics::default();
-        state.column_stats_loaded.store(true, Ordering::Release);
-        state.column_stats_dirty.store(true, Ordering::Release);
+        *state.column_stats_loaded.write() = true;
+        *state.column_stats_dirty.write() = true;
         self.refresh_value_indexes_for_table(table)
     }
 }

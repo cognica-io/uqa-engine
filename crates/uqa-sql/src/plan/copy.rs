@@ -42,6 +42,19 @@ pub(crate) fn copy_syntax_with_control<T: syntax::SyntaxCopy + Clone>(
     copying.finish(value)
 }
 
+pub(crate) fn capture_definition_with_control<T: syntax::SyntaxCopy + Clone>(
+    value: &T,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<T>> {
+    control.check()?;
+    let Some(mut copying) = Copying::new(*control) else {
+        return Ok(control.finish(value.clone(), None)?);
+    };
+    copying.detach_constants = true;
+    let value = value.copy_syntax(&mut copying)?;
+    copying.finish(value)
+}
+
 impl super::CtePlan {
     /// Copy only a declaration's scheduling metadata and transfer an independently admitted query body. The replaced body is never copied; the selected root retains its original allocation and lease.
     pub fn copy_with_query(
@@ -211,6 +224,7 @@ type ParameterLookup<'a> = dyn Fn(&crate::ast::Expr) -> Option<usize> + 'a;
 
 pub(crate) struct Copying<'a> {
     control: ProductionControl<'a>,
+    detach_constants: bool,
     memory: MemoryReservation,
     fields: Option<BudgetedVec<RewriteField>>,
     scalar_items: Option<BudgetedVec<Option<super::scalar::ScalarMemory>>>,
@@ -228,6 +242,7 @@ impl<'a> Copying<'a> {
     fn new(control: ProductionControl<'a>) -> Option<Self> {
         control.empty_reservation().map(|memory| Self {
             control,
+            detach_constants: false,
             memory,
             fields: None,
             scalar_items: None,

@@ -19,6 +19,25 @@ fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
     .unwrap()
 }
 
+#[test]
+fn evaluated_text_image_publication_retains_exact_corpus_nodes_and_buffer_capacities() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut imported = builder(&control);
+    let binding_bytes = control.memory().used() - corpus_bytes(&imported.index.state);
+    let bytes = crate::inverted_index::image::tests::fixture(false);
+    for id in [1, 2, 3] {
+        imported
+            .add_image_document(id, &mut bytes.as_slice())
+            .unwrap();
+        assert_eq!(
+            control.memory().used(),
+            corpus_bytes(&imported.index.state) + binding_bytes
+        );
+    }
+    drop(imported);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn stage_selected<'a>(
     index: &MemoryInvertedIndex,
     doc_id: DocId,
