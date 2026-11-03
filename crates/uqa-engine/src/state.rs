@@ -700,6 +700,13 @@ impl StatementGate {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn owns_current_operation(&self) -> bool {
+        let identity = std::ptr::from_ref(self) as usize;
+        self.mutex.is_owned_by_current_thread()
+            || DELEGATED_STATEMENT_GATES.with(|gates| gates.borrow().contains(&identity))
+    }
+
     pub(super) fn lock_with_cancellation(
         &self,
         cancellation: &uqa_core::CancellationToken,

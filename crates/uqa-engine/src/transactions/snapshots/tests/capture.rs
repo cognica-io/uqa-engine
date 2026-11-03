@@ -8,21 +8,7 @@ use super::*;
 use crate::state::SnapshotCut;
 
 pub(super) fn capture(engine: &Engine, control: &StorageReadControl) -> SnapshotCut {
-    let frames = engine
-        .session
-        .transactions
-        .try_lock()
-        .expect("the callback does not retain the transaction-state guard");
-    frames[0]
-        .data_snapshot
-        .as_ref()
-        .unwrap()
-        .data
-        .sources
-        .as_ref()
-        .unwrap()
-        .capture(engine.row_locks.catalog_oids(), control)
-        .unwrap()
+    engine.capture_committed_memory(control).unwrap()
 }
 
 #[test]

@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 
 mod table;
 
+#[cfg(test)]
+mod capture;
+
 impl Drop for crate::EngineSnapshotData {
     fn drop(&mut self) {
         // Retire immutable membership while its component source owners still exist.

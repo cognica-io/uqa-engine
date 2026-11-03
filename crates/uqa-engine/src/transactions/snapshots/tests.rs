@@ -15,6 +15,7 @@ mod catalogs;
 mod comments;
 mod events;
 mod identifiers;
+mod idle;
 mod resources;
 mod sequence_values;
 mod sequences;

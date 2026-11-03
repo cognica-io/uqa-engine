@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -39369,6 +39369,99 @@
       "capability": "Identifier capture during private callbacks",
       "workload": "Hold a callback after private definitions and sequence/OID reservations, capture original data and reservations, then finish and close.",
       "invariant": "Capture does not wait for the application statement gate and pairs original table membership with the current autonomous OID and matching sequence positions under the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "idle_memory_capture_retires_sources_without_retaining_undo_or_temporary_payloads",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/idle.rs",
+      "capability": "Idle committed memory selection",
+      "workload": "Capture a memory Engine without an open transaction beside large temporary rows/views, mutate data and sequences, replace the table and close.",
+      "invariant": "Only original durable membership and values remain under the original allowance; neither live table owners nor raw catalog roots survive source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "idle_memory_capture_failures_leave_native_transaction_state_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/idle.rs",
+      "capability": "Idle capture failure ownership",
+      "workload": "Deny capture admission and pre-cancel another capture, then execute native rollback and an independently funded capture.",
+      "invariant": "No capture creates a transaction or consumes native rollback; failed reservations release completely and later capture preserves the original row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_capture_cancellation_finishes_before_held_admission_is_released",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/idle.rs",
+      "capability": "Cancellable committed selection admission",
+      "workload": "Hold either transaction admission or the statement gate, wait for an observed capture admission attempt, cancel and require completion before releasing the holder.",
+      "invariant": "Both admission paths stop under the original cancellation while the blocking owner is still held; transaction depth and allowance return unchanged.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_capture_rejects_reentrant_unframed_writes_but_accepts_original_frames",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/idle.rs",
+      "capability": "Reentrant committed selection",
+      "workload": "Capture inside a held unframed statement, inside an active transaction callback, and after commit.",
+      "invariant": "Unframed unfinished writes cannot be selected; framed capture returns the original row and idle capture returns the later commit with independent retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_capture_races_transaction_completion_without_mixing_rows_and_catalogs",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/idle.rs",
+      "capability": "Committed data and catalog selection races",
+      "workload": "Race capture with COMMIT or ROLLBACK after row changes, DDL and a rolled-back savepoint across eight executions.",
+      "invariant": "Each cut pairs original one-column metadata with its original row or committed two-column metadata with its committed row, never private or mixed observations.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "waiting_memory_capture_uses_a_new_frame_before_its_statement_finishes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/idle.rs",
+      "capability": "Frame publication during capture admission",
+      "workload": "Observe a capture waiting on an unframed held statement, start a transaction and private DML/DDL, and require capture completion before the statement is released.",
+      "invariant": "Admission reconsiders the new outer original generation instead of waiting for the application operation to finish; private values and nested definitions remain absent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_memory_frames_keep_the_original_capture_without_consuming_recovery",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/idle.rs",
+      "capability": "Failed-frame committed selection",
+      "workload": "Fail a memory transaction after private changes, capture its original state and perform native rollback.",
+      "invariant": "Capture neither clears failure nor consumes recovery, and its admitted original row survives transaction completion.",
       "case_names": [
         ""
       ]
