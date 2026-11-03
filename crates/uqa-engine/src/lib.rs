@@ -556,15 +556,21 @@ impl Default for SessionRandomState {
 }
 
 struct EngineDataSnapshot {
+    /// Undo alone retains mutable owners needed to restore dropped/replaced tables.
+    table_owners: BTreeMap<RelationIdentity, Arc<TableState>>,
+    data: Arc<EngineSnapshotData>,
+    foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>,
+}
+
+/// Immutable transaction values can outlive undo without pinning later mutable table contents. This is an internal source generation, not an admitted or temporary-filtered backup image.
+struct EngineSnapshotData {
     tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
     memory_membership: Option<state::MembershipSnapshot>,
     durable: DurableCatalogSnapshot,
-    foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>,
 }
 
 #[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
-    state: Arc<TableState>,
     security: Arc<state::BoundTableSecurity>,
     storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,

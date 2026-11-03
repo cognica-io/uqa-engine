@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Separate immutable memory transaction data from live table owners so retained generations survive rollback, replacement and closure without pinning later table contents. Complete admitted committed backup capture remains under implementation.
 - Exclude temporary views before allocating durable memory catalog images, preserving permanent and unlogged definitions under independent capture limits through rollback, replacement and Engine closure. Complete committed Engine backup remains under implementation.
 - Preserve admitted non-temporary memory table membership through creation, deletion, rename, rollback and Engine closure without retaining mutable table owners or copying the relation corpus at capture. Immutable map deletion preserves earlier roots with logarithmic allocation. Complete committed Engine backup remains under implementation.
 

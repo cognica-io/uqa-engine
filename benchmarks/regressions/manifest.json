@@ -38696,6 +38696,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_data_retention_releases_live_table_owners_after_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Independent transaction data ownership",
+      "workload": "Retain outer and savepoint data, grow and replace a live table, roll back replacement, commit and close the Engine.",
+      "invariant": "Retained data keeps exact original rows, columns and catalog roots while the original mutable TableState is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "outer_transaction_data_is_readable_while_a_long_callback_holds_private_savepoints",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Committed transaction source access",
+      "workload": "Hold a callback after private updates and a savepoint, select its outer data using the available transaction-state lock, then finish and mutate again.",
+      "invariant": "Selection allocates no memory, requires no callback completion and preserves only the outer transaction generation through later commits and Engine loss.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
