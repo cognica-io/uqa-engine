@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Add versioned evaluated-value and memory-document image codecs for backup construction, preserving exact floating-point bits, opaque SQL datums, collection types, descriptor identities and tuple metadata. Large borrowed strings and binary payloads stream without another payload-sized allocation; decoded state remains under an explicit memory allowance. Complete Engine backup remains under implementation.
+
 ### Fixed
 
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.

@@ -16,6 +16,31 @@ use crate::{DocumentStore, StorageBackendResult};
 use super::{read_only_error, ReadOnlySnapshot};
 
 impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
+    fn write_image_document(
+        &self,
+        doc_id: DocId,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        let mut output = ImageOutput {
+            output,
+            original: self.2.as_ref(),
+            error: None,
+        };
+        let result = self.0.write_image_document(doc_id, &mut output, control);
+        if let Some(error) = output.error {
+            return Err(error);
+        }
+        let written = result?;
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        Ok(written)
+    }
+
     fn put_stored(
         &mut self,
         _doc_id: DocId,
@@ -321,5 +346,24 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
                 None,
             )) as Arc<dyn DocumentStore>
         }))
+    }
+}
+
+struct ImageOutput<'a> {
+    output: &'a mut dyn std::io::Write,
+    original: Option<&'a StorageReadControl>,
+    error: Option<crate::StorageBackendError>,
+}
+
+impl std::io::Write for ImageOutput<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if let Some(error) = self.original.and_then(|control| control.check().err()) {
+            self.error = Some(error);
+            return Err(std::io::Error::other("retained document image cancelled"));
+        }
+        self.output.write(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.output.flush()
     }
 }

@@ -1,6 +1,6 @@
 # Online and incremental backup implementation plan
 
-Status: design only, based on UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`). The [design](../design/online-and-incremental-backup.md) specifies an independent backup subsystem. Implementation depends on current storage/snapshot/restore owners, not on a replication or CDC implementation, journal, or API. There is no prerequisite feature PR.
+Status: implementation in progress; the complete delivery ledger is [#1322](https://github.com/cognica-io/uqa-engine/issues/1322). The [design](../design/online-and-incremental-backup.md) specifies an independent backup subsystem. Implementation depends on current storage/snapshot/restore owners, not on a replication or CDC implementation, journal, or API. The value/document codec unit is independent of the provider and repository PRs.
 
 ## Current scope and progress
 
@@ -8,7 +8,9 @@ Status: design only, based on UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5
 - [x] Define online full backup, content-based incremental comparison, complete independent inventory roots, verification, retention, and fresh-database restore.
 - [x] Separate full-backup delivery from incremental comparison and optional fingerprint acceleration, with owner-specific PR boundaries and acceptance.
 - [x] Verify document links, paragraph/fence layout, independent scope, and repository dependency, capability, and integration-harness policies.
-- [ ] Implement and qualify the delivery units below. None is implemented by this documentation change.
+- [ ] Implement and qualify the delivery units below. Common Storage, provider metadata, image input and repository units are tracked in #1322. The local value/document codec unit below provides evaluated memory document encoding; joint committed memory capture, complete memory inventories and fresh Engine activation remain outstanding.
+
+Core now owns a versioned evaluated-value image codec, and Common Storage streams actual memory document fields from the selected immutable store generation. Images distinguish every value carrier, preserve floating-point bits and opaque metadata, and avoid interpreting tag-shaped Maps or retained SQL tuple bytes. Source documents are borrowed without materializing another field map; imports retain their decoded allowance. The [wire contract and preservation argument](../design/online-and-incremental-backup.md#evaluated-value-and-memory-document-images) cover this data-model primitive. All 469 Core and 991 Common Storage library cases pass on macOS; the final 14 image cases pass on both Linux aarch64 and macOS. Strict Core/Storage library/test Clippy, formatting, dependency/capability/harness/source-size/header policies, 91 local documentation targets and all 36 regression-verifier tests pass. Six automatic work/memory/output gates bring this branch's inventory to 2,570 checks and 3,733 required cases. Final-source remote qualification and delivery remain pending. It does not capture a joint Engine cut, preserve the complete catalog/index/resource graph or expose public backup jobs.
 
 The current scope is embedded Rust and a local repository, with same-provider restore for memory, native SQLite, SQLite KV, and redb. Source operations continue during backup export. Completed archives restore without a running source. Cross-provider conversion, network storage, arbitrary-time recovery, in-place replacement, scheduling, and language-binding expansion remain separate work. No release date or version is assigned.
 

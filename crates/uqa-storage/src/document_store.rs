@@ -28,6 +28,7 @@ mod controlled_presence;
 pub use controlled_presence::read_field_presence;
 pub mod decoding;
 pub mod identifiers;
+pub mod image;
 mod retained;
 pub use retained::{RetainedDocumentFields, RetainedStoredDocument};
 mod retained_store;
@@ -181,6 +182,18 @@ impl SharedDocumentRow {
 
 /// Mutating methods are fallible: persistent backends surface their write failures so callers (engine DML, upserts, referential rewrites) can abort the enclosing transaction instead of silently committing a partially-applied statement. A rewrite that deletes a row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
+    /// Stream an evaluated document image from this exact read view, returning `None` for an absent document. Only owners with a lossless image codec implement this method; the default does not collect or re-evaluate fields. This primitive does not capture a committed Engine backup cut.
+    fn write_image_document(
+        &self,
+        _doc_id: DocId,
+        _output: &mut dyn std::io::Write,
+        _control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        Err(StorageBackendError::Other(
+            "document image export is unsupported by this owner".into(),
+        ))
+    }
+
     /// Persist one typed storage record. Every backend owns the physical representation of tuple metadata and must keep it outside the public field map.
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()>;
 

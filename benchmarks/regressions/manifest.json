@@ -4,6 +4,84 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "retained_document_image_checks_original_cancellation_between_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/read_only_snapshot/tests/images.rs",
+      "capability": "Retained document image cancellation",
+      "workload": "Cancel the original retained reader during image output under an independent invoking allowance.",
+      "invariant": "Output stops before 32 KiB, preserves the original typed cancellation, leaves the invoking signal live and retires all codec memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_image_export_streams_large_borrowed_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests.rs",
+      "capability": "Bounded memory document export",
+      "workload": "Four MiB of actual retained document payload under a 512-byte encoding allowance.",
+      "invariant": "Export allocates less than 2 KiB without materializing another field map; an underfunded decode fails and releases its allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_images_preserve_captured_rows_metadata_and_future_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests.rs",
+      "capability": "Memory document image identity",
+      "workload": "Actual memory store snapshot after source replacement, clearing and closure, with private tuple metadata, tag-shaped maps and opaque values.",
+      "invariant": "Decode preserves the selected fields and tuple xmin; ordinary future writes work, empty documents differ from absence, and temporary admission retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_admission_and_cancellation_retire_every_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests.rs",
+      "capability": "Value image admission",
+      "workload": "Nested values under six allowances, cancelled readers/writers and maximum-width forged lengths.",
+      "invariant": "Admission precedes allocation, peaks remain within the chosen allowance, typed errors survive and every failed or dropped result retires its charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_streams_large_payloads_without_encoding_a_second_copy",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests.rs",
+      "capability": "Bounded value image export",
+      "workload": "Six MiB of borrowed strings, bytes and opaque tuple backing under a 512-byte encoding allowance.",
+      "invariant": "Every output request is at most 16 KiB; measured allocations remain below 2 KiB, and underfunded import fails without leaked admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_images_preserve_all_carriers_and_opaque_metadata",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests.rs",
+      "capability": "Evaluated value image identity",
+      "workload": "Every carrier, temporal subtype, descriptor and array/legacy-vector metadata, including source byte identity.",
+      "invariant": "Decode preserves exact carriers and opaque metadata; all decoded payloads retain their admitted bytes and release them on drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "independent_allowances_own_snapshot_retention_separately",
       "cases": 1,
       "source": "crates/uqa-storage/src/mvcc/retention/tests.rs",

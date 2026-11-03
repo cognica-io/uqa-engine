@@ -50,6 +50,7 @@ mod record;
 mod row;
 mod temporal;
 mod value;
+pub use value::image as value_image;
 
 pub use array::{
     ArrayAssignmentError, ArrayTraversalError, ArrayValue, BudgetedArrayElements,

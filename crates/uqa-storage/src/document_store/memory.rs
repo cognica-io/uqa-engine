@@ -107,6 +107,30 @@ impl MemoryDocumentStore {
 }
 
 impl DocumentStore for MemoryDocumentStore {
+    fn write_image_document(
+        &self,
+        doc_id: DocId,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        control.check()?;
+        self.state
+            .documents
+            .get(&doc_id)
+            .map(|row| {
+                super::image::write(
+                    self.state.layouts[row.layout_id]
+                        .iter()
+                        .map(String::as_str)
+                        .zip(row.values.iter()),
+                    row.metadata,
+                    output,
+                    control,
+                )
+            })
+            .transpose()
+    }
+
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
         let metadata = self
             .state
