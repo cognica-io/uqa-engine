@@ -566,7 +566,7 @@ struct EngineDataSnapshot {
 struct EngineSnapshotData {
     tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
     memory_membership: Option<state::MembershipSnapshot>,
-    table_sources: Option<state::SnapshotTableSources>,
+    sources: Option<state::SnapshotSources>,
     durable: DurableCatalogSnapshot,
 }
 

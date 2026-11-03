@@ -22,6 +22,14 @@ pub(crate) struct SnapshotTableSources {
 }
 
 impl SnapshotTableSources {
+    pub(crate) fn select<F: Send + Sync + 'static>(
+        &mut self,
+        source: &uqa_storage::memory_capture::MemoryCaptureKey<F>,
+    ) -> StorageBackendResult<()> {
+        self.selection = self.selection.with_source(source)?;
+        Ok(())
+    }
+
     pub(crate) fn new(
         registry: MemoryCaptureRegistry,
         tables: &BTreeMap<RelationIdentity, TableDataSnapshot>,

@@ -15,7 +15,7 @@ mod table;
 impl Drop for crate::EngineSnapshotData {
     fn drop(&mut self) {
         // Retire immutable membership while its component source owners still exist.
-        drop(self.table_sources.take());
+        drop(self.sources.take());
     }
 }
 #[cfg(test)]
@@ -44,8 +44,9 @@ impl Engine {
             tables.insert(name.clone(), TableDataSnapshot::capture(table, registry)?);
             owners.insert(name.clone(), table.clone());
         }
-        let table_sources = generation
-            .map(|registry| crate::state::SnapshotTableSources::new(registry, &tables))
+        let durable = self.durable.snapshot();
+        let sources = generation
+            .map(|registry| crate::state::SnapshotSources::new(registry, &tables, &durable))
             .transpose()
             .map_err(|error| Self::storage_tx_error("snapshot table source membership", &error))?;
         Ok(Some(std::sync::Arc::new(EngineDataSnapshot {
@@ -53,8 +54,8 @@ impl Engine {
             data: std::sync::Arc::new(crate::EngineSnapshotData {
                 tables,
                 memory_membership: self.storage.tables.memory_snapshot(),
-                table_sources,
-                durable: self.durable.snapshot(),
+                sources,
+                durable,
             }),
             foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
         })))

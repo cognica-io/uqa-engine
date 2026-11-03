@@ -10,6 +10,7 @@ use uqa_core::RelationIdentity;
 use uqa_storage::read_control::StorageReadControl;
 
 mod capture;
+mod sequences;
 
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();

@@ -16,6 +16,10 @@ use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 mod catalog_capture;
 mod catalog_cell;
+mod generation_sources;
+#[cfg(test)]
+pub(crate) use generation_sources::SnapshotCut;
+pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
 mod table_capture;
 mod table_membership;

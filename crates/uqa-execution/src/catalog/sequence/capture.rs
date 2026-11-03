@@ -14,6 +14,9 @@ use uqa_core::{
 };
 use uqa_sql::SQLError;
 
+mod catalog;
+pub use catalog::{durable_sequences, CapturedSequence};
+
 pub fn sequences(
     values: &BTreeMap<RelationIdentity, SequenceState>,
     control: &ProductionControl<'_>,

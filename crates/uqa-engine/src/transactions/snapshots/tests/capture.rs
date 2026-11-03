@@ -5,9 +5,9 @@
 //
 
 use super::*;
-use crate::state::SnapshotTableCut;
+use crate::state::SnapshotCut;
 
-fn capture(engine: &Engine, control: &StorageReadControl) -> SnapshotTableCut {
+pub(super) fn capture(engine: &Engine, control: &StorageReadControl) -> SnapshotCut {
     let frames = engine
         .session
         .transactions
@@ -18,7 +18,7 @@ fn capture(engine: &Engine, control: &StorageReadControl) -> SnapshotTableCut {
         .as_ref()
         .unwrap()
         .data
-        .table_sources
+        .sources
         .as_ref()
         .unwrap()
         .capture(control)

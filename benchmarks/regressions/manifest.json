@@ -38882,6 +38882,72 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "durable_sequence_capture_joins_exact_metadata_and_excludes_temporary_capacity",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
+      "capability": "Joint durable sequence records",
+      "workload": "Capture permanent and unlogged definitions, exact identities/OIDs, optional ACLs and extreme state beside a one-MiB temporary name with no private authority.",
+      "invariant": "Each durable record joins its original object identity and authority; excluded temporary state contributes no output capacity or payload charge and unused OID claims stay absent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "durable_sequence_capture_rejects_incomplete_selected_metadata_without_leases",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
+      "capability": "Complete selected sequence metadata",
+      "workload": "Remove persistence, object identity or authority from a selected definition after another complete definition.",
+      "invariant": "No partial catalog escapes and every allocation is released; missing metadata is not replaced with invented defaults.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "durable_sequence_capture_admission_and_original_cancellation_are_independent",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
+      "capability": "Independent sequence catalog admission",
+      "workload": "Try every allowance below the complete retained footprint, admit exactly that footprint, close the source and cancel one independent result.",
+      "invariant": "Every insufficient capture releases all charges; exact admission succeeds and a cancelled result cannot invalidate a separately funded result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_sequence_sources_preserve_joint_durable_records_after_unread_retirement",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/sequences.rs",
+      "capability": "Transaction table and sequence source consistency",
+      "workload": "Capture unread table/sequence state after private data, definition, authority and savepoint changes; COMMIT or ROLLBACK, replace names and close.",
+      "invariant": "The selected table data and complete permanent/unlogged sequence records retain original identities, OIDs, definition, stored position and authority; temporary and private definitions stay absent.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_sequence_source_excludes_temporary_authority_during_a_private_callback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/sequences.rs",
+      "capability": "Sequence capture during private callback",
+      "workload": "Hold a callback after private sequence DDL and a savepoint beside a temporary ACL with 16,384 entries; capture under 8 KiB.",
+      "invariant": "Capture does not wait for callback completion or charge excluded authority; original sequence metadata survives completion and source closure with complete lease release.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
