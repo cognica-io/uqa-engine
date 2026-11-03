@@ -10,10 +10,9 @@
 
 use super::{
     failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
-    EngineDataSnapshot, NontransactionalSequenceValues, SQLError, SessionStateSnapshot,
-    StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
-    TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
-    TransactionStatus,
+    EngineDataSnapshot, SQLError, SessionStateSnapshot, StorageBackendError, StorageSavepointId,
+    TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame, TransactionFrameKind,
+    TransactionIntent, TransactionStatus,
 };
 
 impl Engine {
@@ -272,6 +271,8 @@ impl Engine {
             TransactionFrameKind::ImplicitStatement => (true, false),
             TransactionFrameKind::SimpleQuery => (false, false),
         };
+        let nontransactional_sequence_values =
+            Self::transaction_sequence_values(data_snapshot.as_deref());
         stack.push(TransactionFrame {
             started_at_micros,
             implicit_statement,
@@ -309,7 +310,7 @@ impl Engine {
             pending_notifications: Vec::new(),
             pending_notification_commit: parking_lot::Mutex::new(None),
             constraint_modes,
-            nontransactional_sequence_values: NontransactionalSequenceValues::new(),
+            nontransactional_sequence_values,
         });
         if let Some(savepoint) = storage_savepoint {
             super::fixed_identities::save_identities(stack, savepoint);

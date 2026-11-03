@@ -44,6 +44,14 @@ pub fn durable_sequences(
     source: &SequenceReadSnapshot,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<CapturedSequence>>, SQLError> {
+    with_values(source, |_, state| state, control)
+}
+
+pub(super) fn with_values(
+    source: &SequenceReadSnapshot,
+    value: impl Fn([u8; 16], SequenceState) -> SequenceState,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<CapturedSequence>>, SQLError> {
     let mut count = 0;
     for name in source.sequences.keys() {
         control.check()?;
@@ -75,7 +83,7 @@ pub fn durable_sequences(
                 object_id,
                 catalog_oid: source.catalog_oids.get(&object_id).copied(),
                 persistence,
-                state: *state,
+                state: value(object_id, *state),
                 security,
             },
             control.combine(control.combine(schema_memory, name_memory), security_memory),

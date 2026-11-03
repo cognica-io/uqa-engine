@@ -39240,6 +39240,59 @@
         "case_1",
         "case_2"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_value_capture_joins_original_object_and_definition_before_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/history/tests.rs",
+      "capability": "Original sequence allocation generations",
+      "workload": "Capture original definitions beside a private definition, another object, 1,000 unrelated histories and an excluded one-MiB temporary name.",
+      "invariant": "Only matching object and definition identities replace current/called/log_count; selected allocations stay constant, insufficient admission releases all leases and exact admission survives source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_history_publication_preserves_unread_cuts_and_native_session_observations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/history/tests.rs",
+      "capability": "Sequence history capture ownership",
+      "workload": "Take unread independent cuts around a decreasing setval-style history update, DISCARD and a private definition update; cancel one cut and retire the source.",
+      "invariant": "Earlier cuts retain their physical value tuple; DISCARD changes only session observations, failed capture does not block native history publication and retained controls remain independent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_sequence_cuts_join_reserved_values_to_original_incarnations",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/sequence_values.rs",
+      "capability": "Original sequence values across transaction completion",
+      "workload": "Use cached nextval, private ALTER RESTART/rename/name reuse and temporary sequences; capture, roll back a savepoint, setval false, capture again, COMMIT or ROLLBACK and close.",
+      "invariant": "Original object/definition identities retain the reserved cache endpoint at the first cut and exact decreasing setval state at the second; private incarnations stay absent and original controls release independently.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_sequence_values_capture_without_waiting_for_a_private_callback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/sequence_values.rs",
+      "capability": "Sequence values during private callbacks",
+      "workload": "Hold a transaction callback after cached nextval and a private definition restart; capture original sequence state before releasing the callback.",
+      "invariant": "Capture completes without the statement gate, preserves the original allocation generation and reserved cache endpoint and outlives the source under its original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -366,7 +366,13 @@ impl Engine {
     ) -> SQLError {
         let nontransactional_sequence_values = stack
             .first()
-            .map(|frame| frame.nontransactional_sequence_values.clone())
+            .map(|frame| {
+                frame
+                    .nontransactional_sequence_values
+                    .read()
+                    .values()
+                    .clone()
+            })
             .unwrap_or_default();
         let session_snapshot = stack.first().map(|frame| frame.session_snapshot.clone());
         let snapshot = stack.first().and_then(|frame| frame.data_snapshot.clone());
@@ -569,7 +575,13 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let nontransactional_sequence_values = stack
             .last()
-            .map(|frame| frame.nontransactional_sequence_values.clone())
+            .map(|frame| {
+                frame
+                    .nontransactional_sequence_values
+                    .read()
+                    .values()
+                    .clone()
+            })
             .unwrap_or_default();
         let storage_savepoint = stack
             .last()

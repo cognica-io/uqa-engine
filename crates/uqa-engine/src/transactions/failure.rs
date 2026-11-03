@@ -196,7 +196,11 @@ impl Engine {
         let rollback_state = statement_abort_snapshot(frame);
         let storage_savepoint = rollback_state.storage_savepoint.or(frame.storage_savepoint);
         let outer_frame = &stack[0];
-        let nontransactional_sequence_values = outer_frame.nontransactional_sequence_values.clone();
+        let nontransactional_sequence_values = outer_frame
+            .nontransactional_sequence_values
+            .read()
+            .values()
+            .clone();
         let mut cleanup_errors = Vec::new();
         let backend_aborted = match self
             .rollback_failed_statement_backend(&stack, storage_savepoint)

@@ -223,15 +223,13 @@ type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, uqa_execution::query::document_changes::DocumentChanges>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
-type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
-
-#[derive(Clone, Default)]
-struct NontransactionalSequenceHistory {
-    values_by_definition: BTreeMap<[u8; 16], NontransactionalSequenceValue>,
-    object_id: [u8; 16],
-    session_currval: Option<SessionSequenceValue>,
-    defines_lastval: bool,
-}
+type NontransactionalSequenceValues =
+    uqa_execution::catalog::sequence::session::NontransactionalSequenceValues;
+type NontransactionalSequenceSource = Arc<
+    uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::sequence::capture::SequenceCaptureSource,
+    >,
+>;
 
 /// Unified query engine composed from explicit storage, durable-catalog,
 /// session, extension, epoch, and query-runtime ownership domains.
@@ -371,7 +369,7 @@ struct TransactionFrame {
         parking_lot::Mutex<Option<Box<notifications::CrossNotificationCommit>>>,
     constraint_modes: ConstraintModeState,
     /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`, except that allocations made against a transactionally changed sequence definition roll back with that definition. Every active frame records values by definition generation so transaction, savepoint, and PL/pgSQL exception rollback can reapply exactly the generation owned by the rollback target while preserving the latest session `currval` and `lastval` effects.
-    nontransactional_sequence_values: NontransactionalSequenceValues,
+    nontransactional_sequence_values: NontransactionalSequenceSource,
 }
 
 enum FixedTransactionSnapshot {

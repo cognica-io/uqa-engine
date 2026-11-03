@@ -7,14 +7,14 @@
 //! Transaction data supplies one source domain for matching table and catalog generations.
 
 use super::{DurableCatalogSnapshot, SnapshotTableSources};
-use crate::TableDataSnapshot;
+use crate::{NontransactionalSequenceSource, TableDataSnapshot};
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::{
     comments::snapshot::{CommentCaptureSource, CommentTableSource},
     foreign::capture::ForeignTableCaptureSource,
     security::roles::persistence::RoleCatalogSnapshot,
-    sequence::snapshot::SequenceReadSnapshot,
+    sequence::{capture::SequenceCaptureSource, snapshot::SequenceReadSnapshot},
     table_capture::TableMetadataCaptureSource,
 };
 use uqa_storage::{
@@ -28,7 +28,7 @@ mod resources;
 pub(crate) struct SnapshotSources {
     // Retire membership before the catalog sources it selects.
     tables: SnapshotTableSources,
-    sequences: MemoryCaptureCell<SequenceReadSnapshot>,
+    sequences: NontransactionalSequenceSource,
     foreign: MemoryCaptureCell<ForeignTableCaptureSource>,
     metadata: MemoryCaptureCell<TableMetadataCaptureSource>,
     comments: MemoryCaptureCell<CommentCaptureSource>,
@@ -43,17 +43,19 @@ impl SnapshotSources {
         durable: &DurableCatalogSnapshot,
         temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids>,
     ) -> StorageBackendResult<Self> {
-        let sequences = registry.cell(SequenceReadSnapshot {
-            sequences: durable.sequences.clone(),
-            object_ids: durable.sequence_object_ids.clone(),
-            persistence: durable.sequence_persistence.clone(),
-            security: durable.sequence_security.clone(),
-            catalog_oids: durable.sequence_catalog_oids.clone(),
-            roles: RoleCatalogSnapshot {
-                roles: durable.roles.clone(),
-                memberships: durable.role_memberships.clone(),
+        let sequences = std::sync::Arc::new(registry.cell(SequenceCaptureSource::new(
+            SequenceReadSnapshot {
+                sequences: durable.sequences.clone(),
+                object_ids: durable.sequence_object_ids.clone(),
+                persistence: durable.sequence_persistence.clone(),
+                security: durable.sequence_security.clone(),
+                catalog_oids: durable.sequence_catalog_oids.clone(),
+                roles: RoleCatalogSnapshot {
+                    roles: durable.roles.clone(),
+                    memberships: durable.role_memberships.clone(),
+                },
             },
-        })?;
+        ))?);
         let catalogs = catalogs::CatalogSources::new(&registry, durable)?;
         let resources = resources::ResourceSources::new(&registry, durable)?;
         let foreign = registry.cell(ForeignTableCaptureSource {
@@ -103,6 +105,10 @@ impl SnapshotSources {
         sources.catalogs.select(&mut sources.tables)?;
         sources.resources.select(&mut sources.tables)?;
         Ok(sources)
+    }
+
+    pub(crate) fn sequence_history(&self) -> NontransactionalSequenceSource {
+        self.sequences.clone()
     }
 }
 
