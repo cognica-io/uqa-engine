@@ -18802,7 +18802,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -37640,6 +37640,71 @@
       "capability": "Relation authority failure isolation",
       "workload": "Revoke system, built-in routine and foreign-column grants with independent denied and funded cuts.",
       "invariant": "Ordinary authority publication completes and only the denied capture fails without retained leaks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_types_keep_exact_identity_acl_order_keys_support_and_dropped_attributes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests.rs",
+      "capability": "Stored type definition capture",
+      "workload": "Capture complete domains, enums, composites, ranges and shells with exact keys and nested state.",
+      "invariant": "Every identity, ACL, enum order key, support reference and dropped slot survives; measured live bytes equal admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_domain_constants_detach_source_owners_and_preserve_value_bits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests.rs",
+      "capability": "Independent stored type constants",
+      "workload": "Capture a bound domain constant after source cancellation, then retire the source allowance.",
+      "invariant": "Captured values retain exact nested string and NaN bits without sharing source payload ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_capture_denies_large_nested_payloads_and_releases_partial_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests.rs",
+      "capability": "Type capture admission",
+      "workload": "Capture large late defaults, labels, attributes, multirange names and ACLs under denied and cancelled controls.",
+      "invariant": "Production rejects the original failure and releases every partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_type_capture_preserves_definitions_through_rollback_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/types.rs",
+      "capability": "Actual Engine type generations",
+      "workload": "Capture SQL domain/enum/composite/shell catalogs and stored range generations before rollback, same-name replacement and unread Engine closure.",
+      "invariant": "Selected definitions and identities remain exact; retained children keep original cancellation after cut release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_type_capture_keeps_type_ddl_and_independent_cuts_usable",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/types.rs",
+      "capability": "Type capture failure isolation",
+      "workload": "Alter and replace a domain with independent underfunded and funded captures.",
+      "invariant": "DDL completes, only the underfunded cut fails and all admitted capture memory retires.",
       "case_names": [
         ""
       ]

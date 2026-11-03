@@ -14,6 +14,31 @@ impl DurableCatalogState {
         &mut self,
         registry: &MemoryCaptureRegistry,
     ) -> StorageBackendResult<()> {
+        self.domains = CatalogCell::capture_source(
+            self.domains.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::types::domains,
+        )?;
+        self.enums = CatalogCell::capture_source(
+            self.enums.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::types::enums,
+        )?;
+        self.composites = CatalogCell::capture_source(
+            self.composites.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::types::composites,
+        )?;
+        self.ranges = CatalogCell::capture_source(
+            self.ranges.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::types::ranges,
+        )?;
+        self.shells = CatalogCell::capture_source(
+            self.shells.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::types::shells,
+        )?;
         self.database_security = CatalogCell::capture_source(
             self.database_security.snapshot(),
             Some(registry),

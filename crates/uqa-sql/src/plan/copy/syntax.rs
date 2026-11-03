@@ -224,6 +224,7 @@ syntax_enum!(crate::SQLParam {
 });
 
 mod ast;
+mod catalog_types;
 mod command;
 
 syntax_struct!(crate::ast::ObjectAclEntry {

@@ -131,12 +131,27 @@ impl StorageContext {
 pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 
 pub(super) struct DurableCatalogState {
-    pub(super) domains: CatalogCell<BTreeMap<String, super::domains::StoredDomain>>,
-    pub(super) enums: CatalogCell<uqa_execution::catalog::enum_type::EnumRegistry>,
-    pub(super) ranges: CatalogCell<uqa_execution::catalog::range_type::RangeRegistry>,
-    pub(super) shells: CatalogCell<uqa_execution::catalog::shell_type::ShellRegistry>,
+    pub(super) domains: CatalogCell<
+        BTreeMap<String, super::domains::StoredDomain>,
+        Vec<(String, super::domains::StoredDomain)>,
+    >,
+    pub(super) enums: CatalogCell<
+        uqa_execution::catalog::enum_type::EnumRegistry,
+        Vec<(String, uqa_sql::catalog::enum_type::StoredEnum)>,
+    >,
+    pub(super) ranges: CatalogCell<
+        uqa_execution::catalog::range_type::RangeRegistry,
+        Vec<(String, uqa_sql::catalog::range_type::StoredRange)>,
+    >,
+    pub(super) shells: CatalogCell<
+        uqa_execution::catalog::shell_type::ShellRegistry,
+        Vec<(String, uqa_sql::catalog::shell_type::StoredShellType)>,
+    >,
     pub(super) comments: CatalogCell<uqa_execution::catalog::comments::CommentRegistry>,
-    pub(super) composites: CatalogCell<uqa_execution::catalog::composite_type::CompositeRegistry>,
+    pub(super) composites: CatalogCell<
+        uqa_execution::catalog::composite_type::CompositeRegistry,
+        Vec<(String, uqa_sql::catalog::composite_type::StoredComposite)>,
+    >,
     pub(super) graphs: CatalogCell<
         BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>,
         resource_capture::CapturedResources<uqa_graph::GraphImageSnapshot>,

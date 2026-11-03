@@ -15,6 +15,7 @@ mod metadata;
 mod relation_authority;
 mod resources;
 mod roles;
+mod types;
 
 fn sql(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
