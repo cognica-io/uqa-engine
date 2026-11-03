@@ -26,6 +26,8 @@ Keep each PR at 10,000 changed lines or fewer, counting additions plus deletions
 
 PR #1343 is the integration-only exception for the existing backup stack #1324, #1331–#1335 and #1340–#1342. Its existing product commits are consolidated for one final-source qualification; do not expand its product scope. Remaining backup implementation stays in #1322 and subsequent bounded PRs.
 
+PR #1344 is the integration-only exception for the existing catalog and memory-membership stack #1344 and #1347 through product source `5511ad6cf3f4e838ab9a4ec3a175bd3aa51e42e4`. Its 10,503 changed product/documentation lines against main `491ad0dbd93fd7d0ccecb15caa61ca6c05beb185` are consolidated for one final-source qualification. Only integration policy and delivery records may be added to that candidate; subsequent implementation remains in bounded PRs under #1346 and #1322.
+
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
 
 Describe decisions, scope, behavior and verification evidence directly in issues, PRs and documentation. Do not narrate instructions, approvals or conversation history, or attribute a decision or requirement to a person.
