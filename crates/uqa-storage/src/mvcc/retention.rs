@@ -18,21 +18,27 @@ use uqa_core::memory::MemoryReservation;
 use super::{CommitSequence, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 
+/// A typed ordered retention boundary. Record commits and autonomous metadata epochs use independent registries and cannot be interchanged by callers.
+pub trait SnapshotBoundary: Copy + Ord + Send + Sync + 'static {}
+
+impl SnapshotBoundary for CommitSequence {}
+impl SnapshotBoundary for super::MetadataEpoch {}
+
 /// Provider-owned cross-process transport. All methods except lease destruction run under the common registry's local admission gate. The native admission gate must also exclude other processes' captures and collectors. Releasing a retained lease must never wait for admission or physical persistence.
-pub trait SnapshotLeaseTransport: Send + Sync {
+pub trait SnapshotLeaseTransport<Boundary: SnapshotBoundary = CommitSequence>: Send + Sync {
     fn acquire_admission(&self, control: &StorageReadControl) -> VersionResult<()>;
     fn release_admission(&self);
     fn retain(
         &self,
-        sequence: CommitSequence,
+        sequence: Boundary,
         control: &StorageReadControl,
     ) -> VersionResult<Box<dyn Send + Sync>>;
-    fn oldest(&self, control: &StorageReadControl) -> VersionResult<Option<CommitSequence>>;
+    fn oldest(&self, control: &StorageReadControl) -> VersionResult<Option<Boundary>>;
 }
 
-struct Admission<'a>(Option<&'a dyn SnapshotLeaseTransport>);
+struct Admission<'a, Boundary: SnapshotBoundary>(Option<&'a dyn SnapshotLeaseTransport<Boundary>>);
 
-impl Drop for Admission<'_> {
+impl<Boundary: SnapshotBoundary> Drop for Admission<'_, Boundary> {
     fn drop(&mut self) {
         if let Some(transport) = self.0 {
             transport.release_admission();
@@ -41,29 +47,28 @@ impl Drop for Admission<'_> {
 }
 
 /// One registry per physical database owner, shared by every logical session and retained view. Native providers with multiple process owners supply a liveness transport; an exclusively owned database needs only this local registry.
-#[derive(Default)]
-pub struct SnapshotRegistry {
+pub struct SnapshotRegistry<Boundary: SnapshotBoundary = CommitSequence> {
     admission: Mutex<()>,
-    leases: Mutex<BTreeMap<SnapshotLeaseKey, SnapshotLeaseEntry>>,
-    transport: Option<Arc<dyn SnapshotLeaseTransport>>,
+    leases: Mutex<BTreeMap<SnapshotLeaseKey<Boundary>, SnapshotLeaseEntry<Boundary>>>,
+    transport: Option<Arc<dyn SnapshotLeaseTransport<Boundary>>>,
 }
 
 // The allocation address distinguishes live leases at one sequence without extending their lifetime.
-type SnapshotLeaseKey = (CommitSequence, usize);
+type SnapshotLeaseKey<Boundary> = (Boundary, usize);
 
-struct SnapshotLeaseEntry {
-    lease: Weak<SnapshotLease>,
+struct SnapshotLeaseEntry<Boundary: SnapshotBoundary> {
+    lease: Weak<SnapshotLease<Boundary>>,
     memory: MemoryReservation,
 }
 
 /// Captures of one committed sequence under the same allowance share its lease and allocation charge. Independent allowances retain separate leases, so another session cannot prolong the invoking session's reservation. Destruction never waits for the snapshot admission gate or physical persistence.
-pub struct SnapshotLease {
-    sequence: CommitSequence,
+pub struct SnapshotLease<Boundary: SnapshotBoundary = CommitSequence> {
+    sequence: Boundary,
     _native: Option<Box<dyn Send + Sync>>,
-    registry: Arc<SnapshotRegistry>,
+    registry: Arc<SnapshotRegistry<Boundary>>,
 }
 
-impl Drop for SnapshotLease {
+impl<Boundary: SnapshotBoundary> Drop for SnapshotLease<Boundary> {
     fn drop(&mut self) {
         // This mutex protects only local entries; no provider callback, admission wait or native lease operation holds it.
         self.registry
@@ -73,14 +78,14 @@ impl Drop for SnapshotLease {
     }
 }
 
-impl SnapshotLease {
-    pub fn sequence(&self) -> CommitSequence {
+impl<Boundary: SnapshotBoundary> SnapshotLease<Boundary> {
+    pub fn sequence(&self) -> Boundary {
         self.sequence
     }
 }
 
-impl SnapshotRegistry {
-    pub fn with_transport(transport: Arc<dyn SnapshotLeaseTransport>) -> Self {
+impl<Boundary: SnapshotBoundary> SnapshotRegistry<Boundary> {
+    pub fn with_transport(transport: Arc<dyn SnapshotLeaseTransport<Boundary>>) -> Self {
         Self {
             admission: Mutex::new(()),
             leases: Mutex::new(BTreeMap::new()),
@@ -111,8 +116,8 @@ impl SnapshotRegistry {
     pub fn capture(
         self: &Arc<Self>,
         control: &StorageReadControl,
-        read_sequence: impl FnOnce() -> VersionResult<CommitSequence>,
-    ) -> VersionResult<Arc<SnapshotLease>> {
+        read_sequence: impl FnOnce() -> VersionResult<Boundary>,
+    ) -> VersionResult<Arc<SnapshotLease<Boundary>>> {
         self.admitted(control, || {
             let sequence = read_sequence()?;
             let existing = {
@@ -132,11 +137,15 @@ impl SnapshotRegistry {
                 return Ok(lease);
             }
             // Final lease destruction removes its entry and releases this charge without another admission.
-            let memory = control.memory().reserve(
-                std::mem::size_of::<SnapshotLease>()
-                    + 2 * std::mem::size_of::<usize>()
-                    + std::mem::size_of::<(SnapshotLeaseKey, SnapshotLeaseEntry)>(),
-            )?;
+            let memory =
+                control.memory().reserve(
+                    std::mem::size_of::<SnapshotLease<Boundary>>()
+                        + 2 * std::mem::size_of::<usize>()
+                        + std::mem::size_of::<(
+                            SnapshotLeaseKey<Boundary>,
+                            SnapshotLeaseEntry<Boundary>,
+                        )>(),
+                )?;
             let native = self
                 .transport
                 .as_deref()
@@ -162,7 +171,7 @@ impl SnapshotRegistry {
     pub fn reclaim<T>(
         &self,
         control: &StorageReadControl,
-        remove_versions: impl FnOnce(Option<CommitSequence>) -> VersionResult<T>,
+        remove_versions: impl FnOnce(Option<Boundary>) -> VersionResult<T>,
     ) -> VersionResult<T> {
         self.admitted(control, || {
             let local = self.leases.lock().keys().next().map(|key| key.0);
@@ -175,6 +184,16 @@ impl SnapshotRegistry {
             let oldest = local.into_iter().chain(remote).min();
             remove_versions(oldest)
         })
+    }
+}
+
+impl<Boundary: SnapshotBoundary> Default for SnapshotRegistry<Boundary> {
+    fn default() -> Self {
+        Self {
+            admission: Mutex::new(()),
+            leases: Mutex::new(BTreeMap::new()),
+            transport: None,
+        }
     }
 }
 

@@ -238,6 +238,7 @@ fn failed_receipt_format_upgrade_reopens_as_one_complete_format_with_manual_owne
                 .unwrap();
             metadata.remove("receipt_limit").unwrap();
         }
+        remove_backup_metadata_for_predecessor(&transaction);
         transaction.commit().unwrap();
         drop(store);
         backend.fail_sync.store(true, Ordering::Relaxed);

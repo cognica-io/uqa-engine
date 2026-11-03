@@ -54,6 +54,7 @@ fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_owne
             .unwrap()
             .insert("format", predecessor.to_be_bytes().as_slice())
             .unwrap();
+        remove_backup_metadata_for_predecessor(&transaction);
         transaction.commit().unwrap();
         let upgraded = RedbRecordStore::new(Arc::clone(&store.database)).unwrap();
         let read = upgraded.database.begin_read().unwrap();
@@ -419,6 +420,7 @@ fn legacy_migration_preserves_manual_receipts_and_restore_preserves_the_limit() 
                 .unwrap();
             metadata.remove("receipt_limit").unwrap();
         }
+        remove_backup_metadata_for_predecessor(&transaction);
         transaction.commit().unwrap();
         (
             id,

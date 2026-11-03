@@ -6,6 +6,8 @@
 
 //! Provider-independent reads combine one pinned committed boundary with a fixed private command view.
 
+mod chunk;
+pub use chunk::RecordValueChunk;
 mod fingerprint;
 mod last;
 mod selected;
@@ -110,6 +112,17 @@ pub trait CommittedRecordSnapshot: Send + Sync {
     /// Take the monitor value another snapshot of this same sequence was captured at. Nothing was committed between the two captures, so this snapshot is the latest one for as long as the monitor returns that value. Returns false when the snapshot cannot change its value, and its holder then keeps the other snapshot instead. Keeping this one keeps what it has already read of its records.
     fn adopt_commit_monitor(&self, _monitor: u64) -> bool {
         false
+    }
+
+    /// Copy at most the destination length from one committed value, with its exact total length and revision. Every physical read closes before return, so callers may perform repository I/O or let writers progress between chunks. The caller owns and accounts for the destination allocation. The default borrows through `visit_value`; providers that materialize full values must override this method to offer bounded payload memory. Errors invalidate any bytes copied during the call.
+    fn read_value_chunk(
+        &self,
+        key: &[u8],
+        offset: usize,
+        output: &mut [u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordValueChunk>> {
+        chunk::read(self, key, offset, output, control)
     }
 
     /// Read a revision and tombstone marker without materializing its value when the provider supports key-only access.
@@ -304,6 +317,15 @@ pub fn retain_record_snapshot<T: CommittedRecordSnapshot + 'static>(
 }
 
 impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T> {
+    fn read_value_chunk(
+        &self,
+        key: &[u8],
+        offset: usize,
+        output: &mut [u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<RecordValueChunk>> {
+        self.snapshot.read_value_chunk(key, offset, output, control)
+    }
     fn sequence(&self) -> CommitSequence {
         self.snapshot.sequence()
     }

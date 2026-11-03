@@ -34,7 +34,16 @@ pub(super) fn write<'a>(
     } else {
         9
     };
-    output.write_all(&header[..length]).map_err(io_error)?;
+    let mut remaining = &header[..length];
+    while !remaining.is_empty() {
+        control.check()?;
+        match output.write(remaining) {
+            Ok(0) => return Err(io_error(std::io::ErrorKind::WriteZero.into())),
+            Ok(count) => remaining = &remaining[count..],
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(io_error(error)),
+        }
+    }
     let written = write_fields_image(fields, output, control.memory(), control.cancellation())
         .map_err(value_error)?;
     control.check()?;
@@ -50,14 +59,14 @@ pub fn read_document_image(
 ) -> StorageBackendResult<Budgeted<StoredDocument>> {
     control.check()?;
     let mut header = [0; 9];
-    input.read_exact(&mut header).map_err(io_error)?;
+    read_exact(input, &mut header, control)?;
     if &header[..8] != MAGIC || header[8] > 1 {
         return Err(invalid("document image version or metadata flag"));
     }
     let metadata = if header[8] == 1 {
         control.check()?;
         let mut xmin = [0; 4];
-        input.read_exact(&mut xmin).map_err(io_error)?;
+        read_exact(input, &mut xmin, control)?;
         DocumentMetadata::with_tuple_xmin(u32::from_le_bytes(xmin))
     } else {
         DocumentMetadata::default()
@@ -93,6 +102,23 @@ fn invalid(reason: &'static str) -> StorageBackendError {
 
 fn io_error(error: std::io::Error) -> StorageBackendError {
     StorageBackendError::backend("document image I/O", error)
+}
+
+fn read_exact(
+    input: &mut dyn Read,
+    mut bytes: &mut [u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    while !bytes.is_empty() {
+        control.check()?;
+        match input.read(bytes) {
+            Ok(0) => return Err(io_error(std::io::ErrorKind::UnexpectedEof.into())),
+            Ok(count) => bytes = &mut bytes[count..],
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(io_error(error)),
+        }
+    }
+    control.check()
 }
 
 fn value_error(error: ValueImageError) -> StorageBackendError {

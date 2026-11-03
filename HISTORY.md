@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Add versioned evaluated-value and memory-document image codecs for backup construction, preserving exact floating-point bits, opaque SQL datums, collection types, descriptor identities and tuple metadata. Large borrowed strings and binary payloads stream without another payload-sized allocation; decoded state remains under an explicit memory allowance. Complete Engine backup remains under implementation.
+- Add bounded committed-record reads and a streaming record/allocator cursor for backup image adapters. Physical scan windows include excluded keys in their limit, payload reads retain exact revisions across concurrent writes, and completion or failure immediately releases the captured cut.
+- Add joint SQLite record and autonomous identifier snapshots with short read windows, cross-process retention and durable capture in both mappings and all four file modes. Complete image export/import and public Engine backup APIs remain in progress.
+- Add Common Storage backup image codecs with ordered streaming inventories, immutable root descriptors, bounded parsing and authenticated frames. These format primitives support the ongoing online/incremental backup implementation; they do not expose Engine capture or restore yet.
+- Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
 

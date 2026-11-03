@@ -22,6 +22,7 @@ fn downgrade(database: &Database) {
         .unwrap()
         .insert("format", 49_u64.to_be_bytes().as_slice())
         .unwrap();
+    remove_backup_metadata_for_predecessor(&transaction);
     transaction.commit().unwrap();
 }
 
