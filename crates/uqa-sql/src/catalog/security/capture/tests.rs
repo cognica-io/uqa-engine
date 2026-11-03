@@ -14,6 +14,48 @@ use uqa_core::{
     CancellationToken,
 };
 
+#[test]
+fn durable_schema_capture_excludes_temporary_namespace_names_and_acl_capacity() {
+    let mut source = BTreeMap::from([
+        (
+            "Quoted.Schema".into(),
+            BoundSchemaSecurity::bootstrap("public"),
+        ),
+        (
+            "pg_temp".into(),
+            BoundSchemaSecurity::with_public_privileges(true),
+        ),
+    ]);
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut saved = None;
+    let baseline =
+        allocation_counter::measure(|| saved = Some(schemas(&source, &control).unwrap()));
+    let bytes = memory.used();
+    let expected = saved.take().unwrap().iter().cloned().collect::<Vec<_>>();
+    assert_eq!(memory.used(), 0);
+    for prefix in ["pg_temp_", "pg_toast_temp_"] {
+        let mut temporary = BoundSchemaSecurity::bootstrap("public");
+        temporary.acl = Some(vec![entries(SchemaPrivileges::ALL)[0].clone(); 16384]);
+        source.insert(format!("{prefix}{}", "x".repeat(1 << 20)), temporary);
+    }
+    let selected =
+        allocation_counter::measure(|| saved = Some(schemas(&source, &control).unwrap()));
+    assert_eq!(selected.bytes_total, baseline.bytes_total);
+    assert_eq!(selected.bytes_current, baseline.bytes_current);
+    assert_eq!(memory.used(), bytes);
+    assert_eq!(&**saved.as_ref().unwrap(), &expected);
+    drop(saved);
+    assert_eq!(memory.used(), 0);
+    token.cancel();
+    assert!(matches!(
+        schemas(&source, &control),
+        Err(SQLError::Cancelled(_))
+    ));
+    assert_eq!(memory.used(), 0);
+}
+
 fn entries<P: Copy + Default>(all: P) -> Vec<BoundAclEntry<P>> {
     vec![
         BoundAclEntry {

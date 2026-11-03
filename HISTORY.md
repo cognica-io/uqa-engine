@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Register immutable transaction table and sequence sources separately from private live state. Selected captures exclude temporary data and retain original table metadata, text/vector/value indexes and complete sequence definition/identity/authority records through transaction completion and Engine closure under independent memory and cancellation controls. Complete committed Engine backup remains under implementation.
+- Register immutable transaction table, sequence, type, schema, view and routine sources separately from private live state. Selected captures exclude temporary data and definitions before output admission, retaining original identities, authority, syntax, table metadata and text/vector/value indexes through transaction completion and Engine closure under independent memory and cancellation controls. Complete committed Engine backup remains under implementation.
 - Select immutable memory capture source sets under independent admission. Unselected source writes and retirement consume no capture payload allowance; replacement selections preserve earlier cuts. Complete committed Engine backup remains under implementation.
 - Separate immutable memory transaction data from live table owners so retained generations survive rollback, replacement and closure without pinning later table contents. Complete admitted committed backup capture remains under implementation.
 - Exclude temporary views before allocating durable memory catalog images, preserving permanent and unlogged definitions under independent capture limits through rollback, replacement and Engine closure. Complete committed Engine backup remains under implementation.

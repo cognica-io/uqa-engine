@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -38945,6 +38945,98 @@
       "capability": "Sequence capture during private callback",
       "workload": "Hold a callback after private sequence DDL and a savepoint beside a temporary ACL with 16,384 entries; capture under 8 KiB.",
       "invariant": "Capture does not wait for callback completion or charge excluded authority; original sequence metadata survives completion and source closure with complete lease release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_types_exclude_temporary_names_and_authority_before_output_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests/durable.rs",
+      "capability": "Durable type namespace selection",
+      "workload": "Capture domain, enum, composite, range and shell catalogs before and after adding one-MiB temporary names and 16,384-entry temporary ACLs.",
+      "invariant": "Excluded definitions add no output allocation; original durable definitions and identities remain exact and cancellation releases all charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_type_catalogs_reject_every_insufficient_allowance_and_release_partial_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests/durable.rs",
+      "capability": "Complete type catalog admission",
+      "workload": "Try every allowance below each of five complete type catalog footprints, then admit exactly that footprint.",
+      "invariant": "Every insufficient attempt fails without partial leases; exact admission succeeds and final ownership release returns the full allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_schema_capture_excludes_temporary_namespace_names_and_acl_capacity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/tests.rs",
+      "capability": "Durable schema authority selection",
+      "workload": "Capture original schema authority beside temporary namespace names exceeding one MiB and large temporary ACLs.",
+      "invariant": "Temporary namespaces contribute no retained capacity or payload; selected tuple and authority values remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_routines_borrow_quoted_names_and_exclude_temporary_bodies_before_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Durable routine namespace selection",
+      "workload": "Compare capture allocation before and after adding quoted temporary namespace keys and one-MiB routine bodies, including dotted and escaped identifiers.",
+      "invariant": "Namespace decoding allocates no intermediate strings; temporary bodies add no retained allocation and permanent temporary-looking local names survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_routines_reject_invalid_catalog_names_with_the_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Controlled routine registry diagnostics",
+      "workload": "Capture a malformed stored routine key under zero and sufficient diagnostic allowances.",
+      "invariant": "The original memory denial remains observable and malformed keys cannot be interpreted as durable names.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_catalog_sources_preserve_original_definitions_after_unread_retirement",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/catalogs.rs",
+      "capability": "Original transaction definition generations",
+      "workload": "Capture unread type, schema, view and routine roots beside private table/catalog writes and a savepoint; COMMIT or ROLLBACK, replace the schema and close.",
+      "invariant": "All eight definition families retain original identities and values with matching table data; raw roots release and detached results retain original cancellation.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_catalog_sources_exclude_temporary_definitions_during_a_private_callback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/catalogs.rs",
+      "capability": "Definition capture during private callback",
+      "workload": "Hold a private callback and savepoint beside a one-MiB temporary domain default, temporary routine and view; capture under 64 KiB.",
+      "invariant": "Capture completes before the callback, excludes temporary/private definitions and releases every lease after source and result closure.",
       "case_names": [
         ""
       ]

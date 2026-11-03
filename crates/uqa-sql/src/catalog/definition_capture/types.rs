@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Stored type capture copies complete definitions without declaration replay or identity allocation.
+//! Durable type catalogs exclude temporary namespaces before copying complete definitions.
 
 use crate::{plan::copy::SyntaxProduction, SQLError};
 use std::collections::BTreeMap;
@@ -20,8 +20,16 @@ macro_rules! capture_types {
 
         pub fn $name(values: &BTreeMap<String, $ty>, control: &ProductionControl<'_>) -> Result<Produced<Vec<(String, $ty)>>, SQLError> {
             let output = SyntaxProduction::new(*control);
-            let mut copied = output.vector(values.len())?;
+            let count = values.values().try_fold(0, |count, value| {
+                output.check()?;
+                Ok::<_, SQLError>(count + usize::from(!crate::catalog::temporary_namespace::is_temporary_schema_name(&value.identity.schema)))
+            })?;
+            let mut copied = output.vector(count)?;
             for (name, value) in values {
+                output.check()?;
+                if crate::catalog::temporary_namespace::is_temporary_schema_name(&value.identity.schema) {
+                    continue;
+                }
                 copied.push((output.text(name)?, output.capture_definition(value)?))?;
             }
             let copied = copied.finish()?;

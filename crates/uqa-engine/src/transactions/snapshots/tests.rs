@@ -10,6 +10,7 @@ use uqa_core::RelationIdentity;
 use uqa_storage::read_control::StorageReadControl;
 
 mod capture;
+mod catalogs;
 mod sequences;
 
 fn sql(engine: &Engine, text: &str) {

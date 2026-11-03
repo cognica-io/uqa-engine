@@ -18,10 +18,13 @@ use uqa_storage::{
     StorageBackendResult,
 };
 
+mod catalogs;
+
 pub(crate) struct SnapshotSources {
     // Retire membership before the catalog sources it selects.
     tables: SnapshotTableSources,
     sequences: MemoryCaptureCell<SequenceReadSnapshot>,
+    catalogs: catalogs::CatalogSources,
 }
 
 impl SnapshotSources {
@@ -41,11 +44,14 @@ impl SnapshotSources {
                 memberships: durable.role_memberships.clone(),
             },
         })?;
+        let catalogs = catalogs::CatalogSources::new(&registry, durable)?;
         let mut sources = Self {
             tables: SnapshotTableSources::new(registry, tables)?,
             sequences,
+            catalogs,
         };
         sources.tables.select(&sources.sequences.key()?)?;
+        sources.catalogs.select(&mut sources.tables)?;
         Ok(sources)
     }
 }
@@ -61,6 +67,7 @@ type SequenceKey = uqa_storage::memory_capture::MemoryCaptureKey<
 pub(crate) struct SnapshotCut {
     pub(crate) tables: super::SnapshotTableCut,
     pub(crate) sequences: uqa_core::memory::Budgeted<SequenceKey>,
+    pub(crate) catalogs: uqa_core::memory::Budgeted<catalogs::CatalogKeys>,
 }
 
 #[cfg(test)]
@@ -82,10 +89,12 @@ impl SnapshotSources {
         let memory = control
             .memory()
             .reserve(size_of::<SequenceKey>() + key.retained_source_bytes())?;
+        let catalogs = self.catalogs.keys(control)?;
         let tables = self.tables.capture(control)?;
         Ok(SnapshotCut {
             tables,
             sequences: uqa_core::memory::Budgeted::new(key, memory),
+            catalogs,
         })
     }
 }

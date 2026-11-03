@@ -62,5 +62,12 @@ pub fn is_temporary_schema_name(name: &str) -> bool {
     name.starts_with(TEMPORARY_SCHEMA_PREFIX) || name.starts_with(TEMPORARY_TOAST_SCHEMA_PREFIX)
 }
 
+/// Inspect an already validated, possibly quoted namespace without copying its decoded name.
+pub fn is_temporary_schema_reference(name: uqa_core::RelationName<'_>) -> bool {
+    [TEMPORARY_SCHEMA_PREFIX, TEMPORARY_TOAST_SCHEMA_PREFIX]
+        .iter()
+        .any(|prefix| name.chars().take(prefix.len()).eq(prefix.chars()))
+}
+
 #[cfg(test)]
 mod tests;

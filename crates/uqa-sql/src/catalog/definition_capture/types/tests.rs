@@ -20,6 +20,8 @@ use uqa_core::{
     RelationIdentity, Value,
 };
 
+mod durable;
+
 fn acl() -> Option<Vec<ObjectAclEntry>> {
     Some(vec![ObjectAclEntry {
         role: None,
