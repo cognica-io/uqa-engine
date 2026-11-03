@@ -14,6 +14,15 @@ use super::{
 };
 
 impl InvertedIndex for MemoryInvertedIndex {
+    fn write_image_document(
+        &self,
+        doc_id: DocId,
+        output: &mut dyn std::io::Write,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        super::image::write(self, doc_id, output, control)
+    }
+
     fn field_stats_scalar_budgeted(
         &self,
         field: &str,

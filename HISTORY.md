@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add evaluated memory text-document image output and controlled reconstruction, preserving duplicate token graph edges, raw UTF-16 terms, original offsets, historical analyzer revisions and normalization lengths without reanalysis. Complete analyzer-resource images and Engine backup integration remain under implementation.
+
 - Add a Common Storage memory-capture owner that preserves an immutable source before its first subsequent write, without walking sources at capture registration. Each cut retains its own allowance and terminal failure; a failed backup does not consume an ordinary source write. Complete Engine transaction integration remains under implementation.
 
 - Add controlled memory-document snapshots that admit a retained generation without scanning or copying its rows. Snapshots preserve original cancellation and memory ownership through source replacement, clearing and closure; image output uses a separate bounded working allowance.

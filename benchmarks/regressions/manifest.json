@@ -4,6 +4,123 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "evaluated_text_images_keep_wire_identity_duplicates_raw_terms_and_historical_metadata",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Evaluated text wire identity",
+      "workload": "Import independent emitted/overlap fixtures containing a raw UTF-16 key, duplicate graph edges and historical field metadata.",
+      "invariant": "Output bytes, exact occurrences and counters match the independent fixture; final ownership releases the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_preserve_lazy_cuts_and_corpus_statistics_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Memory text capture images",
+      "workload": "Capture a real synonym index, replace rows and search bindings, remove documents and close the source before reconstruction.",
+      "invariant": "Selected images, empty-field membership, Unicode/overlap metadata and corpus statistics remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_image_rejection_is_atomic_for_malformed_and_truncated_units",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text image input admission",
+      "workload": "Reject invalid tags, metadata, order, repeated fields/terms, extreme lengths, invalid occurrences, trailing bytes and every truncated prefix.",
+      "invariant": "Every rejected unit preserves prior documents and exact retained allowance; no partial document is published.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_image_admission_preserves_prior_documents_and_exact_retention",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text image memory admission",
+      "workload": "Import with zero through sufficient remaining allowance, then attempt a duplicate document.",
+      "invariant": "Underfunded input fails with its memory error without changing previous state or leaking scratch; successful owners retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_stream_large_occurrence_lists_without_export_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Bounded text image output",
+      "workload": "Export a real document with 32,768 occurrences to an observing writer under a zero-byte scratch allowance.",
+      "invariant": "Export allocates no heap scratch, writes over 1 MiB in calls of at most 4 KiB and rejects underfunded reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_keep_original_cancellation_between_io_attempts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text image cancellation",
+      "workload": "Cancel during the first partial or interrupted read/write, including a retained source with a separate output allowance.",
+      "invariant": "Only one underlying I/O attempt occurs; the original typed cancellation and existing retained state survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_do_not_resolve_or_run_deferred_analyzers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Evaluated text reconstruction",
+      "workload": "Import and export exact historical postings with an unresolved analyzer configuration that fails compilation.",
+      "invariant": "Data reconstruction succeeds without resolving or running the analyzer; explicit later resolution still reports its error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_images_validate_original_offsets_and_graph_edges_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests.rs",
+      "capability": "Text source coordinates",
+      "workload": "Corrupt original UTF-8/UTF-16 bounds and graph edge length/position in an actual Unicode image.",
+      "invariant": "Invalid units publish no document and release scratch; the valid original image remains byte-identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "evaluated_text_image_publication_retains_exact_corpus_nodes_and_buffer_capacities",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/retained/tests.rs",
+      "capability": "Text image retention transfer",
+      "workload": "Append three evaluated documents with shared posting keys and inspect independently enumerated corpus capacities.",
+      "invariant": "The retained charge equals every live map node and actual buffer capacity, excluding retired staging and duplicate global keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "memory_capture_registration_does_not_visit_sources_and_writes_preserve_each_cut_once",
       "cases": 1,
       "source": "crates/uqa-storage/src/memory_capture/tests.rs",
