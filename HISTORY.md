@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add a Common Storage memory-capture owner that preserves an immutable source before its first subsequent write, without walking sources at capture registration. Each cut retains its own allowance and terminal failure; a failed backup does not consume an ordinary source write. Complete Engine transaction integration remains under implementation.
+
 - Add controlled memory-document snapshots that admit a retained generation without scanning or copying its rows. Snapshots preserve original cancellation and memory ownership through source replacement, clearing and closure; image output uses a separate bounded working allowance.
 
 - Add versioned evaluated-value and memory-document image codecs for backup construction, preserving exact floating-point bits, opaque SQL datums, collection types, descriptor identities and tuple metadata. Large borrowed strings and binary payloads stream without another payload-sized allocation; decoded state remains under an explicit memory allowance. Complete Engine backup remains under implementation.

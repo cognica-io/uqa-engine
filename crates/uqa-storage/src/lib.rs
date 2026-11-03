@@ -31,6 +31,7 @@ pub mod index_types;
 pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
+pub mod memory_capture;
 pub mod mvcc;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 #[allow(unsafe_code)]

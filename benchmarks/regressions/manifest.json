@@ -4,6 +4,149 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "memory_capture_registration_does_not_visit_sources_and_writes_preserve_each_cut_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture registration and generations",
+      "workload": "Compare one and 8,192 sources, make repeated writes, then retain independent cuts and close them.",
+      "invariant": "Registration allocates the same bytes and visits no source; each changed cell freezes once per cut and retains the original value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_reads_reuse_frozen_values_while_the_source_write_guard_is_live",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Retained memory observation",
+      "workload": "Retain a source, mutate it while holding its write guard, then close the source and cut.",
+      "invariant": "Captured reads reuse the original immutable value without waiting for the live source and retain their allowance after cut destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_waiting_reads_select_a_newly_archived_value_before_the_writer_finishes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory read/write capture interleaving",
+      "workload": "Pause a writer after locking the source, observe the reader waiting, then preserve and mutate while retaining the write guard.",
+      "invariant": "The waiting reader reselects the archived old value and finishes before the writer releases its source lock.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_registration_rejects_incomplete_admission_without_retained_leases",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory cut admission",
+      "workload": "Register with zero, partial, one-byte-short and exact capture-object/index allowances.",
+      "invariant": "Only complete admission succeeds; rejected and dropped cuts release every registration and memory lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_retention_failure_is_terminal_without_consuming_the_source_write",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory cut failure ownership",
+      "workload": "Exhaust a cut during source preservation after retaining another source, then cancel and observe it repeatedly.",
+      "invariant": "The original memory error stays terminal, archived owners retire, and the ordinary source write completes without repeated freeze attempts.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_cancellation_retires_the_archive_and_preserves_other_cuts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Independent memory capture cancellation",
+      "workload": "Retain two cuts, cancel one, mutate, reset its cancellation token and inspect both.",
+      "invariant": "Only the cancelled cut becomes terminal; its archive retires and the other cut preserves its own original state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_rejects_foreign_and_later_cells_without_invalidating_its_sources",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture membership",
+      "workload": "Read cells from another registry and cells created after the cut, then mutate those cells and read an original source.",
+      "invariant": "Invalid membership cannot expose a newer value or invalidate the original cut, and later cells do not trigger preservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_registration_waits_for_mapped_writes_and_observes_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture admission waits",
+      "workload": "Hold a mapped write guard and observe capture admission, with cancellation or normal release.",
+      "invariant": "Cancellation returns while the writer remains locked; successful registration occurs only after the final mapped mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_nested_cell_writes_keep_registration_outside_the_complete_guard_scope",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Nested memory write ownership",
+      "workload": "Begin capture admission while a writer holds its first cell, then acquire and mutate a second cell.",
+      "invariant": "Nested writes finish without a waiting-capture deadlock; the cut observes both completed mutations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_last_handle_can_close_during_write_preservation_without_leaking_registration",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Memory capture retirement race",
+      "workload": "Pause an actual freeze callback, drop the last external cut handle, then finish the source write.",
+      "invariant": "Final internal retirement cannot deadlock on registration ownership and releases every cut lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_real_document_and_text_sources_keep_original_values_and_retention",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Actual memory document and text preservation",
+      "workload": "Register actual controlled document and inverted-index sources, replace them and close every source before reading the captured state.",
+      "invariant": "Original fields and term frequencies survive source replacement/loss; reads retain their original cancellation and release all charges at final close.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "memory_document_capture_pins_large_generations_without_a_corpus_copy",
       "cases": 1,
       "source": "crates/uqa-storage/src/document_store/memory/snapshot/tests.rs",
