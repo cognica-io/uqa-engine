@@ -38,7 +38,7 @@ mod unicode;
 
 pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
-    AnalyzerResource, AnalyzerResourceKind, CompiledAnalyzer,
+    AnalyzerResource, AnalyzerResourceKind, CapturedAnalyzer, CompiledAnalyzer,
 };
 pub use char_filter::CharFilter;
 pub use descriptor::{AnalyzerDescriptor, AnalyzerFingerprint, AnalyzerLimits, TokenLengthPolicy};

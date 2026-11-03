@@ -16,10 +16,13 @@ use std::{
     sync::Arc,
 };
 use uqa_analysis::{
-    AnalyzerDescriptor, AnalyzerResourceInput, AnalyzerResourceKind, AnalyzerResources,
-    CompiledAnalyzer,
+    AnalyzerDescriptor, AnalyzerResource, AnalyzerResourceInput, AnalyzerResourceKind,
+    AnalyzerResources, CompiledAnalyzer,
 };
 use uqa_core::memory::BudgetedVec;
+
+mod capture;
+pub use capture::AnalyzerImageSnapshot;
 
 const MAGIC: &[u8; 8] = b"UQAANA01";
 
@@ -33,15 +36,31 @@ pub fn write_analyzer_image(
     writer: &mut dyn Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
+    write_parts(
+        analyzer.descriptor().canonical_json(),
+        analyzer.dictionary_resources().count(),
+        analyzer.dictionary_resources(),
+        writer,
+        control,
+    )
+}
+
+fn write_parts<'a>(
+    descriptor: &str,
+    count: usize,
+    resources: impl Iterator<Item = AnalyzerResource<'a>>,
+    writer: &mut dyn Write,
+    control: &StorageReadControl,
+) -> StorageBackendResult<u64> {
     let mut output = ImageOutput {
         writer,
         control,
         written: 0,
     };
     output.bytes(MAGIC)?;
-    output.sized(analyzer.descriptor().canonical_json().as_bytes())?;
-    output.count(analyzer.dictionary_resources().count())?;
-    for resource in analyzer.dictionary_resources() {
+    output.sized(descriptor.as_bytes())?;
+    output.count(count)?;
+    for resource in resources {
         let kind = match resource.kind() {
             AnalyzerResourceKind::Nori => 0,
             AnalyzerResourceKind::Kuromoji => 1,

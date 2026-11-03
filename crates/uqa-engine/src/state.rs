@@ -207,8 +207,14 @@ pub(super) struct DurableCatalogState {
         BTreeMap<RelationIdentity, BoundSequenceSecurity>,
         Vec<(RelationIdentity, BoundSequenceSecurity)>,
     >,
-    pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
-    pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
+    pub(super) named_analyzers: CatalogCell<
+        BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>,
+        resource_capture::CapturedResources<uqa_storage::analyzer_image::AnalyzerImageSnapshot>,
+    >,
+    pub(super) table_field_analyzers: CatalogCell<
+        TableFieldAnalyzerRegistry,
+        uqa_storage::analyzer_binding::capture::CapturedFieldAnalyzerBindings,
+    >,
     pub(super) foreign_wrappers: CatalogCell<
         uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
         Vec<(

@@ -14,6 +14,8 @@ use uqa_analysis::{AnalyzerResources, CompiledAnalyzer};
 
 use crate::{AnalyzerPhase, InvertedIndex, StorageBackendError, StorageBackendResult};
 
+pub mod capture;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalyzerBindingOwner {

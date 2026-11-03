@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain resolved memory analyzer images and independent field bindings through replacement, rollback and closure. Captures preserve exact descriptor/dictionary bytes and historical index/search revisions without retaining compiled pipelines or source import allowances.
+
 - Preserve materialized memory path indexes through graph changes, rollback, replacement and closure, retaining exact label sequences and evaluated vertex pairs under independent capture allowances.
 
 - Retain memory foreign-wrapper, server and table definitions with exact handler and validator bindings, public identities, dropped attributes, constraints and option order. Captures own their default values independently and preserve selected definitions through rollback, replacement and closure without reading remote data.

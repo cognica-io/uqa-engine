@@ -37994,6 +37994,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_capture_detaches_resolved_descriptor_without_reopening_files_or_retaining_pipeline",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources/capture/tests.rs",
+      "capability": "Resolved analyzer capture",
+      "workload": "Delete a resolved synonym source, measure capture allocation and destroy the compiled pipeline.",
+      "invariant": "Canonical descriptor bytes survive without file resolution or a retained pipeline; live allocation equals admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_capture_rejects_unfunded_and_cancelled_descriptor_copies_without_leases",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources/capture/tests.rs",
+      "capability": "Analyzer descriptor admission",
+      "workload": "Capture an ordinary descriptor under zero memory and original cancellation.",
+      "invariant": "Both typed failures release every partial lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_capture_keeps_every_enabled_dictionary_byte_and_independent_allowance",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources/capture/tests.rs",
+      "capability": "Analyzer dictionary capture",
+      "workload": "Copy every enabled language dictionary and deny its payload under a descriptor-sized allowance.",
+      "invariant": "Kinds, hashes and all encoded bytes remain exact in independent buffers; denial releases earlier descriptor allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_capture_image_preserves_bytes_after_source_loss_and_last_owner_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Captured analyzer framing",
+      "workload": "Capture an analyzer twice, drop its compiled source and independently retire snapshot clones.",
+      "invariant": "Captured output equals the original versioned image and each allowance survives only its own final owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_capture_image_retains_original_and_invoking_cancellation_between_short_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Captured analyzer controls",
+      "workload": "Cancel original or invoking controls during three-byte output attempts and deny capture under zero memory.",
+      "invariant": "Output stops with the original typed cancellation, independent scopes remain distinct and every lease retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_capture_image_releases_imported_dictionary_owners_before_snapshot_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Imported analyzer resource detachment",
+      "workload": "Import each enabled dictionary image, capture it, destroy its import owner and reconstruct from the retained image.",
+      "invariant": "Source input admission retires independently while exact image bytes and complete token observations survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_analyzer_capture_preserves_independent_sides_names_owner_and_last_phase",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/capture/tests.rs",
+      "capability": "Field analyzer binding capture",
+      "workload": "Capture distinct historical sides and all owner/phase states, including unnamed defaults, then retain one child.",
+      "invariant": "Keys, names, exact images and assignment metadata survive; retained image children keep original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_analyzer_capture_releases_prior_sides_when_a_late_name_is_denied_or_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/capture/tests.rs",
+      "capability": "Field analyzer admission",
+      "workload": "Capture an ordinary binding followed by a 32 KiB table key under insufficient memory and cancellation.",
+      "invariant": "Failed production releases previously constructed images, names and registry buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_analyzer_capture_keeps_named_and_historical_field_revisions_through_rollback_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/analyzers.rs",
+      "capability": "Memory analyzer registry lifecycle",
+      "workload": "Assign different index/search revisions under one name, roll back changes, replace the table/name and close the Engine.",
+      "invariant": "Named and historical field images stay exact; independently retained children preserve original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_analyzer_capture_preserves_replacement_and_independently_funded_images",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/analyzers.rs",
+      "capability": "Memory analyzer failure isolation",
+      "workload": "Replace a large-name analyzer while independent denied and funded cuts are active.",
+      "invariant": "Ordinary replacement succeeds, only the denied cut fails and the funded image retains the original revision.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
