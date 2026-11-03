@@ -1,6 +1,6 @@
 # Online and incremental backup implementation plan
 
-Status: design only, based on UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`). The [design](../design/online-and-incremental-backup.md) specifies an independent backup subsystem. Implementation depends on current storage/snapshot/restore owners, not on a replication or CDC implementation, journal, or API. There is no prerequisite feature PR.
+Status: implementation in progress under [#1322](https://github.com/cognica-io/uqa-engine/issues/1322). The [design](../design/online-and-incremental-backup.md) was established against UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`) and merged in [#1320](https://github.com/cognica-io/uqa-engine/pull/1320). Implementation depends on current storage/snapshot/restore owners, not on a replication or CDC implementation, journal, or API.
 
 ## Current scope and progress
 
@@ -8,7 +8,9 @@ Status: design only, based on UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5
 - [x] Define online full backup, content-based incremental comparison, complete independent inventory roots, verification, retention, and fresh-database restore.
 - [x] Separate full-backup delivery from incremental comparison and optional fingerprint acceleration, with owner-specific PR boundaries and acceptance.
 - [x] Verify document links, paragraph/fence layout, independent scope, and repository dependency, capability, and integration-harness policies.
-- [ ] Implement and qualify the delivery units below. None is implemented by this documentation change.
+- [ ] Implement and qualify the delivery units below. [PR #1323](https://github.com/cognica-io/uqa-engine/pull/1323) implements Common Storage image identities, bounded inventory/root codecs and protected frames with owner tests and a [preservation argument](../design/backup-image-format.md); final-source platform qualification and delivery of this unit remain pending. [PR #1324](https://github.com/cognica-io/uqa-engine/pull/1324) implements local pack publication, verification and prepared-operation recovery in a dependent unit. Provider capture/import, fresh-target activation and public backup operations remain unimplemented.
+
+The image contract unit passes 22 focused cases and all 1,009 Common Storage library cases, including admission under a writer's own frame limit when entries were constructed under a larger allowance. Strict Clippy for the library/tests, ownership and dependency policies, integration-harness and source-size checks, and 36 regression-runner verifier cases pass. Two exact work/memory/output gates are registered for automatic Linux/macOS qualification. The preceding Linux execution exposed cross-allowance snapshot retention; [PR #1325](https://github.com/cognica-io/uqa-engine/pull/1325) supplies the independently tested owner correction and is now this unit's prerequisite. Final-source platform execution and merge remain unchecked; these local codec results do not qualify a provider image.
 
 The current scope is embedded Rust and a local repository, with same-provider restore for memory, native SQLite, SQLite KV, and redb. Source operations continue during backup export. Completed archives restore without a running source. Cross-provider conversion, network storage, arbitrary-time recovery, in-place replacement, scheduling, and language-binding expansion remain separate work. No release date or version is assigned.
 
@@ -93,4 +95,4 @@ Run the relevant dependency, Engine capability, integration-harness, formatting,
 - [ ] Update the manual, HISTORY, discovery map, and examples for verified released behavior only.
 - [ ] Record final-source qualification and delivery in each implementation PR and this ledger, then remove merged branches.
 
-The design PR contains documentation only and requires no new runtime CI run. The product units above remain unimplemented; this plan does not transfer backup work to another feature or require that feature to ship first.
+The original design PR delivered documentation only. The image/repository codec unit is now in implementation and qualification; no codec result is evidence of a complete source capture or restore. This plan retains every product unit above independently of other features.

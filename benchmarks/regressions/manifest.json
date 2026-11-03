@@ -4,6 +4,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "ordered_inventory_streams_large_state_under_a_fixed_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/inventories.rs",
+      "capability": "Backup inventory streaming",
+      "workload": "10,000 ordered image units written to and read from a real temporary file under one 64-byte dynamic workspace allowance.",
+      "invariant": "Preserve every address and the complete logical image digest, encode exactly 1,600,065 bytes, retain no database-sized directory and release all charged buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "frame_admission_rejects_lengths_and_allowance_exhaustion_before_payload_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/frames.rs",
+      "capability": "Backup frame resource admission",
+      "workload": "Protected encoding and plain frame decoding with no available heap allowance, followed by an input advertising a 4 GiB decoded frame.",
+      "invariant": "Reject protected encoding before output and reject invalid or inadmissible decoding after only the 96-byte header, without allocating or reading a payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "independent_allowances_own_snapshot_retention_separately",
       "cases": 1,
       "source": "crates/uqa-storage/src/mvcc/retention/tests.rs",

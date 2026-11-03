@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Add Common Storage backup image codecs with ordered streaming inventories, immutable root descriptors, bounded parsing and authenticated frames. These format primitives support the ongoing online/incremental backup implementation; they do not expose Engine capture or restore yet.
+
 ### Fixed
 
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
