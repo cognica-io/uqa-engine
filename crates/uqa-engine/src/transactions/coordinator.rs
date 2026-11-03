@@ -336,7 +336,7 @@ impl Engine {
         session_snapshot: &SessionStateSnapshot,
     ) -> Result<
         (
-            Option<EngineDataSnapshot>,
+            Option<std::sync::Arc<EngineDataSnapshot>>,
             crate::row_locks::RowChangeBaseline,
         ),
         SQLError,
@@ -380,7 +380,7 @@ impl Engine {
         session_snapshot: &SessionStateSnapshot,
     ) -> Result<
         (
-            Option<EngineDataSnapshot>,
+            Option<std::sync::Arc<EngineDataSnapshot>>,
             crate::row_locks::RowChangeBaseline,
         ),
         SQLError,

@@ -41,6 +41,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain immutable transaction and savepoint generations during error recovery instead of copying the complete table catalog. Table definitions share their existing immutable roots through capture and rollback; later DDL detaches only the changed definition.
 - Share immutable stored-model owners across Engine catalog generations so publishing another model does not copy previously retained weights. Owned model results and transaction rollback keep their existing behavior.
 - Validate stored deep models through borrowed layer views shared with runtime construction, avoiding complete weight copies while preserving shape checks and semantic diagnostics.
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.

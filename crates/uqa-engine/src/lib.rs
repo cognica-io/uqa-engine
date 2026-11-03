@@ -349,7 +349,7 @@ struct TransactionFrame {
     xid_levels: Vec<Option<u32>>,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
-    data_snapshot: Option<EngineDataSnapshot>,
+    data_snapshot: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty_at_begin: TransactionDirtyState,
     prepared_changes: uqa_execution::statement::prepared::invalidation::PreparedInvalidationLog,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
@@ -422,7 +422,7 @@ struct TransactionSavepoint {
     storage_savepoint: StorageSavepointId,
     characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
-    data_snapshot: Option<EngineDataSnapshot>,
+    data_snapshot: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty: TransactionDirtyState,
     prepared_change_mark:
         uqa_execution::statement::prepared::invalidation::PreparedInvalidationMark,
@@ -556,41 +556,39 @@ impl Default for SessionRandomState {
     }
 }
 
-#[derive(Clone)]
 struct EngineDataSnapshot {
     tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
     durable: DurableCatalogSnapshot,
     foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>,
 }
 
-#[derive(Clone)]
 #[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
     state: Arc<TableState>,
-    security: state::BoundTableSecurity,
+    security: Arc<state::BoundTableSecurity>,
     storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
     vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
     value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>,
-    fts_fields: Vec<FieldName>,
-    columns: Vec<uqa_sql::ast::ColumnDef>,
+    fts_fields: Arc<Vec<FieldName>>,
+    columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: bool,
     /// One-past-the-last allocated document id. `u128` is intentional: it
     /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
     /// available final id and can never wrap or issue a duplicate.
     next_id: u128,
-    analyzer: Analyzer,
-    column_stats: uqa_planner::ColumnStatistics,
+    analyzer: Arc<Analyzer>,
+    column_stats: Arc<uqa_planner::ColumnStatistics>,
     column_stats_loaded: bool,
     column_stats_dirty: bool,
     statistics_maintenance: statistics::MaintenanceState,
-    table_checks: Vec<uqa_sql::ast::TableCheck>,
-    foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
-    key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
-    hierarchy: uqa_sql::ast::TableHierarchy,
-    row_type_array_name: Option<String>,
-    dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
+    table_checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
+    foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
+    key_constraints: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    hierarchy: Arc<uqa_sql::ast::TableHierarchy>,
+    row_type_array_name: Arc<Option<String>>,
+    dropped_attributes: Arc<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
     doc_count_cache: u64,
     doc_count_dirty: bool,
 }

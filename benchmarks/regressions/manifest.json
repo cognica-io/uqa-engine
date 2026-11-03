@@ -37019,6 +37019,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_recovery_retains_large_catalog_generations_without_metadata_copies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/failure/tests.rs",
+      "capability": "Shared transaction recovery generations",
+      "workload": "Build one-table and 64-table catalogs, then retain recovery states before and after a savepoint.",
+      "invariant": "Both recovery paths share the exact selected generation and allocate less than 64 KiB independent of retained table metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_generations_preserve_private_savepoint_and_failed_statement_state",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/failure/tests.rs",
+      "capability": "Immutable transaction generation isolation",
+      "workload": "Retain begin and savepoint generations through failed SQL, DDL, same-name table replacement, rollback, commit and Engine closure.",
+      "invariant": "Each retained generation preserves its original document image and column definitions while ordinary failed-transaction admission and savepoint recovery remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_generations_share_large_table_metadata_and_restore_original_roots",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/failure/tests.rs",
+      "capability": "Shared table definition roots",
+      "workload": "Capture a table with a 512-KiB default, alter its columns and default inside a transaction, then roll back and insert using the restored default.",
+      "invariant": "Capture allocates less than 64 KiB, metadata roots remain shared, rollback restores the original root and the complete original default is observed.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
