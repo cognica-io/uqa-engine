@@ -221,3 +221,20 @@ impl MemoryCaptureSource for IVFData {
         VectorImageSnapshot::new(self.snapshot_controlled(control)?, control)
     }
 }
+
+impl crate::vector_index::VectorIndexCapture for IVFIndex {
+    fn key(
+        &self,
+    ) -> StorageBackendResult<crate::memory_capture::MemoryCaptureKey<VectorImageSnapshot>> {
+        self.data.key()
+    }
+    fn captured(
+        &self,
+        capture: &MemoryCapture,
+    ) -> StorageBackendResult<Arc<Budgeted<VectorImageSnapshot>>> {
+        self.data.captured(capture)
+    }
+    fn retire(&self) {
+        drop(self.data.write());
+    }
+}

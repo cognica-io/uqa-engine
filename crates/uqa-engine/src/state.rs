@@ -25,7 +25,8 @@ use super::{
 };
 
 pub(super) struct StorageContext {
-    pub(super) tables: Arc<RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    pub(super) tables: Arc<CatalogCell<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    pub(super) memory_capture: Option<uqa_storage::memory_capture::MemoryCaptureRegistry>,
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
@@ -41,7 +42,8 @@ pub(crate) use uqa_execution::catalog::security::{
 impl StorageContext {
     pub(super) fn memory() -> Self {
         Self {
-            tables: Arc::new(RwLock::new(BTreeMap::new())),
+            tables: Arc::new(CatalogCell::new(BTreeMap::new())),
+            memory_capture: Some(uqa_storage::memory_capture::MemoryCaptureRegistry::new()),
             catalog: None,
             backend: None,
             provider: None,
@@ -55,7 +57,8 @@ impl StorageContext {
         provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
     ) -> Self {
         Self {
-            tables: Arc::new(RwLock::new(BTreeMap::new())),
+            tables: Arc::new(CatalogCell::new(BTreeMap::new())),
+            memory_capture: None,
             catalog: Some(catalog),
             backend: Some(backend),
             provider,
@@ -66,11 +69,45 @@ impl StorageContext {
     pub(super) fn shared_from(source: &Self) -> Self {
         Self {
             tables: Arc::clone(&source.tables),
+            memory_capture: source.memory_capture.clone(),
             catalog: source.catalog.clone(),
             backend: source.backend.clone(),
             provider: source.provider.clone(),
             document_identity_reader: Mutex::new(None),
         }
+    }
+
+    pub(super) fn memory_cell<T: uqa_storage::memory_capture::MemoryCaptureSource>(
+        &self,
+        value: T,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureCell<T>> {
+        match self.table_capture_registry(persistence) {
+            Some(registry) => registry.cell(value),
+            None => Ok(uqa_storage::memory_capture::MemoryCaptureCell::new(value)),
+        }
+    }
+
+    pub(super) fn table_capture_registry(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> Option<&uqa_storage::memory_capture::MemoryCaptureRegistry> {
+        self.memory_capture
+            .as_ref()
+            .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary)
+    }
+
+    pub(super) fn memory_vector_indexes(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::StorageBackendResult<
+        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
+    > {
+        let indexes = self.table_capture_registry(persistence).map_or_else(
+            uqa_storage::vector_index::VectorIndexes::default,
+            uqa_storage::vector_index::VectorIndexes::memory,
+        );
+        self.memory_cell(indexes, persistence)
     }
 }
 
@@ -726,5 +763,7 @@ impl EpochCoordinator {
     }
 }
 
+#[cfg(test)]
+mod memory_capture_tests;
 #[cfg(test)]
 mod tests;

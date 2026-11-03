@@ -321,9 +321,9 @@ impl Engine {
             object_id: crate::new_table_object_id()?,
             security: crate::state::CatalogCell::new(BoundTableSecurity::owner(owner.identity())),
             storage_generation: RwLock::new(crate::new_table_storage_generation()?),
-            document_store: RwLock::new(docs),
-            inverted_index: RwLock::new(inv),
-            vector_indexes: RwLock::new(uqa_storage::vector_index::VectorIndexes::default()),
+            document_store: self.storage.memory_cell(docs, persistence)?,
+            inverted_index: self.storage.memory_cell(inv, persistence)?,
+            vector_indexes: self.storage.memory_vector_indexes(persistence)?,
             fts_fields: crate::state::CatalogCell::new(fts_fields),
             columns: crate::state::CatalogCell::new(Vec::new()),
             columns_declared: crate::state::CatalogCell::new(false),
@@ -454,7 +454,7 @@ impl Engine {
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
         let field = field.into();
         let idx = self.build_vector_index_for_restore(table, &field, dimensions, spec)?;
-        t.vector_indexes.write().live_mut()?.insert(field, idx);
+        t.vector_indexes.write().live_mut()?.insert(field, idx)?;
         Ok(true)
     }
 
@@ -527,14 +527,14 @@ impl Engine {
             .vector_indexes
             .write()
             .live_mut()?
-            .insert(field.clone(), idx);
+            .insert(field.clone(), idx)?;
         if persist_schema && self.is_persistent() {
             if let Err(err) = self.try_save_table_schema(&table_name, &t) {
                 let mut vectors = t.vector_indexes.write();
-                let indexes = vectors.live_mut()?;
+                let mut indexes = vectors.live_mut()?;
                 indexes.remove(&field);
                 if let Some(old) = old {
-                    indexes.insert(field, old);
+                    indexes.insert(field, old)?;
                 }
                 return Err(err);
             }
@@ -685,7 +685,7 @@ impl Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let mut registrations = t.vector_indexes.write();
-        let idxs = registrations.live_mut().map_err(|error| {
+        let mut idxs = registrations.live_mut().map_err(|error| {
             uqa_execution::storage_errors::storage_error("write vector registrations", &error)
         })?;
         let Some(idx) = idxs.get_mut(field) else {
@@ -698,12 +698,11 @@ impl Engine {
             table,
             &t.columns.snapshot(),
             field,
-            idx.as_ref(),
+            &*idx,
             doc_id,
             uqa_execution::serializable::vector::VectorChange::Single(&vector),
         )?;
-        idx.as_mut()
-            .add(doc_id, vector)
+        idx.add(doc_id, vector)
             .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
         drop(registrations);
         self.note_table_data_changed();
@@ -740,7 +739,7 @@ impl Engine {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
         let mut registrations = t.vector_indexes.write();
-        let idxs = registrations.live_mut().map_err(|error| {
+        let mut idxs = registrations.live_mut().map_err(|error| {
             uqa_execution::storage_errors::storage_error("write vector registrations", &error)
         })?;
         let Some(idx) = idxs.get_mut(field) else {
@@ -753,12 +752,11 @@ impl Engine {
             table,
             &t.columns.snapshot(),
             field,
-            idx.as_ref(),
+            &*idx,
             doc_id,
             uqa_execution::serializable::vector::VectorChange::Tensor(&vectors),
         )?;
-        idx.as_mut()
-            .add_many(doc_id, vectors)
+        idx.add_many(doc_id, vectors)
             .map_err(|error| SQLError::Internal(format!("index document vectors: {error}")))?;
         drop(registrations);
         self.note_table_data_changed();

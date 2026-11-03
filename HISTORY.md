@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Register actual non-temporary memory Engine documents, text and vector indexes in their owning capture domain. Preserve unread sources on final closure and exact vector identities through replacement, removal and rollback, including IVF query retraining; share table membership roots without copying rows or names. Complete committed backup selection and public jobs remain in progress.
+
 - Preserve memory IVF state before every registered capture-domain mutation, including query-triggered retraining and probe changes. Export-only captures retain the original training state and controls after source closure; complete Engine backup integration remains under implementation.
 - Add exact stored-model backup images preserving every supported layer, parameter bit, label and gating value. Controlled private reconstruction validates the complete model and retains decoded allocation ownership; joint Engine backup integration remains under implementation.
 - Add exact analyzer-resource images that retain resolved descriptors and Korean/Japanese dictionary bytes without reopening files or consulting host caches during restore. Input validation, feature admission and retained encoded-resource memory remain explicit; joint Engine backup integration remains under implementation.

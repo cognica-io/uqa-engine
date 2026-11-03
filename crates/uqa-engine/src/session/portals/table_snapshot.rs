@@ -162,9 +162,9 @@ impl Engine {
             object_id: metadata.object_id(),
             security: crate::state::CatalogCell::new(metadata.security()),
             storage_generation: parking_lot::RwLock::new(metadata.storage_generation()),
-            document_store: parking_lot::RwLock::new(document_store),
-            inverted_index: parking_lot::RwLock::new(inverted_index),
-            vector_indexes: parking_lot::RwLock::new(vector_indexes),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(document_store),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inverted_index),
+            vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vector_indexes),
             fts_fields: crate::state::CatalogCell::from_snapshot(metadata.fts_fields.snapshot()),
             columns: crate::state::CatalogCell::from_snapshot(metadata.columns.snapshot()),
             columns_declared: crate::state::CatalogCell::from_snapshot(

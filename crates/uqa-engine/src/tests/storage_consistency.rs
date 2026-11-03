@@ -111,7 +111,7 @@ struct PortalSnapshotProbeStore {
     field_reads: Arc<std::sync::atomic::AtomicUsize>,
     doc_id_calls: Arc<std::sync::atomic::AtomicUsize>,
     catalog_was_unlocked: Arc<std::sync::atomic::AtomicBool>,
-    tables: std::sync::Weak<parking_lot::RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    tables: std::sync::Weak<crate::state::CatalogCell<BTreeMap<RelationIdentity, Arc<TableState>>>>,
 }
 
 impl PortalSnapshotProbeStore {

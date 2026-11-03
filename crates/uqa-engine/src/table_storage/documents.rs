@@ -738,8 +738,7 @@ impl Engine {
             })?
             .values_mut()
         {
-            idx.as_mut()
-                .delete(doc_id)
+            idx.delete(doc_id)
                 .map_err(|error| SQLError::Internal(format!("delete indexed vector: {error}")))?;
         }
         let documents = if existed {

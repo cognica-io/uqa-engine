@@ -106,7 +106,7 @@ impl Engine {
             .vector_indexes
             .write()
             .live_mut()?
-            .insert(field.to_owned(), index);
+            .insert(field.to_owned(), index)?;
         Ok(())
     }
 

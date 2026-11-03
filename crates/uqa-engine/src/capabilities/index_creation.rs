@@ -150,7 +150,7 @@ impl IndexRegistryPublication for Engine {
             .vector_indexes
             .write()
             .live_mut()?
-            .insert(field, index);
+            .insert(field, index)?;
         Ok(())
     }
 
@@ -189,7 +189,7 @@ impl IndexRegistryPublication for Engine {
                 .vector_indexes
                 .write()
                 .live_mut()?
-                .insert(field.into(), index);
+                .insert(field.into(), index)?;
         }
         Ok(())
     }

@@ -17,6 +17,8 @@ use uqa_core::{DocId, PostingList};
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod canonical;
+pub(crate) mod capture;
+pub use capture::VectorIndexCapture;
 mod collection;
 mod config;
 mod cosine;
@@ -34,7 +36,8 @@ pub(crate) use canonical::{
 };
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
-    RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
+    CapturedVectorIndexes, LiveVectorIndexesMut, RetainedVectorIndexesBuilder, VectorIndexSource,
+    VectorIndexes, VectorIndexesIter,
 };
 pub use config::{
     DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,
@@ -151,6 +154,20 @@ pub(crate) fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f32, no
 }
 
 pub trait VectorIndex: Send + Sync {
+    /// Transfer a writable memory index into its owning capture boundary before publication. Each concrete owner selects admission appropriate to its interior mutations. Unsupported providers reject this capability without changing their state.
+    fn into_memory_capture(
+        self: Box<Self>,
+        _registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Err(StorageBackendError::Other(
+            "memory capture registration is not supported by this vector owner".into(),
+        ))
+    }
+
+    fn memory_capture(&self) -> Option<&dyn VectorIndexCapture> {
+        None
+    }
+
     /// Retain an export-only source. The returned type exposes no query that could retrain an IVF snapshot. The enclosing Engine owner still establishes the committed cut before this capture.
     fn capture_image_with_control(
         &self,

@@ -52,6 +52,74 @@ fn scalar(registry: &MemoryCaptureRegistry, value: u64) -> MemoryCaptureCell<Sca
 }
 
 #[test]
+fn memory_capture_keys_preserve_retired_sources_without_retaining_live_owners() {
+    let registry = MemoryCaptureRegistry::new();
+    let cell = scalar(&registry, 7);
+    let key = cell.key().unwrap();
+    let control = StorageReadControl::with_limit(4096);
+    let cut = registry.capture(&control).unwrap();
+    assert!(key.retained(&cut).unwrap().is_none());
+    let foreign = MemoryCaptureRegistry::new().capture(&control).unwrap();
+    assert!(key.retained(&foreign).is_err());
+    drop(foreign);
+    let read = cell.read();
+    assert!(cell.try_write().is_none());
+    assert!(key.retained(&cut).unwrap().is_none());
+    assert_eq!(read.calls.load(Ordering::Relaxed), 0);
+    drop(read);
+    cell.try_write().unwrap().value = 8;
+    let frozen = key.retained(&cut).unwrap().unwrap();
+    assert_eq!(**frozen, 7);
+    let later = registry.capture(&control).unwrap();
+    let late = registry
+        .cell(Scalar {
+            value: 9,
+            calls: Arc::default(),
+            scratch: 0,
+        })
+        .unwrap();
+    assert!(late.key().unwrap().retained(&later).is_err());
+    drop(late);
+    drop(cell);
+    drop(registry);
+    assert_eq!(**key.retained(&later).unwrap().unwrap(), 8);
+    assert!(Arc::ptr_eq(&key.retained(&cut).unwrap().unwrap(), &frozen));
+    drop(later);
+    drop(cut);
+    assert!(control.memory().used() > 0);
+    drop(frozen);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn memory_capture_source_retirement_observes_original_limits_and_cancellation() {
+    let registry = MemoryCaptureRegistry::new();
+    let cell = scalar(&registry, 7);
+    let key = cell.key().unwrap();
+    let small = StorageReadControl::with_limit(1024);
+    let good = StorageReadControl::with_limit(8192);
+    let limited = registry.capture(&small).unwrap();
+    let saved = registry.capture(&good).unwrap();
+    cell.value.write().scratch = 2048;
+    drop(cell);
+    assert!(key.retained(&limited).is_err());
+    assert_eq!(**key.retained(&saved).unwrap().unwrap(), 7);
+    assert!(limited.check().is_err());
+    let cancelled = scalar(&registry, 8);
+    let cancelled_key = cancelled.key().unwrap();
+    let cancellation = StorageReadControl::with_limit(8192);
+    let cancelled_cut = registry.capture(&cancellation).unwrap();
+    cancellation.cancellation().cancel();
+    drop(cancelled);
+    assert!(cancelled_key.retained(&cancelled_cut).is_err());
+    assert_eq!(**key.retained(&saved).unwrap().unwrap(), 7);
+    drop((limited, saved, cancelled_cut));
+    assert_eq!(small.memory().used(), 0);
+    assert_eq!(good.memory().used(), 0);
+    assert_eq!(cancellation.memory().used(), 0);
+}
+
+#[test]
 fn memory_capture_unregistered_owners_allocate_no_domain_and_join_once() {
     let calls = Arc::default();
     let mut cell = None;

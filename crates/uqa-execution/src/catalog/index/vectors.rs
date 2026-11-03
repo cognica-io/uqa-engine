@@ -86,14 +86,14 @@ pub fn prepare_column_rewrite(
     field: &str,
     mut canonical: Box<dyn VectorIndex>,
 ) -> StorageBackendResult<()> {
-    let indexes = indexes.live_mut()?;
+    let mut indexes = indexes.live_mut()?;
     if let Some(mut old) = indexes.remove(field) {
         if old.index_kind() != "diskann" {
             old.clear()?;
         }
     }
     canonical.clear()?;
-    indexes.insert(field.into(), canonical);
+    indexes.insert(field.into(), canonical)?;
     Ok(())
 }
 

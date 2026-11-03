@@ -167,6 +167,13 @@ impl DiskANNMemoryIndex {
 }
 
 impl VectorIndex for DiskANNMemoryIndex {
+    fn into_memory_capture(
+        self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        crate::vector_index::capture::ExclusiveVectorCapture::register(self, registry)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

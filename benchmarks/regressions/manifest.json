@@ -36889,6 +36889,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_keys_preserve_retired_sources_without_retaining_live_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Retired memory source identity",
+      "workload": "Retain source keys through failed try-write admission, independent cuts, source mutation and destruction.",
+      "invariant": "Keys reject foreign and earlier cuts; source retirement preserves exact values and final release returns every allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_source_retirement_observes_original_limits_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Controlled memory source retirement",
+      "workload": "Drop live sources with independently successful, underfunded and cancelled captures.",
+      "invariant": "Retirement preserves the successful cut while failed cuts remain terminal and release all owned charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_preserves_all_owners_across_replacement_and_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Memory vector membership generations",
+      "workload": "Capture exact, IVF, HNSW and DiskANN fields, retain a removed owner, reuse its name, replace all membership and close the source.",
+      "invariant": "Each original physical image survives under its own allowance; mismatched cuts cannot resolve the captured membership and all charges retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_retains_ivf_query_transitions_before_collection_preservation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Vector query and membership ordering",
+      "workload": "Query a stale IVF index after capture but before the collection itself freezes, then clear its live data.",
+      "invariant": "The query preserves its original ranked result and the archive retains the pre-training image at its original cut.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_rejects_foreign_registration_without_changing_current_state",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Vector registration failure isolation",
+      "workload": "Reject an index already registered in another domain and exhaust backup retention before another normal mutation.",
+      "invariant": "Failed registration preserves existing membership; archive failure does not prevent source mutation, removal or final allowance retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_preserves_physical_sources_across_rollback_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Actual Engine physical capture adapters",
+      "workload": "Capture documents, text and each vector kind; run UPDATE, TRUNCATE, savepoint rollback, transaction rollback and same-name table replacement on another thread.",
+      "invariant": "Selected evaluated images and original table identities survive mutation and Engine closure, and final capture release returns its complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_retains_unread_sources_before_the_last_engine_owner_closes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Unread Engine source retirement",
+      "workload": "Close the final actual memory Engine and table owner before reading any selected source.",
+      "invariant": "Registered source retirement retains exact documents, text and reconstructable vectors without keeping the mutable Engine alive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_membership_registration_has_no_relation_or_document_copy",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Bounded Engine membership registration",
+      "workload": "Capture actual one-table and 128-table engines with eight-KiB rows, then publish another relation.",
+      "invariant": "Registration allocates less than four KiB and shares the immutable membership root without copying names, rows or table metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_failure_preserves_transaction_progress_and_other_cuts",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Engine archive failure isolation",
+      "workload": "Capture a 64-KiB row under small and sufficient independent allowances, then update and roll back a later deletion.",
+      "invariant": "The underfunded archive fails terminally while the other preserves exact original bytes and ordinary transaction progress remains intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_engine_capture_excludes_temporary_source_retention",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
+      "capability": "Temporary source capture exclusion",
+      "workload": "Capture while a large temporary table exists, then update, truncate, drop it and close the Engine.",
+      "invariant": "Temporary document, text and vector owners stay unregistered; their mutation and retirement add no backup retention.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

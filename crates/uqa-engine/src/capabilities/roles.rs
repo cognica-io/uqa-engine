@@ -157,7 +157,7 @@ impl RoleNotices for Engine {
     }
 }
 struct RoleTableRegistryRead<'a>(
-    parking_lot::RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+    parking_lot::MappedRwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
 );
 impl RoleTableSecurity for TableState {
     fn persistence(&self) -> uqa_sql::ast::RelationPersistence {

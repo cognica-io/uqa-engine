@@ -15,6 +15,13 @@ use crate::vector_index::VectorIndex;
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 impl VectorIndex for HNSWIndex {
+    fn into_memory_capture(
+        self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        crate::vector_index::capture::ExclusiveVectorCapture::register(self, registry)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

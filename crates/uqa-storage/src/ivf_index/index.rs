@@ -16,6 +16,18 @@ use crate::vector_index::VectorIndex;
 use crate::StorageBackendResult;
 
 impl VectorIndex for IVFIndex {
+    fn into_memory_capture(
+        mut self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        self.register_memory_capture(registry)?;
+        Ok(self)
+    }
+
+    fn memory_capture(&self) -> Option<&dyn crate::vector_index::VectorIndexCapture> {
+        Some(self)
+    }
+
     fn capture_image_with_control(
         &self,
         control: &crate::read_control::StorageReadControl,

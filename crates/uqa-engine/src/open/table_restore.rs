@@ -231,9 +231,9 @@ impl Engine {
             object_id: schema.object_id,
             security: crate::state::CatalogCell::new(security),
             storage_generation: RwLock::new(schema.storage_generation),
-            document_store: RwLock::new(docs),
-            inverted_index: RwLock::new(inv),
-            vector_indexes: RwLock::new(vectors.into()),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv),
+            vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vectors.into()),
             fts_fields: crate::state::CatalogCell::new(schema.fts_fields),
             columns_declared: crate::state::CatalogCell::new(
                 constraints.columns_declared.unwrap_or(!columns.is_empty()),

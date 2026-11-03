@@ -43,6 +43,13 @@ impl<T: Clone> CatalogCell<T> {
     pub(crate) fn write(&self) -> MappedRwLockWriteGuard<'_, T> {
         parking_lot::RwLockWriteGuard::map(self.0.write(), Arc::make_mut)
     }
+
+    #[cfg(test)]
+    pub(crate) fn try_write(&self) -> Option<MappedRwLockWriteGuard<'_, T>> {
+        self.0
+            .try_write()
+            .map(|guard| parking_lot::RwLockWriteGuard::map(guard, Arc::make_mut))
+    }
 }
 
 #[cfg(test)]

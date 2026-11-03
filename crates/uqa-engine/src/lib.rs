@@ -604,9 +604,11 @@ pub(crate) struct TableState {
     security: state::CatalogCell<state::BoundTableSecurity>,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: RwLock<[u8; 16]>,
-    pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
-    inverted_index: RwLock<Box<dyn InvertedIndex>>,
-    vector_indexes: RwLock<uqa_storage::vector_index::VectorIndexes>,
+    pub(crate) document_store:
+        uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
+    vector_indexes:
+        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
     fts_fields: state::CatalogCell<Vec<FieldName>>,
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
     columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,

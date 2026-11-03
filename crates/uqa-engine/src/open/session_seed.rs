@@ -106,10 +106,16 @@ impl Engine {
             object_id: source.object_id(),
             security: CatalogCell::from_snapshot(source.security.snapshot()),
             storage_generation: RwLock::new(source.storage_generation()),
-            document_store: RwLock::new(storage.backend.document_store(name)),
-            inverted_index: RwLock::new(storage.backend.inverted_index(name, analyzer)),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                storage.backend.document_store(name),
+            ),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                storage.backend.inverted_index(name, analyzer),
+            ),
             // Bind catalog-selected vector stores after installing the table, which DiskANN restoration needs for its owner and resource handles.
-            vector_indexes: RwLock::new(std::collections::BTreeMap::new().into()),
+            vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                std::collections::BTreeMap::new().into(),
+            ),
             fts_fields: CatalogCell::from_snapshot(source.fts_fields.snapshot()),
             columns: CatalogCell::from_snapshot(source.columns.snapshot()),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),

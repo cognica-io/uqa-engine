@@ -111,29 +111,7 @@ impl Engine {
         for table_snapshot in snapshot.tables.values() {
             let table = &table_snapshot.state;
             table.security.write().clone_from(&table_snapshot.security);
-            let document_store = table_snapshot
-                .document_store
-                .writable_snapshot()
-                .map_err(|err| Self::storage_tx_error("ROLLBACK document restore", &err))?;
-            let inverted_index = table_snapshot
-                .inverted_index
-                .writable_snapshot()
-                .map_err(|err| Self::storage_tx_error("ROLLBACK FTS restore", &err))?;
-            let mut vector_indexes = BTreeMap::new();
-            for (field, index) in &table_snapshot.vector_indexes {
-                vector_indexes.insert(
-                    field.clone(),
-                    index
-                        .writable_snapshot()
-                        .map_err(|err| Self::storage_tx_error("ROLLBACK vector restore", &err))?,
-                );
-            }
-            *table.document_store.write() = document_store;
-            *table.storage_generation.write() = table_snapshot.storage_generation;
-            *table.inverted_index.write() = inverted_index;
-            *table.vector_indexes.write().live_mut().map_err(|error| {
-                Self::storage_tx_error("ROLLBACK vector registrations", &error)
-            })? = vector_indexes;
+            table_snapshot.restore_stores()?;
             table
                 .fts_fields
                 .write()
@@ -195,6 +173,39 @@ impl Engine {
         self.durable.restore(&snapshot.durable);
         self.clear_regtype_output_cache();
         *self.extensions.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
+        Ok(())
+    }
+}
+
+impl TableDataSnapshot {
+    fn restore_stores(&self) -> Result<(), SQLError> {
+        let table = &self.state;
+        let document_store = self
+            .document_store
+            .writable_snapshot()
+            .map_err(|err| Engine::storage_tx_error("ROLLBACK document restore", &err))?;
+        let inverted_index = self
+            .inverted_index
+            .writable_snapshot()
+            .map_err(|err| Engine::storage_tx_error("ROLLBACK FTS restore", &err))?;
+        let mut vector_indexes = BTreeMap::new();
+        for (field, index) in &self.vector_indexes {
+            vector_indexes.insert(
+                field.clone(),
+                index
+                    .writable_snapshot()
+                    .map_err(|err| Engine::storage_tx_error("ROLLBACK vector restore", &err))?,
+            );
+        }
+        *table.document_store.write() = document_store;
+        *table.storage_generation.write() = self.storage_generation;
+        *table.inverted_index.write() = inverted_index;
+        table
+            .vector_indexes
+            .write()
+            .live_mut()
+            .and_then(|mut indexes| indexes.replace(vector_indexes))
+            .map_err(|error| Engine::storage_tx_error("ROLLBACK vector registrations", &error))?;
         Ok(())
     }
 }
