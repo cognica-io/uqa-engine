@@ -222,15 +222,7 @@ pub(in crate::mvcc) fn initialize_in(
         );
     }
     // Older catalogs could install their generic cache triggers on raw record tables. Internal persistence bookkeeping must never change the logical cache generations.
-    for table in [
-        "_uqa_mvcc_metadata",
-        "_uqa_mvcc_heads",
-        "_uqa_mvcc_runs",
-        "_uqa_mvcc_versions",
-        "_uqa_mvcc_version_metadata",
-        "_uqa_mvcc_transactions",
-        "_uqa_mvcc_identifiers",
-    ] {
+    for (table, _) in schema::TABLES {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             transaction.execute_batch(&format!(
                 "DROP TRIGGER IF EXISTS uqa_cache_{table}_{action}"
@@ -794,16 +786,7 @@ fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()>
             && !crate::btree_index::coverage::TABLES
                 .iter()
                 .any(|(table, _)| *table == name)
-            && !matches!(
-                name,
-                "_uqa_mvcc_metadata"
-                    | "_uqa_mvcc_heads"
-                    | "_uqa_mvcc_runs"
-                    | "_uqa_mvcc_versions"
-                    | "_uqa_mvcc_version_metadata"
-                    | "_uqa_mvcc_transactions"
-                    | "_uqa_mvcc_identifiers"
-            )
+            && !schema::TABLES.iter().any(|(table, _)| *table == name)
         {
             return Err(invalid("unmapped native table requires an explicit record family").into());
         }

@@ -47,11 +47,7 @@ pub(super) fn initialize(
     if legacy.is_some_and(|kind| kind != 1) {
         return Err(VersionError::InvalidEncoding("unexpected legacy KeyValue object").into());
     }
-    let unrelated: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN ('_metadata', '_meta') OR (type = 'table' AND name NOT IN ('_key_value', '_uqa_mvcc_metadata', '_uqa_mvcc_heads', '_uqa_mvcc_versions', '_uqa_mvcc_version_metadata', '_uqa_mvcc_transactions', '_uqa_mvcc_identifiers', '_uqa_mvcc_runs') AND name NOT GLOB 'sqlite_*'))",
-        [],
-        |row| row.get(0),
-    )?;
+    let unrelated = has_unrelated_tables(&transaction)?;
     if unrelated {
         return Err(VersionError::InvalidEncoding(
             "native or unrelated SQLite tables require their own record mapping",
@@ -75,6 +71,21 @@ pub(super) fn initialize(
     control.cancellation().check().map_err(VersionError::from)?;
     super::admission::commit(transaction, control)?;
     Ok(identity)
+}
+
+fn has_unrelated_tables(connection: &Connection) -> PhysicalResult<bool> {
+    let mut statement = connection.prepare("SELECT name FROM sqlite_schema WHERE name IN ('_metadata', '_meta') OR (type = 'table' AND name != '_key_value' AND name NOT GLOB 'sqlite_*')")?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let name = row
+            .get_ref(0)?
+            .as_str()
+            .map_err(|_| VersionError::InvalidEncoding("record table name is not UTF-8"))?;
+        if !schema::TABLES.iter().any(|(table, _)| *table == name) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn validate_mapping(connection: &Connection) -> PhysicalResult<()> {
