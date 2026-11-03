@@ -145,9 +145,7 @@ fn memory_engine_capture_preserves_physical_sources_across_rollback_replacement_
             "{method}"
         );
         assert_eq!(text_image(&***captured_text), text, "{method}");
-        let image = captured_vectors
-            .image("embedding", Some(&table.vector_indexes.read()), &cut)
-            .unwrap();
+        let image = captured_vectors.image("embedding", &cut).unwrap();
         let mut bytes = Vec::new();
         image
             .write_image(&mut bytes, &StorageReadControl::with_limit(16 << 20))
@@ -227,7 +225,7 @@ fn memory_engine_capture_retains_unread_sources_before_the_last_engine_owner_clo
             text
         );
         let vectors = vector_key.retained(&cut).unwrap().unwrap();
-        let image = vectors.image("embedding", None, &cut).unwrap();
+        let image = vectors.image("embedding", &cut).unwrap();
         let mut bytes = Vec::new();
         image
             .write_image(&mut bytes, &StorageReadControl::with_limit(1 << 20))

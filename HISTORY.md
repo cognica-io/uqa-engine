@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Read captured memory sources through stable weak identities, including unchanged vector indexes, without borrowing current table/index membership. Retain selected images across source retirement and same-name replacement, admit weak source storage and release future mutable payloads on closure.
+
 - Preserve memory routine and rewrite-rule generations with exact source/bound bodies, attributes, identities, OLD/NEW conditions and dependencies. Captures retain independent constants without compiling deferred bodies or invoking routines; rollback, replacement and closure preserve selected definitions.
 - Preserve memory views and evaluated materialized-view rows through rollback, replacement and closure. Captures retain exact stored query bindings, authority and value representations without executing the query or retaining execution-only analysis owners.
 

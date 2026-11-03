@@ -18,10 +18,9 @@ fn encoded(index: &dyn VectorIndex) -> Vec<u8> {
 fn encoded_capture(
     index: &super::capture::CapturedVectorIndexes,
     field: &str,
-    current: Option<&VectorIndexes>,
     cut: &crate::memory_capture::MemoryCapture,
 ) -> Vec<u8> {
-    let image = index.image(field, current, cut).unwrap();
+    let image = index.image(field, cut).unwrap();
     let mut bytes = Vec::new();
     image
         .write_image(&mut bytes, &StorageReadControl::with_limit(1 << 20))
@@ -102,17 +101,11 @@ fn memory_vector_membership_preserves_all_owners_across_replacement_and_source_r
         ["diskann", "exact", "hnsw", "ivf"]
     );
     for (name, bytes) in &expected {
-        assert_eq!(
-            &encoded_capture(&captured, name, Some(&source.read()), &cut),
-            bytes,
-            "{name}"
-        );
+        assert_eq!(&encoded_capture(&captured, name, &cut), bytes, "{name}");
     }
     let next = registry.capture(&control).unwrap();
-    assert!(captured
-        .image("exact", Some(&source.read()), &next)
-        .is_err());
-    assert!(captured.image("ivf", Some(&source.read()), &next).is_err());
+    assert!(captured.image("exact", &next).is_err());
+    assert!(captured.image("ivf", &next).is_err());
     let current = source
         .read()
         .iter()
@@ -128,19 +121,56 @@ fn memory_vector_membership_preserves_all_owners_across_replacement_and_source_r
     let next_captured = key.retained(&next).unwrap().unwrap();
     for (name, bytes) in current {
         assert_eq!(
-            encoded_capture(&next_captured, &name, None, &next),
+            encoded_capture(&next_captured, &name, &next),
             bytes,
             "{name}"
         );
     }
     for (name, bytes) in expected {
-        assert_eq!(
-            encoded_capture(&captured, name, None, &cut),
-            bytes,
-            "{name}"
-        );
+        assert_eq!(encoded_capture(&captured, name, &cut), bytes, "{name}");
     }
     drop((captured, next_captured, next, cut));
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(source_control.memory().used(), 0);
+}
+
+#[test]
+fn memory_vector_membership_reads_unchanged_sources_without_the_collection_guard() {
+    use crate::memory_capture::MemoryCaptureRegistry;
+    let registry = MemoryCaptureRegistry::new();
+    let source_control = StorageReadControl::with_limit(16 << 20);
+    let source = registry.cell(VectorIndexes::memory(&registry)).unwrap();
+    let mut expected = BTreeMap::new();
+    for (name, mut index) in capture_sources(&source_control) {
+        for id in 0..10 {
+            index.add(id, vec![id as f32, 10.0 - id as f32]).unwrap();
+        }
+        index.initialize().unwrap();
+        expected.insert(name, encoded(index.as_ref()));
+        source
+            .write()
+            .live_mut()
+            .unwrap()
+            .insert(name.into(), index)
+            .unwrap();
+    }
+    let control = StorageReadControl::with_limit(16 << 20);
+    let cut = registry.capture(&control).unwrap();
+    let captured = source.captured(&cut).unwrap();
+    // The collection remains exclusively borrowed while every unchanged child is first read through its captured identity.
+    let held = source.write();
+    for (name, bytes) in &expected {
+        assert_eq!(&encoded_capture(&captured, name, &cut), bytes, "{name}");
+    }
+    assert!(captured.image("absent", &cut).is_err());
+    drop(held);
+    drop((source, registry));
+    for (name, bytes) in expected {
+        assert_eq!(encoded_capture(&captured, name, &cut), bytes, "{name}");
+    }
+    control.cancellation().cancel();
+    assert!(captured.image("exact", &cut).is_err());
+    drop((captured, cut));
     assert_eq!(control.memory().used(), 0);
     assert_eq!(source_control.memory().used(), 0);
 }
@@ -179,10 +209,7 @@ fn memory_vector_membership_retains_ivf_query_transitions_before_collection_pres
     assert!(source.key().unwrap().retained(&cut).unwrap().is_none());
     assert_ne!(encoded(&source.read()["v"]), original);
     let captured = source.captured(&cut).unwrap();
-    assert_eq!(
-        encoded_capture(&captured, "v", Some(&source.read()), &cut),
-        original
-    );
+    assert_eq!(encoded_capture(&captured, "v", &cut), original);
     source
         .write()
         .live_mut()
@@ -191,10 +218,7 @@ fn memory_vector_membership_retains_ivf_query_transitions_before_collection_pres
         .unwrap()
         .clear()
         .unwrap();
-    assert_eq!(
-        encoded_capture(&captured, "v", Some(&source.read()), &cut),
-        original
-    );
+    assert_eq!(encoded_capture(&captured, "v", &cut), original);
 }
 
 #[test]

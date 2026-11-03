@@ -8,6 +8,8 @@ use super::*;
 use std::{collections::BTreeMap, sync::atomic::AtomicUsize, sync::mpsc, thread};
 use uqa_core::{memory::MemoryError, Value};
 
+mod keys;
+
 thread_local! {
     static ON_SOURCE_LOCKED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     static ON_SOURCE_WAIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
@@ -119,7 +121,7 @@ fn memory_capture_source_retirement_observes_original_limits_and_cancellation() 
     let good = StorageReadControl::with_limit(8192);
     let limited = registry.capture(&small).unwrap();
     let saved = registry.capture(&good).unwrap();
-    cell.value.write().scratch = 2048;
+    cell.value().write().scratch = 2048;
     drop(cell);
     assert!(key.retained(&limited).is_err());
     assert_eq!(**key.retained(&saved).unwrap().unwrap(), 7);

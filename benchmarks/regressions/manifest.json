@@ -38436,6 +38436,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "keys_read_unchanged_sources_and_preserve_the_selected_incarnation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory source key generation identity",
+      "workload": "Read an unchanged source, hold its writer, replace its identity and close all source owners.",
+      "invariant": "Reads reuse the selected immutable value; foreign cuts and later identities cannot substitute live values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "keys_do_not_retain_later_source_payloads_and_frozen_values_keep_their_controls",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory key ownership and payload growth",
+      "workload": "Capture 128 bytes, replace with 512 KiB, clone a key and close the source.",
+      "invariant": "Key clones allocate no bytes, later payload owners are released, and retained output keeps its original cancellation and lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_reads_keep_independent_admission_and_cancel_while_waiting_for_a_writer",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory key admission and cancellation",
+      "workload": "Read one source through independent limits, then deterministically cancel a reader waiting for a writer.",
+      "invariant": "Failed or cancelled cuts remain terminal, the independent capture stays exact and all leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_reads_racing_source_retirement_observe_the_completed_preservation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory key retirement ordering",
+      "workload": "Pause source retirement during freeze and concurrently read its weak identity.",
+      "invariant": "The source remains selectable until preservation completes; both reads share the exact frozen value and release admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "a_source_that_unwinds_during_retirement_cannot_leave_a_usable_incomplete_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Incomplete memory cut rejection",
+      "workload": "Unwind a source retirement, then read its key and cancel a cut with another archived source.",
+      "invariant": "The missing selected value invalidates the cut, releases its archive and remains the first terminal error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_reads_unchanged_sources_without_the_collection_guard",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Independent memory vector membership reads",
+      "workload": "Retain exact, IVF, HNSW and DiskANN membership and first-read unchanged children while the live collection is exclusively borrowed.",
+      "invariant": "Captured images match independently encoded original bytes without borrowing current membership and retain cancellation after source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "captured_membership_admits_weak_source_storage_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/capture.rs",
+      "capability": "Memory membership source storage admission",
+      "workload": "Capture vector membership, reject a second allowance one byte below its complete retention and close the source.",
+      "invariant": "Fixed weak source storage and copied names are reserved before publication; failure isolates the cut and final ownership releases every lease.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
