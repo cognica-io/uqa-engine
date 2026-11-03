@@ -158,6 +158,39 @@ fn retained_images_survive_source_changes_and_observe_original_cancellation() {
 }
 
 #[test]
+fn export_only_vector_captures_keep_exact_ivf_and_hnsw_state_after_live_queries() {
+    for mut source in sources() {
+        source.delete(9).unwrap();
+        let expected = encode(&*source);
+        let capture = StorageReadControl::with_limit(1 << 24);
+        let image = source.capture_image_with_control(&capture).unwrap();
+        source.search_knn(&[1.0, 0.0], 5).unwrap();
+        source.clear().unwrap();
+        drop(source);
+        let working = StorageReadControl::with_limit(1 << 24);
+        let used = capture.memory().used();
+        assert!(used > 0);
+        let full = capture
+            .memory()
+            .reserve(capture.memory().limit() - used)
+            .unwrap();
+        let mut bytes = Vec::new();
+        image.write_image(&mut bytes, &working).unwrap();
+        assert_eq!(bytes, expected);
+        drop(full);
+        let nested = image.clone();
+        drop(image);
+        capture.cancellation().cancel();
+        assert!(matches!(
+            nested.write_image(&mut Vec::new(), &working),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        drop(nested);
+        assert_eq!(capture.memory().used(), 0);
+    }
+}
+
+#[test]
 fn every_truncated_image_and_trailing_data_rejects_without_retained_allocations() {
     for source in sources() {
         let bytes = encode(&*source);

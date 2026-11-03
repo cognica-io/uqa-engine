@@ -151,6 +151,14 @@ pub(crate) fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f32, no
 }
 
 pub trait VectorIndex: Send + Sync {
+    /// Retain an export-only source. The returned type exposes no query that could retrain an IVF snapshot. The enclosing Engine owner still establishes the committed cut before this capture.
+    fn capture_image_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<image::VectorImageSnapshot> {
+        image::VectorImageSnapshot::from_index(self.snapshot_with_control(control)?, control)
+    }
+
     /// Stream this selected memory index's evaluated image. Unsupported owners reject the capability before output. Committed source capture and complete database activation belong to the enclosing backup lifecycle.
     fn write_image(
         &self,

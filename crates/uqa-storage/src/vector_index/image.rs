@@ -15,7 +15,10 @@ use crate::{
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError, MemoryReservation};
 
 mod exact;
+mod snapshot;
 pub(super) use exact::write as write_exact;
+pub use snapshot::VectorImageSnapshot;
+pub(crate) use snapshot::VectorImageSource;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -31,6 +34,23 @@ pub fn read_vector_image(
     reader: &mut dyn std::io::Read,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<Box<dyn VectorIndex>>> {
+    read_with_temporary(reader, control, None)
+}
+
+/// Decode an image using the destination's shared temporary-file allowance for future `DiskANN` builds. Import itself does not rebuild an index or consume that allowance.
+pub fn read_vector_image_with_temporary(
+    reader: &mut dyn std::io::Read,
+    control: &StorageReadControl,
+    temporary: &crate::diskann_index::build::DiskANNTemporaryBudget,
+) -> StorageBackendResult<Budgeted<Box<dyn VectorIndex>>> {
+    read_with_temporary(reader, control, Some(temporary))
+}
+
+fn read_with_temporary(
+    reader: &mut dyn std::io::Read,
+    control: &StorageReadControl,
+    temporary: Option<&crate::diskann_index::build::DiskANNTemporaryBudget>,
+) -> StorageBackendResult<Budgeted<Box<dyn VectorIndex>>> {
     control.check()?;
     let mut input = ImageInput { reader, control };
     if &input.array::<8>()? != MAGIC {
@@ -42,6 +62,20 @@ pub fn read_vector_image(
         0 => boxed(exact::read(&mut input, dimensions)?),
         1 => boxed(crate::ivf_index::image::read(&mut input, dimensions)?),
         2 => boxed(crate::hnsw_index::image::read(&mut input, dimensions)?),
+        3 => {
+            let default;
+            let temporary = if let Some(temporary) = temporary {
+                temporary
+            } else {
+                default = crate::diskann_index::build::DiskANNTemporaryBudget::new(
+                    crate::diskann_index::DiskANNIndexOptions::DEFAULT_TEMPORARY_BYTES,
+                );
+                &default
+            };
+            boxed(crate::diskann_index::memory::image::read(
+                &mut input, dimensions, temporary,
+            )?)
+        }
         _ => return Err(invalid()),
     };
     input.end()?;

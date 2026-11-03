@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add evaluated memory DiskANN images that retain sealed graphs, quantization, exact-side records and uncovered canonical changes without rebuilding. Export-only vector captures survive source mutation and closure; restored writers use independent future change identities. Complete Engine backup integration remains under implementation.
 - Add controlled evaluated memory vector images for exact, IVF and HNSW indexes, preserving tensor bits, trained state, graph topology and pending persistence without rebuilding indexes. Complete Engine backup integration remains under implementation.
 - Add evaluated memory graph images with controlled fresh reconstruction, preserving exact properties, named memberships, label allocation history and unused IDs. Derived graph indexes are validated and reconstructed by Graph; complete Engine backup integration remains under implementation.
 

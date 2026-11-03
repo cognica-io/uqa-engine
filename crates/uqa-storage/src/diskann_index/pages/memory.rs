@@ -15,6 +15,8 @@ use super::{
 use crate::diskann_index::format::{DiskANNGeneration, DiskANNManifest, PAGE_BYTES};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
+mod image;
+
 struct Records {
     records: BudgetedMap<DiskANNRecordKey, BudgetedVec<u8>>,
     graph: BudgetedMap<u64, BudgetedVec<u8>>,

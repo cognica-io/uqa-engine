@@ -4,6 +4,110 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "memory_diskann_empty_image_composes_existing_manifest_with_independent_wire_fields",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN outer wire identity",
+      "workload": "Decode independently assembled envelope and empty-owner fields around the existing manifest codec.",
+      "invariant": "Byte-identical output preserves the empty selected generation and releases all decoded admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_images_preserve_physical_metadata_changes_tensor_scores_and_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN physical and canonical fidelity",
+      "workload": "Capture a sealed graph with tensors, exact-side overflow, deletion, replacement and uncovered documents; close the source.",
+      "invariant": "Physical bytes, selected metadata, nearest/threshold scores and tensor support survive without rebuilding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_restore_retains_build_options_but_establishes_independent_future_origins",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN restored mutation lineage",
+      "workload": "Restore evaluated state, apply identical mutations to both writers, rebuild and retain the preceding image.",
+      "invariant": "Build options and query observations match while future origin and generation identities remain independent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_capture_is_constant_size_and_retains_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN retained image admission",
+      "workload": "Compare capture admission for one and 1024 documents, clear/close the source, export with source allowance fully reserved and cancel each retained participant.",
+      "invariant": "Capture cost is corpus-independent, output uses invoking workspace and final owners retire all retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_rejects_truncated_corrupt_and_unfunded_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN private import retirement",
+      "workload": "Reject every empty-image prefix, selected physical/canonical corruption, trailing bytes and partial memory limits.",
+      "invariant": "No incomplete or unfunded owner escapes and each failure releases the complete candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_restore_uses_the_destination_temporary_budget_without_import_rebuilds",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN destination build allowance",
+      "workload": "Import a populated image with zero temporary-file allowance and attempt explicit initialization afterward.",
+      "invariant": "Import performs no build; the later unfunded rebuild fails atomically and preserves the selected image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_images_reject_self_consistent_counts_with_missing_origin_changes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images.rs",
+      "capability": "Memory DiskANN canonical coverage validation",
+      "workload": "Remove every change entry while correcting its declared population and separately invalidate the construction record limit.",
+      "invariant": "Canonical/base origin comparison rejects hidden uncovered changes and invalid construction configuration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "export_only_vector_captures_keep_exact_ivf_and_hnsw_state_after_live_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Export-only evaluated vector capture",
+      "workload": "Retain exact, IVF and HNSW images before live query training, clear and source closure.",
+      "invariant": "Captured output remains byte-identical and capture allowance cannot escape through a queryable handle.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "exact_image_matches_independent_tensor_bytes_and_preserves_coordinate_bits",
       "cases": 1,
       "source": "crates/uqa-storage/src/vector_index/image/tests.rs",

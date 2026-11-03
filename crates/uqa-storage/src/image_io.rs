@@ -131,7 +131,13 @@ impl ImageInput<'_> {
     }
 
     pub fn bytes(&mut self) -> StorageBackendResult<Budgeted<Vec<u8>>> {
+        self.bytes_with_limit(usize::MAX)
+    }
+
+    /// Reject a declared payload beyond the owning format's ceiling before allocating it.
+    pub fn bytes_with_limit(&mut self, maximum: usize) -> StorageBackendResult<Budgeted<Vec<u8>>> {
         let length = self.count()?;
+        self.control.check_value_size(length, maximum)?;
         let mut bytes = BudgetedVec::new(self.control.memory());
         bytes.reserve(length)?;
         let mut buffer = [0; CHUNK];
