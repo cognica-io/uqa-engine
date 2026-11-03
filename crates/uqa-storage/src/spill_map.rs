@@ -112,8 +112,13 @@ impl<V: Record> Map<V> {
     }
 
     pub(crate) fn iter(&self) -> Iter<'_, V> {
+        self.iter_with_memory(&self.memory)
+    }
+
+    pub(crate) fn iter_with_memory<'a>(&'a self, memory: &'a MemoryBudget) -> Iter<'a, V> {
         Iter {
             map: self,
+            memory,
             after: None,
             done: false,
         }
@@ -421,6 +426,7 @@ impl<V: Record> Map<V> {
 
 pub(crate) struct Iter<'a, V> {
     map: &'a Map<V>,
+    memory: &'a MemoryBudget,
     after: Option<u128>,
     done: bool,
 }
@@ -431,7 +437,7 @@ impl<'a, V: Record> Iterator for Iter<'a, V> {
         if self.done {
             return None;
         }
-        match self.map.next(self.after) {
+        match self.map.next_with_memory(self.after, self.memory) {
             Ok(Some((key, value))) => {
                 self.after = Some(key);
                 Some(Ok((key, value)))

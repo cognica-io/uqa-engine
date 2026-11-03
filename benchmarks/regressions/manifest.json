@@ -2,6 +2,227 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exact_image_matches_independent_tensor_bytes_and_preserves_coordinate_bits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Exact tensor wire identity",
+      "workload": "Decode independent document/tensor bytes and compare literal nearest IDs, signed-zero coordinates and byte-identical export.",
+      "invariant": "Exact carriers and tensor order survive, and final destruction releases decoded admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "images_preserve_search_tensor_reduction_and_future_mutations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector query and mutation preservation",
+      "workload": "Compare exact, IVF and HNSW KNN/threshold results including overflow, zero vectors, ties, tensors and subsequent replacement/deletion.",
+      "invariant": "Result support and score bits match and successor physical images remain identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_images_survive_source_changes_and_observe_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Retained vector image ownership",
+      "workload": "Export retained exact, IVF and HNSW sources after source changes/closure with their original allowance exhausted.",
+      "invariant": "Invoking workspace remains independent; original cancellation fails before bytes and final owners release retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "every_truncated_image_and_trailing_data_rejects_without_retained_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector image input completeness",
+      "workload": "Reject every truncated exact/IVF/HNSW fixture prefix, trailing data and unknown envelopes.",
+      "invariant": "No partial candidate escapes and every failed prefix releases all admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_import_admission_releases_every_partial_candidate",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector image import admission",
+      "workload": "Decode all three owners at zero and selected partial-capacity limits, including the spillable HNSW representation.",
+      "invariant": "Every failure is a typed memory error, zero capacity rejects and final owners release all partial retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "large_coordinates_use_bounded_chunks_without_a_full_export_cache",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Bounded vector coordinate I/O",
+      "workload": "Export a two-MiB exact vector without dynamic scratch and restore it through a reader enforcing 4-KiB windows.",
+      "invariant": "Coordinate bits survive, calls remain bounded and export never materializes a full-map cache.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_io_failures_and_midstream_cancellation_preserve_typed_errors",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Vector image failure isolation",
+      "workload": "Cancel input during exact/IVF/HNSW decoding and fail output after a partial prefix.",
+      "invariant": "Original typed cancellation propagates, partial candidates release memory and source images remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "empty_and_zero_dimension_images_preserve_the_owners_existing_carriers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Empty vector image carriers",
+      "workload": "Restore empty and populated zero-dimension exact, IVF and HNSW indexes.",
+      "invariant": "Existing count, query and encoding behavior remains intact without imposing a new dimension restriction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exact_image_rejects_wrong_counts_nonfinite_values_and_unordered_documents",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests.rs",
+      "capability": "Exact image structure",
+      "workload": "Corrupt tensor/document counts, arity, finite-coordinate restrictions and document ordering.",
+      "invariant": "Malformed state never escapes and each rejection returns all admitted bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independent_stale_training_fixture_preserves_exact_values_and_defers_training",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF evaluated training image",
+      "workload": "Decode independent stale-state bytes with exact norms, negative zero, assignments and original probe count.",
+      "invariant": "Import/export does not retrain; the next query performs the existing below-threshold transition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "actual_training_states_and_reconstructed_sorted_lists_preserve_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF list reconstruction",
+      "workload": "Capture untrained, trained and stale owners after out-of-order insertions and deletions.",
+      "invariant": "Ordered assignments reconstruct exact centroid-list order and retain metadata and query results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "malformed_training_metadata_and_source_indexes_never_escape_as_images",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF image structural admission",
+      "workload": "Reject invalid configuration/state tags and a source centroid list with a nonexistent member.",
+      "invariant": "Invalid input retains no candidate; corrupt source validation produces no image bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "training_lock_wait_observes_cancellation_before_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests.rs",
+      "capability": "IVF image publication admission",
+      "workload": "Keep the training publication lock held while cancelling an image export.",
+      "invariant": "Cancellation finishes without acquiring the held lock or emitting output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independent_graph_fixture_preserves_identity_norms_topology_and_pending_delta",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "HNSW evaluated graph wire identity",
+      "workload": "Decode an independent single-node graph with original normalization, sparse node identity and pending dirty state.",
+      "invariant": "Re-export preserves every byte; persistence deltas and the next allocated node retain their original identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tombstones_neighbor_order_and_future_graph_deltas_survive_images",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "HNSW graph successor preservation",
+      "workload": "Capture changed tensor graphs with tombstones and cleared/full pending deltas, then apply equivalent later edits.",
+      "invariant": "Topology, adjacency order, tombstones, dirty state and future persistence deltas remain identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "invalid_graph_metadata_and_edges_reject_before_candidate_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "HNSW image structural validation",
+      "workload": "Corrupt flags, entry/level/counter metadata, ordinals, coordinate/norm data, dirty identities and adjacency.",
+      "invariant": "Invalid images and corrupt source state never publish a candidate or retain partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_graph_images_use_the_invoking_workspace_and_restore_below_corpus_size",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "Bounded HNSW image transfer",
+      "workload": "Export a spilled graph while the source allowance is exhausted, then restore a larger-than-memory corpus under 64 KiB.",
+      "invariant": "Original results/topology survive with separate working admission and all source/target retention releases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-graph",
       "kind": "lib",
       "test": "memory_graph_images_match_independent_wire_and_empty_allocation_fixtures",

@@ -15,6 +15,14 @@ use crate::vector_index::VectorIndex;
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 impl VectorIndex for HNSWIndex {
+    fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        super::image::write(self, output, control)
+    }
+
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         Ok(self
             .active

@@ -14,6 +14,7 @@
 #![allow(clippy::cast_lossless, clippy::similar_names)]
 
 mod canonical;
+pub(crate) mod image;
 mod index;
 mod math;
 mod mutation;

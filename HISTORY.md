@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add controlled evaluated memory vector images for exact, IVF and HNSW indexes, preserving tensor bits, trained state, graph topology and pending persistence without rebuilding indexes. Complete Engine backup integration remains under implementation.
 - Add evaluated memory graph images with controlled fresh reconstruction, preserving exact properties, named memberships, label allocation history and unused IDs. Derived graph indexes are validated and reconstructed by Graph; complete Engine backup integration remains under implementation.
 
 - Add evaluated memory text-document image output and controlled reconstruction, preserving duplicate token graph edges, raw UTF-16 terms, original offsets, historical analyzer revisions and normalization lengths without reanalysis. Complete analyzer-resource images and Engine backup integration remain under implementation.

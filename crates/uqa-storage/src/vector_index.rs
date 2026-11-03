@@ -20,6 +20,7 @@ mod canonical;
 mod collection;
 mod config;
 mod cosine;
+pub mod image;
 mod memory;
 mod memory_snapshot;
 mod memory_state;
@@ -150,6 +151,18 @@ pub(crate) fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f32, no
 }
 
 pub trait VectorIndex: Send + Sync {
+    /// Stream this selected memory index's evaluated image. Unsupported owners reject the capability before output. Committed source capture and complete database activation belong to the enclosing backup lifecycle.
+    fn write_image(
+        &self,
+        _output: &mut dyn std::io::Write,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "vector image output is not supported by this backend".into(),
+        ))
+    }
+
     fn dimensions(&self) -> u32;
     fn index_kind(&self) -> &'static str {
         "vector"
